@@ -1,0 +1,14 @@
+^scripts$
+^\.DS_Store$
+^.*\.Rproj$
+^\.Rproj\.user$
+^\.git$
+^\.github$
+^docs$
+^_pkgdown\.yml$
+^pkgdown$
+^Meta$
+^_include_BACKUP_.*$
+^_PACKAGE_WORK_.*$
+^inst/include/.*\.bak.*$
+^.*\.bak_.*$

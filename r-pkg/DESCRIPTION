@@ -1,0 +1,43 @@
+Package: AI4BayesCode
+Title: Stateful Modular MCMC Building Blocks with AI-Friendly Skill Chain
+Version: 1.0.0
+Date: 2026-06-24
+Authors@R: c(
+    person("Jungang", "Zou",
+           email = "jungang.zou@gmail.com",
+           role = c("aut", "cre")),
+    person("AI4BayesCode contributors", role = "ctb"))
+Description: Header-only C++ library for stateful, modular MCMC samplers
+    that compose NUTS, joint NUTS, BART, Gibbs, RJMCMC, HMM, slice sampling,
+    and variational inference blocks within a single Gibbs loop. Generated
+    samplers expose a uniform 6-method R interface (step / get_current /
+    set_current / predict_at / get_dag / get_history) plus an optional 7th
+    method 'readapt_NUTS' for sequential / online learning workflows.
+    Ships a 24-check validator skill chain that an AI agent can use when
+    generating samplers from natural-language model descriptions. Bundles
+    the runtime, 39 reference examples, and the skill corpus, plus
+    natural-language-to-code generation via 'ai4bayescode_generate()'.
+License: GPL (>= 3)
+URL: https://github.com/zjg540066169/AI4BayesCode
+BugReports: https://github.com/zjg540066169/AI4BayesCode/issues
+Depends: R (>= 4.0)
+Imports:
+    Rcpp (>= 1.0.10),
+    RcppArmadillo,
+    utils
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown,
+    posterior,
+    bayesplot,
+    igraph,
+    loo,
+    httr2,
+    jsonlite
+SystemRequirements: C++17, BLAS, LAPACK
+Encoding: UTF-8
+LazyData: false
+NeedsCompilation: no
+RoxygenNote: 7.3.3
+Config/testthat/edition: 3

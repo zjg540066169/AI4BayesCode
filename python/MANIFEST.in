@@ -1,0 +1,11 @@
+# Ship the vendored AI4BayesCode C++ header tree inside the sdist + wheel so
+# that source() is self-contained (no checkout required).
+graft AI4BayesCode/_vendored_include
+graft AI4BayesCode/_skills
+graft AI4BayesCode/_examples
+include AI4BayesCode/start.md
+include LICENSE
+include THIRD_PARTY_LICENSES.md
+global-exclude *.pyc
+global-exclude __pycache__/*
+global-exclude .DS_Store

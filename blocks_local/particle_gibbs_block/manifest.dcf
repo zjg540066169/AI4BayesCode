@@ -1,0 +1,29 @@
+Block: particle_gibbs_block
+Version: 0.1.0
+Title: Particle Gibbs (conditional SMC) sampler for latent state-space paths
+Description: Samples the latent state path of a nonlinear, non-Gaussian
+ state-space model from its full conditional given the parameters, using
+ particle Gibbs (conditional sequential Monte Carlo). The initial, transition,
+ and observation densities are supplied as callbacks, so the same sampler
+ serves stochastic volatility, nonlinear dynamic, and state-space count models;
+ the model parameters are read each sweep so sibling blocks may update them
+ within a Gibbs scheme. Optional ancestor sampling improves mixing for long
+ series by resampling the reference trajectory's history. Useful for
+ continuous-state time series whose transition or observation density precludes
+ exact Kalman or forward-backward filtering. Methods from Andrieu, Doucet and
+ Holenstein (2010) <doi:10.1111/j.1467-9868.2009.00736.x> and Lindsten, Jordan
+ and Schon (2014).
+Author: Jungang Zou
+License: GPL-3.0-or-later
+EngineKind: mcmc
+ConstraintKinds: none
+RoutingKey: nonlinear/non-Gaussian state-space latent path
+SelectWhen: Nonlinear state-space time series, continuous latent path (e.g.
+ stochastic volatility)
+Skill: skills/particle_gibbs_block.md
+Tests: test_particle_gibbs_block.cpp
+Depends: core (>= 1.0)
+Example: examples/PoissonStateSpace.cpp
+KernelTier: none
+ValidationSkill: skills/particle_gibbs_block_validation.md
+ChecksApplicable: #17; BL1, BL2, BL3, BL4, BL5, BL6

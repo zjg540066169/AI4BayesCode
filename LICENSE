@@ -1,0 +1,53 @@
+AI4BayesCode — stateful modular MCMC for composable Gibbs samplers
+Copyright (C) 2026 AI4BayesCode
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the
+Free Software Foundation; either version 2 of the License, or (at your
+option) any later version.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+
+The full text of version 2 of the GNU General Public License is available
+at <https://www.gnu.org/licenses/old-licenses/gpl-2.0.html>, and the text
+of version 3 is available at <https://www.gnu.org/licenses/gpl-3.0.html>.
+
+================================================================================
+
+LICENSE SCOPE
+
+This GPL-2.0-or-later license applies to all files under:
+  - include/AI4BayesCode/
+  - examples/
+  - R/
+  - tests_autodiff/ (that are authored by the project, excluding any
+    third-party regression test inputs)
+  - skills/
+  - the repository-level documentation files (README.md,
+    AUDIT_LOG.md, FINAL_AUDIT.md, AUTODIFF_PIVOT_SUMMARY.md,
+    THIRD_PARTY_LICENSES.md, and similar)
+
+Vendored third-party code under the following directories retains its
+own upstream license and is NOT re-licensed by this notice:
+  - include/autodiff/        (MIT; see include/autodiff/LICENSE)
+  - include/eigen/           (MPL-2.0; see include/eigen/COPYING.MPL2)
+  - include/mcmclib/         (Apache-2.0; see include/mcmclib/LICENSE)
+  - include/mcmclib/BaseMatrixOps/ (Apache-2.0)
+  - bart_pure_cpp/src/BART/                 (GPL-2.0-or-later; the CRAN BART R
+    package — McCulloch / Sparapani / Spanbauer)
+  - bart_pure_cpp/src/GENBART/              (GPL-2.0-or-later; genBART, derived
+    from the Linero 2022 generalized BART implementation)
+  - bart_pure_cpp/src/SOFTBART_VENDOR/      (GPL-2.0-or-later; SoftBART,
+    Linero & Yang 2018)
+  - celerite/                      (MIT; see celerite/LICENSE)
+  - libgp_kernels/                 (BSD-3-Clause; see libgp_kernels/COPYING)
+
+See THIRD_PARTY_LICENSES.md at the repo root for the full breakdown
+and compatibility notes.

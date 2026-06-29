@@ -1,0 +1,51 @@
+# ── OS / editor ───────────────────────────────────────────────
+.DS_Store
+*~
+.idea/
+.vscode/
+
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+
+# ── R ─────────────────────────────────────────────────────────
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+r-pkg/src/*.o
+r-pkg/src/*.so
+r-pkg/src/*.dll
+r-pkg/..Rcheck/
+r-pkg/*.tar.gz
+
+# ── generated / build outputs ─────────────────────────────────
+generated/
+PROMPT.txt
+*.tar.gz
+*.whl
+
+# ── backups / archives (never commit) ─────────────────────────
+*.bak
+*.bak.*
+*.bak_*
+*.orig
+*_BACKUP_*
+*_DRAFT.md
+_archive/
+"* 2.md"
+
+# ── logs + compiled test binaries (sources + Makefile stay tracked) ──
+*.log
+tests/test_*
+!tests/test_*.cpp
+!tests/test_*.h
+!tests/test_*.hpp
+!tests/test_*.R

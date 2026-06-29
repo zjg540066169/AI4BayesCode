@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=64", "wheel", "pybind11>=2.11"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "AI4BayesCode"
+version = "1.0.0"
+description = "Python helper for the AI4BayesCode MCMC library"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "GPL-3.0-or-later"}
+authors = [
+    {name = "AI4BayesCode authors", email = "jungang.zou@gmail.com"}
+]
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: C++",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = [
+    "numpy>=1.24",
+    "pybind11>=2.11",
+]
+
+[project.optional-dependencies]
+viz = ["networkx>=3.0", "matplotlib>=3.7"]
+diagnostics = ["arviz>=0.16"]
+generate = ["anthropic>=0.40"]
+dev = ["pytest>=7.0", "pytest-cov"]
+
+[project.urls]
+Repository = "https://github.com/zjg540066169/AI4BayesCode"
+
+[tool.setuptools]
+license-files = ["LICENSE"]
+
+[tool.setuptools.packages.find]
+include = ["AI4BayesCode*"]
+
+[tool.setuptools.package-data]
+# Ship the vendored AI4BayesCode C++ header tree so source() is
+# self-contained (no checkout needed), and the skill corpus for prompt()/generate().
+AI4BayesCode = ["start.md", "_examples/**/*", "_vendored_include/**/*", "_skills/**/*"]
