@@ -319,7 +319,7 @@ ai4bayescode_prompt <- function(model_description,
     writeLines(c(
         "No API key was available, so ai4bayescode_generate() emitted the prompt.",
         "  (A) Claude Code: \"Read AI4BayesCode/start.md first, then <model description>.\"",
-        "  (B) Online: set a key once with ai4bayescode_set_key(\"sk-...\", \"anthropic\")",
+        "  (B) Online: set a key once with ai4bayescode_set_key(\"sk-YOUR-KEY-HERE\", \"anthropic\")",
         "      (or pass API_key= / LLM=), then re-run ai4bayescode_generate(...).",
         sprintf("Target class: %s   backend: %s", prompt$classname, prompt$backend)
     ), rf)
@@ -445,7 +445,7 @@ ai4bayescode_models <- function() {
 #' `API_key` argument is left `NULL` -- you no longer have to pass it on every
 #' call (you still can, to override per call).
 #'
-#' @param key Non-empty API-key string (e.g. `"sk-ant-api..."`, `"sk-..."`).
+#' @param key Non-empty API-key string (e.g. `"sk-ant-api..."`, `"sk-YOUR-KEY-HERE"`).
 #'   An Anthropic subscription token (`"sk-ant-oat..."` from
 #'   `claude setup-token`) works too -- the Bearer header is detected from the
 #'   `sk-ant-oat` prefix.
@@ -455,7 +455,7 @@ ai4bayescode_models <- function() {
 #' @examples
 #' \dontrun{
 #' ai4bayescode_set_key("sk-ant-api-...", "anthropic")
-#' ai4bayescode_set_key("sk-...",         "openai")
+#' ai4bayescode_set_key("sk-YOUR-KEY-HERE",         "openai")
 #' ai4bayescode_generate("Linear regression.", LLM = "gpt-5.5")  # key picked up
 #' }
 #' @export
@@ -463,6 +463,14 @@ ai4bayescode_set_key <- function(key, provider = "anthropic", check = TRUE) {
     provider <- match.arg(provider, c("anthropic", "openai", "google"))
     if (!is.character(key) || length(key) != 1L || is.na(key) || !nzchar(key))
         stop("`key` must be a single non-empty string.", call. = FALSE)
+    if (grepl("\\.\\.\\.|[<>]|YOUR.?KEY", key, ignore.case = TRUE))
+        stop("'", key, "' is a PLACEHOLDER from the examples, not a real key.\n",
+             "  Replace it with YOUR ", provider, " key",
+             switch(provider,
+                    anthropic = " -- it starts with 'sk-ant-'; get one at https://console.anthropic.com/settings/keys",
+                    openai    = " -- get one at https://platform.openai.com/api-keys",
+                    google    = " -- get one at https://aistudio.google.com/apikey",
+                    ""), ".", call. = FALSE)
     env <- switch(provider, anthropic = "ANTHROPIC_API_KEY",
                   openai = "OPENAI_API_KEY", google = "GOOGLE_API_KEY")
     args <- list(key); names(args) <- env

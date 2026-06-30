@@ -9,7 +9,7 @@
     # users who already have a key set don't see this line.
     if (!nzchar(.ai4b_provider_key("anthropic")) && !nzchar(.ai4b_provider_key("openai")))
         msg <- c(msg,
-            "  ai4bayescode_set_key('sk-...', 'anthropic')     # set your LLM API key (do this 1st)")
+            "  ai4bayescode_set_key('sk-ant-...', 'anthropic') # do this 1st -- replace 'sk-ant-...' with YOUR real key")
     msg <- c(msg,
         "  ai4bayescode_generate('describe your model')    # NL -> validated sampler",
         "  ai4bayescode_skills_path()                       # for AI agents",

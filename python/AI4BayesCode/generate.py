@@ -211,7 +211,7 @@ def _offline_emit(p: dict, output_path: str, verbose: bool) -> dict:
     rf.write_text(
         "No API key was available, so generate() emitted the prompt.\n"
         "  (A) Claude Code: \"Read AI4BayesCode/start.md first, then <model description>.\"\n"
-        "  (B) Online: set a key once with AI4BayesCode.set_key(\"sk-...\", \"anthropic\")\n"
+        "  (B) Online: set a key once with AI4BayesCode.set_key(\"sk-YOUR-KEY-HERE\", \"anthropic\")\n"
         "      (or pass API_key= / LLM=), then re-run AI4BayesCode.generate(...).\n"
         "      (Messages API path needs: pip install AI4BayesCode[generate].)\n"
         f"Target class: {p['classname']}   backend: {p['backend']}\n")
@@ -422,7 +422,7 @@ def set_key(key: str, provider: str = "anthropic", check: bool = True) -> str:
     (you still can, to override per call).
 
     Args:
-        key: Non-empty API-key string (e.g. ``"sk-ant-api..."``, ``"sk-..."``).
+        key: Non-empty API-key string (e.g. ``"sk-ant-api..."``, ``"sk-YOUR-KEY-HERE"``).
             An Anthropic subscription token (``"sk-ant-oat..."`` from
             ``claude setup-token``) works too -- the Bearer header is detected
             from the ``sk-ant-oat`` prefix.
@@ -435,6 +435,16 @@ def set_key(key: str, provider: str = "anthropic", check: bool = True) -> str:
         raise ValueError("provider must be 'anthropic', 'openai', or 'google'")
     if not isinstance(key, str) or not key:
         raise ValueError("key must be a single non-empty string")
+    import re
+    if re.search(r"\.\.\.|[<>]|YOUR.?KEY", key, re.IGNORECASE):
+        where = {
+            "anthropic": " -- it starts with 'sk-ant-'; get one at https://console.anthropic.com/settings/keys",
+            "openai": " -- get one at https://platform.openai.com/api-keys",
+            "google": " -- get one at https://aistudio.google.com/apikey",
+        }.get(provider, "")
+        raise ValueError(
+            f"'{key}' is a PLACEHOLDER from the examples, not a real key.\n"
+            f"  Replace it with YOUR {provider} key{where}.")
     os.environ[_PROVIDER_ENV[provider]] = key
     print(f"Set {provider} key for this session ({_mask_key(key)}). Not saved to disk.")
     if check and provider == "anthropic":

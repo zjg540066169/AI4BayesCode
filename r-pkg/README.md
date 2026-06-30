@@ -72,7 +72,7 @@ model, and the thinking level **in the call**; nothing is saved.
 ```r
 res <- ai4bayescode_generate(
   "y ~ N(Xbeta, sigma^2), p(sigma^2) propto 1/sigma^2  (linear regression)",
-  API_key = "sk-...",            # passed here, never saved
+  API_key = "sk-YOUR-KEY-HERE",            # passed here, never saved
   LLM     = "claude-opus-4-8",   # or gpt-5.5, claude-sonnet-4-6, ...
   effort  = "high",              # thinking level, validated against this model's levels
   backend = "R", output_path = "./generated", max_attempts = 2L)
