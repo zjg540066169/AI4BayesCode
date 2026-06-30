@@ -125,6 +125,7 @@ ai4bayescode_source <- function(code,
     arma_inc <- system.file("include", package = "RcppArmadillo")
     cppflags <- c(
         paste0("-I", shQuote(c(roots, arma_inc))),
+        .ai4b_block_cppflags(),   # installed contributed blocks (ai4bayescode_install_block)
         "-DMCMC_ENABLE_ARMA_WRAPPERS",
         "-DARMA_DONT_USE_WRAPPER",
         "-DAI4BAYESCODE_RCPP_MODULE",

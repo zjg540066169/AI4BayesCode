@@ -29,6 +29,8 @@ from .source import source, source_AI4BayesCode, vendored_include_path
 from .doc import doc
 from .generate import prompt, generate, models, skills_path, set_key, key_status, stream_check
 from .sourceCpp import sourceCpp
+from .install_block import (
+    install_block, available_blocks, installed_blocks, remove_block, blocks_path)
 from .plot_dag import plot_dag
 from .run_chains import run_chains
 from .diagnose import ai4b_diagnose
@@ -50,6 +52,11 @@ __all__ = [
     "stream_check",
     "vendored_include_path",
     "sourceCpp",
+    "install_block",
+    "available_blocks",
+    "installed_blocks",
+    "remove_block",
+    "blocks_path",
     "plot_dag",
     "run_chains",
     "ai4b_diagnose",

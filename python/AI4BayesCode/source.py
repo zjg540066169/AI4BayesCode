@@ -169,6 +169,8 @@ def _compile_flags(include_root: Path) -> list[str]:
             + "\nThe package install looks incomplete -- reinstall AI4BayesCode."
         )
     flags = [f"-I{r}" for r in roots]
+    from .install_block import _block_include_flags   # installed contributed blocks
+    flags.extend(_block_include_flags())
     arma = _find_armadillo()
     if arma is not None:
         flags.append(f"-I{arma}")

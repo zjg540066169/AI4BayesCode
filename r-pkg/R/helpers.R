@@ -107,6 +107,7 @@ AI4BayesCode_sourceCpp <- function(cpp_file,
         if (dir.exists(inc_eigen)) paste0("-I", shQuote(inc_eigen)) else character(),
         if (dir.exists(inc_libgp)) paste0("-I", shQuote(inc_libgp)) else character(),
         if (dir.exists(inc_celerite)) paste0("-I", shQuote(inc_celerite)) else character(),
+        .ai4b_block_cppflags(),   # installed contributed blocks (ai4bayescode_install_block)
         "-DMCMC_ENABLE_ARMA_WRAPPERS",
         "-DARMA_DONT_USE_WRAPPER",
         "-DAI4BAYESCODE_RCPP_MODULE",

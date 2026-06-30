@@ -94,6 +94,9 @@ def _compile_flags(ai4bayescode_path: Path) -> list[str]:
         flags.append(f"-I{inc_libgp}")
     if inc_celerite.is_dir():
         flags.append(f"-I{inc_celerite}")
+    # installed contributed blocks (AI4BayesCode.install_block)
+    from .install_block import _block_include_flags
+    flags.extend(_block_include_flags())
     # Standalone Armadillo (Python does not go through RcppArmadillo).
     # Try common install locations; user can override with extra_cppflags.
     for arma_guess in (
