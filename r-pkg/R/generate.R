@@ -626,6 +626,27 @@ ai4bayescode_key_status <- function() {
             required = list("question"))))
 }
 
+# Flush one finished streamed text block to the console. In the per-block
+# (`live = FALSE`) path, prose / model-confirmations are rendered through the
+# LaTeX->console map so `$$ ... $$` math is readable instead of raw source;
+# code-bearing blocks (``` fences / #include / module macros) print verbatim so
+# C++/R source is never mangled by the math substitutions. Idempotent via a
+# per-block `flushed` flag; a no-op when `live = TRUE` (already streamed raw).
+#' @keywords internal
+#' @noRd
+.ai4b_flush_text_block <- function(state, i, progress, live = FALSE) {
+    if (isTRUE(live)) return(state)
+    b <- state$blocks[[i]]
+    if (is.null(b) || !identical(b$type, "text") || isTRUE(b$flushed)) return(state)
+    state$blocks[[i]]$flushed <- TRUE
+    txt <- b$text %||% ""
+    if (progress && nzchar(txt)) {
+        code_like <- grepl("```|#include|PYBIND11_MODULE|RCPP_MODULE|// path:", txt)
+        cat("\n", if (code_like) txt else .ai4b_latex_to_console(txt), "\n", sep = "")
+    }
+    state
+}
+
 # ---------------------------------------------------------------------------
 # Anthropic provider: one request + the agentic ask_user loop
 # ---------------------------------------------------------------------------
@@ -633,7 +654,7 @@ ai4bayescode_key_status <- function() {
 # stop_reason). Pure except optional live-progress printing. Unit-testable.
 #' @keywords internal
 #' @noRd
-.ai4b_sse_step <- function(state, ev, progress = TRUE) {
+.ai4b_sse_step <- function(state, ev, progress = TRUE, live = FALSE) {
     type <- ev$type
     if (identical(type, "content_block_start")) {
         i <- ev$index + 1L
@@ -649,8 +670,15 @@ ai4bayescode_key_status <- function() {
         i <- ev$index + 1L
         d <- ev$delta
         if (identical(d$type, "text_delta")) {
-            if (progress) cat(d$text)                       # live model output
             state$blocks[[i]]$text <- paste0(state$blocks[[i]]$text %||% "", d$text)
+            if (progress && live) {
+                cat(d$text)                                 # raw token stream (stream_check)
+            } else if (progress) {                          # buffer; render at block stop
+                state$text_chars <- (state$text_chars %||% 0L) + nchar(d$text %||% "")
+                if (state$text_chars >= (state$next_text_dot %||% 0L)) {
+                    cat("."); state$next_text_dot <- state$text_chars + 600L
+                }
+            }
         } else if (identical(d$type, "thinking_delta")) {
             state$blocks[[i]]$thinking <- paste0(state$blocks[[i]]$thinking %||% "", d$thinking)
             state$think_chars <- (state$think_chars %||% 0L) + nchar(d$thinking)
@@ -668,6 +696,8 @@ ai4bayescode_key_status <- function() {
         }
     } else if (identical(type, "message_delta")) {
         if (!is.null(ev$delta$stop_reason)) state$stop_reason <- ev$delta$stop_reason
+    } else if (identical(type, "content_block_stop")) {
+        state <- .ai4b_flush_text_block(state, ev$index + 1L, progress, live)
     }
     state
 }
@@ -703,7 +733,7 @@ ai4bayescode_key_status <- function() {
 #' @noRd
 .ai4b_anthropic_request <- function(system, messages, model, effort, tools,
                                     api_key, max_tokens, timeout,
-                                    stream = TRUE, progress = TRUE) {
+                                    stream = TRUE, progress = TRUE, live = FALSE) {
     # Anthropic REQUIRES max_tokens. NULL = "no cap I chose" -> send the model's
     # maximum (64000 for Claude 4.x = effectively unlimited).
     body <- list(
@@ -737,6 +767,17 @@ ai4bayescode_key_status <- function() {
     }
     if (!isTRUE(stream))
         return(httr2::resp_body_json(httr2::req_perform(build_req(FALSE))))
+    # Wait hint: the model can sit silent for many seconds before the first
+    # token (it is thinking/generating server-side, longer at higher effort).
+    # Fill that gap so the console does not look frozen. Skipped for the live
+    # stream-check (which prints its own banner).
+    if (progress && !isTRUE(live)) {
+        eff <- if (!is.null(effort) && !is.na(effort) && nzchar(effort))
+                   sprintf(" (effort=%s)", effort) else ""
+        cat(sprintf(
+            "\n  [contacting %s%s -- the model is working; this can take a while, please wait ...]\n",
+            model, eff))
+    }
     tryCatch({
         conn <- httr2::req_perform_connection(build_req(TRUE))
         on.exit(try(close(conn), silent = TRUE), add = TRUE)
@@ -751,8 +792,12 @@ ai4bayescode_key_status <- function() {
             if (identical(pd$type, "error"))
                 stop(pd$error$message %||% "anthropic stream error", call. = FALSE)
             if (identical(pd$type, "message_stop")) break
-            state <- .ai4b_sse_step(state, pd, progress)
+            state <- .ai4b_sse_step(state, pd, progress, live)
         }
+        # Safety: flush any text block that never received an explicit
+        # content_block_stop event (per-block render in the !live path).
+        for (j in seq_along(state$blocks))
+            state <- .ai4b_flush_text_block(state, j, progress, live)
         if (progress) cat("\n")
         .ai4b_sse_finalize(state)
     }, error = function(e) {
@@ -792,7 +837,7 @@ ai4bayescode_stream_check <- function(LLM = "claude-opus-4-8", API_key = NULL,
     t0 <- Sys.time()
     parsed <- .ai4b_anthropic_request(sys, msgs, llm$model, effort, tools = NULL,
                                       api_key = key, max_tokens = 128L, timeout = 60,
-                                      stream = TRUE, progress = TRUE)
+                                      stream = TRUE, progress = TRUE, live = TRUE)
     txt <- paste(vapply(Filter(function(b) identical(b$type, "text"), parsed$content),
                         function(b) b$text, ""), collapse = "")
     message(sprintf("[streaming OK] %d chars, stop=%s, %.1fs",

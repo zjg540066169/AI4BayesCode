@@ -404,7 +404,7 @@ def stream_check(LLM: str = "claude-opus-4-8", API_key: str | None = None,
     parsed = _anthropic_request(
         "You are a connectivity test. Answer in ONE short sentence.",
         [{"role": "user", "content": "In one short sentence, confirm you are streaming this reply."}],
-        llm["model"], effort, None, key, 128, 60, stream=True, progress=progress)
+        llm["model"], effort, None, key, 128, 60, stream=True, progress=progress, live=True)
     txt = "".join(b["text"] for b in parsed["content"] if b.get("type") == "text")
     if progress:
         print(f"[streaming OK] {len(txt)} chars, stop={parsed.get('stop_reason')}, {time.time() - t0:.1f}s")
@@ -565,7 +565,7 @@ def _ask_user_tool() -> list[dict]:
 
 
 def _anthropic_request(system, messages, model, effort, tools, api_key, max_tokens, timeout,
-                       stream=True, progress=True):
+                       stream=True, progress=True, live=False):
     import anthropic
     # Streaming keeps the socket alive (token + ping events), so a generous cap
     # instead of the buffered "0 bytes for `timeout`s" death on long generations.
@@ -608,28 +608,62 @@ def _anthropic_request(system, messages, model, effort, tools, api_key, max_toke
         return _from_msg(client.messages.create(**kwargs))
     try:
         think_chars, next_dot = 0, 0
+        text_chars, next_text_dot = 0, 0
+        cur = {"type": None, "text": ""}
+
+        # Wait hint: the model can sit silent for many seconds before the first
+        # token (thinking/generating server-side, longer at higher effort). Fill
+        # that gap so the console does not look frozen. Skipped for the live
+        # stream-check (which prints its own banner).
+        if progress and not live:
+            eff = f" (effort={effort})" if effort else ""
+            print(f"\n  [contacting {model}{eff} -- the model is working; "
+                  f"this can take a while, please wait ...]")
+
+        def _flush():
+            # Per-block render (live=False): prose / model-confirmations go through
+            # the LaTeX->console map so `$$ ... $$` math is readable; code-bearing
+            # blocks print verbatim so C++/R source is never mangled. No-op when
+            # live (already streamed raw). Idempotent (resets `cur`).
+            if progress and not live and cur["type"] == "text" and cur["text"]:
+                txt = cur["text"]
+                code_like = any(m in txt for m in
+                                ("```", "#include", "PYBIND11_MODULE", "RCPP_MODULE", "// path:"))
+                print("\n" + (txt if code_like else _latex_to_console(txt)))
+            cur["type"], cur["text"] = None, ""
+
         with client.messages.stream(**kwargs) as s:
             for ev in s:
                 et = getattr(ev, "type", None)
                 if et == "content_block_start":
+                    _flush()                                     # flush prior text block
                     cbt = getattr(getattr(ev, "content_block", None), "type", None)
+                    cur["type"], cur["text"] = cbt, ""
                     if progress and cbt == "thinking":
                         print("\n  [thinking] ", end="", flush=True)
-                    elif progress and cbt == "text":
-                        print()
                     elif progress and cbt == "tool_use":
                         print("\n  [preparing a question] ", end="", flush=True)
                 elif et == "content_block_delta":
                     d = getattr(ev, "delta", None)
                     dt = getattr(d, "type", None)
-                    if dt == "text_delta" and progress:
-                        print(getattr(d, "text", ""), end="", flush=True)   # live output
+                    if dt == "text_delta":
+                        cur["text"] += getattr(d, "text", "") or ""
+                        if progress and live:
+                            print(getattr(d, "text", ""), end="", flush=True)   # raw stream
+                        elif progress:
+                            text_chars += len(getattr(d, "text", "") or "")
+                            if text_chars >= next_text_dot:
+                                print(".", end="", flush=True)                  # heartbeat
+                                next_text_dot = text_chars + 600
                     elif dt == "thinking_delta":
                         think_chars += len(getattr(d, "thinking", "") or "")
                         if progress and think_chars >= next_dot:
-                            print(".", end="", flush=True)                  # heartbeat
+                            print(".", end="", flush=True)                      # heartbeat
                             next_dot = think_chars + 400
+                elif et == "content_block_stop":
+                    _flush()
             msg = s.get_final_message()
+        _flush()                                                 # final safety flush
         if progress:
             print()
         return _from_msg(msg)
