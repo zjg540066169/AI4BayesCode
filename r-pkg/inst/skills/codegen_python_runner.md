@@ -338,29 +338,167 @@ def _worker(args):
                                   n_burn=n_burn, n_keep=n_keep)
 
 n_burn = 4000; n_keep = 4000
-t0 = time.time()
-ctx = mp.get_context("spawn")
-with ctx.Pool(2) as pool:
-    chains = pool.map(_worker, [(101, n_burn, n_keep), (202, n_burn, n_keep)])
-total_wall_sec = time.time() - t0
-c1, c2 = chains
 
-# (R-hat / ESS aggregation, including the §R2.s conditional-relevance
-# exclusion rule for Dirac spike-and-slab: filter SLAB DISTRIBUTION
-# PARAMETER draws (per-j slab variance tau2_beta / tau2_theta and
-# similar; NOT the slab-modelled beta_j / theta_jk themselves) by
-# inclusion indicator == 1, truncate to common min count, then
-# arviz.rhat. See validator.md §R2.s for the precise rule, the
-# I_j ∈ {0, 1} convention, and the canonical numpy-mask code to emit.)
-# ... <Stage 1 diag> ...
-# ... <Stage 2 budget bump to 20000 + 20000 if R-hat >= 1.05 or
-#      ess_ratio < 0.005 — see validator.md §R2> ...
+# Flip to True if this runner's composite contains a joint_nuts_block
+# (tightens the R3 BPV interval from (0.05, 0.95) to (0.02, 0.98) —
+# mirrors USES_JOINT_NUTS in codegen_r_runner.md).
+USES_JOINT_NUTS = <True if composite has joint_nuts_block else False>
+
+def _run_two_chains(n_burn, n_keep):
+    """Run the two diagnostic chains in parallel; return (c1, c2, wall)."""
+    t0 = time.time()
+    ctx = mp.get_context("spawn")
+    with ctx.Pool(2) as pool:
+        chains = pool.map(_worker, [(101, n_burn, n_keep), (202, n_burn, n_keep)])
+    return chains[0], chains[1], time.time() - t0
+
+c1, c2, total_wall_sec = _run_two_chains(n_burn, n_keep)
+
+# --- R-hat / ESS aggregation (rank-normalized, via arviz) ----------------
+# Matches validator.md §R2 and codegen_r_runner.md r2_diag(): rank-normalized
+# R-hat is a HARD gate (< 1.05); ESS is a SOFT criterion via
+# ess_ratio = min(ESS_bulk, ESS_tail) / n_keep — >= 0.01 silent,
+# [0.005, 0.01) WARN and proceed, < 0.005 escalate. az.rhat / az.ess use the
+# rank-normalized split-R-hat and bulk/tail ESS of Vehtari et al. (2021),
+# the same estimators posterior::rhat / ess_bulk / ess_tail compute R-side.
+#
+# §R2.s conditional-relevance exclusion (Dirac spike-and-slab): for per-j
+# slab DISTRIBUTION parameters (per-coordinate slab variance tau2_beta /
+# tau2_theta and similar — NOT the slab-modelled beta_j / theta_jk
+# themselves), mask draws by inclusion indicator I_j == 1, truncate the two
+# chains to the common min retained count, then feed to az.rhat. See
+# validator.md §R2.s for the precise rule and the I_j ∈ {0, 1} convention.
+
+def _stack_param(c1, c2, key):
+    """Stack two chains' draws for one parameter into an arviz-shaped array.
+
+    Returns a list of per-component (chain, draw) arrays so a vector
+    parameter (n_keep × dim) is diagnosed component-by-component, exactly
+    like the R-side `apply(arr, 3, posterior::rhat)`.
+    """
+    a1 = np.asarray(c1["hist"][key]); a2 = np.asarray(c2["hist"][key])
+    if a1.ndim == 1:                       # scalar parameter -> single component
+        return [np.stack([a1, a2], axis=0)]            # shape (2, n_keep)
+    return [np.stack([a1[:, j], a2[:, j]], axis=0)     # shape (2, n_keep)
+            for j in range(a1.shape[1])]
+
+def r2_diag(c1, c2, n_keep_used):
+    worst_rhat = 0.0
+    worst_ess_ratio = np.inf
+    for nm in c1["hist"].keys():
+        comp_rhat = 0.0
+        comp_min_ess = np.inf
+        for arr in _stack_param(c1, c2, nm):           # arr: (chains=2, draws)
+            idata = az.convert_to_dataset(arr[np.newaxis, ...].reshape(2, -1))
+            rh = float(az.rhat(idata))
+            eb = float(az.ess(idata, method="bulk"))
+            et = float(az.ess(idata, method="tail"))
+            comp_rhat = max(comp_rhat, rh)
+            comp_min_ess = min(comp_min_ess, eb, et)
+        ess_ratio = comp_min_ess / n_keep_used
+        print(f"  {nm:<14}  max Rhat={comp_rhat:.3f}  "
+              f"min ESS={comp_min_ess:.0f}  ess_ratio={ess_ratio:.4f}")
+        worst_rhat = max(worst_rhat, comp_rhat)
+        worst_ess_ratio = min(worst_ess_ratio, ess_ratio)
+    return {"rhat": worst_rhat, "ess_ratio": worst_ess_ratio}
+
+# Stage 1 diagnostic at the template's existing budget (4k + 4k).
+d = r2_diag(c1, c2, n_keep)
+
+# Stage-2 escalation (within-attempt): re-run at 20000 + 20000 if Stage-1
+# shows max R-hat >= 1.05 OR a severely low ess_ratio (< 0.005), then
+# recompute. A slow-but-correct model gets the bigger budget BEFORE being
+# declared a failure (validator.md §R2). Do NOT hard-fail ESS at Stage 1.
+if d["rhat"] >= 1.05 or d["ess_ratio"] < 0.005:
+    print("  [R2] Stage-1 inadequate -> escalating to 20000 + 20000 ...")
+    n_burn = 20000; n_keep = 20000
+    c1, c2, total_wall_sec = _run_two_chains(n_burn, n_keep)
+    assert all(np.all(np.isfinite(np.asarray(v))) for v in c1["hist"].values())
+    assert all(np.all(np.isfinite(np.asarray(v))) for v in c2["hist"].values())
+    d = r2_diag(c1, c2, n_keep)
+
+# worst rank-normalized R-hat across all parameters — drives the final gate.
+worst_rhat = d["rhat"]
+
+# Final R2 gates: R-hat HARD (< 1.05); ESS SOFT (only ess_ratio < 0.005 at the
+# escalated budget is a FAILURE; [0.005, 0.01) only warns — legitimate for slow
+# GP / hierarchical models).
+assert worst_rhat < 1.05, f"R2 FAIL: worst rank-Rhat {worst_rhat:.4f} >= 1.05"
+if d["ess_ratio"] < 0.005:
+    raise RuntimeError(
+        f"R2 FAIL: worst ess_ratio {d['ess_ratio']:.4f} < 0.005 "
+        f"even at the escalated budget")
+elif d["ess_ratio"] < 0.01:
+    import warnings
+    warnings.warn(
+        f"R2: worst ess_ratio {d['ess_ratio']:.4f} in [0.005, 0.01) — "
+        f"model mixes slowly, proceeding")
 
 # === R3. Posterior check ===
-# Bayesian p-values on summary statistics + PSIS-LOO. See validator.md §R3
-# for the gate (BPV in (0.05, 0.95); k̂ < 0.7 acceptable for hierarchical /
-# latent models per Vehtari et al. 2024).
-# Use arviz.loo for PSIS-LOO; numpy for BPV.
+# Bayesian posterior-predictive p-values on up to 6 summary stats + an OPTIONAL
+# PSIS-LOO diagnostic. See validator.md §R3 and codegen_r_runner.md §R3.
+#
+# R3.a Bayesian p-values on (up to) 6 summary statistics. y_rep is the
+# posterior-predictive draw matrix (n_keep × N) from predict_at(). The p-value
+# for statistic T is P(T(y_rep) >= T(y_obs)) over posterior-predictive draws.
+# Gate: every p-value strictly inside (pv_lo, pv_hi). Interval is (0.05, 0.95)
+# normally, tightened to (0.02, 0.98) when the composite uses joint_nuts_block.
+bp_stat = {
+    "mean": np.mean, "sd": lambda x: np.std(x, ddof=1),
+    "min": np.min,   "max": np.max,
+    "q25": lambda x: np.quantile(x, 0.25),
+    "q75": lambda x: np.quantile(x, 0.75),
+}
+y_rep = np.asarray(c1["pp"]["y_rep"])      # (n_keep × N)
+pv = {nm: float(np.mean(np.array([f(row) for row in y_rep]) >= f(y_obs)))
+      for nm, f in bp_stat.items()}
+pv_lo = 0.02 if USES_JOINT_NUTS else 0.05
+pv_hi = 1.0 - pv_lo
+print("\n  Bayesian p-values: " +
+      "  ".join(f"{nm}={p:.2f}" for nm, p in pv.items()))
+assert all(pv_lo < p < pv_hi for p in pv.values()), \
+    f"R3 FAIL: a Bayesian p-value fell outside ({pv_lo}, {pv_hi}): {pv}"
+
+# R3.b PSIS-LOO (DIAGNOSTIC ONLY — NEVER gates). Pareto-k_hat measures LOO
+# importance-weight reliability, NOT sampler correctness; GP latent-variable
+# and hierarchical-latent models routinely fail this diagnostic even with a
+# correctly sampled posterior (Vehtari, Simpson, Gelman, Yao, Gabry, JMLR
+# 2024, arXiv:1507.02646). Sampler-correctness gates are R-hat (R2) and the
+# Bayesian p-values (R3.a); this is recorded + warned, never asserted.
+#
+# Emit the per-observation log-likelihood that matches the model's
+# observation family (Gaussian example below; replace the body — see
+# codegen_cpp.md §6a per-family templates). Build an InferenceData with a
+# log_likelihood group of shape (chain, draw, obs) and call az.loo.
+try:
+    def pointwise_loglik(hist, y):
+        # ...replace with the model's per-observation log density,
+        #    shape (n_keep, N); see codegen_cpp.md §6a templates...
+        raise NotImplementedError
+    ll1 = pointwise_loglik(c1["hist"], y_obs)   # (n_keep, N)
+    ll2 = pointwise_loglik(c2["hist"], y_obs)   # (n_keep, N)
+    ll = np.stack([ll1, ll2], axis=0)           # (chain=2, draw, obs)
+    idata_loo = az.from_dict(
+        posterior={"_": np.zeros(ll.shape[:2])},
+        log_likelihood={"y": ll})
+    loo_res = az.loo(idata_loo, pointwise=True)
+    khat = np.asarray(loo_res.pareto_k)
+    pct_k_lo = float(np.mean(khat < 0.5) * 100)
+    pct_k_hi = float(np.mean(khat >= 0.7) * 100)
+    print(f"  LOO elpd={float(loo_res.elpd_loo):.1f} "
+          f"(se={float(loo_res.se):.1f})  "
+          f"pct_k<0.5={pct_k_lo:.1f}%  pct_k>=0.7={pct_k_hi:.1f}%")
+    if pct_k_lo < 50 or pct_k_hi >= 10:
+        import warnings
+        warnings.warn(
+            f"[R3.b] PSIS-LOO Pareto-k DIAGNOSTIC ONLY (NOT a failure): "
+            f"{pct_k_lo:.1f}% k<0.5, {pct_k_hi:.1f}% k>=0.7. Pareto-k indicates "
+            f"LOO importance-weight reliability, NOT sampler correctness; GP and "
+            f"hierarchical-latent models routinely fail this diagnostic with "
+            f"correctly sampled posteriors. See Vehtari et al. (JMLR 2024).")
+except NotImplementedError:
+    print("  [R3.b] PSIS-LOO skipped (no pointwise_loglik emitted) — "
+          "diagnostic only, does not gate.")
 
 # === Performance hint ===
 AI4BayesCode.perf_hint(

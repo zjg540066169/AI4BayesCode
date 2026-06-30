@@ -271,9 +271,20 @@ def _validate(cpp_path, runner_path, classname, verbose: bool = False) -> dict:
         if verbose:
             print("  [validate] converged")
         return {"ok": True, "stage": "converged", "detail": "\n".join(lines[-15:])}
+    # No PASS sentinel -> distinguish WHY, rather than always blaming "convergence".
+    detail = "\n".join(lines[-40:])
+    if re.search(r"AI4BAYES_VALIDATE:\s*FAIL", out_txt):       # ran to the end; R-hat too high
+        if verbose:
+            print("  [validate] ran but did not converge")
+        return {"ok": False, "stage": "convergence", "detail": detail}
+    if re.search(r"Traceback \(most recent|^Error:|Segmentation fault|terminate called|Abort",
+                 out_txt, re.M):                               # compiled but crashed at RUNTIME
+        if verbose:
+            print("  [validate] runner crashed at runtime")
+        return {"ok": False, "stage": "runtime", "detail": detail}
     if verbose:
-        print("  [validate] convergence not reached")
-    return {"ok": False, "stage": "convergence", "detail": "\n".join(lines[-40:])}
+        print("  [validate] runner did not reach the validate line")
+    return {"ok": False, "stage": "incomplete", "detail": detail}
 
 
 # Default validator, referenced inside generate() where the `_validate` parameter
@@ -295,10 +306,15 @@ def _repair_msg(result: dict) -> str:
 "ONLY the fenced code blocks. Keep the code complete but concise so it is not cut\n"
 "off. The runner MUST print `AI4BAYES_VALIDATE: PASS` (or\n"
 "`AI4BAYES_VALIDATE: FAIL maxRhat=<v>`) as its very last line.\n")
+    hint = {
+        "compile": "The C++ did NOT COMPILE. Fix the compile error below.",
+        "runtime": "The sampler COMPILED but the runner CRASHED at RUNTIME -- this is NOT a convergence problem; fix the C++/runner bug below.",
+        "incomplete": "The runner did NOT reach the `AI4BAYES_VALIDATE` line (it stopped early) -- find why it never finished.",
+        "convergence": "The runner ran to completion but rank-R-hat was too high (true non-convergence) -- fix the sampler/model.",
+    }.get(result.get("stage"), "The generated sampler did not pass automated validation.")
     return (
-f"Validation FAILED at stage `{result.get('stage')}`. The generated sampler did not\n"
-"pass automated validation. Details below (compile error / runner output / the\n"
-"convergence check):\n\n"
+f"Validation FAILED at stage `{result.get('stage')}`. {hint}\n"
+"Details below:\n\n"
 f"-----\n{result.get('detail', '')}\n-----\n\n"
 "Please FIX the problem and RE-EMIT the FULL corrected files (do NOT send a diff\n"
 "or only the changed lines). Emit the complete `.cpp` sampler AND the complete\n"
@@ -498,6 +514,7 @@ _LATEX_MAP = {
     "\\forall": "∀", "\\exists": "∃", "\\cup": "∪", "\\cap": "∩",
     "\\subseteq": "⊆", "\\subset": "⊂", "\\langle": "⟨", "\\rangle": "⟩",
     "\\ldots": "...", "\\cdots": "...", "\\dotsc": "...", "\\dots": "...",
+    "\\lVert": "‖", "\\rVert": "‖", "\\Vert": "‖", "\\lvert": "|", "\\rvert": "|",
     "\\quad": "  ", "\\qquad": "    ",
 }
 _LATEX_SUP = {"^{\\top}": "ᵀ", "^\\top": "ᵀ", "^{-1}": "⁻¹",
@@ -513,12 +530,13 @@ def _latex_to_console(s: str) -> str:
         return s
     t = s
     t = re.sub(r"\\(?:begin|end)\{[^}]*\}", "", t)          # environments
+    t = re.sub(r"\\\\\[[^][]*\]", "\n", t)                  # \\[2pt] line break + spacing
     t = t.replace("$$", "\n").replace("\\[", "\n").replace("\\]", "\n")
     t = t.replace("\\(", "").replace("\\)", "").replace("$", "")
     t = t.replace("\\\\", "\n").replace("&", "")            # line breaks / align
     t = re.sub(r"\\(?:left|right|bigg|Bigg|big|Big)\b", "", t)
     t = re.sub(r"\\(?:text|mathrm|mathbf|mathsf|mathtt|operatorname|hat|bar"
-               r"|tilde|widehat|widetilde|vec|boldsymbol)\{([^{}]*)\}", r"\1", t)
+               r"|tilde|widehat|widetilde|vec|boldsymbol|overline|underline)\{([^{}]*)\}", r"\1", t)
     t = (t.replace("\\mathbb{R}", "ℝ").replace("\\mathbb{N}", "ℕ")
            .replace("\\mathbb{Z}", "ℤ").replace("\\mathbb{E}", "E"))
     t = re.sub(r"\\math(?:cal|bb|frak|scr)\{([^{}]*)\}", r"\1", t)
@@ -627,9 +645,17 @@ def _anthropic_request(system, messages, model, effort, tools, api_key, max_toke
             # live (already streamed raw). Idempotent (resets `cur`).
             if progress and not live and cur["type"] == "text" and cur["text"]:
                 txt = cur["text"]
-                code_like = any(m in txt for m in
-                                ("```", "#include", "PYBIND11_MODULE", "RCPP_MODULE", "// path:"))
-                print("\n" + (txt if code_like else _latex_to_console(txt)))
+                if "```" in txt:
+                    # Mixed prose + fenced code: render the PROSE (so $$...$$ math is
+                    # readable) but keep CODE verbatim. split("```") -> even index =
+                    # prose, odd index = code; re-wrap code segments in their fences.
+                    parts = txt.split("```")
+                    rendered = "".join(
+                        _latex_to_console(seg) if k % 2 == 0 else "```" + seg + "```"
+                        for k, seg in enumerate(parts))
+                    print("\n" + rendered)
+                else:
+                    print("\n" + _latex_to_console(txt))
             cur["type"], cur["text"] = None, ""
 
         with client.messages.stream(**kwargs) as s:

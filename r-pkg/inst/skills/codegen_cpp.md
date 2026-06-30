@@ -1840,13 +1840,27 @@ public:
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const;
     AI4BayesCode::dag_info    get_dag() const;                    // = impl_->get_dag()
     AI4BayesCode::history_map get_history() const;                // = impl_->get_history()
+    // CONDITIONAL 7th method — emit ONLY if the composite contains any
+    // nuts_block / joint_nuts_block child (see §9). Then also add the
+    // readapt_rng_ member below.
+    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1);
 private:
     std::mt19937_64                             rng_;
     mutable std::mt19937_64                     predict_rng_;  // §6a
+    mutable std::mt19937_64                     readapt_rng_;  // §9, NUTS-family only
     std::unique_ptr<AI4BayesCode::composite_block> impl_;
     bool                                        keep_history_ = false;
 };
 ```
+
+**Constructor body (canonical):** construct `impl_` with a NAME string —
+`impl_(std::make_unique<composite_block>("<ClassName>"))` in the init list
+(the ONLY ctor is `composite_block(std::string name)`; NEVER pass a bool) —
+then, as the LAST statement of the constructor body, enable history with
+`if (keep_history_) impl_->set_keep_history(true);`. The wrapper's
+`keep_history` argument is stored in `keep_history_`, NOT forwarded to the
+`composite_block` constructor. See `examples/GaussianLocationScale.cpp`
+(ctor init list ~line 162, body ~line 211).
 
 **Return BACKEND-NEUTRAL types — NEVER `Rcpp::List` in the class methods.** They
 return `AI4BayesCode::state_map` (= `unordered_map<string, arma::vec>`),
@@ -1854,10 +1868,34 @@ return `AI4BayesCode::state_map` (= `unordered_map<string, arma::vec>`),
 pybind11 auto-convert them (codegen.md §1). Declaring them `Rcpp::List` is the
 obsolete R-only style and forces a manual conversion that does not compile.
 
+**CONSTRUCT `impl_` with a NAME string — the ONLY constructor is
+`composite_block(std::string name)`:**
+
+```cpp
+// In the wrapper constructor init list:
+impl_(std::make_unique<composite_block>("<ClassName>")),
+keep_history_(keep_history)
+```
+
+- `std::make_unique<composite_block>("<ClassName>")` — the **ONLY**
+  constructor is `composite_block(std::string name)`. **NEVER** pass a
+  `bool` / `keep_history` to it: `std::make_unique<composite_block>(keep_history)`
+  **DOES NOT COMPILE** (there is no `composite_block(bool)` ctor). The
+  wrapper's `keep_history` argument is stored in the `keep_history_`
+  field, NOT forwarded to the `composite_block` constructor.
+- **Enable per-draw history via a SEPARATE call in the constructor body**
+  (NOT a ctor argument): `if (keep_history_) impl_->set_keep_history(true);`
+  as the LAST statement of the constructor.
+  Ground truth: `examples/GaussianLocationScale.cpp` line ~162
+  (`std::make_unique<composite_block>("GaussianLocationScale")`) and
+  line ~211 (`if (keep_history_) impl_->set_keep_history(true);`).
+
 **The engine `impl_` (a `composite_block`) exposes ONLY these methods — do not
 invent others:**
 - `impl_->step(rng_)` — ONE Gibbs sweep; **LOOP it** for `n_steps`. It takes the
   rng **by reference**, NOT `impl_->step(n, rng)`.
+- `impl_->set_keep_history(true)` — enable per-draw history (call in the
+  constructor body when `keep_history_` is true; see above).
 - `impl_->current_named_outputs()` → `state_map` (the current draw).
 - `impl_->get_history()` → `history_map`; `impl_->get_dag()` → `dag_info`.
 - `impl_->data()` (the shared DataContext: `.set(...)`, `.declare_dependencies(...)`,
@@ -1868,6 +1906,14 @@ There is **NO `impl_->get_current()`** — build the class's `get_current()` by
 `return impl_->current_named_outputs();` (or assemble from the child blocks).
 The canonical, copy-this reference is `examples/GaussianLocationScale.cpp`
 (its `get_current` / `get_history` / `predict_at` / `get_dag` bodies).
+
+**NUTS-family note:** if the composite contains ANY `nuts_block` or
+`joint_nuts_block` child, the wrapper MUST ALSO expose a conditional 7th
+method `void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1);`
+and carry a 3rd RNG member `mutable std::mt19937_64 readapt_rng_;` (seeded
+once in the ctor init list). See §9 "Conditional 7th method `readapt_NUTS`"
+below for the exact wrapper-class additions and the
+`examples/GaussianLocationScale.cpp` reference (lines ~158, ~288, ~296).
 
 Expose via `RCPP_MODULE(<ClassName>_module) { ... }`.
 

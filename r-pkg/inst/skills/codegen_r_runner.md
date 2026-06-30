@@ -255,16 +255,21 @@ in `<folder>` and `<ClassName>` from your generation context:
 # ============================================================================
 # run_<ClassName>.R
 #
-# Paths below are RELATIVE to your project root — the directory that
-# contains BOTH `AI4BayesCode/` and `<folder>/`. Run this script from that
-# project root (via `Rscript` or R's `source()`). If you're in a
-# subdirectory, either `setwd()` to the project root first, or edit
-# the two paths in the two lines just below.
+# DEFAULT (installed package): load the package and compile the .cpp with a
+# bare RELATIVE path. Run this script from the directory that contains the
+# `<folder>/` where the .cpp lives (via `Rscript` or R's `source()`). If
+# you're elsewhere, `setwd()` there or edit the path below. NO local
+# AI4BayesCode checkout and NO helper sourcing are needed.
 # ============================================================================
 
-source("AI4BayesCode/R/AI4BayesCode_helpers.R")
-AI4BayesCode_sourceCpp("<folder>/<ClassName>.cpp",
-                    AI4BayesCode_path = "AI4BayesCode")
+library(AI4BayesCode)
+ai4bayescode_source("<folder>/<ClassName>.cpp")   # relative path; no AI4BayesCode_path=
+
+# Raw-checkout fallback only (package NOT installed) — requires a local
+# AI4BayesCode/ checkout sitting next to `<folder>/`; run from the project
+# root that contains BOTH directories:
+#   source("AI4BayesCode/R/AI4BayesCode_helpers.R")
+#   AI4BayesCode_sourceCpp("<folder>/<ClassName>.cpp", AI4BayesCode_path = "AI4BayesCode")
 
 # ===========================================================================
 #  Constructor arguments for <ClassName>
@@ -492,6 +497,12 @@ if (d$ess_ratio < 0.005) {
     warning(sprintf("R2: worst ess_ratio %.4f in [0.005, 0.01) — model mixes slowly, proceeding",
                     d$ess_ratio))
 }
+
+# ---- MANDATORY validator contract line (R-hat gate) ---------------------
+# The generation harness greps stdout for exactly this token. `d$rhat` is the
+# worst rank-normalized R-hat from r2_diag() above. Emit it verbatim.
+max_rhat <- d$rhat
+if (max_rhat < 1.01) cat("AI4BAYES_VALIDATE: PASS\n") else cat(sprintf("AI4BAYES_VALIDATE: FAIL maxRhat=%.4f\n", max_rhat))
 
 # ---- Layer 3 R3: posterior predictive p-values + PSIS-LOO ---------------
 suppressPackageStartupMessages(library(loo))

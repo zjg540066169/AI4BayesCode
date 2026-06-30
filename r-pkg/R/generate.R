@@ -203,9 +203,20 @@ if (backend %in% c("Python","both"))
         return(list(ok = TRUE, stage = "converged",
                     detail = paste(tail_lines, collapse = "\n")))
     }
-    if (verbose) message("  [validate] convergence not reached")
+    # No PASS sentinel -> distinguish WHY, rather than always blaming "convergence".
     tail_lines <- tail(strsplit(out_txt, "\n", fixed = TRUE)[[1]], 40L)
-    list(ok = FALSE, stage = "convergence", detail = paste(tail_lines, collapse = "\n"))
+    detail <- paste(tail_lines, collapse = "\n")
+    if (grepl("AI4BAYES_VALIDATE:\\s*FAIL", out_txt)) {       # ran to the end; R-hat too high
+        if (verbose) message("  [validate] ran but did not converge")
+        return(list(ok = FALSE, stage = "convergence", detail = detail))
+    }
+    if (grepl("Execution halted|Error in |Error:|Segmentation fault|terminate called|Abort trap|Traceback \\(most recent",
+              out_txt)) {                                     # compiled but crashed at RUNTIME
+        if (verbose) message("  [validate] runner crashed at runtime")
+        return(list(ok = FALSE, stage = "runtime", detail = detail))
+    }
+    if (verbose) message("  [validate] runner did not reach the validate line")
+    list(ok = FALSE, stage = "incomplete", detail = detail)   # no PASS, no FAIL, no error
 }
 
 # Build the repair user-message fed back to the model after a failed attempt.
@@ -225,10 +236,15 @@ if (backend %in% c("Python","both"))
 "off. The runner MUST print `AI4BAYES_VALIDATE: PASS` (or\n",
 "`AI4BAYES_VALIDATE: FAIL maxRhat=<v>`) as its very last line.\n"))
     }
+    hint <- switch(result$stage %||% "",
+        compile     = "The C++ did NOT COMPILE. Fix the compile error below.",
+        runtime     = "The sampler COMPILED but the runner CRASHED at RUNTIME -- this is NOT a convergence problem; fix the C++/runner bug below.",
+        incomplete  = "The runner did NOT reach the `AI4BAYES_VALIDATE` line (it stopped early) -- find why it never finished.",
+        convergence = "The runner ran to completion but rank-R-hat was too high (true non-convergence) -- fix the sampler/model.",
+        "The generated sampler did not pass automated validation.")
     paste0(
-"Validation FAILED at stage `", result$stage, "`. The generated sampler did not\n",
-"pass automated validation. Details below (compile error / runner output / the\n",
-"convergence check):\n\n",
+"Validation FAILED at stage `", result$stage, "`. ", hint, "\n",
+"Details below:\n\n",
 "-----\n", result$detail, "\n-----\n\n",
 "Please FIX the problem and RE-EMIT the FULL corrected files (do NOT send a diff\n",
 "or only the changed lines). Emit the complete `.cpp` sampler AND the complete\n",
@@ -547,6 +563,7 @@ ai4bayescode_key_status <- function() {
   "\\forall"="∀","\\exists"="∃","\\cup"="∪","\\cap"="∩",
   "\\subseteq"="⊆","\\subset"="⊂","\\langle"="⟨","\\rangle"="⟩",
   "\\ldots"="...","\\cdots"="...","\\dotsc"="...","\\dots"="...",
+  "\\lVert"="‖","\\rVert"="‖","\\Vert"="‖","\\lvert"="|","\\rvert"="|",
   "\\quad"="  ","\\qquad"="    ")
 .ai4b_latex_sup <- c("^{\\top}"="ᵀ","^\\top"="ᵀ","^{-1}"="⁻¹",
   "^{2}"="²","^{3}"="³","^{T}"="ᵀ","^2"="²","^3"="³","^T"="ᵀ")
@@ -561,6 +578,7 @@ ai4bayescode_key_status <- function() {
     if (!grepl("\\", s, fixed = TRUE) && !grepl("$", s, fixed = TRUE)) return(s)
     t <- s
     t <- gsub("\\\\(?:begin|end)\\{[^}]*\\}", "", t, perl = TRUE)
+    t <- gsub("\\\\\\\\\\[[^][]*\\]", "\n", t, perl = TRUE)  # \\[2pt] line break + spacing
     t <- gsub("$$", "\n", t, fixed = TRUE)
     t <- gsub("\\[", "\n", t, fixed = TRUE)
     t <- gsub("\\]", "\n", t, fixed = TRUE)
@@ -569,7 +587,7 @@ ai4bayescode_key_status <- function() {
     t <- gsub("\\\\", "\n", t, fixed = TRUE)        # LaTeX line break
     t <- gsub("&", "", t, fixed = TRUE)             # alignment
     t <- gsub("\\\\(?:left|right|bigg|Bigg|big|Big)\\b", "", t, perl = TRUE)
-    t <- gsub("\\\\(?:text|mathrm|mathbf|mathsf|mathtt|operatorname|hat|bar|tilde|widehat|widetilde|vec|boldsymbol)\\{([^{}]*)\\}", "\\1", t, perl = TRUE)
+    t <- gsub("\\\\(?:text|mathrm|mathbf|mathsf|mathtt|operatorname|hat|bar|tilde|widehat|widetilde|vec|boldsymbol|overline|underline)\\{([^{}]*)\\}", "\\1", t, perl = TRUE)
     t <- gsub("\\mathbb{R}", "ℝ", t, fixed = TRUE)
     t <- gsub("\\mathbb{N}", "ℕ", t, fixed = TRUE)
     t <- gsub("\\mathbb{Z}", "ℤ", t, fixed = TRUE)
@@ -641,8 +659,20 @@ ai4bayescode_key_status <- function() {
     state$blocks[[i]]$flushed <- TRUE
     txt <- b$text %||% ""
     if (progress && nzchar(txt)) {
-        code_like <- grepl("```|#include|PYBIND11_MODULE|RCPP_MODULE|// path:", txt)
-        cat("\n", if (code_like) txt else .ai4b_latex_to_console(txt), "\n", sep = "")
+        if (grepl("```", txt, fixed = TRUE)) {
+            # Mixed prose + fenced code: render the PROSE (so $$...$$ math is readable)
+            # but keep CODE verbatim (never mangle C++/R). Split on ``` -> odd segments
+            # are prose, even segments are code; re-wrap code in its fences.
+            parts <- strsplit(txt, "```", fixed = TRUE)[[1]]
+            cat("\n")
+            for (k in seq_along(parts)) {
+                if (k %% 2L == 1L) cat(.ai4b_latex_to_console(parts[k]))   # prose
+                else               cat("```", parts[k], "```", sep = "")   # code, verbatim
+            }
+            cat("\n")
+        } else {
+            cat("\n", .ai4b_latex_to_console(txt), "\n", sep = "")          # pure prose
+        }
     }
     state
 }
