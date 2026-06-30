@@ -505,6 +505,13 @@ AI4BayesCode.perf_hint(
     wall_sec=total_wall_sec,
     n_sweeps_total=2 * (n_burn + n_keep),
     uses_joint_nuts=<True if composite has joint_nuts_block else False>)
+
+# === Final validation verdict (MUST be the VERY LAST line printed) ===
+# The generator greps stdout for this exact sentinel. worst_rhat is from R2 above.
+if worst_rhat < 1.01:
+    print("AI4BAYES_VALIDATE: PASS")
+else:
+    print(f"AI4BAYES_VALIDATE: FAIL maxRhat={worst_rhat:.4f}")
 ```
 
 ### Special case: per-step outputs NOT in `get_history()`
