@@ -1834,12 +1834,12 @@ template OR the strict-N pattern with documented reason.
 class <ClassName> {
 public:
     <ClassName>(/* data + int rng_seed + bool keep_history = false */);
-    void step(int n_steps);
-    Rcpp::List get_current() const;
-    void set_current(Rcpp::List params);
-    Rcpp::List predict_at(Rcpp::List new_data) const;
-    Rcpp::List get_dag() const;
-    Rcpp::List get_history() const;
+    void                      step(int n_steps);                  // loops impl_->step(rng_) n_steps times
+    AI4BayesCode::state_map   get_current() const;                // backend-neutral; Rcpp/pybind auto-convert
+    void                      set_current(const AI4BayesCode::state_map& params);
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const;
+    AI4BayesCode::dag_info    get_dag() const;                    // = impl_->get_dag()
+    AI4BayesCode::history_map get_history() const;                // = impl_->get_history()
 private:
     std::mt19937_64                             rng_;
     mutable std::mt19937_64                     predict_rng_;  // §6a
@@ -1847,6 +1847,27 @@ private:
     bool                                        keep_history_ = false;
 };
 ```
+
+**Return BACKEND-NEUTRAL types — NEVER `Rcpp::List` in the class methods.** They
+return `AI4BayesCode::state_map` (= `unordered_map<string, arma::vec>`),
+`history_map` (= `unordered_map<string, arma::mat>`), and `dag_info`; Rcpp **and**
+pybind11 auto-convert them (codegen.md §1). Declaring them `Rcpp::List` is the
+obsolete R-only style and forces a manual conversion that does not compile.
+
+**The engine `impl_` (a `composite_block`) exposes ONLY these methods — do not
+invent others:**
+- `impl_->step(rng_)` — ONE Gibbs sweep; **LOOP it** for `n_steps`. It takes the
+  rng **by reference**, NOT `impl_->step(n, rng)`.
+- `impl_->current_named_outputs()` → `state_map` (the current draw).
+- `impl_->get_history()` → `history_map`; `impl_->get_dag()` → `dag_info`.
+- `impl_->data()` (the shared DataContext: `.set(...)`, `.declare_dependencies(...)`,
+  `.declare_data_input(...)`, `.register_stochastic_refresher(...)`),
+  `impl_->add_child(std::make_unique<...block>(...))`.
+
+There is **NO `impl_->get_current()`** — build the class's `get_current()` by
+`return impl_->current_named_outputs();` (or assemble from the child blocks).
+The canonical, copy-this reference is `examples/GaussianLocationScale.cpp`
+(its `get_current` / `get_history` / `predict_at` / `get_dag` bodies).
 
 Expose via `RCPP_MODULE(<ClassName>_module) { ... }`.
 
