@@ -92,6 +92,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("HierarchicalLM_MultivariateRE")
 //   set.seed(2024)
 //   J <- 30L; per_group <- 20L; N <- J * per_group   # 30 groups x 20 obs = 600 (replicated)
 //   p <- 3L                                           # fixed-effect dim (incl. intercept)

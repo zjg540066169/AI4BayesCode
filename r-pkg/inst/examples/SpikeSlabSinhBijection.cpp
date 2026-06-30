@@ -54,6 +54,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("SpikeSlabSinhBijection")
 //   set.seed(123)
 //   N <- 80; beta_true <- 1.5; sigma <- 1.0; slab_sd <- 5.0; pi_incl <- 0.5
 //   x <- rnorm(N)

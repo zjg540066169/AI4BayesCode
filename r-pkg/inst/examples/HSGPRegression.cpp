@@ -70,6 +70,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("HSGPRegression")
 //   set.seed(601); N <- 80L; M <- 25L                 # sample size, basis count
 //   x <- runif(N, -3, 3)                              # 1-D inputs on [-3, 3]
 //   y <- 1.5 * sin(2 * x) + 0.3 * x + rnorm(N, 0, 0.4) # smooth truth + N(0,0.4)

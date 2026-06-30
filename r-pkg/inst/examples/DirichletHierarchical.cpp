@@ -49,6 +49,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("DirichletHierarchical")
 //   set.seed(2026)
 //   ## Simulate K=400 simplexes ~ Dirichlet(kappa_true * s_true): well
 //   ## replicated (400 obs to identify a length-4 base simplex + kappa + theta).

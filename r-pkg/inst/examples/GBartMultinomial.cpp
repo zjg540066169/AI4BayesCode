@@ -74,6 +74,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("GBartMultinomial")
 //   set.seed(42); N <- 900L                       # well-identified C=3 DGP
 //   X <- matrix(runif(N * 3L, -1.5, 1.5), N, 3L)  # x1,x2,x3 ~ Unif(-1.5,1.5)
 //   r1 <-  1.2 * X[,1] - 0.8 * X[,2]              # class 1 vs ref log-odds

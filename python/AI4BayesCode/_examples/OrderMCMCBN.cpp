@@ -70,6 +70,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("OrderMCMCBN")
 //   set.seed(123); n <- 4L; N <- 4000L; flip <- 0.10   # binary chain X1->X2->X3->X4
 //   data <- matrix(0L, N, n)
 //   data[, 1] <- as.integer(runif(N) < 0.5)             # X1 ~ Bernoulli(0.5)

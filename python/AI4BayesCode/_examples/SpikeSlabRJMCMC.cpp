@@ -84,6 +84,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("SpikeSlabRJMCMC")
 //   set.seed(20260621); N <- 300L; p <- 8L; sigma_true <- 1.0
 //   beta_true <- numeric(p); beta_true[c(1,4,7)] <- c(2.5, -1.8, 1.2)  # actives {1,4,7}
 //   X <- matrix(rnorm(N * p), N, p); X <- scale(X, center = TRUE, scale = FALSE)  # center cols (no intercept)

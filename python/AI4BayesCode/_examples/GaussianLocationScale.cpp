@@ -38,6 +38,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("GaussianLocationScale")
 //   set.seed(42); N <- 200
 //   y <- rnorm(N, mean = 3, sd = 2)                # DGP: true mu=3, sigma=2
 //   m <- new(GaussianLocationScale, y, 7L, TRUE)   # (y, rng_seed, keep_history)

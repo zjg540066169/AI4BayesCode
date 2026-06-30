@@ -20,6 +20,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("BetaBernoulli")
 //   set.seed(2026)
 //   N <- 500; p_true <- 0.30            # N Bernoulli trials, true success prob
 //   y <- as.numeric(runif(N) < p_true)  # 0/1 data vector

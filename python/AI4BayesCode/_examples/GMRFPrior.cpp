@@ -47,6 +47,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("GMRFPrior")
 //   # Pure-prior 2D ICAR: x ~ N(0, (kappa R)^{-1}) with sum(x)=0 on a
 //   # 4x4 lattice. No data — x is drawn directly (Rue 2001 sparse-Cholesky),
 //   # so each step is an exact i.i.d. prior draw (no observation likelihood).

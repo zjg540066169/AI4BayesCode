@@ -52,6 +52,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("ProbitRegression")
 //   set.seed(20260621)
 //   N <- 800L; p <- 3L                       # N >> p: beta well-identified
 //   beta_true <- c(-0.4, 1.2, -0.8)

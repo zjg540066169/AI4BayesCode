@@ -51,6 +51,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("GBartHeteroscedastic")
 //   set.seed(42); N <- 600L                          # well-identified DGP
 //   X  <- matrix(runif(N * 2L, -1, 1), N, 2L)        # x1,x2 ~ Unif(-1,1)
 //   r  <- 1.0 + 0.8 * sin(2 * X[,1]) + 0.6 * X[,2]   # smooth log-mean

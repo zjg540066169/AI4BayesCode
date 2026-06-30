@@ -98,6 +98,17 @@
 "    Apply the non-informative default SILENTLY; do not stop to ask.")
 }
 
+# Case-insensitive backend: a user may write "python"/"r"/"BOTH"; map to the
+# canonical "R"/"Python"/"both" before match.arg. The default (an unmatched
+# multi-value vector) passes through untouched.
+#' @keywords internal
+#' @noRd
+.ai4b_norm_backend <- function(backend) {
+    if (length(backend) != 1L) return(backend)
+    nb <- unname(c(r = "R", python = "Python", both = "both")[tolower(trimws(backend))])
+    if (is.na(nb)) backend else nb
+}
+
 #' @keywords internal
 #' @noRd
 .ai4b_build_user <- function(description, backend, output_path, classname,
@@ -258,6 +269,7 @@ ai4bayescode_prompt <- function(model_description,
                             include_skills = FALSE,
                             skills         = NULL,
                             confirm_model  = FALSE) {
+    backend <- .ai4b_norm_backend(backend)
     backend <- match.arg(backend)
     if (is.character(model_description) && length(model_description) == 1L &&
         file.exists(model_description) && grepl("\\.(txt|md)$", model_description)) {
@@ -620,6 +632,7 @@ ai4bayescode_key_status <- function() {
         cb <- ev$content_block
         state$blocks[[i]] <- list(type = cb$type %||% "text",
                                   text = cb$text %||% "", thinking = cb$thinking %||% "",
+                                  signature = cb$signature %||% "", data = cb$data %||% "",
                                   id = cb$id, name = cb$name, partial = "")
         if (progress && identical(cb$type, "thinking")) cat("\n  [thinking] ")
         if (progress && identical(cb$type, "text"))     cat("\n")
@@ -636,6 +649,12 @@ ai4bayescode_key_status <- function() {
             if (progress && state$think_chars >= (state$next_dot %||% 0L)) {
                 cat("."); state$next_dot <- state$think_chars + 400L   # heartbeat
             }
+        } else if (identical(d$type, "signature_delta")) {
+            # REQUIRED: the thinking block's cryptographic signature. Anthropic
+            # rejects (HTTP 400) a follow-up turn whose tool_use-bearing assistant
+            # message carries a thinking block stripped of its signature, so it
+            # MUST be captured here and re-emitted by .ai4b_sse_finalize().
+            state$blocks[[i]]$signature <- paste0(state$blocks[[i]]$signature %||% "", d$signature %||% "")
         } else if (identical(d$type, "input_json_delta")) {
             state$blocks[[i]]$partial <- paste0(state$blocks[[i]]$partial %||% "", d$partial_json)
         }
@@ -653,7 +672,14 @@ ai4bayescode_key_status <- function() {
     content <- Filter(Negate(is.null), lapply(state$blocks, function(b) {
         if (is.null(b)) return(NULL)
         if (identical(b$type, "text"))     return(list(type = "text", text = b$text %||% ""))
-        if (identical(b$type, "thinking")) return(list(type = "thinking", thinking = b$thinking %||% ""))
+        if (identical(b$type, "thinking")) {
+            tb <- list(type = "thinking", thinking = b$thinking %||% "")
+            # Carry the signature so a tool_use turn survives the next request.
+            if (nzchar(b$signature %||% "")) tb$signature <- b$signature
+            return(tb)
+        }
+        if (identical(b$type, "redacted_thinking"))
+            return(list(type = "redacted_thinking", data = b$data %||% ""))
         if (identical(b$type, "tool_use")) {
             pj  <- if (nzchar(b$partial %||% "")) b$partial else "{}"
             inp <- tryCatch(jsonlite::fromJSON(pj, simplifyVector = FALSE),
@@ -691,6 +717,13 @@ ai4bayescode_key_status <- function() {
         # cap instead of the buffered "0 bytes for `timeout`s" death that killed
         # long effort=max generations.
         req <- httr2::req_timeout(req, if (streaming) max(timeout, 1800) else timeout)
+        # Surface the API's actual error message on 4xx/5xx instead of an opaque
+        # "HTTP 400 Bad Request" (e.g. a malformed message or an invalid param).
+        req <- httr2::req_error(req, body = function(resp) {
+            b <- tryCatch(httr2::resp_body_json(resp), error = function(...) NULL)
+            msg <- b$error$message %||% b$message
+            if (!is.null(msg)) paste0("anthropic: ", msg) else NULL
+        })
         httr2::req_retry(req, max_tries = 4,
             is_transient = function(r) httr2::resp_status(r) %in% c(429, 500, 529))
     }
@@ -1071,7 +1104,7 @@ ai4bayescode_generate <- function(model_description = NULL,
         if (is.null(output_path)) output_path <- "./generated"
         if (is.null(classname)) classname <- .ai4b_derive_class_name(model_description)
     }
-    backend <- match.arg(backend, c("R", "Python", "both"))
+    backend <- match.arg(.ai4b_norm_backend(backend), c("R", "Python", "both"))
     if (is.null(priors)) priors <- if (interactive) "interactive" else "noninformative"
     if (is.null(confirm_model)) confirm_model <- isTRUE(interactive)
 

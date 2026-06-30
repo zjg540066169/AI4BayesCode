@@ -60,6 +60,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("BSplineRegression")
 //   set.seed(123); N <- 100L; K_s <- 10L                       # data + basis dim
 //   x <- (0:(N-1))/(N-1); knots <- (1:K_s)/(K_s+1)             # grid + interior knots
 //   Bsp <- outer(x, knots, function(a,b) pmax(a-b, 0))         # truncated-power basis (N x K_s)

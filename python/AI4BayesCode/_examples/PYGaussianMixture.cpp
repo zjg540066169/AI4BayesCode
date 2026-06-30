@@ -117,6 +117,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("PYGaussianMixture")
 //   set.seed(7)
 //   ## DGP: 3 well-separated 2-D Gaussian clusters (truth K = 3).
 //   N <- 300L; d <- 2L

@@ -57,6 +57,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("LogisticRegression")
 //   set.seed(2026); N <- 800; p <- 3; beta_true <- c(-0.5, 1.2, -0.8)
 //   X <- cbind(1, matrix(rnorm(N * (p - 1)), N, p - 1))   # col1 intercept, rest N(0,1)
 //   prob <- 1 / (1 + exp(-(X %*% beta_true)))             # sigmoid(X beta)

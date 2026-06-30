@@ -41,6 +41,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("LinearRegJointMixed")
 //   set.seed(2026)
 //   N <- 300L; p <- 3L                                  # N >> p: well-identified
 //   alpha <- 1.5; beta <- c(2.0, -1.0, 0.5); sigma <- 0.8

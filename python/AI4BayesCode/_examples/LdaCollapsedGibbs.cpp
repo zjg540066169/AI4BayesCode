@@ -92,6 +92,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("LdaCollapsedGibbs")
 //   set.seed(2024)
 //   M <- 40L; V <- 6L; K <- 2L; Ld <- 30L           # docs / vocab / topics / tokens-per-doc
 //   phi_true <- rbind(c(.40,.35,.15,.05,.03,.02),    # topic 1: mass on first vocab half

@@ -58,6 +58,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("GPTimeSeries")
 //   set.seed(2026)
 //   N <- 300L; dt <- 1.0
 //   amp_true <- 2.0; tau_true <- 40.0; sigma_true <- 1.0   # OU truth

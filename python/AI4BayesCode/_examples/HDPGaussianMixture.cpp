@@ -126,6 +126,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("HDPGaussianMixture")
 //   set.seed(2026)
 //   ## Two groups (G=2) sharing T=6 truncated atoms in 2-D. Three well-
 //   ## separated true clusters; groups differ in mixing weights.

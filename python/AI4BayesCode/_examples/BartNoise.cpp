@@ -57,6 +57,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("BartNoise")
 //   set.seed(42); N <- 600L; p <- 3L                      # well-identified DGP (= int main)
 //   X <- matrix(runif(N * p, -1, 1), N, p)                # X ~ Uniform(-1, 1)
 //   f <- sin(3 * X[, 1]) + 0.5 * X[, 2]^2 - X[, 3]        # smooth low-dim mean

@@ -69,6 +69,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("StructuredPottsVI")
 //   # Two K=2 triangles {1,2,3},{4,5,6} bridged weakly by edge 3--6 (Potts MRF).
 //   edges <- rbind(c(1,2),c(2,3),c(1,3), c(4,5),c(5,6),c(4,6), c(3,6))  # n_edges x 2, 1-based
 //   beta  <- c(1.5,1.5,1.5, 1.5,1.5,1.5, 0.2)                           # per-edge coupling

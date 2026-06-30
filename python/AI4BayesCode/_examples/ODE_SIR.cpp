@@ -52,6 +52,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("ODE_SIR")
 //   set.seed(1)
 //   beta_t <- 0.6; gamma_t <- 0.2; sigma_t <- 0.05         # ground truth
 //   S0 <- 990; I0 <- 10; R0 <- 0                            # initial compartments at t=0

@@ -36,6 +36,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("DirichletSimplex")
 //   set.seed(2026)
 //   K <- 4L; N <- 500L                          # 4 categories, 500 obs
 //   theta_true <- c(0.50, 0.25, 0.15, 0.10)     # known simplex point

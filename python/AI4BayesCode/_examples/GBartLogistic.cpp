@@ -60,6 +60,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("GBartLogistic")
 //   set.seed(42); N <- 800L; p <- 3L            # well-identified DGP (= int main)
 //   X <- matrix(runif(N * p, -1.5, 1.5), N, p)  # X ~ Uniform(-1.5, 1.5)
 //   eta <- 1.5 * X[, 1] - 1.0 * X[, 2] + 0.8 * X[, 3]   # smooth linear predictor

@@ -51,6 +51,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("IsingPrior")
 //   # Pure-prior 2D Ising (Q=2) on a 16x16 periodic lattice, ferromagnetic
 //   # beta=0.44 (near the 2D critical coupling). No data: the proper discrete
 //   # MRF prior pi(x) is itself the target; we just sample the latent state x.

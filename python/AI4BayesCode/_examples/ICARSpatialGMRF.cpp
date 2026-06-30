@@ -54,6 +54,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("ICARSpatialGMRF")
 //   P<-5; N<-P*P; cc<-(0:(N-1))%%P; rr<-(0:(N-1))%/%P                   # 5x5 lattice, N=25 nodes
 //   ei<-c((1:N)[cc<P-1], (1:N)[rr<P-1]); ej<-c((1:N)[cc<P-1]+1, (1:N)[rr<P-1]+P)  # grid edges (1-based)
 //   x<-cc/(P-1); yy<-rr/(P-1); phi<-2*sin(pi*x)*sin(pi*yy)+(x-0.5); phi<-phi-mean(phi)  # sum-to-zero field

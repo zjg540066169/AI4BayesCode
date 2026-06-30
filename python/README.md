@@ -10,7 +10,7 @@ Python equivalent of the R-side `AI4BayesCode_helpers.R`:
 | `ai4bayescode_models()`         | `AI4BayesCode.models()`           |
 | `ai4bayescode_doc(...)`         | `AI4BayesCode.doc(...)`           |
 | `plot_dag(model)`               | `AI4BayesCode.plot_dag(model)`    |
-| `ai4bayescode_run_chains(...)`  | `AI4BayesCode.run_chains(...)`    |
+| `AI4BayesCode_run_chains(...)`  | `AI4BayesCode.run_chains(...)`    |
 | `posterior::rhat(x)`            | `AI4BayesCode.rhat(x)`            |
 | `posterior::ess_bulk(x)`        | `AI4BayesCode.ess_bulk(x)`        |
 

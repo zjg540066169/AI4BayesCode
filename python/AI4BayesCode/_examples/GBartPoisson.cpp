@@ -61,6 +61,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("GBartPoisson")
 //   set.seed(1)                                          # reproducible R run
 //   N <- 600L; p <- 3L                                   # well-identified DGP
 //   X <- matrix(runif(N * p, -1.5, 1.5), N, p)           # covariates ~ U(-1.5,1.5)

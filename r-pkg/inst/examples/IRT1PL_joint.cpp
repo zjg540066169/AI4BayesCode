@@ -75,6 +75,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("IRT1PL_joint")
 //   set.seed(2026)
 //   N <- 200L; J <- 12L; sigma_b <- 1.2          # students, items, item-difficulty scale
 //   theta <- rnorm(N)                            # student abilities ~ N(0,1)

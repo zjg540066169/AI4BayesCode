@@ -434,3 +434,168 @@ test_that("confirm_model: model confirms via ask_user, then emits code", {
 test_that("max_tokens defaults to NULL (no chosen cap; model maximum)", {
     expect_null(formals(ai4bayescode_generate)$max_tokens)
 })
+
+# ---------------------------------------------------------------------------
+# Streaming transport + verify_stream gate + LaTeX console render (new in 1.0)
+# ---------------------------------------------------------------------------
+test_that("SSE accumulator builds the same content+stop_reason shape as buffered", {
+    evs <- list(
+        list(type="content_block_start", index=0, content_block=list(type="thinking", thinking="")),
+        list(type="content_block_delta", index=0, delta=list(type="thinking_delta", thinking=strrep("r ",50))),
+        list(type="content_block_start", index=1, content_block=list(type="text", text="")),
+        list(type="content_block_delta", index=1, delta=list(type="text_delta", text="Hello ")),
+        list(type="content_block_delta", index=1, delta=list(type="text_delta", text="world")),
+        list(type="content_block_start", index=2, content_block=list(type="tool_use", id="t1", name="ask_user")),
+        list(type="content_block_delta", index=2, delta=list(type="input_json_delta", partial_json='{"question":"Prior?"}')),
+        list(type="message_delta", delta=list(stop_reason="tool_use")))
+    st <- list(blocks=list(), stop_reason=NULL, think_chars=0L, next_dot=0L)
+    for (ev in evs) st <- AI4BayesCode:::.ai4b_sse_step(st, ev, progress=FALSE)
+    r <- AI4BayesCode:::.ai4b_sse_finalize(st)
+    expect_identical(r$stop_reason, "tool_use")
+    expect_identical(Filter(function(b) identical(b$type,"text"), r$content)[[1]]$text, "Hello world")
+    tu <- Filter(function(b) identical(b$type,"tool_use"), r$content)[[1]]
+    expect_identical(tu$name, "ask_user")
+    expect_identical(tu$input$question, "Prior?")          # input parsed to a list, NOT a string
+})
+
+test_that("a streamed-shaped response drives the agent loop unchanged", {
+    tn <- 0L
+    responder <- function(messages) { tn <<- tn + 1L
+        if (tn == 1L)
+            AI4BayesCode:::.ai4b_sse_finalize(list(stop_reason="tool_use", blocks=list(
+                list(type="text", text="Eliciting."),
+                list(type="tool_use", id="t1", name="ask_user",
+                     partial='{"question":"Prior for beta?"}'))))
+        else list(stop_reason="end_turn", content=list(list(type="text",
+            text="```cpp\n// path: SF.cpp\n#include <x>\nclass SF{};\n```"))) }
+    td <- file.path(tempdir(), "ai4b_streamshape"); unlink(td, recursive = TRUE)
+    asked <- character(0)
+    res <- ai4bayescode_generate("Logistic regression with beta.", classname="SF",
+        output_path=td, backend="R", interactive=FALSE, verbose=FALSE, max_attempts=1L,
+        .responder=responder, .ask=function(q, ...){ asked <<- c(asked, q); "Jeffreys" },
+        .validate=function(...) list(ok=TRUE))
+    expect_true(res$validated)
+    expect_match(asked[1], "Prior for beta")               # the streamed tool_use question reached the user
+})
+
+test_that("verify_stream gate does NOT fire under the injected responder (no API call)", {
+    responder <- function(m) list(stop_reason="end_turn", content=list(list(type="text",
+        text="```cpp\n// path: VS.cpp\n#include <x>\nclass VS{};\n```")))
+    td <- file.path(tempdir(), "ai4b_vs"); unlink(td, recursive = TRUE)
+    res <- ai4bayescode_generate("LR.", classname="VS", API_key="sk-ant-api-x",
+        output_path=td, backend="R", interactive=FALSE, verbose=FALSE,
+        .responder=responder, .validate=function(...) list(ok=TRUE))
+    expect_true(res$validated)                              # reached generation; gate skipped (responder set)
+    expect_true("verify_stream" %in% names(formals(ai4bayescode_generate)))
+})
+
+test_that("set_key(check = FALSE) sets the key with no streaming self-check (no network)", {
+    old <- Sys.getenv("ANTHROPIC_API_KEY", unset = NA)
+    on.exit(if (is.na(old)) Sys.unsetenv("ANTHROPIC_API_KEY") else Sys.setenv(ANTHROPIC_API_KEY = old))
+    expect_no_error(suppressMessages(ai4bayescode_set_key("sk-ant-api-fake-xyz", "anthropic", check = FALSE)))
+    expect_identical(Sys.getenv("ANTHROPIC_API_KEY"), "sk-ant-api-fake-xyz")
+    expect_true("check" %in% names(formals(ai4bayescode_set_key)))
+})
+
+test_that("LaTeX console renderer turns display math into readable Unicode", {
+    out <- AI4BayesCode:::.ai4b_latex_to_console(
+        "$$\\beta \\sim \\mathcal{N}(0, \\sigma^2), \\quad \\sigma > 0$$")
+    expect_match(out, "β"); expect_match(out, "σ"); expect_match(out, "~")
+    expect_false(grepl("\\\\beta|\\\\sigma|[$][$]", out))   # no raw LaTeX left
+})
+
+# ---------------------------------------------------------------------------
+# Prior-specification modes: none (non-informative default) / partial / full,
+# a multi-parameter elicitation loop, and a full LaTeX model-spec render.
+# ---------------------------------------------------------------------------
+test_that("no-prior description -> prompt carries the strict non-informative defaults", {
+    p <- ai4bayescode_prompt("Linear regression y ~ N(X beta, sigma^2).")   # names NO priors
+    expect_match(p$user, "NON-INFORMATIVE")
+    expect_match(p$user, "FLAT IMPROPER")            # real coefs -> flat improper
+    expect_match(p$user, "Jeffreys")                 # positive scale -> 1/sigma
+})
+
+test_that("full-prior description -> prompt instructs using the stated priors exactly", {
+    p <- ai4bayescode_prompt(
+        "y ~ N(X beta, sigma^2); beta ~ Normal(0,10^2); sigma ~ Half-Normal(0,5).")
+    expect_match(p$user, "use it EXACTLY")           # stated priors honored verbatim
+})
+
+test_that("partial priors via a named list pin the given prior, non-informative for the rest", {
+    p <- ai4bayescode_prompt("Linear regression y ~ N(X beta, sigma^2).",
+                             priors = list(beta = "Normal(0, 10^2)"))
+    expect_match(p$user, "use these EXACTLY")
+    expect_match(p$user, "beta")
+    expect_match(p$user, "Normal\\(0, 10")
+    expect_match(p$user, "NON-INFORMATIVE")          # sigma (unlisted) falls back
+})
+
+test_that("interactive elicitation threads a multi-parameter ask_user loop", {
+    tn <- 0L; asked <- character(0)
+    responder <- function(messages) { tn <<- tn + 1L
+        if (tn == 1L) list(stop_reason="tool_use", content=list(
+            list(type="text", text="Prior 1/2."),
+            list(type="tool_use", id="p1", name="ask_user",
+                 input=list(question="Prior for beta?", options=list("flat","N(0,5^2)")))))
+        else if (tn == 2L) list(stop_reason="tool_use", content=list(
+            list(type="tool_use", id="p2", name="ask_user",
+                 input=list(question="Prior for sigma?", options=list("Jeffreys","HalfN(0,5)")))))
+        else list(stop_reason="end_turn", content=list(list(type="text",
+            text="```cpp\n// path: Multi.cpp\n#include <x>\nclass Multi{};\n```"))) }
+    ask <- function(q, options=NULL, default=NULL) { asked <<- c(asked, q)
+        if (grepl("beta", q)) "N(0,5^2)" else "Jeffreys" }
+    td <- file.path(tempdir(), "ai4b_multi"); unlink(td, recursive = TRUE)
+    res <- ai4bayescode_generate("Linear regression.", classname="Multi", priors="interactive",
+        output_path=td, backend="R", interactive=FALSE, verbose=FALSE, max_attempts=1L,
+        .responder=responder, .ask=ask, .validate=function(...) list(ok=TRUE))
+    expect_true(res$validated)
+    expect_length(asked, 2L)
+    expect_match(asked[1], "beta"); expect_match(asked[2], "sigma")
+    expect_equal(tn, 3L)                             # ask, ask, then code
+})
+
+test_that("confirm_model: a full likelihood+priors LaTeX spec renders to console Unicode", {
+    spec <- paste0("$$\\begin{aligned}\n",
+        "y_i \\mid \\beta, \\sigma^2 &\\sim \\mathcal{N}(x_i^\\top\\beta,\\ \\sigma^2)\\\\\n",
+        "\\beta_j &\\sim \\mathcal{N}(0, 10^2)\\\\\n",
+        "\\sigma &\\sim \\mathrm{Half\\text{-}Normal}(0, 5)\n\\end{aligned}$$")
+    out <- AI4BayesCode:::.ai4b_latex_to_console(spec)
+    expect_match(out, "β"); expect_match(out, "σ"); expect_match(out, "~")
+    expect_false(grepl("\\\\beta|\\\\sigma|\\\\mathcal|\\\\begin|\\\\sim|[$][$]", out))
+})
+
+# ---------------------------------------------------------------------------
+# Streaming MUST preserve the thinking-block signature + redacted_thinking, or
+# the FOLLOW-UP turn after an ask_user tool_use is rejected (HTTP 400) by the
+# Anthropic API whenever thinking is on (the default effort = "high").
+# Regression guard for the confirm_model / interactive-elicitation crash.
+# ---------------------------------------------------------------------------
+test_that("streaming preserves the thinking signature for multi-turn tool use", {
+    evs <- list(
+        list(type="content_block_start", index=0, content_block=list(type="thinking", thinking="")),
+        list(type="content_block_delta", index=0, delta=list(type="thinking_delta", thinking="reason ")),
+        list(type="content_block_delta", index=0, delta=list(type="signature_delta", signature="SIG-xyz")),
+        list(type="content_block_start", index=1, content_block=list(type="tool_use", id="t1", name="ask_user")),
+        list(type="content_block_delta", index=1, delta=list(type="input_json_delta", partial_json='{"question":"Correct?"}')),
+        list(type="message_delta", delta=list(stop_reason="tool_use")))
+    st <- list(blocks=list(), stop_reason=NULL, think_chars=0L, next_dot=0L)
+    for (ev in evs) st <- AI4BayesCode:::.ai4b_sse_step(st, ev, progress=FALSE)
+    r <- AI4BayesCode:::.ai4b_sse_finalize(st)
+    expect_identical(r$content[[1]]$type, "thinking")        # thinking-first ordering
+    expect_identical(r$content[[1]]$signature, "SIG-xyz")    # signature carried through
+    expect_identical(Filter(function(b) identical(b$type,"tool_use"), r$content)[[1]]$name, "ask_user")
+})
+
+test_that("streaming preserves a redacted_thinking block with its data payload", {
+    evs <- list(
+        list(type="content_block_start", index=0, content_block=list(type="redacted_thinking", data="ENC")),
+        list(type="content_block_start", index=1, content_block=list(type="text", text="")),
+        list(type="content_block_delta", index=1, delta=list(type="text_delta", text="hi")),
+        list(type="message_delta", delta=list(stop_reason="end_turn")))
+    st <- list(blocks=list(), stop_reason=NULL, think_chars=0L, next_dot=0L)
+    for (ev in evs) st <- AI4BayesCode:::.ai4b_sse_step(st, ev, progress=FALSE)
+    r <- AI4BayesCode:::.ai4b_sse_finalize(st)
+    rt <- Filter(function(b) identical(b$type,"redacted_thinking"), r$content)
+    expect_length(rt, 1L)
+    expect_identical(rt[[1]]$data, "ENC")
+})

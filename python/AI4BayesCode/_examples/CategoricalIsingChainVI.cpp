@@ -56,6 +56,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("CategoricalIsingChainVI")
 //   n <- 4L                                  # chain length (>= 2)
 //   K <- 3L                                  # states per node (K^n = 81 <= 4096 -> EXACT gradients)
 //   beta <- 0.8                              # ferromagnetic coupling (>= 0)

@@ -43,6 +43,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("ARDLasso")
 //   set.seed(20260621)
 //   N <- 200L; p <- 6L                              # N >> p: well-identified
 //   beta_true <- c(2.5, 0, -1.5, 0, 0.8, 0)         # 3 active, 3 exactly-zero

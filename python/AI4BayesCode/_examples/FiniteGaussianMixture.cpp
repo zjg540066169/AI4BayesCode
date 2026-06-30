@@ -88,6 +88,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("FiniteGaussianMixture")
 //   set.seed(20260621)                              # 2-cluster 2-D mixture DGP
 //   n_per <- 150L; K <- 2L                          # 150 points per cluster
 //   mu_true <- rbind(c(-3, -3), c(3, 3))            # well-separated centers, sd=1

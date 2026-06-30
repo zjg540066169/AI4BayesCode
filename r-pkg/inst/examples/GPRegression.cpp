@@ -69,6 +69,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("GPRegression")
 //   set.seed(2024); N <- 120                       # dense 1-D grid: many points per lengthscale
 //   x <- seq(-3, 3, length.out = N)                # covariate grid on [-3, 3]
 //   f_true <- sin(3 * x) + 0.5 * x                 # known smooth latent function

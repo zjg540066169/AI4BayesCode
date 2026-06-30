@@ -38,6 +38,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("DirichletSparse")
 //   set.seed(2026)
 //   s_true <- c(0.50, 0.25, 0.15, 0.05, 0.03, 0.02)  # sparse P=6 simplex
 //   N      <- 1000L                                   # multinomial trials (N >> P)

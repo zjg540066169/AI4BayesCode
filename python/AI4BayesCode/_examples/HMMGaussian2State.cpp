@@ -36,6 +36,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("HMMGaussian2State")
 //   set.seed(2026)
 //   T   <- 400                                  # length of the state sequence
 //   A   <- c(0.92, 0.08, 0.08, 0.92)            # sticky 2x2 transition (row-major)

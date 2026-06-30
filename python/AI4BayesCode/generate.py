@@ -169,6 +169,7 @@ def prompt(model_description: str, *, backend: str = "R", output_path: str = "./
            include_skills: bool = False, skills: Iterable[str] | None = None,
            confirm_model: bool = False) -> dict:
     """Assemble the codegen system + user prompt (pure, no network)."""
+    backend = {"r": "R", "python": "Python", "both": "both"}.get(str(backend).strip().lower(), backend)
     if backend not in ("R", "Python", "both"):
         raise ValueError("backend must be 'R', 'Python', or 'both'")
     if isinstance(model_description, str) and os.path.isfile(model_description) and \
@@ -902,8 +903,9 @@ def generate(model_description: str | None = None, *, classname: str | None = No
         backend = backend or "R"
         output_path = output_path or "./generated"
         classname = classname or _derive_class_name(model_description)
+    backend = {"r": "R", "python": "Python", "both": "both"}.get(str(backend).strip().lower(), backend)
     if backend not in ("R", "Python", "both"):
-        raise ValueError("backend must be R/Python/both")
+        raise ValueError("backend must be 'R', 'Python', or 'both'")
     if priors is None:
         priors = "interactive" if interactive else "noninformative"
     if confirm_model is None:

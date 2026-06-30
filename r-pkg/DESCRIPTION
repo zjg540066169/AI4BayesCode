@@ -13,7 +13,7 @@ Description: Header-only C++ library for stateful, modular MCMC samplers
     samplers expose a uniform 6-method R interface (step / get_current /
     set_current / predict_at / get_dag / get_history) plus an optional 7th
     method 'readapt_NUTS' for sequential / online learning workflows.
-    Ships a 24-check validator skill chain that an AI agent can use when
+    Ships a 25-check validator skill chain that an AI agent can use when
     generating samplers from natural-language model descriptions. Bundles
     the runtime, 39 reference examples, and the skill corpus, plus
     natural-language-to-code generation via 'ai4bayescode_generate()'.

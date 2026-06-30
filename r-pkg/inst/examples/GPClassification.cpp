@@ -45,6 +45,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("GPClassification")
 //   set.seed(2026)
 //   N <- 120                                     # >> #hyperparams: rich signal
 //   x <- runif(N, -3, 3)                         # 1D inputs on [-3, 3]

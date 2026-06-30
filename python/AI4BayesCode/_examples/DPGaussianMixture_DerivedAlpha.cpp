@@ -90,6 +90,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("DPGaussianMixture_DerivedAlpha")
 //   set.seed(2026)
 //   ## DGP: 3 well-separated 2-D Gaussian clusters; fit DP mixture with
 //   ## K_trunc = 8 truncation slots, alpha = exp(phi) derived from phi.
