@@ -1693,6 +1693,46 @@ in the lambda to read nuisance parameters at PPC time.
 
 ---
 
+## 7. set_current — apply NAMED parameters to the block(s)
+
+`set_current(params)` takes a NAMED map of parameter values (used for
+over-dispersed chain inits + stateful control). `Rcpp::as<state_map>` **exists**
+(rcpp_wrap.hpp), so `const AI4BayesCode::state_map&` is a valid R input — you do
+NOT need `Rcpp::List` for this.
+
+**#1 RECURRING COMPILE ERROR — do NOT make it.** `composite_block::set_current`
+and EVERY block's `set_current` (`joint_nuts_block`, `nuts_block`, …) take a
+**CONCATENATED `arma::vec`** (the block's sub_params in the order you declared
+them), **NOT** a `state_map`/`Rcpp::List`. Writing `impl_->set_current(params)`
+with a map does **not compile**
+(`no viable conversion from state_map to const arma::vec`). You MUST build the
+`arma::vec` from the named entries yourself.
+
+**Canonical pattern** — one `joint_nuts_block` over `(beta [p], sigma [1])`;
+sub_params order fixes the layout (`beta` = indices `0..p-1`, `sigma` = index `p`):
+
+```cpp
+void set_current(const AI4BayesCode::state_map& params) {
+    auto& jblk = dynamic_cast<joint_nuts_block&>(impl_->child(0));
+    arma::vec cat = jblk.current();                 // current concat [beta(p), sigma(1)]
+    auto itb = params.find("beta");
+    if (itb != params.end() && itb->second.n_elem == p_)
+        cat.subvec(0, p_ - 1) = itb->second;
+    auto its = params.find("sigma");
+    if (its != params.end() && its->second[0] > 0.0)
+        cat[p_] = its->second[0];
+    jblk.set_current(cat);                           // <-- arma::vec, NEVER a map
+    impl_->data().set("beta",  cat.subvec(0, p_ - 1));   // keep shared_data in sync
+    impl_->data().set("sigma", arma::vec{ cat[p_] });
+}
+```
+
+- SEPARATE blocks (not one joint block): apply each block's keys to *that*
+  block's own concat via `dynamic_cast<nuts_block&>(impl_->child(i)).set_current(cat_i)`,
+  or build the FULL concat across all children in `add_child` order and call
+  `impl_->set_current(full_cat)` — an `arma::vec`, never a map.
+- If `X`/`y` (data) are ALSO `set_current` keys, handle them per §7a below.
+
 ## 7a. set_current(X, y) dispatcher — dynamic-N canonical pattern
 
 **Hard rule (system_design.md §7 rule 4 + rule 6).** If `X` or `y`
