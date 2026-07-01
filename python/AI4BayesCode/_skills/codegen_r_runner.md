@@ -213,8 +213,9 @@ model$predict_at(list(<X> = <X>_test))
 ## Example (uncomment in real sequential-update use):
 ## model$set_current(list(<data inputs> = <updated values>))
 ## model$step(1L)               ## refresh derived state — hybrid composites only
-## model$readapt_NUTS(500L, FALSE)  ## re-tune metric (Rcpp needs BOTH args; reset = FALSE)
-## ## model$readapt_NUTS(500L, TRUE)   ## use reset=TRUE if data change is dramatic
+## model$readapt_NUTS(500L, FALSE, -1L)  ## re-tune metric. Rcpp modules drop C++
+##                                        ## default args -> pass ALL 3 (n, reset, max_tree_depth)
+## ## model$readapt_NUTS(500L, TRUE, -1L)  ## use reset=TRUE if data change is dramatic
 ```
 
 The example must run as-is on the synthetic shapes generated in the
@@ -333,12 +334,20 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep, diagnosis
     model <- new(<ClassName>, <data_args>, as.integer(seed), TRUE)
     t0 <- Sys.time()
     model$step(n_burnin)
+    # NUTS / joint_nuts models: RE-ADAPT the metric at the mode before the kept
+    # draws. The first-call warmup adapted the metric from the over-dispersed
+    # init, so WITHOUT this the two chains often stall at R-hat > 1.01 (a bigger
+    # burn-in does NOT fix it). Pass ALL 3 args -- Rcpp modules drop C++ default
+    # args, so `readapt_NUTS(N)` errors "could not find valid method". `try(...)`
+    # makes it a no-op for pure-Gibbs / non-NUTS models (no readapt_NUTS method).
+    try(model$readapt_NUTS(1000L, FALSE, -1L), silent = TRUE)
     model$step(n_keep)
     t1 <- Sys.time()
-    # Both `get_history()` and `predict_at()` return per-iteration draws
-    # for every iteration stepped (burn-in + keep). Slice off burn-in
-    # inside the runner so downstream code sees only the kept draws.
-    keep_idx <- (n_burnin + 1L):(n_burnin + n_keep)
+    # get_history() / predict_at() return per-iteration draws for every iteration
+    # stepped (burn-in + keep); readapt_NUTS adds NO history rows. Keep the LAST
+    # n_keep draws (robust whether or not readapt recorded anything).
+    tot <- { .h <- model$get_history()[[1]]; if (is.null(dim(.h))) length(.h) else nrow(.h) }
+    keep_idx <- (tot - n_keep + 1L):tot
     slice <- function(lst) lapply(lst, function(x) {
         if (is.null(dim(x))) x[keep_idx]
         else x[keep_idx, , drop = FALSE]
