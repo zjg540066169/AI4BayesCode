@@ -1938,9 +1938,12 @@ invent others:**
   constructor body when `keep_history_` is true; see above).
 - `impl_->current_named_outputs()` → `state_map` (the current draw).
 - `impl_->get_history()` → `history_map`; `impl_->get_dag()` → `dag_info`.
-- `impl_->data()` (the shared DataContext: `.set(...)`, `.declare_dependencies(...)`,
-  `.declare_data_input(...)`, `.register_stochastic_refresher(...)`),
-  `impl_->add_child(std::make_unique<...block>(...))`.
+- `impl_->data()` (the shared DataContext: `.set(...)`, `.get(...)`, `.at(...)`,
+  `.declare_dependencies(...)`, `.declare_data_input(...)`, `.data_input_keys()`
+  (→ `std::unordered_set<std::string>`), `.register_stochastic_refresher(...)`),
+  `impl_->add_child(std::make_unique<...block>(...))`. There is **NO
+  `data().is_data_input(key)`** — to test membership use
+  `data().data_input_keys().count(key)`.
 
 There is **NO `impl_->get_current()`** — build the class's `get_current()` by
 `return impl_->current_named_outputs();` (or assemble from the child blocks).
