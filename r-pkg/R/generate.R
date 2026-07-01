@@ -226,10 +226,17 @@ if (backend %in% c("Python","both"))
     }
 
     # ---- 3. run the runner; capture stdout+stderr ----
-    out <- tryCatch(
+    # Run it FROM the output dir: the runner compiles its .cpp via a RELATIVE
+    # `ai4bayescode_sourceCpp("<Class>.cpp")` (the start.md convention), so it must
+    # execute with the .cpp in its working dir or it errors "... does not exist"
+    # (which the sentinel logic below would otherwise mislabel a "runtime crash").
+    owd <- getwd()
+    out <- tryCatch({
+        setwd(dirname(runner_path))
         suppressWarnings(system2("Rscript", shQuote(runner_path),
-                                 stdout = TRUE, stderr = TRUE)),
-        error = function(e) paste("runner error:", conditionMessage(e)))
+                                 stdout = TRUE, stderr = TRUE))
+    }, error = function(e) paste("runner error:", conditionMessage(e)))
+    setwd(owd)
     out_txt <- paste(out, collapse = "\n")
 
     # ---- 4. convergence sentinel ----

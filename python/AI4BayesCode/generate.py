@@ -283,8 +283,13 @@ def _validate(cpp_path, runner_path, classname, verbose: bool = False) -> dict:
         return {"ok": False, "stage": "no_runner", "detail": "no runner emitted"}
 
     # ---- 3. run the runner; capture stdout+stderr ----
+    # Run it FROM the output dir: the runner compiles its .cpp via a RELATIVE
+    # `source("<Class>.cpp")` (the start.md convention), so it must execute with
+    # the .cpp in its working dir or it errors "no such file" (which the sentinel
+    # logic below would otherwise mislabel a "runtime crash").
     try:
         proc = subprocess.run([sys.executable, str(runner_path)],
+                              cwd=str(Path(runner_path).parent),
                               capture_output=True, text=True)
         out_txt = (proc.stdout or "") + (proc.stderr or "")
     except Exception as e:  # noqa: BLE001
