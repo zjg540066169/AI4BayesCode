@@ -137,6 +137,14 @@
     paste0(
 "You are deploying the AI4BayesCode library to GENERATE A SAMPLER for the model\n",
 "described at the end of this message.\n\n",
+"TOOLS -- you have `read_file`, `grep`, and `glob` over the INSTALLED AI4BayesCode\n",
+"package (examples/, skills/, include/). The skills reference worked reference\n",
+"implementations ('see examples/GaussianLocationScale.cpp') and headers: READ the\n",
+"relevant example with `read_file` BEFORE writing the .cpp (its class shape,\n",
+"set_current, predict_at, get_current, the block config are all there), and read\n",
+"the on-demand skills (skills/system_design.md, skills/joint_nuts_failure.md,\n",
+"skills/hierarchical_re.md, skills/label_switching.md) when the model calls for\n",
+"them. Do NOT invent an API you can read -- `grep` the headers/examples first.\n\n",
 "Settings:\n",
 sprintf("  - Runtime backend: %s\n", backend),
 sprintf("  - Output folder:   %s/\n", output_path),
@@ -672,6 +680,124 @@ ai4bayescode_key_status <- function() {
             required = list("question"))))
 }
 
+# Read-only file tools -- let the model read the installed package's canonical
+# reference material ON DEMAND (like Claude Code's Read / Grep / Glob), so the
+# skills' "see examples/GaussianLocationScale.cpp" actually works instead of the
+# model guessing the API. Restricted to the AI4BayesCode tree (examples/, skills/,
+# include/, blocks_local/). Returned alongside ask_user in the tools list.
+#' @keywords internal
+#' @noRd
+.ai4b_agent_tools <- function() {
+    c(.ai4b_ask_user_tool(), list(
+        list(name = "read_file",
+             description = paste(
+                 "Read a file from the installed AI4BayesCode package -- its reference",
+                 "`examples/*.cpp` (worked, compiling samplers), `skills/*.md`, and",
+                 "`include/AI4BayesCode/*.hpp` headers. READ the reference example a skill",
+                 "points to (e.g. 'examples/GaussianLocationScale.cpp') BEFORE writing code;",
+                 "do not guess an API you can read."),
+             input_schema = list(type = "object",
+                 properties = list(path = list(type = "string",
+                     description = "package-relative, e.g. 'examples/GaussianLocationScale.cpp'")),
+                 required = list("path"))),
+        list(name = "grep",
+             description = paste(
+                 "Regex-search file CONTENTS across the installed AI4BayesCode package.",
+                 "Returns `path:line: text`. Use to find which example/header uses a",
+                 "symbol or block (e.g. pattern='joint_nuts_block', glob='examples/*.cpp')."),
+             input_schema = list(type = "object",
+                 properties = list(pattern = list(type = "string"),
+                                   glob = list(type = "string",
+                     description = "restrict search, default 'examples/*.cpp'")),
+                 required = list("pattern"))),
+        list(name = "glob",
+             description = paste(
+                 "List files in the installed AI4BayesCode package matching a glob, e.g.",
+                 "'examples/*.cpp', 'skills/*.md', 'include/AI4BayesCode/*.hpp'."),
+             input_schema = list(type = "object",
+                 properties = list(pattern = list(type = "string")),
+                 required = list("pattern")))))
+}
+
+#' @keywords internal
+#' @noRd
+.ai4b_pkg_root <- function() {
+    r <- tryCatch(system.file(package = "AI4BayesCode"), error = function(e) "")
+    if (is.null(r) || !nzchar(r)) NA_character_ else normalizePath(r, mustWork = FALSE)
+}
+
+# Whitelist + escape guard for a package-relative path.
+#' @keywords internal
+#' @noRd
+.ai4b_safe_pkg_path <- function(rel, root) {
+    rel <- gsub("^[./]+", "", rel %||% "")
+    if (grepl("\\.\\.", rel) || !nzchar(rel)) return(NULL)
+    if (!grepl("^(examples|skills|include|blocks_local)(/|$)", rel)) return(NULL)
+    p <- normalizePath(file.path(root, rel), mustWork = FALSE)
+    if (!startsWith(p, root)) return(NULL)
+    p
+}
+
+# Glob within the whitelisted package dirs (supports a single ** for recursion).
+#' @keywords internal
+#' @noRd
+.ai4b_glob_pkg <- function(pattern, root) {
+    pattern <- gsub("^[./]+", "", pattern %||% "")
+    if (grepl("\\.\\.", pattern) ||
+        !grepl("^(examples|skills|include|blocks_local)(/|$)", pattern)) return(character(0))
+    if (grepl("\\*\\*", pattern)) {
+        base <- sub("/?\\*\\*.*$", "", pattern)
+        ext  <- sub("^.*\\*\\*/?", "", pattern)
+        list.files(file.path(root, base),
+                   pattern = utils::glob2rx(if (nzchar(ext)) ext else "*"),
+                   recursive = TRUE, full.names = TRUE)
+    } else {
+        Sys.glob(file.path(root, pattern))
+    }
+}
+
+# Execute one read_file / grep / glob tool_use; returns the tool_result string.
+#' @keywords internal
+#' @noRd
+.ai4b_exec_readonly_tool <- function(name, input, root) {
+    if (is.na(root))
+        return("(AI4BayesCode package not installed; read_file/grep/glob unavailable.)")
+    rel <- function(f) sub(paste0("^", root, "/?"), "", f)
+    if (identical(name, "read_file")) {
+        p <- .ai4b_safe_pkg_path(input$path, root)
+        if (is.null(p) || !file.exists(p))
+            return(sprintf("read_file: '%s' not found or not allowed (only examples/, skills/, include/, blocks_local/).",
+                           input$path %||% ""))
+        txt <- tryCatch(readLines(p, warn = FALSE), error = function(e) NULL)
+        if (is.null(txt)) return(sprintf("read_file: could not read '%s'.", input$path))
+        if (length(txt) > 1400L)
+            txt <- c(txt[1:1400], sprintf("... [truncated; %d lines total -- grep for a specific part]",
+                                          length(txt)))
+        paste(txt, collapse = "\n")
+    } else if (identical(name, "grep")) {
+        pat <- input$pattern %||% ""
+        g   <- input$glob %||% "examples/*.cpp"
+        hits <- character(0)
+        for (f in .ai4b_glob_pkg(g, root)) {
+            ls <- tryCatch(readLines(f, warn = FALSE), error = function(e) character(0))
+            m  <- tryCatch(grep(pat, ls, perl = TRUE), error = function(e) integer(0))
+            for (k in m) {
+                hits <- c(hits, sprintf("%s:%d: %s", rel(f), k, ls[k]))
+                if (length(hits) >= 200L) break
+            }
+            if (length(hits) >= 200L) break
+        }
+        if (!length(hits)) sprintf("grep: no match for /%s/ in %s", pat, g)
+        else paste(c(hits, if (length(hits) >= 200L) "... [capped at 200 hits]"), collapse = "\n")
+    } else if (identical(name, "glob")) {
+        fs <- vapply(.ai4b_glob_pkg(input$pattern, root), rel, "")
+        if (!length(fs)) sprintf("glob: no files match '%s'", input$pattern %||% "")
+        else paste(fs, collapse = "\n")
+    } else {
+        sprintf("(unknown tool '%s')", name)
+    }
+}
+
 # Flush one finished streamed text block to the console. In the per-block
 # (`live = FALSE`) path, prose / model-confirmations are rendered through the
 # LaTeX->console map so `$$ ... $$` math is readable instead of raw source;
@@ -1058,11 +1184,19 @@ ai4bayescode_stream_check <- function(LLM = "claude-opus-4-8", API_key = NULL,
             return(list(text = txt, msgs = msgs,
                         truncated = identical(parsed$stop_reason, "max_tokens")))
         }
+        root <- .ai4b_pkg_root()
         results <- lapply(tu, function(t) {
-            q <- t$input$question
-            opts <- if (!is.null(t$input$options)) unlist(t$input$options) else NULL
-            if (verbose) message("[model asks]")
-            list(type = "tool_result", tool_use_id = t$id, content = ask(q, options = opts))
+            if (identical(t$name, "ask_user")) {
+                q <- t$input$question
+                opts <- if (!is.null(t$input$options)) unlist(t$input$options) else NULL
+                if (verbose) message("[model asks]")
+                list(type = "tool_result", tool_use_id = t$id, content = ask(q, options = opts))
+            } else {
+                if (verbose) message("  [model ", t$name, ": ",
+                                     t$input$path %||% t$input$pattern %||% "", "]")
+                list(type = "tool_result", tool_use_id = t$id,
+                     content = .ai4b_exec_readonly_tool(t$name, t$input, root))
+            }
         })
         msgs <- c(msgs, list(list(role = "assistant", content = content),
                              list(role = "user", content = results)))
@@ -1285,7 +1419,7 @@ ai4bayescode_generate <- function(model_description = NULL,
                     call. = FALSE)
             return(.ai4b_offline_emit(prompt, output_path, verbose))
         }
-        tools <- .ai4b_ask_user_tool()
+        tools <- .ai4b_agent_tools()
         if (identical(llm$provider, "openai")) {
             call <- function(messages)
                 .ai4b_openai_request(prompt$system, messages, llm$model, effort, tools,
