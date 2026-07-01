@@ -67,10 +67,16 @@
 .ai4b_prior_block <- function(priors) {
     if (identical(priors, "interactive")) {
         return(paste0(
-"  - Priors: do NOT assume. ELICIT the prior for EACH model parameter from the\n",
-"    user by calling the `ask_user` tool, ONE parameter at a time, offering the\n",
-"    options: non-informative (default) / weakly-informative / literature-informed\n",
-"    / fixed value / custom. Apply the user's choices. (See codegen_priors.md.)"))
+"  - Priors: FIRST use every prior the model description ALREADY specifies\n",
+"    -- e.g. `p(beta) propto 1`, `p(sigma) propto 1/sigma`, `beta ~ N(0, 10)`,\n",
+"    `sigma ~ Half-Normal(2.5)` -- EXACTLY, and do NOT ask about them (a written\n",
+"    prior IS the user's decision). ELICIT (via the `ask_user` tool, ONE\n",
+"    parameter at a time: non-informative (default) / weakly-informative /\n",
+"    literature-informed / fixed value / custom) ONLY the priors that are\n",
+"    MISSING or genuinely AMBIGUOUS (e.g. Gamma(2,3) rate-vs-scale). If the\n",
+"    description already specifies EVERY parameter's prior, ask NOTHING and go\n",
+"    straight to code (codegen.md §2: 'Spec already COMPLETE -> skip the entire\n",
+"    elicitation'). (See codegen_priors.md.)"))
     }
     if (is.list(priors)) {
         lines <- vapply(seq_along(priors),
