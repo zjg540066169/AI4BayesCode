@@ -395,12 +395,25 @@ ai4bayescode_prompt <- function(model_description,
     for (b in blocks) {
         body <- sub("(?s)^```[A-Za-z]*\\n", "", b, perl = TRUE)
         body <- sub("(?s)```$", "", body, perl = TRUE)
-        ph <- NA_character_
-        for (hl in head(strsplit(body, "\n", fixed = TRUE)[[1]], 3L)) {
+        lines <- strsplit(body, "\n", fixed = TRUE)[[1]]
+        ph <- NA_character_; marker_idx <- NA_integer_
+        for (i in head(seq_along(lines), 3L)) {
+            hl <- lines[i]
             m <- regmatches(hl, regexec("path:\\s*([^[:space:]]+)", hl))[[1]]
-            if (length(m) == 2L) { ph <- m[2]; break }
+            if (length(m) == 2L) {
+                ph <- m[2]
+                # Strip the routing-marker line so it never leaks into the written
+                # file -- ONLY when it is a comment-style directive (`// path:` or
+                # `# path:`), never a genuine code line. A `// path:` header is a
+                # harmless C++ comment but an R/Python SYNTAX ERROR ("unexpected
+                # '/'"), so writing it verbatim crashes any .R/.py runner whose
+                # marker used `//` (which the model does slip into under repair).
+                if (grepl("^\\s*(//+|#+)\\s*path:", hl)) marker_idx <- i
+                break
+            }
         }
-        out[[length(out) + 1L]] <- list(path = ph, code = body)
+        if (!is.na(marker_idx)) lines <- lines[-marker_idx]
+        out[[length(out) + 1L]] <- list(path = ph, code = paste(lines, collapse = "\n"))
     }
     out
 }

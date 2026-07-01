@@ -249,12 +249,24 @@ def _extract_code(text: str) -> list[dict]:
     out = []
     for m in re.finditer(r"```[A-Za-z]*\n(.*?)```", text, re.DOTALL):
         body = m.group(1)
+        lines = body.splitlines()
         path = None
-        for hl in body.splitlines()[:3]:
+        marker_idx = None
+        for i, hl in enumerate(lines[:3]):
             pm = re.search(r"path:\s*(\S+)", hl)
             if pm:
-                path = pm.group(1); break
-        out.append({"path": path, "code": body})
+                path = pm.group(1)
+                # Strip the routing-marker line so it never leaks into the written
+                # file -- ONLY when it is a comment-style directive (`// path:` or
+                # `# path:`), never a genuine code line. A `// path:` header is a
+                # harmless C++ comment but an R/Python SYNTAX ERROR, so writing it
+                # verbatim crashes any .R/.py runner whose marker used `//`.
+                if re.match(r"^\s*(//+|#+)\s*path:", hl):
+                    marker_idx = i
+                break
+        if marker_idx is not None:
+            lines = lines[:marker_idx] + lines[marker_idx + 1:]
+        out.append({"path": path, "code": "\n".join(lines)})
     return out
 
 
