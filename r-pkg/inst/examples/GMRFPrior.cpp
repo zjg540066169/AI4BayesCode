@@ -51,6 +51,12 @@
 //   # Pure-prior 2D ICAR: x ~ N(0, (kappa R)^{-1}) with sum(x)=0 on a
 //   # 4x4 lattice. No data — x is drawn directly (Rue 2001 sparse-Cholesky),
 //   # so each step is an exact i.i.d. prior draw (no observation likelihood).
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(GMRFPrior, 4L, 4L, 2.0, FALSE, FALSE, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GMRFPrior,
 //            4L,     # L_x : lattice width
 //            4L,     # L_y : lattice height (N = L_x*L_y = 16 latent nodes)
@@ -65,6 +71,12 @@
 //   # Pure-prior 2D ICAR: x ~ N(0, (kappa R)^{-1}) with sum(x)=0 on a 4x4
 //   # lattice. No data — x is an exact sparse-Cholesky prior draw each step.
 //   Mod = AI4BayesCode.source("GMRFPrior.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.GMRFPrior(4, 4, 2.0, False, False, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GMRFPrior(4, 4, 2.0, False, False, 7, True)
 //   #             (L_x, L_y, kappa, periodic, eight_nn, rng_seed, keep_history)
 //   m.step(2500)

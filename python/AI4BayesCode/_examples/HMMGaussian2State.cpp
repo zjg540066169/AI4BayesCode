@@ -47,6 +47,12 @@
 //   z <- integer(T); z[1] <- sample.int(2, 1, prob = pi0) - 1L
 //   for (t in 2:T) z[t] <- if (runif(1) < A[z[t-1]*2 + z[t-1] + 1]) z[t-1] else 1L - z[t-1]
 //   y <- mu[z + 1L] + sigma * rnorm(T)
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(HMMGaussian2State, y, A, pi0, mu, sigma, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(HMMGaussian2State,
 //            y,        # length-T observations
 //            A,        # length-4 row-major transition matrix
@@ -70,6 +76,12 @@
 //       z[t] = z[t-1] if rng.uniform() < A[z[t-1]*2 + z[t-1]] else 1 - z[t-1]
 //   y = mu[z] + sigma * rng.standard_normal(T)     # Gaussian emissions
 //   Mod = AI4BayesCode.source("HMMGaussian2State.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.HMMGaussian2State(y, A, pi0, mu, sigma, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.HMMGaussian2State(y, A, pi0, mu, sigma, 7, True)  # (y, A, pi, mu, sigma, seed, keep_history)
 //   m.step(2500); print(m.get_current())           # dict: z (latent path) only
 // @example:end

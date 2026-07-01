@@ -43,6 +43,12 @@
 //   s_true <- c(0.50, 0.25, 0.15, 0.05, 0.03, 0.02)  # sparse P=6 simplex
 //   N      <- 1000L                                   # multinomial trials (N >> P)
 //   y      <- as.numeric(rmultinom(1, N, s_true))     # observed category counts
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(DirichletSparse, y, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(DirichletSparse, y, 7L, TRUE)            # y_counts, rng_seed, keep_history
 //   m$step(2500); str(m$get_current())                # s (P-simplex) + theta (>0)
 // @example:python
@@ -52,6 +58,12 @@
 //   N = 1000                                                 # multinomial trials (N >> P)
 //   y = rng.multinomial(N, s_true).astype(float)             # observed category counts
 //   Mod = AI4BayesCode.source("DirichletSparse.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.DirichletSparse(y, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.DirichletSparse(y, 7, True)  # (y_counts, rng_seed, keep_history)
 //   m.step(2500); print(m.get_current())                     # s (P-simplex) + theta (>0)
 // @example:end

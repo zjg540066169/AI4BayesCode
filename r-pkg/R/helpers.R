@@ -548,6 +548,25 @@ AI4BayesCode_perf_hint <- function(wall_sec,
 }
 
 
+# Scan matrix-valued history keys for LABEL SWITCHING: a key is flagged when its
+# raw max split-R-hat is high but collapses after ordering the components within
+# each draw (order statistics are invariant to relabelling).
+#' @keywords internal
+#' @noRd
+.ai4b_label_switch_scan <- function(hist, hi = 1.05, drop = 0.1) {
+    if (!requireNamespace("posterior", quietly = TRUE)) return(list())
+    out <- list()
+    rh <- function(m) suppressWarnings(max(apply(m, 2L, posterior::rhat), na.rm = TRUE))
+    for (nm in names(hist)) {
+        x <- hist[[nm]]
+        if (is.null(dim(x)) || ncol(x) < 2L || nrow(x) < 8L) next
+        raw <- rh(x); ord <- rh(t(apply(x, 1L, sort)))
+        if (is.finite(raw) && is.finite(ord) && raw > hi && (raw - ord) > drop)
+            out[[nm]] <- list(raw = raw, ordered = ord)
+    }
+    out
+}
+
 #' Model-independent posterior diagnostics and plot
 #'
 #' @description Computes per-parameter convergence diagnostics (split-R-hat,
@@ -561,10 +580,17 @@ AI4BayesCode_perf_hint <- function(wall_sec,
 #' @param hist Named list of posterior draws: scalars as numeric vectors,
 #'   vector parameters as matrices (draws in rows).
 #' @param plot Logical; build the diagnostic plot. Defaults to `TRUE`.
-#' @return A list with `summary` (a `posterior::summarise_draws` table) and
-#'   `plot` (a \pkg{bayesplot} object, a base-R plotting closure, or `NULL`).
+#' @return A list with `summary` (a `posterior::summarise_draws` table), `plot`
+#'   (a \pkg{bayesplot} object, a base-R plotting closure, or `NULL`), and
+#'   `label_switch` (named list of keys flagged as label-switching, each with the
+#'   `raw` and `ordered` max split-R-hat; empty if none).
+#' @param order_components Logical; if `TRUE`, sort each draw's components within
+#'   every matrix-valued key (order statistics) before summarising -> a LABEL-
+#'   INVARIANT per-component summary for exchangeable (mixture/cluster) params.
+#'   Defaults to `FALSE`, in which case `ai4b_diagnose` still scans for label
+#'   switching and warns when a high R-hat is a labelling artefact.
 #' @export
-ai4b_diagnose <- function(hist, plot = TRUE) {
+ai4b_diagnose <- function(hist, plot = TRUE, order_components = FALSE) {
     if (!requireNamespace("posterior", quietly = TRUE)) {
         stop("ai4b_diagnose() needs the 'posterior' package. ",
              "Install it with install.packages('posterior').", call. = FALSE)
@@ -574,9 +600,22 @@ ai4b_diagnose <- function(hist, plot = TRUE) {
              "(scalars as vectors, vector parameters as matrices).",
              call. = FALSE)
     }
+    # Detect label switching on the RAW draws (before any ordering).
+    label_switch <- .ai4b_label_switch_scan(hist)
+    if (length(label_switch) && !isTRUE(order_components)) {
+        ex <- label_switch[[1L]]
+        message(sprintf(
+"ai4b_diagnose: possible LABEL SWITCHING in %s -- the high R-hat is a labelling\n  artefact, NOT non-convergence (e.g. %s: %.2f -> %.2f after ordering components\n  within each draw). Pass order_components = TRUE for a label-invariant summary,\n  or canonicalize the labels in the sampler.",
+            paste(names(label_switch), collapse = ", "),
+            names(label_switch)[1L], ex$raw, ex$ordered))
+    }
+    # order_components: sort each draw's components within every matrix key (order
+    # statistics) -> a label-invariant per-component summary for exchangeable params.
+    sort_key <- function(x) if (is.null(dim(x)) || ncol(x) < 2L) x else t(apply(x, 1L, sort))
+    hist_use <- if (isTRUE(order_components)) lapply(hist, sort_key) else hist
     cols <- list()
-    for (nm in names(hist)) {
-        x <- hist[[nm]]
+    for (nm in names(hist_use)) {
+        x <- hist_use[[nm]]
         if (is.null(dim(x))) cols[[nm]] <- as.numeric(x)
         else for (j in seq_len(ncol(x))) cols[[sprintf("%s[%d]", nm, j)]] <- x[, j]
     }
@@ -604,7 +643,7 @@ ai4b_diagnose <- function(hist, plot = TRUE) {
             }
         }
     }
-    list(summary = summary, plot = plt)
+    list(summary = summary, plot = plt, label_switch = label_switch)
 }
 
 
@@ -668,12 +707,27 @@ AI4BayesCode_run_chains <- function(model_ctor,
         else 1
     }
 
+    chain_ok <- function(r) !inherits(r, "try-error") && !is.null(r$history)
+
     if (use_parallel && mc.cores > 1) {
         if (verbose)
             message("AI4BayesCode_run_chains: running ", n_chains,
                     " chains on ", mc.cores, " cores (parallel)")
         results <- parallel::mclapply(seeds, one_chain, mc.cores = mc.cores,
                                       mc.set.seed = TRUE)
+        if (!all(vapply(results, chain_ok, logical(1)))) {
+            # A forked worker died before returning a history. The usual cause
+            # is a fork-unsafe multithreaded BLAS -- notably macOS Accelerate
+            # (vecLib), whose GCD worker threads do not survive fork(), so a
+            # chain doing heavier linear algebra segfaults under mclapply.
+            # Recover by re-running every chain sequentially (no fork).
+            warning("AI4BayesCode_run_chains: a parallel chain failed (likely a ",
+                    "fork-unsafe multithreaded BLAS, e.g. macOS Accelerate); ",
+                    "re-running all chains sequentially. To keep parallelism set ",
+                    "VECLIB_MAXIMUM_THREADS=1 before starting R, or pass ",
+                    "parallel = FALSE.", call. = FALSE, immediate. = TRUE)
+            results <- lapply(seeds, one_chain)
+        }
     } else {
         if (verbose)
             message("AI4BayesCode_run_chains: running ", n_chains,
@@ -681,10 +735,9 @@ AI4BayesCode_run_chains <- function(model_ctor,
         results <- lapply(seeds, one_chain)
     }
 
-    # Detect failures (mclapply may return try-error on child crash).
+    # Detect failures (after any sequential fallback -- a real model/data error).
     for (i in seq_along(results)) {
-        if (inherits(results[[i]], "try-error") ||
-            is.null(results[[i]]$history)) {
+        if (!chain_ok(results[[i]])) {
             stop("AI4BayesCode_run_chains: chain ", i, " failed")
         }
     }

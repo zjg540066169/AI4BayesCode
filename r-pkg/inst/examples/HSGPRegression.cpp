@@ -74,6 +74,12 @@
 //   set.seed(601); N <- 80L; M <- 25L                 # sample size, basis count
 //   x <- runif(N, -3, 3)                              # 1-D inputs on [-3, 3]
 //   y <- 1.5 * sin(2 * x) + 0.3 * x + rnorm(N, 0, 0.4) # smooth truth + N(0,0.4)
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(HSGPRegression, y, x, M, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(HSGPRegression, y, x, M, 7L, TRUE)       # y, x, M, seed, keep_history
 //   m$step(2500); str(m$get_current())
 // @example:python
@@ -82,6 +88,12 @@
 //   x = rng.uniform(-3, 3, N)                              # 1-D inputs on [-3, 3]
 //   y = 1.5*np.sin(2*x) + 0.3*x + rng.normal(0, 0.4, N)    # smooth truth + N(0,0.4)
 //   Mod = AI4BayesCode.source("HSGPRegression.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.HSGPRegression(y, x, M, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.HSGPRegression(y, x, M, 7, True); m.step(2500); print(m.get_current())
 // @example:end
 

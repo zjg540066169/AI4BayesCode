@@ -65,6 +65,12 @@
 //   x <- (0:(N-1))/(N-1); knots <- (1:K_s)/(K_s+1)             # grid + interior knots
 //   Bsp <- outer(x, knots, function(a,b) pmax(a-b, 0))         # truncated-power basis (N x K_s)
 //   y <- 0.4*sin(8*x) + 0.2*x^2 + rnorm(N, 0, 0.3)             # smooth(x) + N(0,0.3)
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(BSplineRegression, y, Bsp, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(BSplineRegression, y, Bsp, 7L, TRUE)              # y, basis, seed, keep_history
 //   m$step(2500); str(m$get_current())
 // @example:python
@@ -74,6 +80,12 @@
 //   Bsp = np.maximum(x[:,None] - knots[None,:], 0.0)           # truncated-power basis (N x K_s)
 //   y = 0.4*np.sin(8*x) + 0.2*x**2 + rng.normal(0, 0.3, N)     # smooth(x) + N(0,0.3)
 //   Mod = AI4BayesCode.source("BSplineRegression.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.BSplineRegression(y, Bsp, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.BSplineRegression(y, Bsp, 7, True); m.step(2500); print(m.get_current())
 // @example:end
 

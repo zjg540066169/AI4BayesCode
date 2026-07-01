@@ -104,6 +104,12 @@
 //     wd <- vapply(z, function(k) sample.int(V, 1L, prob = phi_true[k, ]), 1L)  # w_n ~ Cat(phi_{z_n})
 //     w <- c(w, wd); doc <- c(doc, rep(d, Ld))
 //   }
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(LdaCollapsedGibbs, w, doc, M, V, K, rep(1, K), rep(1, V), seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(LdaCollapsedGibbs, w, doc, M, V, K,     # w/doc length-N (1-indexed) tokens & doc ids
 //            rep(1, K), rep(1, V), 7L, TRUE)          # alpha (len K), beta (len V), seed, keep_history
 //   m$step(2500); str(m$get_current())
@@ -121,6 +127,12 @@
 //       w.extend(wd); doc.extend([d] * Ld)
 //   w = np.asarray(w, float); doc = np.asarray(doc, float)
 //   Mod = AI4BayesCode.source("LdaCollapsedGibbs.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.LdaCollapsedGibbs(w, doc, M, V, K, np.ones(K), np.ones(V), seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.LdaCollapsedGibbs(w, doc, M, V, K,        # w/doc length-N (1-indexed) tokens & doc ids
 //                             np.ones(K), np.ones(V), 7, True)  # alpha, beta, seed, keep_history
 //   m.step(2500); print(m.get_current())

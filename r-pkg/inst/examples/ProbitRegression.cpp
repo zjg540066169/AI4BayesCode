@@ -59,6 +59,12 @@
 //   X <- cbind(1, matrix(rnorm(N * (p - 1)), N, p - 1))   # intercept + 2 covars
 //   eta <- as.numeric(X %*% beta_true)
 //   y <- as.numeric(runif(N) < pnorm(eta))   # y ~ Bernoulli(Phi(X beta))
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(ProbitRegression, X, y, 10, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(ProbitRegression, X, y, 10, 7L, TRUE)  # X, y, prior_sd, seed, keep_history
 //   m$step(2500); str(m$get_current())
 // @example:python
@@ -70,6 +76,12 @@
 //   X = np.column_stack([np.ones(N), rng.standard_normal((N, p - 1))])
 //   y = (rng.random(N) < norm.cdf(X @ beta_true)).astype(float)  # Bernoulli(Phi(Xb))
 //   Mod = AI4BayesCode.source("ProbitRegression.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.ProbitRegression(X, y, 10, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.ProbitRegression(X, y, 10, 7, True)  # X, y, prior_sd, seed, keep_history
 //   m.step(2500); print(m.get_current())
 // @example:end

@@ -139,6 +139,12 @@
 //   }
 //   y <- rbind(draw_group(0L), draw_group(1L))
 //   group_idx <- c(rep(0L, Ng), rep(1L, Ng))
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(HDPGaussianMixture, y, group_idx, 6L, c(0, 0), 0.1, diag(d), 4.0, 1.0, 1.0, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(HDPGaussianMixture,
 //            y, group_idx, 6L,                 # y (N x d), group_idx, K_trunc
 //            c(0, 0), 0.1,                      # mu_0, kappa_0
@@ -163,6 +169,12 @@
 //   y = np.vstack([draw_group(0), draw_group(1)])
 //   group_idx = np.concatenate([np.zeros(Ng), np.ones(Ng)])   # 0/1 group labels
 //   Mod = AI4BayesCode.source("HDPGaussianMixture.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.HDPGaussianMixture(y, group_idx, 6, np.zeros(d), 0.1, np.eye(d), 4.0, 1.0, 1.0, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.HDPGaussianMixture(y, group_idx, 6, np.zeros(d), 0.1,
 //                              np.eye(d), 4.0, 1.0, 1.0, 7, False)
 //   m.step(800); cur = m.get_current()

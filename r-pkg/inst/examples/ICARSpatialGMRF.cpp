@@ -60,6 +60,12 @@
 //   x<-cc/(P-1); yy<-rr/(P-1); phi<-2*sin(pi*x)*sin(pi*yy)+(x-0.5); phi<-phi-mean(phi)  # sum-to-zero field
 //   node<-rep(1:N, each=5L)                                             # 5 replicate obs/node -> identifies sigma
 //   set.seed(20260621); y<-4.0+phi[node]+rnorm(N*5L,0,0.5)             # Intercept=4, sigma=0.5
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(ICARSpatialGMRF, y, node, N, ei, ej, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m<-new(ICARSpatialGMRF, y, node, N, ei, ej, 7L, TRUE)             # y,node_idx,N,edge_i,edge_j,seed,keep_hist
 //   m$step(2500); str(m$get_current())
 // @example:python
@@ -74,6 +80,12 @@
 //   rng = np.random.default_rng(20260621)
 //   y = 4.0 + phi[node-1] + rng.normal(0.0, 0.5, N*5)                   # Intercept=4, sigma=0.5
 //   Mod = AI4BayesCode.source("ICARSpatialGMRF.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.ICARSpatialGMRF(y, node.astype(float), N, ei.astype(float), ej.astype(float), seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.ICARSpatialGMRF(y, node.astype(float), N,                  # indices NUMERIC (no arma::ivec caster)
 //                           ei.astype(float), ej.astype(float), 7, True)
 //   m.step(2500); print(m.get_current())                               # Intercept~4, sigma~0.5

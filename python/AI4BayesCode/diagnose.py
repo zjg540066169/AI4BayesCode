@@ -54,7 +54,24 @@ def _acf(v, nlags):
     return ac[:nlags + 1]
 
 
-def ai4b_diagnose(hist, n_burn=0, plot=True):
+def _label_switch_scan(hist, hi=1.05, drop=0.1):
+    """Flag matrix keys whose max split-R-hat is high but collapses after ordering
+    each draw's components (order statistics are invariant to relabelling)."""
+    from .utils import rhat
+    out = {}
+    for nm, x in hist.items():
+        a = np.asarray(x)
+        if a.ndim < 2 or a.shape[1] < 2 or a.shape[0] < 8:
+            continue
+        raw = max(rhat(a[:, j]) for j in range(a.shape[1]))
+        xs = np.sort(a, axis=1)
+        ordd = max(rhat(xs[:, j]) for j in range(a.shape[1]))
+        if np.isfinite(raw) and np.isfinite(ordd) and raw > hi and (raw - ordd) > drop:
+            out[nm] = {"raw": float(raw), "ordered": float(ordd)}
+    return out
+
+
+def ai4b_diagnose(hist, n_burn=0, plot=True, order_components=False):
     """Compute draws-only diagnostics and a trace / ACF / density plot.
 
     Parameters
@@ -80,7 +97,20 @@ def ai4b_diagnose(hist, n_burn=0, plot=True):
         matplotlib and returns the Figure, or ``None`` when ``plot=False``
         or matplotlib is not installed.
     """
-    cols = _flatten(hist, n_burn)
+    hb = {nm: np.asarray(x)[n_burn:] for nm, x in hist.items()}
+    # Detect label switching on the RAW draws (before any ordering).
+    label_switch = _label_switch_scan(hb)
+    if label_switch and not order_components:
+        nm0 = next(iter(label_switch)); ex = label_switch[nm0]
+        print(f"ai4b_diagnose: possible LABEL SWITCHING in {', '.join(label_switch)} -- the "
+              f"high R-hat is a labelling artefact, NOT non-convergence (e.g. {nm0}: "
+              f"{ex['raw']:.2f} -> {ex['ordered']:.2f} after ordering components within each "
+              f"draw). Pass order_components=True for a label-invariant summary, or "
+              f"canonicalize the labels in the sampler.")
+    if order_components:
+        hb = {nm: (np.sort(a, axis=1) if (a := np.asarray(x)).ndim >= 2 and a.shape[1] >= 2
+                   else np.asarray(x)) for nm, x in hb.items()}
+    cols = _flatten(hb, 0)   # burn-in already stripped above
 
     # Per-parameter numpy diagnostics. posterior_summary() uses split-R-hat
     # and an initial-sequence ESS, so it is correct for a single chain.
@@ -88,6 +118,7 @@ def ai4b_diagnose(hist, n_burn=0, plot=True):
     try:
         import pandas as pd
         summary = pd.DataFrame(rows).T
+        summary.attrs["label_switch"] = label_switch
     except Exception:
         summary = rows  # dict of dicts when pandas is unavailable
 

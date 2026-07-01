@@ -55,6 +55,12 @@
 //   # Pure-prior 2D Ising (Q=2) on a 16x16 periodic lattice, ferromagnetic
 //   # beta=0.44 (near the 2D critical coupling). No data: the proper discrete
 //   # MRF prior pi(x) is itself the target; we just sample the latent state x.
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(IsingPrior, 16L, 16L, 2L, 0.44, TRUE, FALSE, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(IsingPrior,
 //            16L, 16L,   # L_x, L_y: lattice dims (N = 256 sites)
 //            2L,         # Q: state count (2 = Ising)
@@ -70,6 +76,12 @@
 //   # beta=0.44 (near the 2D critical coupling). No data: the proper discrete
 //   # MRF prior pi(x) is itself the target; we just sample the latent state x.
 //   Mod = AI4BayesCode.source("IsingPrior.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.IsingPrior(16, 16, 2, 0.44, True, False, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.IsingPrior(16, 16,   # L_x, L_y: lattice dims (N = 256 sites)
 //                      2,         # Q: state count (2 = Ising)
 //                      0.44,      # beta: interaction strength (>= 0)

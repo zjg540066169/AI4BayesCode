@@ -58,6 +58,12 @@
 //   rdir <- function(a) { g <- rgamma(length(a), shape = a, rate = 1); g / sum(g) }
 //   S_obs <- t(replicate(K, pmax(rdir(kappa_true * s_true), 1e-8)))
 //   S_obs <- S_obs / rowSums(S_obs)
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(DirichletHierarchical, S_obs, 0.5, 1.0, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(DirichletHierarchical,
 //            S_obs,   # K x P matrix of observed simplexes
 //            0.5,     # beta_a : Beta hyperprior shape on theta/(theta+P)
@@ -76,6 +82,12 @@
 //   S_obs = np.vstack([np.maximum(rdir(kappa_true * s_true), 1e-8) for _ in range(K)])
 //   S_obs = S_obs / S_obs.sum(axis=1, keepdims=True)
 //   Mod = AI4BayesCode.source("DirichletHierarchical.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.DirichletHierarchical(S_obs, 0.5, 1.0, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.DirichletHierarchical(S_obs, 0.5, 1.0, 7, True)  # (S_obs, beta_a, beta_b, seed, keep_history)
 //   m.step(2500); print(m.get_current())
 // @example:end

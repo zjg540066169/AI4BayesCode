@@ -67,12 +67,27 @@ AI4BayesCode_run_chains <- function(model_ctor,
         else 1
     }
 
+    chain_ok <- function(r) !inherits(r, "try-error") && !is.null(r$history)
+
     if (use_parallel && mc.cores > 1) {
         if (verbose)
             message("AI4BayesCode_run_chains: running ", n_chains,
                     " chains on ", mc.cores, " cores (parallel)")
         results <- parallel::mclapply(seeds, one_chain, mc.cores = mc.cores,
                                       mc.set.seed = TRUE)
+        if (!all(vapply(results, chain_ok, logical(1)))) {
+            # A forked worker died before returning a history. The usual cause
+            # is a fork-unsafe multithreaded BLAS -- notably macOS Accelerate
+            # (vecLib), whose GCD worker threads do not survive fork(), so a
+            # chain doing heavier linear algebra segfaults under mclapply.
+            # Recover by re-running every chain sequentially (no fork).
+            warning("AI4BayesCode_run_chains: a parallel chain failed (likely a ",
+                    "fork-unsafe multithreaded BLAS, e.g. macOS Accelerate); ",
+                    "re-running all chains sequentially. To keep parallelism set ",
+                    "VECLIB_MAXIMUM_THREADS=1 before starting R, or pass ",
+                    "parallel = FALSE.", call. = FALSE, immediate. = TRUE)
+            results <- lapply(seeds, one_chain)
+        }
     } else {
         if (verbose)
             message("AI4BayesCode_run_chains: running ", n_chains,
@@ -80,10 +95,9 @@ AI4BayesCode_run_chains <- function(model_ctor,
         results <- lapply(seeds, one_chain)
     }
 
-    # Detect failures (mclapply may return try-error on child crash).
+    # Detect failures (after any sequential fallback -- a real model/data error).
     for (i in seq_along(results)) {
-        if (inherits(results[[i]], "try-error") ||
-            is.null(results[[i]]$history)) {
+        if (!chain_ok(results[[i]])) {
             stop("AI4BayesCode_run_chains: chain ", i, " failed")
         }
     }

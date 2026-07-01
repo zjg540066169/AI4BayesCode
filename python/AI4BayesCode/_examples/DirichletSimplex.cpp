@@ -43,6 +43,12 @@
 //   cats  <- sample.int(K, N, replace = TRUE, prob = theta_true)
 //   y     <- tabulate(cats, nbins = K)          # category counts (length K)
 //   alpha <- rep(1, K)                          # flat Dirichlet prior
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(DirichletSimplex, y, alpha, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(DirichletSimplex, y, alpha, 7L, TRUE)  # y_counts, alpha, seed, keep_history
 //   m$step(2500); str(m$get_current())
 // @example:python
@@ -54,6 +60,12 @@
 //   y = np.bincount(cats, minlength=K).astype(float)   # category counts
 //   alpha = np.ones(K)                                  # flat Dirichlet prior
 //   Mod = AI4BayesCode.source("DirichletSimplex.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.DirichletSimplex(y, alpha, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.DirichletSimplex(y, alpha, 7, True)         # y_counts, alpha, seed, keep_history
 //   m.step(2500); print(m.get_current())
 // @example:end

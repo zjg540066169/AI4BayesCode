@@ -94,6 +94,12 @@
 //   mu_true <- rbind(c(-3, -3), c(3, 3))            # well-separated centers, sd=1
 //   y <- rbind(matrix(rnorm(n_per * 2, mu_true[1, ], 1), n_per, 2, byrow = TRUE),
 //              matrix(rnorm(n_per * 2, mu_true[2, ], 1), n_per, 2, byrow = TRUE))
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(FiniteGaussianMixture, y, K, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(FiniteGaussianMixture, y, K, 12345L, TRUE)  # y(Nxd), K, seed, keep_history
 //   m$step(2500); str(m$get_current())
 // @example:python
@@ -104,6 +110,12 @@
 //   y = np.vstack([rng.normal(mu_true[0], 1.0, (n_per, 2)),
 //                  rng.normal(mu_true[1], 1.0, (n_per, 2))])
 //   Mod = AI4BayesCode.source("FiniteGaussianMixture.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.FiniteGaussianMixture(y, K, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.FiniteGaussianMixture(y, K, 12345, True) # (y(Nxd), K, seed, keep_history)
 //   m.step(2500); print(m.get_current())
 // @example:end

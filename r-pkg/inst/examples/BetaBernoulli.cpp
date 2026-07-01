@@ -26,6 +26,12 @@
 //   y <- as.numeric(runif(N) < p_true)  # 0/1 data vector
 //   # new(BetaBernoulli, y, a, b, seed, keep_history):
 //   #   y = data, a = 2 / b = 2 Beta prior shapes, seed = 7, keep_history = TRUE
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(BetaBernoulli, y, 2, 2, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(BetaBernoulli, y, 2, 2, 7L, TRUE)
 //   m$step(2500); str(m$get_current())  # posterior mean p ~= (a+sum_y)/(a+b+N)
 // @example:python
@@ -35,6 +41,12 @@
 //   y = (rng.random(N) < p_true).astype(float)        # 0/1 data vector
 //   Mod = AI4BayesCode.source("BetaBernoulli.cpp")
 //   # BetaBernoulli(y, a, b, rng_seed, keep_history): a=2/b=2 Beta prior, seed=7
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.BetaBernoulli(y, 2.0, 2.0, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.BetaBernoulli(y, 2.0, 2.0, 7, True)
 //   m.step(2500); print(m.get_current())
 // @example:end

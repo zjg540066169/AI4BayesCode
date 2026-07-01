@@ -89,6 +89,12 @@
 //   beta_true <- numeric(p); beta_true[c(1,4,7)] <- c(2.5, -1.8, 1.2)  # actives {1,4,7}
 //   X <- matrix(rnorm(N * p), N, p); X <- scale(X, center = TRUE, scale = FALSE)  # center cols (no intercept)
 //   y <- as.numeric(X %*% beta_true + rnorm(N, 0, sigma_true)); y <- y - mean(y)  # center y
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(SpikeSlabRJMCMC, X, y, 1.0, 1.0, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(SpikeSlabRJMCMC, X, y, 1.0, 1.0, 7L, TRUE)  # X (N x p), y, a_pi=1, b_pi=1 (Beta prior on pi), seed=7, keep_history=TRUE
 //   m$step(2500); str(m$get_current())
 // @example:python
@@ -98,6 +104,12 @@
 //   X = rng.standard_normal((N, p)); X = X - X.mean(axis=0)             # center cols (no intercept)
 //   y = X @ beta_true + rng.normal(0.0, sigma_true, N); y = y - y.mean()  # center y
 //   Mod = AI4BayesCode.source("SpikeSlabRJMCMC.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.SpikeSlabRJMCMC(X, y, 1.0, 1.0, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.SpikeSlabRJMCMC(X, y, 1.0, 1.0, 7, True)  # (X, y, a_pi=1, b_pi=1, seed=7, keep_history=True)
 //   m.step(2500); print(m.get_current())              # gamma ~ {0,3,6} active, sigma ~ 1
 // @example:end

@@ -53,6 +53,12 @@
 //   p_true <- 1 / (1 + exp(-f_true))             # Bernoulli success prob
 //   y <- as.numeric(runif(N) < p_true)           # 0/1 labels
 //   X <- matrix(x, ncol = 1)                     # N x 1 design matrix
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(GPClassification, X, y, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GPClassification, X, y, 7L, TRUE)   # X(Nx1), y(0/1), seed=7L, keep_history=TRUE
 //   m$step(2500); str(m$get_current())           # single chain; amplitude, lengthscale, f
 // @example:python
@@ -65,6 +71,12 @@
 //   y = (rng.uniform(size=N) < p_true).astype(float)   # 0/1 labels
 //   X = x.reshape(N, 1)                            # N x 1 design matrix
 //   Mod = AI4BayesCode.source("GPClassification.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.GPClassification(X, y, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GPClassification(X, y, 7, True)        # X(Nx1), y(0/1), seed=7, keep_history=True
 //   m.step(2500); print(m.get_current())          # dict: f, amplitude, lengthscale
 // @example:end

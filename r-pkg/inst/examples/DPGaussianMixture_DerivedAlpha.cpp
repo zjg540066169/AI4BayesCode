@@ -99,6 +99,12 @@
 //   y <- do.call(rbind, lapply(1:3, function(k)
 //            matrix(rnorm(N_k * d, mean = centers[k, ], sd = 0.7),
 //                   ncol = d, byrow = TRUE)))
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(DPGaussianMixture_DerivedAlpha, y, 8L, seed),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(DPGaussianMixture_DerivedAlpha, y, 8L, 7L)  # (y, K_trunc, seed)
 //   m$step(1500)
 //   cur <- m$get_current()
@@ -113,6 +119,12 @@
 //   centers = np.array([[-4.0, -4.0], [0.0, 4.0], [5.0, -1.0]])
 //   y = np.vstack([rng.normal(centers[k], 0.7, size=(N_k, d)) for k in range(3)])
 //   Mod = AI4BayesCode.source("DPGaussianMixture_DerivedAlpha.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.DPGaussianMixture_DerivedAlpha(y, 8, seed),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.DPGaussianMixture_DerivedAlpha(y, 8, 7)  # (y, K_trunc, seed)
 //   m.step(1500)
 //   cur = m.get_current()

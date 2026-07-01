@@ -62,6 +62,12 @@
 //   X <- cbind(1, matrix(rnorm(N * (p - 1)), N, p - 1))   # col1 intercept, rest N(0,1)
 //   prob <- 1 / (1 + exp(-(X %*% beta_true)))             # sigmoid(X beta)
 //   y <- as.numeric(runif(N) < prob)                      # Bernoulli 0/1
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- AI4BayesCode_run_chains(
+//       function(seed) new(LogisticRegression, X, y, 10.0, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(LogisticRegression, X, y, 10.0, 7L, TRUE)    # X, y, prior_sd, seed, keep_history
 //   m$step(2500); str(m$get_current())
 // @example:python
@@ -71,6 +77,12 @@
 //   prob = 1.0 / (1.0 + np.exp(-(X @ beta_true)))                       # sigmoid(X beta)
 //   y = (rng.random(N) < prob).astype(float)                           # Bernoulli 0/1
 //   Mod = AI4BayesCode.source("LogisticRegression.cpp")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.LogisticRegression(X, y, 10.0, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.LogisticRegression(X, y, 10.0, 7, True); m.step(2500); print(m.get_current())
 // @example:end
 
