@@ -133,6 +133,14 @@ def _build_user(description, backend, output_path, classname, priors, max_attemp
     return (
 "You are deploying the AI4BayesCode library to GENERATE A SAMPLER for the model\n"
 "described at the end of this message.\n\n"
+"TOOLS -- you have `read_file`, `grep`, and `glob` over the INSTALLED AI4BayesCode\n"
+"package (examples/, skills/, include/). The skills reference worked reference\n"
+"implementations ('see examples/GaussianLocationScale.cpp') and headers: READ the\n"
+"relevant example with `read_file` BEFORE writing the .cpp (its class shape,\n"
+"set_current, predict_at, get_current, the block config are all there), and read\n"
+"the on-demand skills (skills/system_design.md, skills/joint_nuts_failure.md,\n"
+"skills/hierarchical_re.md, skills/label_switching.md) when the model calls for\n"
+"them. Do NOT invent an API you can read -- `grep` the headers/examples first.\n\n"
 "Settings:\n"
 f"  - Runtime backend: {backend}\n"
 f"  - Output folder:   {output_path}/\n"
@@ -599,6 +607,115 @@ def _ask_user_tool() -> list[dict]:
     }]
 
 
+# Read-only file tools -- give the model Claude-Code-style Read/Grep/Glob over the
+# installed AI4BayesCode package so it reads the canonical reference examples/headers
+# instead of guessing the API (root cause of the recurring compile bugs). The model
+# uses LOGICAL paths ('examples/...','skills/...','include/...'); map to the python
+# package's physical dirs (_examples / _skills / _vendored_include).
+_PKG_DIRMAP = {"examples": "_examples", "skills": "_skills",
+               "include": "_vendored_include", "blocks_local": "blocks_local"}
+
+
+def _agent_tools() -> list[dict]:
+    return _ask_user_tool() + [
+        {"name": "read_file",
+         "description": ("Read a file from the installed AI4BayesCode package -- its reference "
+                         "`examples/*.cpp` (worked, compiling samplers), `skills/*.md`, and "
+                         "`include/AI4BayesCode/*.hpp` headers. READ the reference example a skill "
+                         "points to (e.g. 'examples/GaussianLocationScale.cpp') BEFORE writing code; "
+                         "do not guess an API you can read."),
+         "input_schema": {"type": "object",
+                          "properties": {"path": {"type": "string"}}, "required": ["path"]}},
+        {"name": "grep",
+         "description": ("Regex-search file CONTENTS across the installed AI4BayesCode package. "
+                         "Returns `path:line: text`. Find which example/header uses a symbol/block."),
+         "input_schema": {"type": "object",
+                          "properties": {"pattern": {"type": "string"}, "glob": {"type": "string"}},
+                          "required": ["pattern"]}},
+        {"name": "glob",
+         "description": ("List files in the installed AI4BayesCode package matching a glob, e.g. "
+                         "'examples/*.cpp', 'skills/*.md', 'include/AI4BayesCode/*.hpp'."),
+         "input_schema": {"type": "object",
+                          "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},
+    ]
+
+
+def _pkg_root() -> str:
+    import os
+    return os.path.dirname(os.path.realpath(__file__))
+
+
+def _map_logical(rel):
+    import re
+    rel = re.sub(r"^[./]+", "", rel or "")
+    if ".." in rel or not rel:
+        return None
+    parts = rel.split("/", 1)
+    if parts[0] not in _PKG_DIRMAP:
+        return None
+    phys = _PKG_DIRMAP[parts[0]]
+    return phys + ("/" + parts[1] if len(parts) > 1 else "")
+
+
+def _phys_to_logical(p, root):
+    import os
+    rel = os.path.relpath(p, root)
+    for logical, phys in _PKG_DIRMAP.items():
+        if rel == phys or rel.startswith(phys + os.sep):
+            return (logical + rel[len(phys):]).replace(os.sep, "/")
+    return rel.replace(os.sep, "/")
+
+
+def _glob_pkg(pattern, root):
+    import glob as _g, os
+    phys = _map_logical(pattern)
+    if phys is None:
+        return []
+    return sorted(_g.glob(os.path.join(root, phys), recursive=True))
+
+
+def _exec_readonly_tool(name, inp, root):
+    import os, re
+    if name == "read_file":
+        rel = _map_logical(inp.get("path", ""))
+        p = os.path.realpath(os.path.join(root, rel)) if rel else None
+        if not p or not p.startswith(root) or not os.path.isfile(p):
+            return (f"read_file: '{inp.get('path','')}' not found or not allowed "
+                    "(only examples/, skills/, include/, blocks_local/).")
+        try:
+            lines = open(p, encoding="utf-8", errors="replace").read().splitlines()
+        except Exception as e:
+            return f"read_file: could not read '{inp.get('path')}': {e}"
+        if len(lines) > 1400:
+            lines = lines[:1400] + [f"... [truncated; {len(lines)} lines total -- grep for a part]"]
+        return "\n".join(lines)
+    if name == "grep":
+        pat, g = inp.get("pattern", ""), inp.get("glob", "examples/*.cpp")
+        try:
+            rx = re.compile(pat)
+        except re.error as e:
+            return f"grep: bad regex: {e}"
+        hits = []
+        for f in _glob_pkg(g, root):
+            if not os.path.isfile(f):
+                continue
+            try:
+                for i, ln in enumerate(open(f, encoding="utf-8", errors="replace"), 1):
+                    if rx.search(ln):
+                        hits.append(f"{_phys_to_logical(f, root)}:{i}: {ln.rstrip()}")
+                        if len(hits) >= 200:
+                            break
+            except Exception:
+                continue
+            if len(hits) >= 200:
+                break
+        return "\n".join(hits) if hits else f"grep: no match for /{pat}/ in {g}"
+    if name == "glob":
+        fs = [_phys_to_logical(f, root) for f in _glob_pkg(inp.get("pattern", ""), root)]
+        return "\n".join(fs) if fs else f"glob: no files match '{inp.get('pattern','')}'"
+    return f"(unknown tool '{name}')"
+
+
 def _anthropic_request(system, messages, model, effort, tools, api_key, max_tokens, timeout,
                        stream=True, progress=True, live=False):
     import anthropic
@@ -872,16 +989,24 @@ def _anthropic_turn(system, msgs, *, call, ask, verbose=False, max_subturns=30):
         if not tus:
             txt = "".join(b.get("text", "") for b in content if b.get("type") == "text")
             return txt, msgs, parsed.get("stop_reason") == "max_tokens"
+        root = _pkg_root()
         results = []
         for t in tus:
-            q = t["input"]["question"]
-            opts = t["input"].get("options")
-            if verbose:
-                # The console ask() already echoes the question, so printing it
-                # here too would double the prompt -- just announce the ask.
-                print("[model asks]")
-            results.append({"type": "tool_result", "tool_use_id": t["id"],
-                            "content": ask(q, options=opts)})
+            if t.get("name") == "ask_user":
+                q = t["input"]["question"]
+                opts = t["input"].get("options")
+                if verbose:
+                    # The console ask() already echoes the question, so printing it
+                    # here too would double the prompt -- just announce the ask.
+                    print("[model asks]")
+                results.append({"type": "tool_result", "tool_use_id": t["id"],
+                                "content": ask(q, options=opts)})
+            else:
+                if verbose:
+                    print(f"  [model {t.get('name')}: "
+                          f"{t['input'].get('path') or t['input'].get('pattern','')}]")
+                results.append({"type": "tool_result", "tool_use_id": t["id"],
+                                "content": _exec_readonly_tool(t.get("name"), t["input"], root)})
         msgs = msgs + [{"role": "assistant", "content": content},
                        {"role": "user", "content": results}]
     raise RuntimeError(f"generate: exceeded {max_subturns} conversation turns")
@@ -1053,7 +1178,7 @@ def generate(model_description: str | None = None, *, classname: str | None = No
     elif use_cli_transport:
         call = lambda messages: _claude_p_call(p["system"], messages, llm["model"])  # noqa: E731
     elif llm["provider"] == "openai":
-        tools = _ask_user_tool()
+        tools = _agent_tools()
         call = lambda messages: _openai_request(  # noqa: E731
             p["system"], messages, llm["model"], effort, tools, API_key, max_tokens, timeout)
     else:
@@ -1064,7 +1189,7 @@ def generate(model_description: str | None = None, *, classname: str | None = No
                 print("'anthropic' SDK not installed (pip install AI4BayesCode[generate]); "
                       "emitting prompt offline instead.")
             return _offline_emit(p, output_path, verbose)
-        tools = _ask_user_tool()
+        tools = _agent_tools()
         call = lambda messages: _anthropic_request(  # noqa: E731
             p["system"], messages, llm["model"], effort, tools, API_key, max_tokens, timeout)
     validate_fn = _validate or _DEFAULT_VALIDATE
