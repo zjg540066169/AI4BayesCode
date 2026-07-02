@@ -527,9 +527,16 @@ def set_key(key: str, provider: str = "anthropic", check: bool = True) -> str:
     print(f"Set {provider} key for this session ({_mask_key(key)}). Not saved to disk.")
     if check and provider == "anthropic":
         try:
-            stream_check(API_key=key, progress=True)
-        except Exception as e:  # noqa: BLE001
-            print(f"[warning] streaming self-check failed: {e}")
+            import anthropic  # noqa: F401
+        except ImportError:
+            print("  (streaming self-check skipped: the 'anthropic' package is not "
+                  "installed -- run  pip install anthropic  to use the Anthropic backend; "
+                  "the key IS set for this session.)")
+        else:
+            try:
+                stream_check(API_key=key, progress=True)
+            except Exception as e:  # noqa: BLE001
+                print(f"[warning] streaming self-check failed: {e}")
     return provider
 
 
@@ -777,7 +784,13 @@ def _exec_readonly_tool(name, inp, root):
 
 def _anthropic_request(system, messages, model, effort, tools, api_key, max_tokens, timeout,
                        stream=True, progress=True, live=False):
-    import anthropic
+    try:
+        import anthropic
+    except ImportError as e:
+        raise RuntimeError(
+            "The 'anthropic' package is required for the Anthropic backend. "
+            "Install it with:  pip install anthropic  "
+            "(the OpenAI backend uses only the standard library and needs no SDK).") from e
     # Streaming keeps the socket alive (token + ping events), so a generous cap
     # instead of the buffered "0 bytes for `timeout`s" death on long generations.
     to = max(timeout, 1800) if stream else timeout

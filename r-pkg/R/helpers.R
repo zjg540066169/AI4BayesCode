@@ -472,7 +472,11 @@ ai4bayescode_perf_hint <- function(wall_sec,
 # each draw (order statistics are invariant to relabelling).
 #' @keywords internal
 #' @noRd
-.ai4b_label_switch_scan <- function(hist, hi = 1.05, drop = 0.1) {
+# A key is flagged as label switching ONLY when the raw max split-R-hat is high
+# (> hi) AND ordering components within each draw brings it BELOW a converged
+# level (< converged). If ordering does NOT bring R-hat down to convergence, the
+# high R-hat is genuine non-convergence, not a labelling artefact -- do not flag.
+.ai4b_label_switch_scan <- function(hist, hi = 1.05, converged = 1.05) {
     if (!requireNamespace("posterior", quietly = TRUE)) return(list())
     out <- list()
     rh <- function(m) suppressWarnings(max(apply(m, 2L, posterior::rhat), na.rm = TRUE))
@@ -480,7 +484,7 @@ ai4bayescode_perf_hint <- function(wall_sec,
         x <- hist[[nm]]
         if (is.null(dim(x)) || ncol(x) < 2L || nrow(x) < 8L) next
         raw <- rh(x); ord <- rh(t(apply(x, 1L, sort)))
-        if (is.finite(raw) && is.finite(ord) && raw > hi && (raw - ord) > drop)
+        if (is.finite(raw) && is.finite(ord) && raw > hi && ord < converged)
             out[[nm]] <- list(raw = raw, ordered = ord)
     }
     out
@@ -524,7 +528,7 @@ ai4bayescode_diagnose <- function(hist, plot = TRUE, order_components = FALSE) {
     if (length(label_switch) && !isTRUE(order_components)) {
         ex <- label_switch[[1L]]
         message(sprintf(
-"ai4bayescode_diagnose: possible LABEL SWITCHING in %s -- the high R-hat is a labelling\n  artefact, NOT non-convergence (e.g. %s: %.2f -> %.2f after ordering components\n  within each draw). Pass order_components = TRUE for a label-invariant summary,\n  or canonicalize the labels in the sampler.",
+"ai4bayescode_diagnose: %s MIGHT have LABEL SWITCHING -- ordering components within each\n  draw brings R-hat down to a converged level (e.g. %s: %.2f -> %.2f), so the high raw\n  R-hat MAY be a labelling artefact rather than non-convergence. Pass order_components =\n  TRUE for a label-invariant summary, or canonicalize the labels in the sampler.",
             paste(names(label_switch), collapse = ", "),
             names(label_switch)[1L], ex$raw, ex$ordered))
     }
@@ -750,10 +754,12 @@ ai4bayescode_rhat_summary <- function(run, keys = NULL, drop_burn = 0,
                 vals <- lapply(vals, function(m) m[(drop_burn + 1):n, , drop=FALSE])
             raw <- col_diag(vals)
             ord <- if (ncol(vals[[1]]) >= 2L) col_diag(lapply(vals, sort_rows)) else raw
-            # Flag label switching: raw max R-hat is high but collapses after
-            # ordering the components within each draw (a labelling artefact).
+            # Flag label switching ONLY when the high raw max R-hat drops BELOW a
+            # converged level after ordering components within each draw. If it
+            # stays high, the non-convergence is genuine (bad sampler / wrong
+            # model / slow mixing) -- NOT a labelling artefact -- so do not flag.
             mr <- max(raw$rhat, na.rm = TRUE); mo <- max(ord$rhat, na.rm = TRUE)
-            if (is.finite(mr) && is.finite(mo) && mr > 1.05 && (mr - mo) > 0.1)
+            if (is.finite(mr) && is.finite(mo) && mr > 1.05 && mo < 1.05)
                 label_switch[[k]] <- list(raw = mr, ordered = mo)
             chosen <- if (isTRUE(order_components)) ord else raw
             out[[k]] <- list(rhat = chosen$rhat, ess_bulk = chosen$ess,
@@ -766,7 +772,7 @@ ai4bayescode_rhat_summary <- function(run, keys = NULL, drop_burn = 0,
         if (!isTRUE(order_components)) {
             ex <- label_switch[[1L]]
             message(sprintf(
-"ai4bayescode_rhat_summary: possible LABEL SWITCHING in %s -- the high R-hat is a\n  labelling artefact, NOT non-convergence (e.g. %s: %.2f -> %.2f after ordering\n  components within each draw). Pass order_components = TRUE for a label-invariant\n  summary, or canonicalize the labels in the sampler.",
+"ai4bayescode_rhat_summary: %s MIGHT have LABEL SWITCHING -- ordering components within\n  each draw brings R-hat down to a converged level (e.g. %s: %.2f -> %.2f), so the high\n  raw R-hat MAY be a labelling artefact rather than non-convergence. Pass order_components\n  = TRUE for a label-invariant summary, or canonicalize the labels in the sampler.",
                 paste(names(label_switch), collapse = ", "),
                 names(label_switch)[1L], ex$raw, ex$ordered))
         }

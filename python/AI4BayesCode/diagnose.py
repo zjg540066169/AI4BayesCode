@@ -54,9 +54,12 @@ def _acf(v, nlags):
     return ac[:nlags + 1]
 
 
-def _label_switch_scan(hist, hi=1.05, drop=0.1):
-    """Flag matrix keys whose max split-R-hat is high but collapses after ordering
-    each draw's components (order statistics are invariant to relabelling)."""
+def _label_switch_scan(hist, hi=1.05, converged=1.05):
+    """Flag a matrix key as label switching ONLY when its max split-R-hat is high
+    (> hi) AND ordering each draw's components brings it BELOW a converged level
+    (< converged). If ordering does not bring R-hat down to convergence, the high
+    R-hat is genuine non-convergence (bad sampler / wrong model / slow mixing),
+    NOT a labelling artefact -- so it is not flagged."""
     from .utils import rhat
     out = {}
     for nm, x in hist.items():
@@ -66,7 +69,7 @@ def _label_switch_scan(hist, hi=1.05, drop=0.1):
         raw = max(rhat(a[:, j]) for j in range(a.shape[1]))
         xs = np.sort(a, axis=1)
         ordd = max(rhat(xs[:, j]) for j in range(a.shape[1]))
-        if np.isfinite(raw) and np.isfinite(ordd) and raw > hi and (raw - ordd) > drop:
+        if np.isfinite(raw) and np.isfinite(ordd) and raw > hi and ordd < converged:
             out[nm] = {"raw": float(raw), "ordered": float(ordd)}
     return out
 
@@ -116,11 +119,11 @@ def diagnose(hist, n_burn=0, plot=True, order_components=False):
     label_switch = _label_switch_scan(hb)
     if label_switch and not order_components:
         nm0 = next(iter(label_switch)); ex = label_switch[nm0]
-        print(f"diagnose: possible LABEL SWITCHING in {', '.join(label_switch)} -- the "
-              f"high R-hat is a labelling artefact, NOT non-convergence (e.g. {nm0}: "
-              f"{ex['raw']:.2f} -> {ex['ordered']:.2f} after ordering components within each "
-              f"draw). Pass order_components=True for a label-invariant summary, or "
-              f"canonicalize the labels in the sampler.")
+        print(f"diagnose: {', '.join(label_switch)} MIGHT have LABEL SWITCHING -- ordering "
+              f"components within each draw brings R-hat down to a converged level (e.g. "
+              f"{nm0}: {ex['raw']:.2f} -> {ex['ordered']:.2f}), so the high raw R-hat MAY be "
+              f"a labelling artefact rather than non-convergence. Pass order_components=True "
+              f"for a label-invariant summary, or canonicalize the labels in the sampler.")
     if order_components:
         hb = {nm: (np.sort(a, axis=1) if (a := np.asarray(x)).ndim >= 2 and a.shape[1] >= 2
                    else np.asarray(x)) for nm, x in hb.items()}
