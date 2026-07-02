@@ -49,3 +49,7 @@ tests/test_*
 !tests/test_*.h
 !tests/test_*.hpp
 !tests/test_*.R
+
+# R CMD check / build artifacts
+*.Rcheck/
+AI4BayesCode_*.tar.gz
