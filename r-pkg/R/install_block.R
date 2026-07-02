@@ -40,20 +40,30 @@ ai4bayescode_blocks_path <- function(name = NULL) {
     if (is.null(name)) d else file.path(d, name)
 }
 
-# -I flags for every installed block: the block dir (for "<block>.hpp") plus each
-# vendored dependency dir. Folded into the compile flags by ai4bayescode_sourceCpp.
+# -I flags for every contributed block (block dir for "<block>.hpp" + each vendored
+# dependency dir). Folded into the compile flags by ai4bayescode_source(). Covers
+# BOTH tiers: user-global installed blocks (~/.AI4BayesCode/blocks_download/) AND
+# project-local blocks (./blocks_local/, relative to the working directory).
 #' @keywords internal
 #' @noRd
 .ai4b_block_cppflags <- function() {
-    bdir <- .ai4b_blocks_dir()
-    if (!dir.exists(bdir)) return(character())
-    flags <- character()
-    for (b in list.dirs(bdir, recursive = FALSE)) {
-        flags <- c(flags, paste0("-I", shQuote(b)))
-        vdir <- file.path(b, "vendor")
-        if (dir.exists(vdir))
-            for (v in list.dirs(vdir, recursive = FALSE))
-                flags <- c(flags, paste0("-I", shQuote(v)))
+    flags <- character(); seen <- character()
+    # project-local FIRST, then user-global; DEDUP by block name so a locally
+    # developed block shadows a same-named downloaded copy (the develop ->
+    # upload -> re-download case) — local is your live working copy, the
+    # download is the published snapshot, so local wins.
+    for (bdir in c(file.path(getwd(), "blocks_local"), .ai4b_blocks_dir())) {
+        if (!dir.exists(bdir)) next
+        for (b in list.dirs(bdir, recursive = FALSE)) {
+            nm <- basename(b)
+            if (nm %in% seen) next
+            seen <- c(seen, nm)
+            flags <- c(flags, paste0("-I", shQuote(b)))
+            vdir <- file.path(b, "vendor")
+            if (dir.exists(vdir))
+                for (v in list.dirs(vdir, recursive = FALSE))
+                    flags <- c(flags, paste0("-I", shQuote(v)))
+        }
     }
     flags
 }
@@ -152,6 +162,13 @@ ai4bayescode_installed_blocks <- function() {
 ai4bayescode_install_block <- function(name, force = FALSE, quiet = FALSE) {
     stopifnot(is.character(name), length(name) == 1L, nzchar(name))
     dest <- ai4bayescode_blocks_path(name)
+    # A project-local block of the same name shadows the download (local > download):
+    # the develop -> upload -> re-download case. Flag it so the user is not surprised
+    # that edits to ./blocks_local/ still win over the freshly downloaded snapshot.
+    if (!quiet && dir.exists(file.path(getwd(), "blocks_local", name)))
+        message("Note: a project-local block '", name, "' exists in ./blocks_local/ and ",
+                "will take PRECEDENCE over this download (local > download). The download ",
+                "is kept as the published snapshot; remove the local copy to use it.")
     if (dir.exists(dest) && !force) {
         if (!quiet)
             message("Block '", name, "' is already installed (", dest, ").\n",

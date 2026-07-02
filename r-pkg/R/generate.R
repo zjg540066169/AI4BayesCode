@@ -797,33 +797,51 @@ ai4bayescode_key_status <- function() {
     if (is.null(r) || !nzchar(r)) NA_character_ else normalizePath(r, mustWork = FALSE)
 }
 
-# Whitelist + escape guard for a package-relative path.
+# Base dir for a whitelisted read-only tool path, by its top-level prefix:
+# project-local blocks under the CWD, downloaded blocks under the user-global
+# store, everything else under the installed package root.
+#' @keywords internal
+#' @noRd
+.ai4b_tool_base <- function(rel, pkg_root) {
+    if (grepl("^blocks_local(/|$)", rel)) getwd()
+    else if (grepl("^blocks_download(/|$)", rel))
+        Sys.getenv("AI4BAYESCODE_DATA_HOME",
+                   unset = file.path(path.expand("~"), ".AI4BayesCode"))
+    else pkg_root
+}
+
+# Whitelist + escape guard for a read-only tool path.
 #' @keywords internal
 #' @noRd
 .ai4b_safe_pkg_path <- function(rel, root) {
     rel <- gsub("^[./]+", "", rel %||% "")
     if (grepl("\\.\\.", rel) || !nzchar(rel)) return(NULL)
-    if (!grepl("^(examples|skills|include|blocks_local)(/|$)", rel)) return(NULL)
-    p <- normalizePath(file.path(root, rel), mustWork = FALSE)
-    if (!startsWith(p, root)) return(NULL)
+    if (!grepl("^(examples|skills|include|blocks_local|blocks_download)(/|$)", rel)) return(NULL)
+    base <- .ai4b_tool_base(rel, root)
+    if (length(base) != 1L || is.na(base) || !nzchar(base)) return(NULL)
+    p  <- normalizePath(file.path(base, rel), mustWork = FALSE)
+    nb <- normalizePath(base, mustWork = FALSE)
+    if (!startsWith(p, nb)) return(NULL)
     p
 }
 
-# Glob within the whitelisted package dirs (supports a single ** for recursion).
+# Glob within the whitelisted dirs (supports a single ** for recursion).
 #' @keywords internal
 #' @noRd
 .ai4b_glob_pkg <- function(pattern, root) {
     pattern <- gsub("^[./]+", "", pattern %||% "")
     if (grepl("\\.\\.", pattern) ||
-        !grepl("^(examples|skills|include|blocks_local)(/|$)", pattern)) return(character(0))
+        !grepl("^(examples|skills|include|blocks_local|blocks_download)(/|$)", pattern)) return(character(0))
+    base <- .ai4b_tool_base(pattern, root)
+    if (length(base) != 1L || is.na(base) || !nzchar(base)) return(character(0))
     if (grepl("\\*\\*", pattern)) {
-        base <- sub("/?\\*\\*.*$", "", pattern)
-        ext  <- sub("^.*\\*\\*/?", "", pattern)
-        list.files(file.path(root, base),
+        b   <- sub("/?\\*\\*.*$", "", pattern)
+        ext <- sub("^.*\\*\\*/?", "", pattern)
+        list.files(file.path(base, b),
                    pattern = utils::glob2rx(if (nzchar(ext)) ext else "*"),
                    recursive = TRUE, full.names = TRUE)
     } else {
-        Sys.glob(file.path(root, pattern))
+        Sys.glob(file.path(base, pattern))
     }
 }
 

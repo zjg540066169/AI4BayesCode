@@ -650,7 +650,8 @@ def _ask_user_tool() -> list[dict]:
 # uses LOGICAL paths ('examples/...','skills/...','include/...'); map to the python
 # package's physical dirs (_examples / _skills / _vendored_include).
 _PKG_DIRMAP = {"examples": "_examples", "skills": "_skills",
-               "include": "_vendored_include", "blocks_local": "blocks_local"}
+               "include": "_vendored_include", "blocks_local": "blocks_local",
+               "blocks_download": "blocks_download"}
 
 
 def _agent_tools() -> list[dict]:
@@ -682,43 +683,64 @@ def _pkg_root() -> str:
     return os.path.dirname(os.path.realpath(__file__))
 
 
-def _map_logical(rel):
+def _tool_base(top):
+    # Base dir for a whitelisted prefix: project CWD for blocks_local, the
+    # user-global store's parent for blocks_download, else the package root.
+    import os
+    if top == "blocks_local":
+        return os.getcwd()
+    if top == "blocks_download":
+        from .install_block import _blocks_dir
+        return os.path.dirname(_blocks_dir())
+    return _pkg_root()
+
+
+def _resolve_logical(rel):
+    # (base_dir, physical_relative_path) for a whitelisted logical path, or None.
     import re
     rel = re.sub(r"^[./]+", "", rel or "")
     if ".." in rel or not rel:
         return None
-    parts = rel.split("/", 1)
-    if parts[0] not in _PKG_DIRMAP:
+    top = rel.split("/", 1)[0]
+    if top not in _PKG_DIRMAP:
         return None
-    phys = _PKG_DIRMAP[parts[0]]
-    return phys + ("/" + parts[1] if len(parts) > 1 else "")
+    base = _tool_base(top)
+    # examples/skills/include map to physical package subdirs; block dirs keep name.
+    phys = rel if top in ("blocks_local", "blocks_download") \
+        else _PKG_DIRMAP[top] + rel[len(top):]
+    return (base, phys)
 
 
-def _phys_to_logical(p, root):
+def _phys_to_logical(p, root=None):
     import os
-    rel = os.path.relpath(p, root)
-    for logical, phys in _PKG_DIRMAP.items():
-        if rel == phys or rel.startswith(phys + os.sep):
-            return (logical + rel[len(phys):]).replace(os.sep, "/")
-    return rel.replace(os.sep, "/")
+    rp = os.path.realpath(p)
+    for logical in _PKG_DIRMAP:
+        r = _resolve_logical(logical)
+        if r is None:
+            continue
+        prefix = os.path.realpath(os.path.join(*r))
+        if rp == prefix or rp.startswith(prefix + os.sep):
+            return (logical + rp[len(prefix):]).replace(os.sep, "/")
+    return os.path.basename(p)
 
 
-def _glob_pkg(pattern, root):
+def _glob_pkg(pattern, root=None):
     import glob as _g, os
-    phys = _map_logical(pattern)
-    if phys is None:
+    r = _resolve_logical(pattern)
+    if r is None:
         return []
-    return sorted(_g.glob(os.path.join(root, phys), recursive=True))
+    base, phys = r
+    return sorted(_g.glob(os.path.join(base, phys), recursive=True))
 
 
 def _exec_readonly_tool(name, inp, root):
     import os, re
     if name == "read_file":
-        rel = _map_logical(inp.get("path", ""))
-        p = os.path.realpath(os.path.join(root, rel)) if rel else None
-        if not p or not p.startswith(root) or not os.path.isfile(p):
+        r = _resolve_logical(inp.get("path", ""))
+        p = os.path.realpath(os.path.join(*r)) if r else None
+        if not r or not p.startswith(os.path.realpath(r[0])) or not os.path.isfile(p):
             return (f"read_file: '{inp.get('path','')}' not found or not allowed "
-                    "(only examples/, skills/, include/, blocks_local/).")
+                    "(only examples/, skills/, include/, blocks_local/, blocks_download/).")
         try:
             lines = open(p, encoding="utf-8", errors="replace").read().splitlines()
         except Exception as e:

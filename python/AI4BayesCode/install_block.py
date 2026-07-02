@@ -39,22 +39,31 @@ def blocks_path(name: str | None = None) -> str:
 
 
 def _block_include_flags() -> list[str]:
-    """`-I` flags for every installed block (block dir + each vendored dep dir)."""
-    bdir = _blocks_dir()
-    if not os.path.isdir(bdir):
-        return []
+    """``-I`` flags for every contributed block (block dir + each vendored dep dir).
+
+    Covers BOTH tiers: user-global installed blocks (``~/.AI4BayesCode/blocks_download/``)
+    AND project-local blocks (``./blocks_local/``, relative to the working directory).
+    """
     flags: list[str] = []
-    for b in sorted(os.listdir(bdir)):
-        bp = os.path.join(bdir, b)
-        if not os.path.isdir(bp):
+    seen: set[str] = set()
+    # project-local FIRST, then user-global; DEDUP by block name so a locally
+    # developed block shadows a same-named downloaded copy (develop -> upload ->
+    # re-download) — local is the live working copy, download the published snapshot.
+    for bdir in (os.path.join(os.getcwd(), "blocks_local"), _blocks_dir()):
+        if not os.path.isdir(bdir):
             continue
-        flags.append(f"-I{bp}")
-        vdir = os.path.join(bp, "vendor")
-        if os.path.isdir(vdir):
-            for v in sorted(os.listdir(vdir)):
-                vp = os.path.join(vdir, v)
-                if os.path.isdir(vp):
-                    flags.append(f"-I{vp}")
+        for b in sorted(os.listdir(bdir)):
+            bp = os.path.join(bdir, b)
+            if not os.path.isdir(bp) or b in seen:
+                continue
+            seen.add(b)
+            flags.append(f"-I{bp}")
+            vdir = os.path.join(bp, "vendor")
+            if os.path.isdir(vdir):
+                for v in sorted(os.listdir(vdir)):
+                    vp = os.path.join(vdir, v)
+                    if os.path.isdir(vp):
+                        flags.append(f"-I{vp}")
     return flags
 
 
@@ -162,6 +171,13 @@ def install_block(name: str, force: bool = False, quiet: bool = False) -> str:
     if not isinstance(name, str) or not name:
         raise ValueError("name must be a non-empty block name")
     dest = blocks_path(name)
+    # A project-local block of the same name shadows the download (local > download):
+    # the develop -> upload -> re-download case. Flag it so the user is not surprised
+    # that edits to ./blocks_local/ still win over the freshly downloaded snapshot.
+    if not quiet and os.path.isdir(os.path.join(os.getcwd(), "blocks_local", name)):
+        print(f"Note: a project-local block '{name}' exists in ./blocks_local/ and will take "
+              f"PRECEDENCE over this download (local > download). The download is kept as the "
+              f"published snapshot; remove the local copy to use it.")
     if os.path.isdir(dest) and not force:
         if not quiet:
             print(f"Block '{name}' is already installed ({dest}).\n"

@@ -29,9 +29,15 @@ path so `#include "<Block>.hpp"` resolves:
 | **core** | this file | maintainer-vetted |
 
 **Priority when several fit: local > downloaded > core** (prefer the user's own /
-reviewed block over a generic core one). Block names are globally unique (core
-names are reserved; local + downloaded are checked at creation / install), so
-there is never a name collision to resolve.
+reviewed block over a generic core one). Names are unique across DISTINCT blocks
+(core names reserved; new local / downloaded names are checked at creation /
+install). The ONE deliberate same-name case: after you develop a block locally,
+publish it, and re-download it, `./blocks_local/<Block>/` and
+`~/.AI4BayesCode/blocks_download/<Block>/` hold the SAME block. That is not a
+conflict to resolve — the tooling **deduplicates by name and local wins** (your
+live working copy shadows the published snapshot) for BOTH discovery below AND
+the compile `-I` path. So list local rows first and, when a name also appears
+under downloaded, keep only the local row.
 
 **Two-stage, token-bounded selection** — do this BEFORE settling on a core block;
 it stays cheap no matter how many blocks are installed (bounded by relevance, not
