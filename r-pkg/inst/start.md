@@ -313,8 +313,7 @@ runtime — it decides the compile call AND whether to even ask for a library pa
 **Only if the package is NOT installed (raw checkout):**
 
 - Ask the "Path to AI4BayesCode folder?" question, and use the checkout form
-  (`source("<path>/R/AI4BayesCode_helpers.R")` + capital
-  `ai4bayescode_sourceCpp("<ClassName>.cpp", AI4BayesCode_path="<path>")`).
+  (`source("<path>/R/AI4BayesCode_helpers.R")` +  `ai4bayescode_sourceCpp("<ClassName>.cpp", AI4BayesCode_path="<path>")`).
 
 The generated `@example` header block (what `doc()` shows) ALWAYS uses the
 installed-package form when the package is present — the clean relative

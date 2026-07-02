@@ -1,0 +1,28 @@
+# BART_unified — Authors and Acknowledgements
+
+## Authors of BART_unified
+
+  Jungang Zou       <jungang.zou@gmail.com>
+  Keming Zhang
+
+## Vendored / Derived Code
+
+The BART/ subfolder derives from the BART R package (CRAN), authored by
+Robert McCulloch, Rodney Sparapani, and Charles Spanbauer.  Its files are
+licensed under GPL-2 and have been integrated here under that same license.
+
+The LOGBART/ subfolder implements log-linear BART following Murray (2021,
+JASA).  The original C++ tree code derives from BART (above); the log-linear
+augmentation and Gibbs sampler logic are original to this project.
+
+The GENBART/ subfolder implements RJMCMC-based generalized BART following
+Linero (2022).  The hyperrectangle / cutpoint code derives from BART; the
+RJMCMC machinery and likelihood interface are original.
+
+The (forthcoming) SOFTBART_VENDOR/ subfolder will vendor the SoftBart R
+package (Antonio R. Linero), licensed under GPL-2 or later.  See its
+header files for the full attribution.
+
+## License
+
+GPL-2 or later.  See LICENSE for the full text.

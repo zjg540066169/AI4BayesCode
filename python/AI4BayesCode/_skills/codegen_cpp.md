@@ -484,7 +484,7 @@ Rules:
   `AI4BayesCode_path=`, NEVER a `source(".../AI4BayesCode_helpers.R")` runner line.**
   Absolute or checkout paths break on another machine or if the folder moves, and
   the `@example` `doc()` shows runs inside the installed package. The legacy
-  checkout form (`source(helpers.R)` + capital `ai4bayescode_sourceCpp(...,
+  checkout form (`source(helpers.R)` + `ai4bayescode_sourceCpp(...,
   AI4BayesCode_path=)`) belongs ONLY in a standalone runner when the package is
   NOT installed — never in the `@example`.
 - **Single source of the DGP**: the toy data here is the SAME simulation the

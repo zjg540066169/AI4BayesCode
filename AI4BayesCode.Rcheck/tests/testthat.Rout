@@ -1,0 +1,145 @@
+
+R version 4.5.2 (2025-10-31) -- "[Not] Part in a Rumble"
+Copyright (C) 2025 The R Foundation for Statistical Computing
+Platform: aarch64-apple-darwin20
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> library(testthat)
+> library(AI4BayesCode)
+AI4BayesCode 1.0.0 -- stateful modular MCMC + AI codegen skill chain
+  ai4bayescode_example('GaussianLocationScale')   # try a built-in
+  ai4bayescode_source('./my_model.cpp')           # compile your own .cpp
+  ai4bayescode_set_key('sk-ant-...', 'anthropic') # do this 1st -- replace 'sk-ant-...' with YOUR real key
+  ai4bayescode_generate('describe your model')    # NL -> validated sampler
+  ai4bayescode_skills_path()                       # for AI agents
+
+
+Attaching package: 'AI4BayesCode'
+
+The following object is masked from 'package:utils':
+
+    ?
+
+> 
+> test_check("AI4BayesCode")
+──────────────────────────────────────────────────────────────── 
+  GaussianLocationScale
+──────────────────────────────────────────────────────────────── 
+   GaussianLocationScale.cpp
+  
+   JOINT-NUTS rewrite of GaussianLocationScale.cpp. Same model, same priors,
+   same posterior — but mu and sigma are sampled by ONE joint_nuts_block
+   instead of two separate single nuts_blocks updated Gibbs-style. This is the
+   "collapse a bunch of single nuts_blocks into one joint_nuts_block" refactor.
+  
+   Model (identical to GaussianLocationScale.cpp)
+   ---------------------------------------------
+       y_i | mu, sigma  ~ Normal(mu, sigma^2),      i = 1..N
+       mu               ~ Normal(0, 100^2)
+       sigma            ~ Jeffreys, p(sigma) ∝ 1/sigma
+  
+   Block decomposition
+   -------------------
+       (mu, sigma) : ONE joint_nuts_block, sub_params
+                     [{ "mu", 1, REAL }, { "sigma", 1, POSITIVE }].
+       The joint log-density is the FULL joint log p(mu, sigma | y) on the
+──────────────────────────────────────────────────────────────── 
+Construct:
+  new(GaussianLocationScale,
+      y             ,   # numeric vector
+      rng_seed      ,   # integer (e.g. 1L)
+      keep_history  )   # logical (TRUE/FALSE)  [optional, default false]
+
+Methods:
+  $step(n_steps)            advance the sampler n_steps iterations
+  $get_current()            current draw of each parameter -> named list
+  $set_current(params)      set the current draw (named list)
+  $predict_at(new_data)     posterior prediction at new_data
+  $get_dag()                model DAG (feed to ai4bayescode_plot_dag)
+  $get_history()            all kept draws (needs keep_history=TRUE)
+  $readapt_NUTS(n, adapt)   re-run NUTS warm-up (online / sequential use)
+
+Example:
+  library(AI4BayesCode)
+  ai4bayescode_example("GaussianLocationScale")
+  set.seed(42); N <- 200
+  y <- rnorm(N, mean = 3, sd = 2)                # DGP: true mu=3, sigma=2
+  # ---- Recommended: parallel chains + convergence diagnosis ----
+  run <- ai4bayescode_run_chains(
+      function(seed) new(GaussianLocationScale, y, seed, TRUE),
+      n_chains = 4, n_burn = 1000, n_keep = 2000)
+  ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+  # ---- Advanced: stateful single-chain control ----
+  m <- new(GaussianLocationScale, y, 7L, TRUE)   # (y, rng_seed, keep_history)
+  m$step(2500); str(m$get_current())             # mu_hat ~ 3, sigma_hat ~ 2
+──────────────────────────────────────────────────────────────── 
+────────────────────────────────────────────────────────────────
+  file1707a3adc877c.cpp   (exported function(s), not a sampler class)
+────────────────────────────────────────────────────────────────
+Call:
+  spike_slab_sinh_chain(
+      n               ,   # integer (e.g. 1L)
+      a               )   # numeric  [default 1.0]
+──────────────────────────────────────────────────────────────── 
+──────────────────────────────────────────────────────────────── 
+  Fix
+──────────────────────────────────────────────────────────────── 
+   Fix.cpp -- toy model
+   y ~ Normal(mu, sigma).
+──────────────────────────────────────────────────────────────── 
+Construct:  new(Fix, ...)   (source not found - pass the .cpp path for argument names)
+
+Methods:
+  $step(n_steps)            advance the sampler n_steps iterations
+  $get_current()            current draw of each parameter -> named list
+  $set_current(params)      set the current draw (named list)
+  $predict_at(new_data)     posterior prediction at new_data
+  $get_dag()                model DAG (feed to ai4bayescode_plot_dag)
+  $get_history()            all kept draws (needs keep_history=TRUE)
+  $readapt_NUTS(n, adapt)   re-run NUTS warm-up (online / sequential use)
+
+Example:
+  library(AI4BayesCode)
+  y <- rnorm(50)
+  m <- new(Fix, y, 1L)
+  m$step(100)
+──────────────────────────────────────────────────────────────── 
+──────────────────────────────────────────────────────────────── 
+  G
+──────────────────────────────────────────────────────────────── 
+   G.cpp -- m
+──────────────────────────────────────────────────────────────── 
+Construct:  new(G, ...)   (source not found - pass the .cpp path for argument names)
+
+Methods:
+  $step(n_steps)            advance the sampler n_steps iterations
+  $get_current()            current draw of each parameter -> named list
+  $set_current(params)      set the current draw (named list)
+  $predict_at(new_data)     posterior prediction at new_data
+  $get_dag()                model DAG (feed to ai4bayescode_plot_dag)
+  $get_history()            all kept draws (needs keep_history=TRUE)
+  $readapt_NUTS(n, adapt)   re-run NUTS warm-up (online / sequential use)
+──────────────────────────────────────────────────────────────── 
+[ FAIL 0 | WARN 0 | SKIP 5 | PASS 167 ]
+
+══ Skipped tests (5) ═══════════════════════════════════════════════════════════
+• On CRAN (5): 'test-sourceCpp.R:5:5', 'test-sourceCpp.R:21:5',
+  'test-source_AI4BayesCode.R:6:5', 'test-source_AI4BayesCode.R:25:5',
+  'test-source_AI4BayesCode.R:39:5'
+
+[ FAIL 0 | WARN 0 | SKIP 5 | PASS 167 ]
+> 
+> proc.time()
+   user  system elapsed 
+  1.076   0.155   1.246 

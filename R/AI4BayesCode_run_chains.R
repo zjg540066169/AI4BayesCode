@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# ai4bayescode_run_chains.R (T13)
+# AI4BayesCode_run_chains.R (T13)
 #
 # R-level multi-chain runner for any AI4BayesCode wrapper class. Spawns
 # n_chains chains (parallel or sequential), runs warmup + keep on each,
@@ -8,7 +8,7 @@
 #
 # Usage
 # -----
-#   source("path/to/ai4bayescode_run_chains.R")
+#   source("path/to/AI4BayesCode_run_chains.R")
 #   model_ctor <- function(seed) {
 #       new(SpikeSlabRJMCMC, X, y, a_pi, b_pi, as.integer(seed), TRUE)
 #   }

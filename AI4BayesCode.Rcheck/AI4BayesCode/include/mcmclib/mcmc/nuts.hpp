@@ -1,0 +1,621 @@
+/*################################################################################
+  ##
+  ##   Copyright (C) 2011-2023 Keith O'Hara
+  ##
+  ##   This file is part of the MCMC C++ library.
+  ##
+  ##   Licensed under the Apache License, Version 2.0 (the "License");
+  ##   you may not use this file except in compliance with the License.
+  ##   You may obtain a copy of the License at
+  ##
+  ##       http://www.apache.org/licenses/LICENSE-2.0
+  ##
+  ##   Unless required by applicable law or agreed to in writing, software
+  ##   distributed under the License is distributed on an "AS IS" BASIS,
+  ##   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ##   See the License for the specific language governing permissions and
+  ##   limitations under the License.
+  ##
+  ################################################################################*/
+
+/*################################################################################
+  ##
+  ##   Modifications Copyright (C) 2025-2026 Jungang Zou
+  ##
+  ##   This file has been modified from the original MCMClib source as part of
+  ##   the MTBART and block_mcmc projects. Modifications are licensed under the
+  ##   Apache License, Version 2.0 (same as the original file).
+  ##
+  ##   Summary of modifications:
+  ##     - Added a persistent / mini-warmup adaptation mode for the NUTS dual
+  ##       averaging step-size scheme. When nuts_settings_t::use_persistent_adapt
+  ##       is true and adapt_iter_persist > 0, the sampler starts fresh dual
+  ##       averaging from the previously adapted epsilon_bar (warm start) rather
+  ##       than re-running full initialization. This enables short mini-warmups
+  ##       inside Gibbs iterations so the step size can track a drifting
+  ##       conditional target (used by DP_DART / RE_DART / block_mcmc).
+  ##
+  ##       NOTE: this is deliberately *not* strict cumulative dual averaging
+  ##       as written in Hoffman & Gelman 2014 Algorithm 6. Each call resets
+  ##       H_bar and the per-call iteration counter m, while carrying forward
+  ##       epsilon_bar and setting mu = log(10 * epsilon_bar_persist). The
+  ##       standard cumulative scheme makes 1/(m + t_0) shrink toward zero
+  ##       and effectively freezes the step size after warmup, which is
+  ##       correct for a FIXED target but disastrous for a DRIFTING
+  ##       conditional posterior (the common case in block-wise Gibbs). The
+  ##       mini-warmup variant keeps per-call responsiveness while reusing
+  ##       the last epsilon_bar as a warm start.
+  ##     - On completion, the adapted epsilon_bar is written back to
+  ##       settings.nuts_settings.epsilon_bar_persist for reuse on the next
+  ##       call.
+  ##     - See nuts.ipp for a paper-faithful fix to the step-size search
+  ##       direction in nuts_find_initial_step_size (the original only
+  ##       doubled; per Hoffman & Gelman 2014 Algorithm 4 it must also be
+  ##       able to halve).
+  ##
+  ################################################################################*/
+
+/*
+ * No-U-Turn Sampler (NUTS) (with Dual Averaging)
+ */
+
+#ifndef _mcmc_nuts_HPP
+#define _mcmc_nuts_HPP
+
+/**
+ * @brief The No-U-Turn Sampler (NUTS) MCMC Algorithm
+ *
+ * @param initial_vals a column vector of initial values.
+ * @param target_log_kernel the log posterior kernel function of the target distribution, taking three arguments:
+ *   - \c vals_inp a vector of inputs; and
+ *   - \c grad_out a vector to store the gradient; and
+ *   - \c target_data additional data passed to the user-provided function.
+ * @param draws_out a matrix of posterior draws, where each row represents one draw.
+ * @param target_data additional data passed to the user-provided function.
+ *
+ * @return a boolean value indicating successful completion of the algorithm.
+ */ 
+
+bool
+nuts(
+    const ColVec_t& initial_vals, 
+    std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data)> target_log_kernel, 
+    Mat_t& draws_out, 
+    void* target_data
+);
+
+/**
+ * @brief The No-U-Turn Sampler (NUTS) MCMC Algorithm
+ *
+ * @param initial_vals a column vector of initial values.
+ * @param target_log_kernel the log posterior kernel function of the target distribution, taking three arguments:
+ *   - \c vals_inp a vector of inputs; and
+ *   - \c grad_out a vector to store the gradient; and
+ *   - \c target_data additional data passed to the user-provided function.
+ * @param draws_out a matrix of posterior draws, where each row represents one draw.
+ * @param target_data additional data passed to the user-provided function.
+ * @param settings parameters controlling the MCMC routine.
+ *
+ * @return a boolean value indicating successful completion of the algorithm.
+ */ 
+
+bool
+nuts(
+    const ColVec_t& initial_vals, 
+    std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data)> target_log_kernel, 
+    Mat_t& draws_out, 
+    void* target_data, 
+    algo_settings_t& settings
+);
+
+
+namespace internal
+{
+
+bool
+nuts_impl(
+    const ColVec_t& initial_vals, 
+    std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data)> target_log_kernel, 
+    Mat_t& draws_out, 
+    void* target_data, 
+    algo_settings_t* settings_inp
+);
+
+#include "nuts.ipp"
+
+}
+
+//
+
+ inline
+bool
+internal::nuts_impl(
+    const ColVec_t& initial_vals, 
+    std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data)> target_log_kernel, 
+    Mat_t& draws_out, 
+    void* target_data, 
+    algo_settings_t* settings_inp
+)
+{
+    bool success = false;
+
+    const size_t n_vals = BMO_MATOPS_SIZE(initial_vals);
+
+    // settings
+
+    algo_settings_t settings;
+
+    if (settings_inp) {
+        settings = *settings_inp;
+    }
+
+    const size_t n_burnin_draws = settings.nuts_settings.n_burnin_draws;
+    const size_t n_keep_draws   = settings.nuts_settings.n_keep_draws;
+    const size_t n_total_draws  = n_burnin_draws + n_keep_draws;
+
+    const size_t n_adapt_draws = (settings.nuts_settings.n_adapt_draws <= n_total_draws) ? settings.nuts_settings.n_adapt_draws : n_total_draws;
+    const fp_t target_accept_rate = settings.nuts_settings.target_accept_rate;
+
+    const size_t max_tree_depth = settings.nuts_settings.max_tree_depth;
+
+    fp_t epsilon_bar     = settings.nuts_settings.step_size; // \bar{\epsilon}_0
+    const fp_t gamma_val = settings.nuts_settings.gamma_val;
+    const fp_t t0_val    = settings.nuts_settings.t0_val;
+    const fp_t kappa_val = settings.nuts_settings.kappa_val;
+
+    const Mat_t precond_matrix = (BMO_MATOPS_SIZE(settings.nuts_settings.precond_mat) == n_vals*n_vals) ? settings.nuts_settings.precond_mat : BMO_MATOPS_EYE(n_vals);
+    const Mat_t inv_precond_matrix = BMO_MATOPS_INV(precond_matrix);
+    const Mat_t sqrt_precond_matrix = BMO_MATOPS_CHOL_LOWER(precond_matrix);
+
+    const bool vals_bound = settings.vals_bound;
+    
+    const ColVec_t lower_bounds = settings.lower_bounds;
+    const ColVec_t upper_bounds = settings.upper_bounds;
+
+    const ColVecInt_t bounds_type = determine_bounds_type(vals_bound, n_vals, lower_bounds, upper_bounds);
+
+    rand_engine_t rand_engine(settings.rng_seed_value);
+
+    // parallelization setup
+
+#ifdef MCMC_USE_OPENMP
+    int omp_n_threads = 1;
+
+    if (settings.nuts_settings.omp_n_threads > 0) {
+        omp_n_threads = settings.nuts_settings.omp_n_threads;
+    } else {
+        omp_n_threads = std::max(1, static_cast<int>(omp_get_max_threads()) / 2); // OpenMP often detects the number of virtual/logical cores, not physical cores
+    }
+#endif
+    
+    // ----------------------------------------------------------------
+    // Phase-1 speedup (2026-06-08, GZ): leapfrog gradient cache.
+    //
+    // Design overview:
+    //
+    //   The original mcmclib::mntm_update_fn computes grad(pos_inp)
+    //   from scratch on every call, so each leapfrog step costs TWO
+    //   target_log_kernel-with-grad calls. For most Bayesian targets
+    //   that is the dominant per-step cost.
+    //
+    //   In a leapfrog step, the FIRST half-kick uses grad at the
+    //   current position (= where the previous leap step ended), and
+    //   the SECOND half-kick uses grad at the post-drift position.
+    //   The grad needed for the first half-kick of step k+1 is
+    //   EXACTLY the grad just computed for the second half-kick of
+    //   step k. By threading that value through, we halve the number
+    //   of grad evaluations.
+    //
+    //   The cache invariant is: at entry to leap_frog_fn, the caller
+    //   guarantees cached_raw_grad == raw_grad(new_draw). At exit,
+    //   leap_frog_fn ensures the same (it refreshes cached_raw_grad
+    //   to raw_grad(new_draw_after_drift) before the second half-kick,
+    //   and new_draw == that position on return).
+    //
+    //   nuts_build_tree propagates TWO caches per call to honor this
+    //   invariant under mcmclib's boundary swap convention (where for
+    //   direction=+1 second sub-tree, caller's new_draw_pos receives
+    //   callee's new_draw_NEG, not new_draw_pos). See
+    //   project_mcmclib_nuts_cache_investigation.md for the root-cause
+    //   analysis.
+    // ----------------------------------------------------------------
+
+    std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* box_data)> box_log_kernel_fn \
+    = [target_log_kernel, vals_bound, bounds_type, lower_bounds, upper_bounds] (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data) \
+    -> fp_t
+    {
+        if (vals_bound) {
+            ColVec_t vals_inv_trans = inv_transform(vals_inp, bounds_type, lower_bounds, upper_bounds);
+            return target_log_kernel(vals_inv_trans, nullptr, target_data) + log_jacobian(vals_inp, bounds_type, lower_bounds, upper_bounds);
+        } else {
+            return target_log_kernel(vals_inp, nullptr, target_data);
+        }
+    };
+
+    // Pure gradient computation: writes raw_grad(pos_inp) into raw_grad_out.
+    // For vals_bound=true, pos_inp is on the TRANSFORMED scale; the grad
+    // is the NATURAL-scale grad (Jacobian is applied separately in leap_frog).
+    // PERF (2026-06-14): raw_grad_fn now RETURNS the natural-scale log-density
+    // VALUE it already computes (was void → value discarded). target_log_kernel
+    // computes value+grad together; returning the value lets the leapfrog cache
+    // it and skip the separate box_log_kernel_fn(nullptr) re-evaluation at the
+    // same leaf — eliminating one full target eval per leaf (the dominant NUTS
+    // cost). Bit-equivalent: same value, just not recomputed.
+    std::function<fp_t (const ColVec_t& pos_inp, ColVec_t& raw_grad_out, void* target_data)> raw_grad_fn \
+    = [target_log_kernel, vals_bound, bounds_type, lower_bounds, upper_bounds] (const ColVec_t& pos_inp, ColVec_t& raw_grad_out, void* target_data) \
+    -> fp_t
+    {
+        const size_t n_vals_local = BMO_MATOPS_SIZE(pos_inp);
+        raw_grad_out.set_size(n_vals_local);
+        if (vals_bound) {
+            ColVec_t pos_inv_trans = inv_transform(pos_inp, bounds_type, lower_bounds, upper_bounds);
+            return target_log_kernel(pos_inv_trans, &raw_grad_out, target_data);
+        } else {
+            return target_log_kernel(pos_inp, &raw_grad_out, target_data);
+        }
+    };
+
+    // Cached-grad leapfrog. cached_raw_grad must satisfy the cache
+    // invariant on entry (cached_raw_grad == raw_grad(new_draw)). On
+    // exit it holds raw_grad(new_draw_after_full_step).
+    // PERF (2026-06-14): leap_frog_fn now ALSO outputs cached_box_U_out — the
+    // box-scale potential U = -log_density at the FINAL post-leap position,
+    // captured from the grad refresh (raw_grad_fn) that already computes it.
+    // The caller (nuts_build_tree base case) uses this instead of a separate
+    // box_log_kernel_fn(new_draw, nullptr) re-evaluation. Bit-equivalent.
+    std::function<void (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data)> leap_frog_fn \
+    = [target_log_kernel, raw_grad_fn, inv_precond_matrix, vals_bound, bounds_type, lower_bounds, upper_bounds] (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data) \
+    -> void
+    {
+        fp_t nat_U_final = fp_t(0);   // natural-scale log-density at final pos
+        for (size_t k = 0; k < n_leap_steps; ++k) {
+            // First half-kick uses cached grad at the CURRENT new_draw.
+            // Cache invariant: caller guarantees cached_raw_grad equals
+            // raw_grad(new_draw) on entry. nuts_build_tree's dual-cache
+            // propagation honors this invariant across recursion.
+#ifdef CACHE_CHECK
+            {
+                ColVec_t fresh_grad(new_draw.n_elem);
+                if (vals_bound) {
+                    ColVec_t pos_inv_trans = inv_transform(new_draw, bounds_type, lower_bounds, upper_bounds);
+                    target_log_kernel(pos_inv_trans, &fresh_grad, target_data);
+                } else {
+                    target_log_kernel(new_draw, &fresh_grad, target_data);
+                }
+                for (size_t i = 0; i < new_draw.n_elem; ++i) {
+                    if (std::abs(fresh_grad[i] - cached_raw_grad[i]) > 1e-12) {
+                        std::fprintf(stderr, "[STALE i=%zu] draw=%.17e cached=%.17e fresh=%.17e diff=%.3e\n",
+                                     i, new_draw[i], cached_raw_grad[i], fresh_grad[i],
+                                     std::abs(fresh_grad[i] - cached_raw_grad[i]));
+                        break;
+                    }
+                }
+            }
+#endif
+            if (vals_bound) {
+                Mat_t jacob_matrix = inv_jacobian_adjust(new_draw, bounds_type, lower_bounds, upper_bounds);
+                new_mntm = new_mntm + step_size * jacob_matrix * cached_raw_grad / fp_t(2);
+            } else {
+                new_mntm = new_mntm + step_size * cached_raw_grad / fp_t(2);
+            }
+            // Drift.
+            new_draw += step_size * inv_precond_matrix * new_mntm;
+            // Refresh cached grad at the new (post-drift) position. CAPTURE the
+            // natural-scale value it computes (was discarded) for the energy.
+            nat_U_final = raw_grad_fn(new_draw, cached_raw_grad, target_data);
+            // Second half-kick uses the refreshed grad. On exit
+            // cached_raw_grad == raw_grad(new_draw) -- invariant
+            // restored.
+            if (vals_bound) {
+                Mat_t jacob_matrix = inv_jacobian_adjust(new_draw, bounds_type, lower_bounds, upper_bounds);
+                new_mntm = new_mntm + step_size * jacob_matrix * cached_raw_grad / fp_t(2);
+            } else {
+                new_mntm = new_mntm + step_size * cached_raw_grad / fp_t(2);
+            }
+        }
+        // Box-scale potential value at the final position. For vals_bound the
+        // box log-density adds log|Jacobian| (matching box_log_kernel_fn); for
+        // the unbounded case (AI4BayesCode default) it equals nat_U_final.
+        if (vals_bound) {
+            cached_box_U_out = nat_U_final
+                + log_jacobian(new_draw, bounds_type, lower_bounds, upper_bounds);
+        } else {
+            cached_box_U_out = nat_U_final;
+        }
+    };
+
+    // setup
+    
+    ColVec_t first_draw = initial_vals;
+
+    if (vals_bound) { // should we transform the parameters?
+        first_draw = transform(initial_vals, bounds_type, lower_bounds, upper_bounds);
+    }
+
+    ColVec_t rand_vec(n_vals);
+
+    bmo::stats::internal::rnorm_vec_inplace<fp_t>(n_vals, rand_engine, rand_vec);
+
+    ColVec_t mntm_vec = sqrt_precond_matrix * rand_vec;
+
+    //
+
+    fp_t step_size;
+    fp_t mu_val;
+    fp_t h_val;
+
+    const bool use_persist = settings.nuts_settings.use_persistent_adapt;
+
+    if (use_persist && settings.nuts_settings.adapt_iter_persist > 0) {
+        // Mini-warmup: start from previously adapted epsilon_bar,
+        // do fresh dual averaging for n_adapt_draws steps.
+        // This avoids the cumulative dual averaging drift problem when
+        // the target changes between calls.
+        step_size = settings.nuts_settings.epsilon_bar_persist;
+        mu_val = std::log(10 * step_size);
+        h_val = 0;
+        epsilon_bar = step_size;  // initialize smoothed value to current
+    } else if (n_adapt_draws == 0) {
+        // skip initial step size search; reuse the value passed in via settings
+        step_size = epsilon_bar;
+        mu_val = std::log(10 * step_size);
+        h_val = 0;
+    } else {
+        step_size = nuts_find_initial_step_size(first_draw, mntm_vec, inv_precond_matrix, box_log_kernel_fn, raw_grad_fn, leap_frog_fn, target_data);
+        mu_val = std::log(10 * step_size);
+        h_val = 0;
+        epsilon_bar = fp_t(1);  // reset epsilon_bar at start of fresh adaptation
+    }
+
+    //
+
+    BMO_MATOPS_SET_SIZE(draws_out, n_keep_draws, n_vals);
+
+    // Bootstrap the cache invariant: cached_raw_grad_at_prev_draw is the
+    // grad at the CURRENT prev_draw. Maintained at every accept of a
+    // proposal in the main loop below.
+    // PERF (2026-06-14): the bootstrap grad eval (raw_grad_fn) now ALSO
+    // returns the natural-scale value, so we use it for prev_U instead of a
+    // SEPARATE box_log_kernel_fn(first_draw, nullptr) re-evaluation — one
+    // fewer full target eval per nuts() call. Bit-equivalent (box value =
+    // natural value + log_jacobian when vals_bound; == natural when not).
+    ColVec_t cached_raw_grad_at_prev_draw(n_vals);
+    const fp_t boot_U_nat = raw_grad_fn(first_draw, cached_raw_grad_at_prev_draw, target_data);
+    fp_t prev_U = vals_bound
+        ? - (boot_U_nat + log_jacobian(first_draw, bounds_type, lower_bounds, upper_bounds))
+        : - boot_U_nat;
+    if (!std::isfinite(prev_U)) prev_U = posinf;
+    fp_t prop_U = prev_U;
+
+    fp_t prev_K;
+    fp_t log_rand_val;
+
+    ColVec_t prev_draw = first_draw;
+    ColVec_t new_draw  = first_draw;
+
+    ColVec_t draw_pos  = first_draw;
+    ColVec_t draw_neg  = first_draw;
+    ColVec_t mntm_pos  = mntm_vec;
+    ColVec_t mntm_neg  = mntm_vec;
+
+    //
+
+    size_t n_accept = 0;
+
+    for (size_t draw_ind = 0; draw_ind < n_total_draws; ++draw_ind) {
+        bmo::stats::internal::rnorm_vec_inplace<fp_t>(n_vals, rand_engine, rand_vec);
+
+        mntm_vec = sqrt_precond_matrix * rand_vec;
+
+        prev_K = BMO_MATOPS_DOT_PROD(mntm_vec, inv_precond_matrix * mntm_vec) / fp_t(2);
+
+        log_rand_val = std::log(bmo::stats::runif<fp_t>(rand_engine)) - prev_U - prev_K ;
+
+        //
+
+        new_draw = prev_draw;
+
+        draw_pos = prev_draw;
+        draw_neg = prev_draw;
+        mntm_pos = mntm_vec;
+        mntm_neg = mntm_vec;
+        // Both boundaries start at prev_draw -> both caches start at
+        // grad(prev_draw). The dual-cache build_tree below keeps each
+        // boundary's cache aligned with its boundary across recursion.
+        ColVec_t cached_raw_grad_pos = cached_raw_grad_at_prev_draw;
+        ColVec_t cached_raw_grad_neg = cached_raw_grad_at_prev_draw;
+
+        size_t tree_depth = 0;
+        size_t n_val = 1;
+        size_t s_val = 1;
+
+        fp_t alpha_val = 0;
+        size_t n_alpha_val = 0;
+        int good_round = 0;
+
+        //
+
+        while (s_val == size_t(1) && tree_depth < max_tree_depth) {
+            size_t n_p_val;
+            size_t s_p_val;
+            // PERF (2026-06-14): proposal value+grad threaded out of
+            // nuts_build_tree so the accept block reuses them instead of
+            // recomputing box_log_kernel_fn + raw_grad_fn at new_draw.
+            fp_t new_draw_box_U = fp_t(0);
+            ColVec_t new_draw_grad;
+
+            //
+
+            fp_t z = bmo::stats::runif<fp_t>(rand_engine);
+
+            int direction_val = (z <= fp_t(0.5)) ? -1 : 1;
+
+            // Hoffman & Gelman 2014 Algorithm 3: extend the trajectory
+            // from the CURRENT endpoint, not from the original starting
+            // point. Backward: start from (draw_neg, mntm_neg).
+            // Forward: start from (draw_pos, mntm_pos).
+            //
+            // Dual-cache: pass cached_raw_grad_neg (or _pos) as the
+            // cache aligned with the starting endpoint, then receive
+            // BOTH updated boundary caches back. Only the cache
+            // aligned with the direction we expanded gets used here
+            // (the other boundary's cache is unchanged by this call
+            // but tracking it preserves the invariant for subsequent
+            // iterations).
+            if (direction_val == -1) {
+                ColVec_t dummy_draw = draw_pos;
+                ColVec_t dummy_mntm = mntm_pos;
+                ColVec_t cached_at_new_draw_pos_after;
+                ColVec_t cached_at_new_draw_neg_after;
+                nuts_build_tree(
+                    direction_val, step_size, log_rand_val, prev_U, prev_K,
+                    draw_neg, mntm_neg, inv_precond_matrix,
+                    box_log_kernel_fn, leap_frog_fn, tree_depth,
+                    new_draw, dummy_draw, draw_neg, dummy_mntm, mntm_neg,
+                    n_p_val, s_p_val, alpha_val, n_alpha_val, rand_engine, target_data,
+                    cached_raw_grad_neg, cached_at_new_draw_pos_after, cached_at_new_draw_neg_after,
+                    new_draw_box_U, new_draw_grad);
+                // For direction=-1 outer mapping: draw_neg <- callee's new_draw_neg.
+                // So caller's cached_raw_grad_neg <- callee's cached_at_new_draw_neg.
+                cached_raw_grad_neg = cached_at_new_draw_neg_after;
+                // cached_raw_grad_pos unchanged (its boundary draw_pos was not modified).
+            } else {
+                ColVec_t dummy_draw = draw_neg;
+                ColVec_t dummy_mntm = mntm_neg;
+                ColVec_t cached_at_new_draw_pos_after;
+                ColVec_t cached_at_new_draw_neg_after;
+                nuts_build_tree(direction_val, step_size, log_rand_val, prev_U, prev_K,
+                    draw_pos, mntm_pos, inv_precond_matrix,
+                    box_log_kernel_fn, leap_frog_fn, tree_depth,
+                    new_draw, draw_pos, dummy_draw, mntm_pos, dummy_mntm,
+                    n_p_val, s_p_val, alpha_val, n_alpha_val, rand_engine, target_data,
+                    cached_raw_grad_pos, cached_at_new_draw_pos_after, cached_at_new_draw_neg_after,
+                    new_draw_box_U, new_draw_grad);
+                // For direction=+1 outer mapping: draw_pos <- callee's new_draw_pos.
+                // So caller's cached_raw_grad_pos <- callee's cached_at_new_draw_pos.
+                cached_raw_grad_pos = cached_at_new_draw_pos_after;
+                // cached_raw_grad_neg unchanged.
+            }
+
+            //
+
+            if (s_p_val == size_t(1)) {
+                z = bmo::stats::runif<fp_t>(rand_engine);
+
+                if (z < fp_t(n_p_val) / fp_t(n_val)) {
+                    // PERF (2026-06-14): #2/#3 — the accepted proposal (new_draw)
+                    // is a leaf built in nuts_build_tree; its value+grad were
+                    // already computed there and threaded out as new_draw_box_U
+                    // / new_draw_grad. Use them instead of recomputing
+                    // box_log_kernel_fn(new_draw,nullptr) + raw_grad_fn(new_draw).
+                    // Bit-equivalent (same value+grad as the recompute).
+                    prop_U = - new_draw_box_U;
+
+                    if (!std::isfinite(prop_U)) {
+                        prop_U = posinf;
+                    }
+
+                    //
+
+                    prev_draw = new_draw;
+                    prev_U = prop_U;
+                    // Maintain the bootstrap cache invariant for the NEXT outer
+                    // for-loop iteration: cached_raw_grad_at_prev_draw must equal
+                    // raw_grad(prev_draw) — now taken from the threaded grad.
+                    cached_raw_grad_at_prev_draw = new_draw_grad;
+
+                    //
+
+                    good_round = 1;
+                }
+            }
+
+            //
+
+            n_val += n_p_val;
+            tree_depth += 1;
+
+            int check_val_1 = BMO_MATOPS_DOT_PROD(draw_pos - draw_neg, mntm_neg) >= fp_t(0);
+            int check_val_2 = BMO_MATOPS_DOT_PROD(draw_pos - draw_neg, mntm_pos) >= fp_t(0);
+
+            s_val = s_p_val * check_val_1 * check_val_2;
+        } // while s == 1
+
+        //
+
+        if (draw_ind < n_adapt_draws) {
+            h_val += (1/fp_t(draw_ind + 1 + t0_val)) * ( target_accept_rate - (fp_t(alpha_val) / fp_t(n_alpha_val)) - h_val);
+
+            step_size = std::exp(mu_val - h_val * std::sqrt(draw_ind + 1) / gamma_val);
+
+            epsilon_bar *= std::exp( std::pow(draw_ind + 1, - kappa_val) * (std::log(step_size) - std::log(epsilon_bar)) );
+        } else {
+            step_size = epsilon_bar;
+        }
+
+        //
+
+        if (draw_ind >= n_burnin_draws) {
+            draws_out.row(draw_ind - n_burnin_draws) = BMO_MATOPS_TRANSPOSE(prev_draw);
+            n_accept += good_round;
+        }
+    }
+
+    success = true;
+
+    //
+
+    if (vals_bound) {
+#ifdef MCMC_USE_OPENMP
+        #pragma omp parallel for num_threads(omp_n_threads)
+#endif
+        for (size_t draw_ind = 0; draw_ind < n_keep_draws; ++draw_ind) {
+            draws_out.row(draw_ind) = inv_transform<RowVec_t>(draws_out.row(draw_ind), bounds_type, lower_bounds, upper_bounds);
+        }
+    }
+
+    if (settings_inp) {
+        settings_inp->nuts_settings.n_accept_draws = n_accept;
+        settings_inp->nuts_settings.step_size = epsilon_bar; // write back adapted step size
+
+        // Write back persistent adaptation state for next call
+        if (use_persist) {
+            settings_inp->nuts_settings.epsilon_bar_persist = epsilon_bar;
+            // Mark that persistent state is valid (adapt_iter > 0)
+            settings_inp->nuts_settings.adapt_iter_persist = 1;
+        }
+    }
+
+    //
+
+    return success;
+}
+
+// wrappers
+
+inline
+bool
+nuts(
+    const ColVec_t& initial_vals, 
+    std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data)> target_log_kernel, 
+    Mat_t& draws_out, 
+    void* target_data
+)
+{
+    return internal::nuts_impl(initial_vals,target_log_kernel,draws_out,target_data,nullptr);
+}
+
+inline
+bool
+nuts(
+    const ColVec_t& initial_vals, 
+    std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data)> target_log_kernel, 
+    Mat_t& draws_out, 
+    void* target_data, 
+    algo_settings_t& settings
+)
+{
+    return internal::nuts_impl(initial_vals,target_log_kernel,draws_out,target_data,&settings);
+}
+
+#endif
