@@ -1829,6 +1829,7 @@ template OR the strict-N pattern with documented reason.
 class <ClassName> {
 public:
     <ClassName>(/* data + int rng_seed + bool keep_history = false */);
+    void                      step();                             // no-arg = 1 sweep; body is just `{ step(1); }`
     void                      step(int n_steps);                  // loops impl_->step(rng_) n_steps times
     AI4BayesCode::state_map   get_current() const;                // backend-neutral; Rcpp/pybind auto-convert
     void                      set_current(const AI4BayesCode::state_map& params);
@@ -2274,7 +2275,10 @@ alternates.
 RCPP_MODULE(<ClassName>_module) {
     Rcpp::class_<ClassName>("<ClassName>")
         .constructor<...args...>("<docstring>")
-        .method("step",         &ClassName::step)
+        // Rcpp modules IGNORE C++ default args, so expose step() and step(int) as
+        // two arity-dispatched overloads -> both `m$step()` and `m$step(n)` work.
+        .method("step", (void (ClassName::*)())    &ClassName::step)
+        .method("step", (void (ClassName::*)(int)) &ClassName::step)
         .method("get_current",  &ClassName::get_current)
         .method("set_current",  &ClassName::set_current)
         .method("predict_at",   &ClassName::predict_at)
@@ -2303,7 +2307,8 @@ PYBIND11_MODULE(<ClassName>, m) {
         .def(pybind11::init<...args...>(),
              pybind11::arg("arg1"), pybind11::arg("arg2") = default_val, ...,
              "<docstring>")
-        .def("step",         &ClassName::step, pybind11::arg("n_steps"))
+        .def("step", (void (ClassName::*)())    &ClassName::step)          // model.step() = 1 sweep
+        .def("step", (void (ClassName::*)(int)) &ClassName::step, pybind11::arg("n_steps"))
         .def("get_current",  &ClassName::get_current)
         .def("set_current",  &ClassName::set_current, pybind11::arg("params"))
         .def("predict_at",   &ClassName::predict_at, pybind11::arg("new_data"))

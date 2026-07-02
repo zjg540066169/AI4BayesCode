@@ -696,8 +696,16 @@ ai4bayescode_rhat_summary <- function(run, keys = NULL, drop_burn = 0,
         stop("posterior package required for R-hat summary")
     }
     histories <- run$histories
-    if (length(histories) < 2L) {
-        stop("need at least 2 chains for R-hat")
+    if (length(histories) < 1L) {
+        stop("run$histories is empty -- nothing to summarise")
+    }
+    if (length(histories) == 1L) {
+        # Single chain: posterior::rhat() splits the one chain in half and
+        # returns the rank-normalized SPLIT-R-hat (a valid within-chain
+        # convergence check). Between-chain R-hat needs >= 2 chains.
+        message("ai4bayescode_rhat_summary: only 1 chain -- reporting split-R-hat ",
+                "(each chain split in half); use >= 2 chains for the standard ",
+                "between-chain R-hat.")
     }
     all_keys <- names(histories[[1]])
     if (is.null(keys)) keys <- all_keys

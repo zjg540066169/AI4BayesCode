@@ -42,7 +42,12 @@
 //                       ensemble updates, refresh_derived_for() recomputes the
 //                       OTHER ensembles' working responses (wr_k) and the full
 //                       mean mu -- a deterministic systematic-scan Gibbs backfit.
-//      sigma          : positive nuts_block on the FULL residual y - mu.
+//      sigma          : OWNED by beta_0 (the unweighted intercept ensemble),
+//                       drawn each sweep by BART's calibrated conjugate Inv-Chi^2
+//                       whose residual is exactly y - mu; beta_1..p read it as
+//                       their weighted noise scale. No separate sigma block --
+//                       a NUTS-on-sigma freezes under the BART mean/noise
+//                       non-identifiability.
 //
 //  BACKEND-NEUTRAL DUAL MODULE
 //  ---------------------------
@@ -119,42 +124,8 @@ using AI4BayesCode::bart_block_config;
 
 namespace constraints = AI4BayesCode::constraints;
 
-namespace {
-
-// sigma | ... natural-scale log-density for the FULL VC-BART residual y - mu,
-// with BART's calibrated conjugate IG prior sigma^2 ~ IG(nu/2, nu*lambda/2).
-// Identical to the plain-BART case except the mean is the full VC mean `mu`
-// (a refresher-derived key = sum_j x_ij beta_j(Z_i)) instead of a single f_bart.
-double sigma_natural_log_density(const arma::vec& sigma_nat,
-                                 const block_context& ctx,
-                                 arma::vec* grad_nat) {
-    const double sigma  = sigma_nat[0];
-    const arma::vec& y  = ctx.at("y");
-    const arma::vec& mu = ctx.at("mu");
-    const double nu     = ctx.at("sigma_nu")[0];
-    const double lambda = ctx.at("sigma_lambda")[0];
-
-    const double sigma2 = sigma * sigma;
-    const double N      = static_cast<double>(y.n_elem);
-
-    double sum_sq = 0.0;
-    for (std::size_t i = 0; i < y.n_elem; ++i) {
-        const double r = y[i] - mu[i];
-        sum_sq += r * r;
-    }
-
-    const double rate = sum_sq + nu * lambda;
-    const double lp   = -(N + nu + 1.0) * std::log(sigma)
-                        - 0.5 * rate / sigma2;
-
-    if (grad_nat) {
-        grad_nat->set_size(1);
-        (*grad_nat)[0] = -(N + nu + 1.0) / sigma + rate / (sigma2 * sigma);
-    }
-    return lp;
-}
-
-} // anonymous namespace
+// (sigma is drawn by beta_0's BART kernel via its conjugate Inv-Chi^2; there is
+//  no hand-written sigma log-density any more.)
 
 // ============================================================================
 //  User-facing class. Backend-neutral: arma containers, state_map/history_map.
@@ -240,14 +211,22 @@ public:
                     return wr;
                 });
 
-            // bart_block context = its working response, weights, and sigma.
-            impl_->data().declare_dependencies(bj, {wrj, wj, "sigma"});
+            // beta_0 is the intercept (x_i0 == 1): UNWEIGHTED, and it OWNS the
+            // shared sigma -- it draws sigma internally via BART's calibrated
+            // conjugate Inv-Chi^2 (BartNoise's native path), and its residual is
+            // exactly the full VC-BART residual y - mu. beta_1..p are weighted
+            // (w_i = 1/|x_ij|) and READ that sigma. Using BART's conjugate draw
+            // (not a nuts_block on sigma) avoids the BART mean/noise non-
+            // identifiability that freezes a NUTS-on-sigma.
+            if (j == 0) impl_->data().declare_dependencies(bj, {wrj});
+            else        impl_->data().declare_dependencies(bj, {wrj, wj, "sigma"});
             // When beta_j updates, every OTHER ensemble's working response is
             // stale, and so is the full mean mu. Refresh them (systematic-scan
-            // Gibbs backfitting).
+            // Gibbs backfitting). beta_0 also re-publishes the sigma it just drew.
             std::vector<std::string> inval;
             for (int kk = 0; kk < J; ++kk) if (kk != j) inval.push_back(wr_key(kk));
             inval.push_back("mu");
+            if (j == 0) inval.push_back("sigma");
             impl_->data().declare_invalidates(bj, inval);
 
             bart_block_config bc;
@@ -255,8 +234,10 @@ public:
             bc.x_train              = Z;              // ensembles are BARTs over Z
             bc.y_init               = wr0;            // for the leaf-scale prior
             bc.working_response_key = wrj;
-            bc.weights_key          = wj;             // <- the x_ij scaling
-            bc.sigma_key            = "sigma";
+            // beta_0: unweighted + draws sigma internally (empty sigma_key).
+            // beta_1..p: weighted by 1/|x_ij|, reading the shared sigma.
+            bc.weights_key          = (j == 0) ? std::string() : wj;
+            bc.sigma_key            = (j == 0) ? std::string() : std::string("sigma");
             bc.ntrees               = ntrees;
             bc.k                    = k;
             bc.power                = power;
@@ -281,43 +262,27 @@ public:
                 return mu;
             });
 
-        // ---- Calibrated IG prior for sigma (BART::wbart default) -------------
-        impl_->data().set("sigma", arma::vec{arma::stddev(y)});
+        // ---- Shared sigma is OWNED by beta_0 (child 0) ----------------------
+        // beta_0 draws sigma each sweep via BART's calibrated conjugate Inv-Chi^2
+        // (nu passed through to its bart_model). A refresher publishes beta_0's
+        // current sigma to the "sigma" key so beta_1..p (weighted) read it.
+        impl_->data().set("sigma",
+            arma::vec{dynamic_cast<bart_block&>(impl_->child(0)).current_sigma()});
         {
-            auto& b0 = dynamic_cast<bart_block&>(impl_->child(0));
-            const double sigest = b0.current_sigma();
-            impl_->data().set("sigma", arma::vec{sigest});
-            const double qchi   = R::qchisq(0.1, nu, /*lower.tail=*/1, /*log.p=*/0);
-            const double lambda = sigest * sigest * qchi / nu;
-            impl_->data().set("sigma_nu",     arma::vec{nu});
-            impl_->data().set("sigma_lambda", arma::vec{lambda});
+            composite_block* comp = impl_.get();
+            impl_->data().register_refresher(
+                "sigma",
+                [comp](const AI4BayesCode::shared_data_t&) -> arma::vec {
+                    return arma::vec{
+                        dynamic_cast<bart_block&>(comp->child(0)).current_sigma()};
+                });
         }
 
         // Prime all derived keys (wr_j, mu) before the first sweep.
         impl_->data().refresh_all();
 
-        // ---- sigma block: positive NUTS on the full residual y - mu ----------
-        const double sigest_for_nuts =
-            dynamic_cast<bart_block&>(impl_->child(0)).current_sigma();
-        nuts_block_config sg;
-        sg.name        = "sigma";
-        sg.initial_unc = arma::vec{std::log(sigest_for_nuts)};
-        sg.constrain   = constraints::positive::constrain;
-        sg.unconstrain = constraints::positive::unconstrain;
-        sg.log_density_grad =
-            [](const arma::vec& theta_unc, const block_context& ctx,
-               arma::vec* grad) {
-                return constraints::positive::wrap(
-                    theta_unc, grad,
-                    [&](const arma::vec& sigma_nat, arma::vec* grad_nat) {
-                        return sigma_natural_log_density(sigma_nat, ctx, grad_nat);
-                    });
-            };
-        sg.nuts_settings.nuts_settings.max_tree_depth     = 6;
-        sg.nuts_settings.nuts_settings.target_accept_rate = 0.8;
-        impl_->data().declare_dependencies(
-            "sigma", {"y", "mu", "sigma_nu", "sigma_lambda"});
-        impl_->add_child(std::make_unique<nuts_block>(std::move(sg)));
+        // sigma is drawn by beta_0 (child 0) via BART's internal conjugate
+        // Inv-Chi^2 -- there is NO separate sigma block (see the ensemble loop).
 
         // ---- predict DAG (generative direction) ------------------------------
         impl_->data().declare_data_input("X");
@@ -333,8 +298,16 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg: one sweep (Rcpp/pybind default)
     void step(int n_steps) {
-        for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
+        for (int i = 0; i < n_steps; ++i) {
+            impl_->step(rng_);
+            // sigma is a refresher-derived key (drawn by beta_0), NOT a child
+            // block, so the composite does not record it -- buffer it here so
+            // get_history() can surface the sigma chain for diagnostics.
+            if (keep_history_)
+                sigma_hist_.push_back(impl_->data().get("sigma")[0]);
+        }
     }
 
     // Current draw: each coefficient function at the training Z, the full mean
@@ -388,7 +361,15 @@ public:
     }
 
     AI4BayesCode::dag_info    get_dag()     const { return impl_->get_dag(); }
-    AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
+    AI4BayesCode::history_map get_history() const {
+        AI4BayesCode::history_map h = impl_->get_history();
+        if (!sigma_hist_.empty()) {
+            arma::mat sm(sigma_hist_.size(), 1);
+            for (std::size_t i = 0; i < sigma_hist_.size(); ++i) sm(i, 0) = sigma_hist_[i];
+            h["sigma"] = sm;
+        }
+        return h;
+    }
 
     void readapt_NUTS(int n, bool reset = false) {
         if (n < 0) ai4b::stop("readapt_NUTS: n must be non-negative");
@@ -411,6 +392,7 @@ private:
     int  z_ncol_;
     bool keep_history_;
     std::shared_ptr<std::vector<arma::vec>> xcols_;
+    std::vector<double> sigma_hist_;   // per-sweep sigma (recorded when keep_history_)
 };
 
 // ============================================================================
@@ -430,7 +412,8 @@ RCPP_MODULE(VCBart_module) {
             "0.95), nu (sigma prior df, default 3), numcut (cutpoints per var, "
             "default 100), seed (RNG seed, 0 = random), keep_history (record "
             "per-step buffers; cheap; default FALSE).")
-        .method("step",         &VCBart::step,        "Run n Gibbs backfitting sweeps.")
+        .method("step", (void (VCBart::*)())    &VCBart::step, "Run one Gibbs backfitting sweep.")
+        .method("step", (void (VCBart::*)(int)) &VCBart::step, "Run n Gibbs backfitting sweeps.")
         .method("get_current",  &VCBart::get_current,
                 "Named list: $beta_0..$beta_p (coefficient functions at the "
                 "training Z), $mu (full mean), $sigma.")
@@ -467,7 +450,8 @@ PYBIND11_MODULE(VCBart, m) {
              pybind11::arg("numcut")       = 100,
              pybind11::arg("rng_seed")     = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",         &VCBart::step, pybind11::arg("n_steps"))
+        .def("step", (void (VCBart::*)())    &VCBart::step, "Run one Gibbs backfitting sweep.")
+        .def("step", (void (VCBart::*)(int)) &VCBart::step, pybind11::arg("n_steps"))
         .def("get_current",  &VCBart::get_current)
         .def("set_current",  &VCBart::set_current, pybind11::arg("params"))
         .def("predict_at",   &VCBart::predict_at, pybind11::arg("new_data"))
