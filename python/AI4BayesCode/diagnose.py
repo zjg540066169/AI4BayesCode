@@ -71,6 +71,15 @@ def _label_switch_scan(hist, hi=1.05, drop=0.1):
     return out
 
 
+class _SummaryDict(dict):
+    """A dict that also carries an ``.attrs`` mapping (parity with
+    ``pandas.DataFrame.attrs``), so ``ai4b_diagnose`` can expose ``label_switch``
+    even when pandas is unavailable and the summary is a plain dict of dicts."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.attrs = {}
+
+
 def ai4b_diagnose(hist, n_burn=0, plot=True, order_components=False):
     """Compute draws-only diagnostics and a trace / ACF / density plot.
 
@@ -117,10 +126,13 @@ def ai4b_diagnose(hist, n_burn=0, plot=True, order_components=False):
     rows = {nm: posterior_summary(v) for nm, v in cols.items()}
     try:
         import pandas as pd
-        summary = pd.DataFrame(rows).T
-        summary.attrs["label_switch"] = label_switch
+        summary = pd.DataFrame(rows).T          # DataFrame already carries .attrs
     except Exception:
-        summary = rows  # dict of dicts when pandas is unavailable
+        summary = _SummaryDict(rows)            # dict-of-dicts + an .attrs mapping
+    # Expose label switching the SAME way with or without pandas (parity with the
+    # R ai4b_diagnose()$label_switch): attach it to summary.attrs so callers can
+    # read it even when pandas is absent (a bare dict would otherwise drop it).
+    summary.attrs["label_switch"] = label_switch
 
     plot_fn = None
     if plot:
