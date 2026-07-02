@@ -107,6 +107,11 @@ def diagnose(hist, n_burn=0, plot=True, order_components=False):
         or matplotlib is not installed.
     """
     hb = {nm: np.asarray(x)[n_burn:] for nm, x in hist.items()}
+    _lens = [np.asarray(v).shape[0] for v in hb.values()]
+    if _lens and min(_lens) == 0:
+        raise ValueError(
+            f"diagnose: n_burn={n_burn} leaves no post-burn-in draws "
+            f"(the shortest history key has <= {n_burn} draws). Reduce n_burn.")
     # Detect label switching on the RAW draws (before any ordering).
     label_switch = _label_switch_scan(hb)
     if label_switch and not order_components:

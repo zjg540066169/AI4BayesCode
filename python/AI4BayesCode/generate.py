@@ -1052,8 +1052,9 @@ def _anthropic_turn(system, msgs, *, call, ask, verbose=False, max_subturns=30):
         results = []
         for t in tus:
             if t.get("name") == "ask_user":
-                q = t["input"]["question"]
-                opts = t["input"].get("options")
+                inp = t.get("input") or {}
+                q = inp.get("question", "")
+                opts = inp.get("options")
                 if verbose:
                     # The console ask() already echoes the question, so printing it
                     # here too would double the prompt -- just announce the ask.
@@ -1084,13 +1085,15 @@ def _write_emitted(txt, output_path, classname):
     for blk in _extract_code(txt):
         path = blk["path"]
         if path is None:
+            # no explicit filename: derive one from the code content
             if any(k in blk["code"] for k in ("PYBIND11_MODULE", "RCPP_MODULE", "#include")):
-                path = str(out / f"{classname}.cpp")
+                pp = out / f"{classname}.cpp"
             else:
                 continue
-        pp = Path(path)
-        if not pp.is_absolute() and not str(pp).startswith("."):
-            pp = out / pp.name
+        else:
+            # model-provided filename: confine to output_path via .name --
+            # never honor an absolute path or a ".." that would escape the dir.
+            pp = out / Path(path).name
         pp.parent.mkdir(parents=True, exist_ok=True)
         pp.write_text(blk["code"])
         files.append(str(pp))

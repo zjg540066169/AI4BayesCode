@@ -85,6 +85,7 @@ ai4bayescode_plot_dag <- function(model,
     }
 
     data_inputs <- as.character(dag$data_inputs)
+    data_inputs <- data_inputs[!is.na(data_inputs) & nzchar(data_inputs)]
 
     # --- Collect edges (by type) --------------------------------------------
     collect_edges <- function(spec, type) {
@@ -125,7 +126,15 @@ ai4bayescode_plot_dag <- function(model,
 
     all_edges <- rbind(gibbs_reads_edges, refresh_edges,
                        predict_edges, context_edges)
+    # Drop any edge with a missing/empty endpoint. A malformed DAG export
+    # (e.g. an NA/"" node name) must not crash rendering with "missing value
+    # where TRUE/FALSE needed" at the plate-detection any(), nor trip
+    # graph_from_data_frame() with an unlisted vertex name.
+    ok_edge <- !is.na(all_edges$from) & nzchar(all_edges$from) &
+               !is.na(all_edges$to)   & nzchar(all_edges$to)
+    all_edges <- all_edges[ok_edge, , drop = FALSE]
     all_nodes <- unique(c(all_edges$from, all_edges$to, data_inputs))
+    all_nodes <- all_nodes[!is.na(all_nodes) & nzchar(all_nodes)]
 
     if (length(all_nodes) == 0) {
         if (is.null(out_path)) {
@@ -179,6 +188,19 @@ ai4bayescode_plot_dag <- function(model,
                               all_edges$from, all_edges$to))
         # rewrite data_inputs by the same mapping
         data_inputs <- unique(vapply(data_inputs, collapse, character(1)))
+        # Keep the STANDALONE context_edges table (used by the layout code
+        # below) consistent with the collapsed graph. Without this, a context
+        # edge onto a plate member -- e.g. `BART -> beta_2` while beta_0/1/2
+        # collapse to a single `beta_i` node -- can no longer find its target,
+        # so ctx_tgts() returns nothing and the layout computes
+        # mean(numeric(0)) = NaN, which crashes downstream with "missing value
+        # where TRUE/FALSE needed". (This is the VaryingCoefBART trigger.)
+        if (nrow(context_edges) > 0L) {
+            context_edges$from <- vapply(context_edges$from, collapse, character(1))
+            context_edges$to   <- vapply(context_edges$to,   collapse, character(1))
+            context_edges <- unique(
+                context_edges[context_edges$from != context_edges$to, , drop = FALSE])
+        }
     }
 
     g <- igraph::graph_from_data_frame(
@@ -293,7 +315,11 @@ ai4bayescode_plot_dag <- function(model,
                 nodes_d <- names(depth)[depth == d]
                 for (cn in nodes_d) {
                     tg <- ctx_tgts(cn)
-                    layout[idx_of[cn], 1] <- mean(layout[idx_of[tg], 1])
+                    # If a context node's targets are absent (e.g. mismatch
+                    # after a collapse), keep its existing x rather than
+                    # mean(numeric(0)) = NaN, which would crash rendering.
+                    xs <- layout[idx_of[tg], 1]
+                    if (length(xs)) layout[idx_of[cn], 1] <- mean(xs)
                     layout[idx_of[cn], 2] <- pred_y_top + d * row_gap
                 }
                 # spread same-anchor siblings on this shelf

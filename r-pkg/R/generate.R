@@ -224,7 +224,11 @@ if (backend %in% c("Python","both"))
 .ai4b_validate <- function(cpp_path, runner_path, classname, verbose = FALSE) {
     # ---- 1. compile ----
     comp <- tryCatch({
-        ai4bayescode_source(cpp_path, env = new.env()); NULL
+        # Compile into a THROWAWAY env just to prove it builds -- pass quiet=TRUE
+        # so the "Loaded '<Class>' -- run ai4bayescode_doc(<Class>)" hint is NOT
+        # printed here (that env is discarded; the promise would be a lie). The
+        # real load into the caller's session happens on success in generate().
+        ai4bayescode_source(cpp_path, env = new.env(), quiet = TRUE); NULL
     }, error = function(e) conditionMessage(e))
     if (!is.null(comp)) {
         if (verbose) message("  [validate] compile failed")
@@ -1308,11 +1312,16 @@ ai4bayescode_stream_check <- function(LLM = "claude-opus-4-8", API_key = NULL,
     files <- character(0); cpp_path <- NA_character_
     for (blk in .ai4b_extract_code(txt)) {
         path <- blk$path
-        if (is.na(path))
-            path <- if (grepl("RCPP_MODULE|PYBIND11_MODULE|#include", blk$code))
-                file.path(output_path, paste0(classname, ".cpp")) else NA
-        if (is.na(path)) next
-        if (!grepl("^(/|\\.)", path)) path <- file.path(output_path, basename(path))
+        if (is.na(path)) {
+            # no explicit filename: derive one from the code content
+            if (grepl("RCPP_MODULE|PYBIND11_MODULE|#include", blk$code))
+                path <- file.path(output_path, paste0(classname, ".cpp"))
+            else next
+        } else {
+            # model-provided filename: confine to output_path via basename() —
+            # never honor an absolute path or a ".." that would escape the dir.
+            path <- file.path(output_path, basename(path))
+        }
         dir.create(dirname(path), showWarnings = FALSE, recursive = TRUE)
         writeLines(blk$code, path)
         files <- c(files, path)
@@ -1424,6 +1433,10 @@ ai4bayescode_generate <- function(model_description = NULL,
     dots   <- list(...)
     ask    <- if (!is.null(dots$.ask)) dots$.ask else .ai4b_console_ask
     responder <- dots$.responder    # injectable transport for offline testing
+    # Environment to load the validated model into on success, so the promised
+    # `ai4bayescode_doc(<Class>)` / `new(<Class>, ...)` actually resolve in the
+    # user's session (validation itself compiles into a throwaway env).
+    caller_env <- parent.frame()
 
     llm <- .ai4b_resolve_llm(LLM)
 
@@ -1624,6 +1637,18 @@ ai4bayescode_generate <- function(model_description = NULL,
         result <- validate_fn(em$cpp_path, em$runner_path, classname, verbose)
         if (isTRUE(result$ok)) {
             if (verbose) message("Attempt ", attempt, ": validation PASSED.")
+            # Load the validated model into the CALLER's environment so the
+            # class name is actually defined in their session (validation only
+            # compiled it into a throwaway env). The build is cached by
+            # Rcpp::sourceCpp (same code + flags), so this is a fast re-load,
+            # NOT a recompile. This is what prints the truthful
+            # "Loaded '<Class>' -- run ai4bayescode_doc(<Class>)" hint.
+            tryCatch(
+                ai4bayescode_source(em$cpp_path, env = caller_env),
+                error = function(e) if (verbose) message(
+                    "  (compiled + validated, but could not auto-load into your ",
+                    "session -- run  ai4bayescode_source(\"", em$cpp_path,
+                    "\")  manually: ", conditionMessage(e), ")"))
             break
         }
         if (attempt >= max_attempts) {

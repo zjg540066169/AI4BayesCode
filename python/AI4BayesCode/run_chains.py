@@ -38,17 +38,26 @@ def _chain_worker(factory: Callable[[int], Any], seed: int,
                   history_keys: Optional[list[str]] = None) -> dict:
     """Run one chain. This is called in a fresh subprocess."""
     t0 = time.time()
-    m = factory(seed)
-    # Some models have step(n) that returns None; we just call and discard.
-    if n_burn > 0:
-        m.step(int(n_burn))
-    if n_keep > 0:
-        m.step(int(n_keep))
-    wall = time.time() - t0
-    hist = m.get_history() if hasattr(m, "get_history") else None
-    if history_keys is not None and hist is not None:
-        hist = {k: hist[k] for k in history_keys if k in hist}
-    return {"seed": seed, "wall": wall, "hist": hist}
+    try:
+        m = factory(seed)
+        # Some models have step(n) that returns None; we just call and discard.
+        if n_burn > 0:
+            m.step(int(n_burn))
+        if n_keep > 0:
+            m.step(int(n_keep))
+        wall = time.time() - t0
+        hist = m.get_history() if hasattr(m, "get_history") else None
+        if history_keys is not None and hist is not None:
+            hist = {k: hist[k] for k in history_keys if k in hist}
+        return {"seed": seed, "wall": wall, "hist": hist}
+    except Exception as e:  # noqa: BLE001
+        # Mirror R's ai4bayescode_run_chains: one failing chain must not take
+        # down the whole run. Warn loudly and return a marked-failed result
+        # (hist=None + "error") so the successful chains stay usable.
+        import warnings
+        warnings.warn(f"run_chains: chain seed={seed} failed: {e}")
+        return {"seed": seed, "wall": time.time() - t0, "hist": None,
+                "error": str(e)}
 
 
 def run_chains(
@@ -91,6 +100,8 @@ def run_chains(
     list of dicts, one per chain: `{"seed", "wall", "hist"}`.
     """
     seeds = list(seeds)
+    if not seeds:
+        return []
     if n_jobs is None:
         n_jobs = min(len(seeds), os.cpu_count() or 1)
 

@@ -53,6 +53,8 @@ def rhat(samples: np.ndarray) -> float:
     traditionally flagged as a concern.
     """
     x = _as_2d(samples)
+    if x.shape[0] < 4:            # too few draws for a meaningful split-R-hat
+        return float("nan")
     x = _split_chains(x)
     n, m = x.shape
     chain_means = x.mean(axis=0)
@@ -86,6 +88,8 @@ def ess_bulk(samples: np.ndarray) -> float:
     samples : array shape (n_draws,) or (n_draws, n_chains)
     """
     x = _as_2d(samples)
+    if x.shape[0] < 4:            # too few draws for a meaningful split-ESS
+        return float("nan")
     x = _split_chains(x)  # split-ESS (Vehtari 2021); also makes a single
                           # chain well-defined (m becomes 2, not 1)
     n, m = x.shape
