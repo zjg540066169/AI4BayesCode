@@ -225,14 +225,27 @@ if (backend %in% c("Python","both"))
     # `ai4bayescode_sourceCpp("<Class>.cpp")` (the start.md convention), so it must
     # execute with the .cpp in its working dir or it errors "... does not exist"
     # (which the sentinel logic below would otherwise mislabel a "runtime crash").
+    # Use the ABSOLUTE Rscript from this R's own install -- bare "Rscript" relies
+    # on the PATH, which is minimal in RStudio / R.app / cron (Rscript not found
+    # there), so the runner would silently never start and the sentinel below
+    # would mislabel it "incomplete". R.home("bin")/Rscript always exists.
+    rscript <- file.path(R.home("bin"),
+                         if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript")
+    if (!file.exists(rscript)) rscript <- Sys.which("Rscript")   # last-resort PATH lookup
     owd <- getwd()
     out <- tryCatch({
         setwd(dirname(runner_path))
-        suppressWarnings(system2("Rscript", shQuote(runner_path),
+        suppressWarnings(system2(rscript, shQuote(runner_path),
                                  stdout = TRUE, stderr = TRUE))
     }, error = function(e) paste("runner error:", conditionMessage(e)))
     setwd(owd)
     out_txt <- paste(out, collapse = "\n")
+    # A failed launch (e.g. Rscript not found -> empty output, non-zero status)
+    # is NOT convergence "incomplete"; surface it so the repair loop / user see it.
+    st <- attr(out, "status")
+    if (!nzchar(trimws(out_txt)) && !is.null(st) && st != 0L)
+        out_txt <- paste0("runner error: Rscript exited with status ", st,
+                          " and produced no output (could not launch the runner).")
 
     # ---- 4. convergence sentinel ----
     if (grepl("AI4BAYES_VALIDATE:\\s*PASS", out_txt)) {
@@ -248,7 +261,7 @@ if (backend %in% c("Python","both"))
         if (verbose) message("  [validate] ran but did not converge")
         return(list(ok = FALSE, stage = "convergence", detail = detail))
     }
-    if (grepl("Execution halted|Error in |Error:|Segmentation fault|terminate called|Abort trap|Traceback \\(most recent",
+    if (grepl("Execution halted|Error in |Error:|Segmentation fault|terminate called|Abort trap|Traceback \\(most recent|runner error",
               out_txt)) {                                     # compiled but crashed at RUNTIME
         if (verbose) message("  [validate] runner crashed at runtime")
         return(list(ok = FALSE, stage = "runtime", detail = detail))
@@ -277,7 +290,11 @@ if (backend %in% c("Python","both"))
     hint <- switch(result$stage %||% "",
         compile     = "The C++ did NOT COMPILE. Fix the compile error below.",
         runtime     = "The sampler COMPILED but the runner CRASHED at RUNTIME -- this is NOT a convergence problem; fix the C++/runner bug below.",
-        incomplete  = "The runner did NOT reach the `AI4BAYES_VALIDATE` line (it stopped early) -- find why it never finished.",
+        incomplete  = paste0("The runner file WAS written and executed, but its output did not ",
+                             "contain the `AI4BAYES_VALIDATE` line. This is NOT a file-path / `// path:` / fence problem ",
+                             "(the runner was found and run) -- do NOT change the markers. Find why the runner did not ",
+                             "run to its final `cat(\"AI4BAYES_VALIDATE: ...\")`: an earlier crash, a hang, or (if the ",
+                             "detail below is EMPTY) the runner subprocess could not start in this environment."),
         convergence = "The runner ran to completion but rank-R-hat was too high (true non-convergence) -- fix the sampler/model.",
         "The generated sampler did not pass automated validation.")
     paste0(
