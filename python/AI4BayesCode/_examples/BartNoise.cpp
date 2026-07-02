@@ -63,10 +63,10 @@
 //   f <- sin(3 * X[, 1]) + 0.5 * X[, 2]^2 - X[, 3]        # smooth low-dim mean
 //   y <- f + rnorm(N, 0, 0.5)                             # y ~ N(f, sigma_true^2), sigma_true = 0.5
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(BartNoise, X, y, 50L, 2.0, 2.0, 0.95, 3.0, 100L, FALSE, FALSE, seed, FALSE, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(BartNoise, X, y, 50L, 2.0, 2.0, 0.95, 3.0, 100L, FALSE, FALSE, 42L)
 //                                                          # ntrees=50,k=2,power=2,base=.95,nu=3,numcut=100,dart=F,aug=F,seed=42
@@ -264,7 +264,7 @@ public:
         //      (calibrated): sigma_nu / sigma_lambda are sigma's prior
         //      parents. The BART forest is itself a sampled generative
         //      parent of f_bart alongside X (cf. MetaRegBartSpline). All
-        //      drawn faded by plot_dag.
+        //      drawn faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("sigma_nu",     {"sigma"});
         impl_->data().declare_context_edges("sigma_lambda", {"sigma"});
         impl_->data().declare_context_edges("BART",         {"f_bart"});

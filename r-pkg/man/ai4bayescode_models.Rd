@@ -2,12 +2,9 @@
 % Please edit documentation in R/generate.R
 \name{ai4bayescode_models}
 \alias{ai4bayescode_models}
-\alias{ai4bayes_models}
 \title{Supported LLMs for ai4bayescode_generate()}
 \usage{
 ai4bayescode_models()
-
-ai4bayes_models()
 }
 \value{
 A data.frame with `name`, `provider`, `model_id`, `implemented`, and

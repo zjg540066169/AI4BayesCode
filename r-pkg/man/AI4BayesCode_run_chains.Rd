@@ -2,21 +2,9 @@
 % Please edit documentation in R/helpers.R
 \name{ai4bayescode_run_chains}
 \alias{ai4bayescode_run_chains}
-\alias{AI4BayesCode_run_chains}
 \title{Run multiple MCMC chains for an AI4BayesCode wrapper class}
 \usage{
 ai4bayescode_run_chains(
-  model_ctor,
-  n_chains = 4,
-  n_burn = 2000,
-  n_keep = 10000,
-  seeds = NULL,
-  parallel = TRUE,
-  mc.cores = NULL,
-  verbose = TRUE
-)
-
-AI4BayesCode_run_chains(
   model_ctor,
   n_chains = 4,
   n_burn = 2000,

@@ -66,10 +66,10 @@
 //   Bsp <- outer(x, knots, function(a,b) pmax(a-b, 0))         # truncated-power basis (N x K_s)
 //   y <- 0.4*sin(8*x) + 0.2*x^2 + rnorm(N, 0, 0.3)             # smooth(x) + N(0,0.3)
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(BSplineRegression, y, Bsp, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(BSplineRegression, y, Bsp, 7L, TRUE)              # y, basis, seed, keep_history
 //   m$step(2500); str(m$get_current())

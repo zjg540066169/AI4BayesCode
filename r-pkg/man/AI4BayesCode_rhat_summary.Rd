@@ -2,17 +2,9 @@
 % Please edit documentation in R/helpers.R
 \name{ai4bayescode_rhat_summary}
 \alias{ai4bayescode_rhat_summary}
-\alias{AI4BayesCode_rhat_summary}
 \title{R-hat / ESS summary across chains}
 \usage{
 ai4bayescode_rhat_summary(
-  run,
-  keys = NULL,
-  drop_burn = 0,
-  order_components = FALSE
-)
-
-AI4BayesCode_rhat_summary(
   run,
   keys = NULL,
   drop_burn = 0,

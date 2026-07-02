@@ -61,10 +61,10 @@
 //   node<-rep(1:N, each=5L)                                             # 5 replicate obs/node -> identifies sigma
 //   set.seed(20260621); y<-4.0+phi[node]+rnorm(N*5L,0,0.5)             # Intercept=4, sigma=0.5
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(ICARSpatialGMRF, y, node, N, ei, ej, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m<-new(ICARSpatialGMRF, y, node, N, ei, ej, 7L, TRUE)             # y,node_idx,N,edge_i,edge_j,seed,keep_hist
 //   m$step(2500); str(m$get_current())

@@ -1,6 +1,6 @@
 """Visualize the model PREDICTION DAG with networkx + matplotlib.
 
-Python analogue of the R helper's `plot_dag(model)`. Renders ONLY
+Python analogue of the R helper's `ai4bayescode_plot_dag(model)`. Renders ONLY
 the prediction DAG (generative / causal direction), per
 codegen.md §2(b). Gibbs / refresh edges are intentionally hidden —
 those are the internal full-conditional graph and confuse users who
@@ -86,7 +86,7 @@ def _collapse_plates(edges: list, data_inputs: list) -> tuple[list, list, dict]:
     return new_edges, new_data_inputs, plate_sizes
 
 
-def plot_dag(
+def ai4bayescode_plot_dag(
     model: Any,
     *,
     out_path: Optional[str | Path] = None,
@@ -119,7 +119,7 @@ def plot_dag(
         import matplotlib.pyplot as plt
     except ImportError as e:
         raise ImportError(
-            "plot_dag requires networkx and matplotlib.\n"
+            "ai4bayescode_plot_dag requires networkx and matplotlib.\n"
             "Install with: pip install networkx matplotlib"
         ) from e
 

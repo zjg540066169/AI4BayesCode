@@ -2,21 +2,9 @@
 % Please edit documentation in R/helpers.R
 \name{ai4bayescode_plot_dag}
 \alias{ai4bayescode_plot_dag}
-\alias{plot_dag}
 \title{Render the model prediction (generative) DAG}
 \usage{
 ai4bayescode_plot_dag(
-  model,
-  out_path = NULL,
-  main = NULL,
-  width = 1600,
-  height = 1100,
-  res = 150,
-  plate = TRUE,
-  ...
-)
-
-plot_dag(
   model,
   out_path = NULL,
   main = NULL,

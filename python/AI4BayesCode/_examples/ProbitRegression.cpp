@@ -60,10 +60,10 @@
 //   eta <- as.numeric(X %*% beta_true)
 //   y <- as.numeric(runif(N) < pnorm(eta))   # y ~ Bernoulli(Phi(X beta))
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(ProbitRegression, X, y, 10, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(ProbitRegression, X, y, 10, 7L, TRUE)  # X, y, prior_sd, seed, keep_history
 //   m$step(2500); str(m$get_current())
@@ -297,7 +297,7 @@ public:
         //      reads context_edges_). beta ~ N(0, prior_sd^2 I): the
         //      prior sd is beta's prior parent. (Albert-Chib z is a
         //      sampling-augmentation latent, not a generative node.)
-        //      Drawn faded by plot_dag.
+        //      Drawn faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("prior_sd", {"beta"});
         impl_->data().set("y_rep", arma::vec(N_, arma::fill::zeros));
         impl_->data().register_stochastic_refresher(

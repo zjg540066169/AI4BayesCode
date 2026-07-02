@@ -2,30 +2,9 @@
 % Please edit documentation in R/generate.R
 \name{ai4bayescode_generate}
 \alias{ai4bayescode_generate}
-\alias{ai4bayes_generate}
 \title{Generate a validated AI4BayesCode sampler from a natural-language description}
 \usage{
 ai4bayescode_generate(
-  model_description = NULL,
-  classname = NULL,
-  LLM = "claude-opus-4-8",
-  effort = "high",
-  output_path = "./generated",
-  backend = NULL,
-  API_key = NULL,
-  interactive = base::interactive(),
-  use_cli = FALSE,
-  max_attempts = 5L,
-  priors = NULL,
-  confirm_model = NULL,
-  max_tokens = NULL,
-  timeout = 600,
-  verbose = TRUE,
-  verify_stream = TRUE,
-  ...
-)
-
-ai4bayes_generate(
   model_description = NULL,
   classname = NULL,
   LLM = "claude-opus-4-8",

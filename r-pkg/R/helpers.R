@@ -14,7 +14,7 @@
 #   * ai4bayescode_rhat_summary() -- R-hat / ESS summary across chains.
 #
 # Ported verbatim (behavior-preserving) from the standalone scripts
-# AI4BayesCode/R/AI4BayesCode_helpers.R and AI4BayesCode/R/AI4BayesCode_run_chains.R
+# AI4BayesCode/R/AI4BayesCode_helpers.R and AI4BayesCode/R/ai4bayescode_run_chains.R
 # so that `library(AI4BayesCode)` provides them too.
 # ----------------------------------------------------------------------------
 
@@ -741,26 +741,3 @@ ai4bayescode_rhat_summary <- function(run, keys = NULL, drop_burn = 0,
 }
 
 
-# ---- Back-compat aliases -----------------------------------------------------
-# Deprecated spellings kept so existing user scripts keep working. The canonical
-# public names are the ai4bayescode_* forms defined above.
-
-#' @rdname ai4bayescode_run_chains
-#' @export
-AI4BayesCode_run_chains <- ai4bayescode_run_chains
-
-#' @rdname ai4bayescode_perf_hint
-#' @export
-AI4BayesCode_perf_hint <- ai4bayescode_perf_hint
-
-#' @rdname ai4bayescode_rhat_summary
-#' @export
-AI4BayesCode_rhat_summary <- ai4bayescode_rhat_summary
-
-#' @rdname ai4bayescode_diagnose
-#' @export
-ai4b_diagnose <- ai4bayescode_diagnose
-
-#' @rdname ai4bayescode_plot_dag
-#' @export
-plot_dag <- ai4bayescode_plot_dag

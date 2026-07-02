@@ -484,7 +484,7 @@ public:
      *                      prediction inputs via declare_data_input().
      *
      * Together these describe the complete parameter-structure graph.
-     * R-level tools (plot_dag, etc.) render them as distinct but
+     * R-level tools (ai4bayescode_plot_dag, etc.) render them as distinct but
      * coexisting layers.
      */
     dag_info get_dag() const {

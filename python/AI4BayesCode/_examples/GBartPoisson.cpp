@@ -68,10 +68,10 @@
 //   r <- 0.8 * sin(2 * X[,1]) + 0.6 * X[,2] - 0.4 * X[,3]# true log-rate surface
 //   y <- rpois(N, exp(r))                                # y ~ Poisson(exp(r))
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(GBartPoisson, X, y, 50L, seed, FALSE, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GBartPoisson, X, y, 50L, 42L, TRUE)         # X, y, ntrees, seed, keep_tree
 //   m$step(2000); str(m$get_current())                  # $r (log rate), $rate=exp(r)

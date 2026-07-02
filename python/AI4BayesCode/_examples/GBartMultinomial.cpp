@@ -82,10 +82,10 @@
 //   E  <- cbind(1, exp(r1), exp(r2)); P <- E / rowSums(E)   # softmax(0,r1,r2)
 //   y  <- apply(P, 1L, function(p) sample.int(3L, 1L, prob = p)) - 1L  # 0..2
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(GBartMultinomial, X, as.numeric(y), 3L, 50L, seed, FALSE, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m  <- new(GBartMultinomial, X, as.numeric(y), 3L, 50L, 42L, TRUE)
 //   #          X,    y,         C,  ntrees, seed, keep_history
@@ -296,7 +296,7 @@ public:
         //      reads context_edges_). Each r_j ~ independent
         //      generalized-BART prior: the shared genBART forest is a
         //      sampled generative parent of every r_j alongside X. Drawn
-        //      faded by plot_dag.
+        //      faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("genBART", r_all);
 
         // Deterministic refresher: probs = softmax(0, r_1, ..., r_{C-1}).

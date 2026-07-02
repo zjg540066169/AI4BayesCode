@@ -84,10 +84,10 @@
 //   Y     <- matrix(as.numeric(runif(N * J) < 1 / (1 + exp(-eta))), N, J)  # Bernoulli responses
 //   # ctor: Y (N x J), theta_init (len N), b_init (len J), sigma_b_init (>0), seed, keep_history
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(IRT1PL_joint, Y, numeric(N), numeric(J), 1.0, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(IRT1PL_joint, Y, numeric(N), numeric(J), 1.0, 7L, TRUE)
 //   m$step(2500); str(m$get_current())

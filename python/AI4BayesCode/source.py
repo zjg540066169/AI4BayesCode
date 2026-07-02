@@ -37,7 +37,7 @@ from typing import Iterable
 
 import pybind11
 
-__all__ = ["source", "source_AI4BayesCode", "vendored_include_path"]
+__all__ = ["source", "vendored_include_path"]
 
 
 # ---------------------------------------------------------------------------
@@ -308,4 +308,3 @@ def _compile(cpp_file: Path, so_path: Path, cppflags: list[str], libs: list[str]
 
 
 # Back-compat alias (pre-0.1.3 name). Canonical name is source().
-source_AI4BayesCode = source

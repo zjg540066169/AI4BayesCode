@@ -1646,17 +1646,3 @@ ai4bayescode_generate <- function(model_description = NULL,
 #' @noRd
 `%||%` <- function(a, b) if (is.null(a) || (is.character(a) && !nzchar(a))) b else a
 
-# ---------------------------------------------------------------------------
-# Back-compat aliases (pre-0.9.4 names). Canonical names are ai4bayescode_*.
-# ---------------------------------------------------------------------------
-#' @rdname ai4bayescode_prompt
-#' @export
-ai4bayes_prompt <- ai4bayescode_prompt
-
-#' @rdname ai4bayescode_models
-#' @export
-ai4bayes_models <- ai4bayescode_models
-
-#' @rdname ai4bayescode_generate
-#' @export
-ai4bayes_generate <- ai4bayescode_generate

@@ -59,10 +59,10 @@
 //   S_obs <- t(replicate(K, pmax(rdir(kappa_true * s_true), 1e-8)))
 //   S_obs <- S_obs / rowSums(S_obs)
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(DirichletHierarchical, S_obs, 0.5, 1.0, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(DirichletHierarchical,
 //            S_obs,   # K x P matrix of observed simplexes

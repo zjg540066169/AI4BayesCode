@@ -56,10 +56,10 @@
 //   # beta=0.44 (near the 2D critical coupling). No data: the proper discrete
 //   # MRF prior pi(x) is itself the target; we just sample the latent state x.
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(IsingPrior, 16L, 16L, 2L, 0.44, TRUE, FALSE, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(IsingPrior,
 //            16L, 16L,   # L_x, L_y: lattice dims (N = 256 sites)

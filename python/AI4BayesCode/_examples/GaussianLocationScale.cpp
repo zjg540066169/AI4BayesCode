@@ -42,10 +42,10 @@
 //   set.seed(42); N <- 200
 //   y <- rnorm(N, mean = 3, sd = 2)                # DGP: true mu=3, sigma=2
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(GaussianLocationScale, y, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GaussianLocationScale, y, 7L, TRUE)   # (y, rng_seed, keep_history)
 //   m$step(2500); str(m$get_current())             # mu_hat ~ 3, sigma_hat ~ 2

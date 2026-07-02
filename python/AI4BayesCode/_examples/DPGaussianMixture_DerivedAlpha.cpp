@@ -100,10 +100,10 @@
 //            matrix(rnorm(N_k * d, mean = centers[k, ], sd = 0.7),
 //                   ncol = d, byrow = TRUE)))
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(DPGaussianMixture_DerivedAlpha, y, 8L, seed),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(DPGaussianMixture_DerivedAlpha, y, 8L, 7L)  # (y, K_trunc, seed)
 //   m$step(1500)
@@ -531,7 +531,7 @@ public:
         //      (derived-alpha pattern, alpha is a refresher of phi);
         //      alpha drives the stick-breaking; (mu_k, lambda_k) ~
         //      NormalGamma(mu_0, kappa_0, a_lambda_0, b_lambda_0).
-        //      Drawn faded by plot_dag.
+        //      Drawn faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("phi",         {"alpha"});
         impl_->data().declare_context_edges("alpha",       {"stick_V"});
         impl_->data().declare_context_edges("stick_V",     {"pi"});

@@ -60,10 +60,10 @@
 //   x <- rnorm(N)
 //   y <- beta_true * x + rnorm(N, 0, sigma)        # known nonzero truth -> inclusion favored
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(SpikeSlabSinhBijection, y, x, sigma, slab_sd, pi_incl, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(SpikeSlabSinhBijection,
 //            y, x,                                 # data: response y, predictor x

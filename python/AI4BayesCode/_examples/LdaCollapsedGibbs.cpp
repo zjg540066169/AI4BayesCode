@@ -105,10 +105,10 @@
 //     w <- c(w, wd); doc <- c(doc, rep(d, Ld))
 //   }
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(LdaCollapsedGibbs, w, doc, M, V, K, rep(1, K), rep(1, V), seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(LdaCollapsedGibbs, w, doc, M, V, K,     # w/doc length-N (1-indexed) tokens & doc ids
 //            rep(1, K), rep(1, V), 7L, TRUE)          # alpha (len K), beta (len V), seed, keep_history
@@ -292,7 +292,7 @@ public:
         //      reads context_edges_). theta_d ~ Dirichlet(alpha);
         //      phi_k ~ Dirichlet(beta): the Dirichlet hyperparameters
         //      are the per-document / per-topic prior parents. Drawn
-        //      faded by plot_dag.
+        //      faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("alpha", {"theta"});
         impl_->data().declare_context_edges("beta",  {"phi"});
 

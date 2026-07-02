@@ -68,10 +68,10 @@
 //   t <- (0:(N-1)) * dt
 //   y <- f + sigma_true * rnorm(N)                          # + observation noise
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(GPTimeSeries, t, y, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GPTimeSeries, t, y, 7L, TRUE)  # t, y, rng_seed, keep_history=TRUE
 //   m$step(2500); str(m$get_current())      # amp / tau / sigma / logp
@@ -346,7 +346,7 @@ public:
         //      tau_prior_scale); the celerite kernel coefficients
         //      (a_real, c_real) are built from the sampled (amp, tau)
         //      hyperparameters. sigma ~ Jeffreys (no slot). Drawn faded
-        //      by plot_dag.
+        //      by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("amp_prior_sd",   {"amp"});
         impl_->data().declare_context_edges("tau_prior_shape",{"tau"});
         impl_->data().declare_context_edges("tau_prior_scale",{"tau"});

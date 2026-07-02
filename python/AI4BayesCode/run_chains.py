@@ -1,6 +1,6 @@
 """Parallel multi-chain MCMC orchestration.
 
-Python equivalent of the R helper's `AI4BayesCode_run_chains()`:
+Python equivalent of the R helper's `ai4bayescode_run_chains()`:
 
     chains = AI4BayesCode.run_chains(
         factory = lambda seed: MyModel(y, seed=seed, keep_history=True),

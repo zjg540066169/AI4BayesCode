@@ -2,22 +2,9 @@
 % Please edit documentation in R/generate.R
 \name{ai4bayescode_prompt}
 \alias{ai4bayescode_prompt}
-\alias{ai4bayes_prompt}
 \title{Assemble the AI4BayesCode codegen prompt (no network)}
 \usage{
 ai4bayescode_prompt(
-  model_description,
-  backend = c("R", "Python", "both"),
-  output_path = "./generated",
-  classname = NULL,
-  priors = "noninformative",
-  max_attempts = 5L,
-  include_skills = FALSE,
-  skills = NULL,
-  confirm_model = FALSE
-)
-
-ai4bayes_prompt(
   model_description,
   backend = c("R", "Python", "both"),
   output_path = "./generated",

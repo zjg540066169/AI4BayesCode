@@ -9,8 +9,8 @@ Python equivalent of the R-side `AI4BayesCode_helpers.R`:
 | `ai4bayescode_generate(...)`    | `AI4BayesCode.generate(...)`      |
 | `ai4bayescode_models()`         | `AI4BayesCode.models()`           |
 | `ai4bayescode_doc(...)`         | `AI4BayesCode.doc(...)`           |
-| `plot_dag(model)`               | `AI4BayesCode.plot_dag(model)`    |
-| `AI4BayesCode_run_chains(...)`  | `AI4BayesCode.run_chains(...)`    |
+| `ai4bayescode_plot_dag(model)`               | `AI4BayesCode.plot_dag(model)`    |
+| `ai4bayescode_run_chains(...)`  | `AI4BayesCode.run_chains(...)`    |
 | `posterior::rhat(x)`            | `AI4BayesCode.rhat(x)`            |
 | `posterior::ess_bulk(x)`        | `AI4BayesCode.ess_bulk(x)`        |
 
@@ -164,7 +164,7 @@ python/
 │   ├── source.py           # compile-on-demand pybind11 wrapper
 │   ├── sourceCpp.py        # legacy alias for source.py
 │   ├── generate.py         # LLM-driven sampler generation
-│   ├── plot_dag.py         # networkx + matplotlib DAG viz
+│   ├── ai4bayescode_plot_dag.py         # networkx + matplotlib DAG viz
 │   ├── run_chains.py       # multiprocessing parallel chains
 │   ├── diagnose.py         # convergence diagnostics
 │   ├── doc.py              # block documentation lookup

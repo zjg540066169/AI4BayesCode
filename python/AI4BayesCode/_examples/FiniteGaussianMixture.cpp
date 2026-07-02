@@ -95,10 +95,10 @@
 //   y <- rbind(matrix(rnorm(n_per * 2, mu_true[1, ], 1), n_per, 2, byrow = TRUE),
 //              matrix(rnorm(n_per * 2, mu_true[2, ], 1), n_per, 2, byrow = TRUE))
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(FiniteGaussianMixture, y, K, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(FiniteGaussianMixture, y, K, 12345L, TRUE)  # y(Nxd), K, seed, keep_history
 //   m$step(2500); str(m$get_current())
@@ -347,7 +347,7 @@ public:
         //        pi ~ Dirichlet(alpha_dir/K, ..., alpha_dir/K);
         //        (mu_k, lambda_k) ~ NormalGamma(mu_0, kappa_0,
         //                                       a_lambda_0, b_lambda_0).
-        //      Drawn faded by plot_dag.
+        //      Drawn faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("alpha_dir",   {"pi"});
         impl_->data().declare_context_edges("mu_0",        {"mu"});
         impl_->data().declare_context_edges("kappa_0",     {"mu"});

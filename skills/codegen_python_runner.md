@@ -52,7 +52,7 @@ the runner deliverables are independent (`.R` + `.py`).
    `@example:python` header block** (per `codegen_cpp.md` §5 "Header
    `@example` block"): the SAME toy DGP this runner uses, distilled to
    ≤ ~8 runnable lines using the packaged API
-   (`Mod = AI4BayesCode.source_AI4BayesCode("<ClassName>.cpp")` →
+   (`Mod = AI4BayesCode.source("<ClassName>.cpp")` →
    `Mod(...)`). This is what `AI4BayesCode.doc()` shows as the Example.
    If the backend is Both R+Python, also emit `@example:R`. Write the
    DGP once and mirror it into the header so runner and card cannot
@@ -278,7 +278,7 @@ import AI4BayesCode
 
 # Compile + load the generated .cpp; returns the module (the class is an
 # attribute, e.g. mod.<ClassName>).
-mod = AI4BayesCode.source_AI4BayesCode("<folder>/<ClassName>.cpp")
+mod = AI4BayesCode.source("<folder>/<ClassName>.cpp")
 
 # Constructor reference (one row per argument; every codegen produces this)
 # -------------------------------------------------------------------------

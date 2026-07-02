@@ -48,10 +48,10 @@
 //   for (t in 2:T) z[t] <- if (runif(1) < A[z[t-1]*2 + z[t-1] + 1]) z[t-1] else 1L - z[t-1]
 //   y <- mu[z + 1L] + sigma * rnorm(T)
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(HMMGaussian2State, y, A, pi0, mu, sigma, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(HMMGaussian2State,
 //            y,        # length-T observations
@@ -175,7 +175,7 @@ public:
         //      reads context_edges_). z_1 ~ Categorical(pi);
         //      z_t | z_{t-1} ~ Categorical(A_{z_{t-1},:}): the initial
         //      distribution pi and transition matrix A are z's
-        //      generative parents. Drawn faded by plot_dag.
+        //      generative parents. Drawn faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("pi", {"z"});
         impl_->data().declare_context_edges("A",  {"z"});
         impl_->data().set("y_rep", arma::vec(T_, arma::fill::zeros));

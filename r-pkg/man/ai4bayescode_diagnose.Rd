@@ -2,12 +2,9 @@
 % Please edit documentation in R/helpers.R
 \name{ai4bayescode_diagnose}
 \alias{ai4bayescode_diagnose}
-\alias{ai4b_diagnose}
 \title{Model-independent posterior diagnostics and plot}
 \usage{
 ai4bayescode_diagnose(hist, plot = TRUE, order_components = FALSE)
-
-ai4b_diagnose(hist, plot = TRUE, order_components = FALSE)
 }
 \arguments{
 \item{hist}{Named list of posterior draws: scalars as numeric vectors,

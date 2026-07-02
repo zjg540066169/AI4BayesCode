@@ -271,7 +271,3 @@ ai4bayescode_source <- function(code,
     mk
 }
 
-# Back-compat alias (pre-0.9.4 name). Canonical name is ai4bayescode_source().
-#' @rdname ai4bayescode_source
-#' @export
-source_AI4BayesCode <- ai4bayescode_source

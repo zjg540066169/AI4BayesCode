@@ -63,10 +63,10 @@
 //   prob <- 1 / (1 + exp(-(X %*% beta_true)))             # sigmoid(X beta)
 //   y <- as.numeric(runif(N) < prob)                      # Bernoulli 0/1
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(LogisticRegression, X, y, 10.0, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(LogisticRegression, X, y, 10.0, 7L, TRUE)    # X, y, prior_sd, seed, keep_history
 //   m$step(2500); str(m$get_current())

@@ -162,6 +162,3 @@ def diagnose(hist, n_burn=0, plot=True, order_components=False):
 
     return summary, plot_fn
 
-
-# Deprecated pre-1.0 alias; canonical name is diagnose().
-ai4b_diagnose = diagnose

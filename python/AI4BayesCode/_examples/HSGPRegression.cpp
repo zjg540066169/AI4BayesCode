@@ -75,10 +75,10 @@
 //   x <- runif(N, -3, 3)                              # 1-D inputs on [-3, 3]
 //   y <- 1.5 * sin(2 * x) + 0.3 * x + rnorm(N, 0, 0.4) # smooth truth + N(0,0.4)
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(HSGPRegression, y, x, M, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(HSGPRegression, y, x, M, 7L, TRUE)       # y, x, M, seed, keep_history
 //   m$step(2500); str(m$get_current())

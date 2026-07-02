@@ -3,7 +3,7 @@
 Public API mirrors the R helper (AI4BayesCode_helpers.R):
 
     sourceCpp(cpp_file, ai4bayescode_path)   # compile a .cpp with pybind11
-    plot_dag(model, ...)                 # visualize the model DAG
+    ai4bayescode_plot_dag(model, ...)                 # visualize the model DAG
     run_chains(model_ctor, ...)          # parallel multi-chain MCMC
     rhat(samples), ess_bulk(samples)     # convergence diagnostics
 
@@ -25,22 +25,21 @@ block. See `examples/ODE_SIR.cpp` for a dual-module reference.
 `ai4bayescode_path=` only if you want the legacy checkout-based build).
 """
 
-from .source import source, source_AI4BayesCode, vendored_include_path
+from .source import source, vendored_include_path
 from .doc import doc
 from .generate import prompt, generate, models, skills_path, set_key, key_status, stream_check
 from .sourceCpp import sourceCpp
 from .install_block import (
     install_block, available_blocks, installed_blocks, remove_block, blocks_path)
-from .plot_dag import plot_dag
+from .plot_dag import ai4bayescode_plot_dag
 from .run_chains import run_chains
-from .diagnose import diagnose, ai4b_diagnose
+from .diagnose import diagnose
 from .utils import rhat, ess_bulk, ess_tail, posterior_summary
 from ._blocks import blocks
 
 __version__ = "1.0.0"
 __all__ = [
     "source",
-    "source_AI4BayesCode",
     "doc",
     "blocks",
     "prompt",
@@ -57,7 +56,7 @@ __all__ = [
     "installed_blocks",
     "remove_block",
     "blocks_path",
-    "plot_dag",
+    "ai4bayescode_plot_dag",
     "run_chains",
     "diagnose",
     "rhat",

@@ -2,17 +2,9 @@
 % Please edit documentation in R/helpers.R
 \name{ai4bayescode_perf_hint}
 \alias{ai4bayescode_perf_hint}
-\alias{AI4BayesCode_perf_hint}
 \title{Post-run performance hint for AI4BayesCode samplers}
 \usage{
 ai4bayescode_perf_hint(
-  wall_sec,
-  n_sweeps_total,
-  uses_joint_nuts = FALSE,
-  thresholds = list(slow_sweep_sec = 0.5)
-)
-
-AI4BayesCode_perf_hint(
   wall_sec,
   n_sweeps_total,
   uses_joint_nuts = FALSE,

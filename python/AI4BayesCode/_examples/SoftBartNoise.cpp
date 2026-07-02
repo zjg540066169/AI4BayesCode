@@ -67,10 +67,10 @@
 //   f <- sin(3 * X[,1]) + 0.5 * X[,2]^2 - X[,3]   # smooth low-dim mean
 //   y <- f + rnorm(N, 0, 0.5)                      # sigma_true = 0.5
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(SoftBartNoise, X, y, 50L, 2.0, 10.0, FALSE, seed, 3.0, FALSE, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(SoftBartNoise, X, y, 50L, 2.0, 10.0, FALSE, 42L)
 //   #          X,  y, ntrees, k, tau_rate, dart, seed
@@ -253,7 +253,7 @@ public:
         //      reads context_edges_). sigma^2 ~ IG(nu/2, nu*lambda/2):
         //      sigma_nu / sigma_lambda are sigma's prior parents. The
         //      SoftBART forest is a sampled generative parent of
-        //      f_softbart alongside X. Drawn faded by plot_dag.
+        //      f_softbart alongside X. Drawn faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("sigma_nu",     {"sigma"});
         impl_->data().declare_context_edges("sigma_lambda", {"sigma"});
         impl_->data().declare_context_edges("SoftBART",     {"f_softbart"});

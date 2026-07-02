@@ -77,10 +77,10 @@
 //   for (j in 2:n) data[, j] <- ifelse(runif(N) < flip, 1L - data[, j-1], data[, j-1])
 //   cards <- rep(2, n)                                  # all variables binary
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(OrderMCMCBN, data, cards, 1.0, 3L, 20L, 4000L, 10.0, 0.5, numeric(0), seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(OrderMCMCBN, data, cards, 1.0, 3L, 20L, 4000L, 10.0, 0.5,
 //            numeric(0), 7L, TRUE)   # bdeu_alpha,max_parents,top_C,cache_F,prune,p_adj,init_order=empty,seed,keep_history

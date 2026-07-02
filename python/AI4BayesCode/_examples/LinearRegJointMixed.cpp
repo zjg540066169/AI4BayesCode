@@ -48,10 +48,10 @@
 //   X <- matrix(rnorm(N * p), N, p)                     # iid N(0,1) design
 //   y <- as.numeric(alpha + X %*% beta + rnorm(N, 0, sigma))
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(LinearRegJointMixed, y, X, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(LinearRegJointMixed, y, X, 7L, TRUE)       # ctor: y, X, seed, keep_history
 //   m$step(2500); str(m$get_current())                 # -> alpha, beta(p), sigma

@@ -66,10 +66,10 @@
 //   eta <- 1.5 * X[, 1] - 1.0 * X[, 2] + 0.8 * X[, 3]   # smooth linear predictor
 //   y <- as.numeric(runif(N) < 1 / (1 + exp(-eta)))     # y ~ Bernoulli(sigmoid(eta))
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(GBartLogistic, X, y, 50L, seed, FALSE, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GBartLogistic, X, y, 50L, 42L)     # X, y, ntrees=50, seed=42 (single chain)
 //   m$step(2000L); str(m$get_current())         # $r linear predictor, $p fitted prob
