@@ -1480,11 +1480,19 @@ ai4bayescode_generate <- function(model_description = NULL,
                 "using the API key / offline path instead.", call. = FALSE)
     online <- nzchar(API_key) || !is.null(responder) || cli_available
 
-    # ---- build prompt; online path inlines the skill subset ----
+    # ---- build prompt; online path inlines ONLY start.md (lazy load) ----
+    # start.md is the canonical entry point + phase-by-phase load schedule; it
+    # EXPLICITLY says "Do NOT pre-load all of skills/*.md". The model reads each
+    # other skill (codegen.md -> codegen_priors -> codegen_cpp -> runner ->
+    # validator) ON DEMAND via the read_file/grep tools, so the system prompt is
+    # ~6.5k tokens instead of ~150k. (Offline / no-tools falls back to inlining
+    # the full subset so a single-shot completion still has everything.)
     prompt <- ai4bayescode_prompt(model_description, backend = backend,
                               output_path = output_path, classname = classname,
                               priors = priors, max_attempts = max_attempts,
-                              include_skills = online, confirm_model = confirm_model)
+                              include_skills = online,
+                              skills = if (online) "start.md" else NULL,
+                              confirm_model = confirm_model)
 
     if (!online) return(.ai4b_offline_emit(prompt, output_path, verbose))
 

@@ -1197,8 +1197,13 @@ def generate(model_description: str | None = None, *, classname: str | None = No
                       "using the API key / offline path instead.", stacklevel=2)
     online = bool(API_key) or _responder is not None or cli_available
 
+    # Online path inlines ONLY start.md (lazy load): start.md is the entry point +
+    # phase-by-phase load schedule and EXPLICITLY says "Do NOT pre-load all skills".
+    # The model reads each other skill on demand via the read_file/grep tools, so the
+    # system prompt is ~6.5k tokens instead of ~150k. Offline falls back to the full set.
     p = prompt(model_description, backend=backend, output_path=output_path,
                classname=classname, priors=priors, include_skills=online,
+               skills=["start.md"] if online else None,
                confirm_model=confirm_model)
 
     if not online:
