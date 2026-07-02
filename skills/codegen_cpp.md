@@ -2317,7 +2317,7 @@ PYBIND11_MODULE(<ClassName>, m) {
 #endif
 ```
 
-Python users invoke via `AI4BayesCode.sourceCpp("MyModel.cpp", ai4bayescode_path=".../AI4BayesCode")`
+Python users invoke via `AI4BayesCode.source("MyModel.cpp")` (packaged; no path),
 which sets `-DAI4BAYESCODE_PYBIND_MODULE` at compile time.
 
 #### Dual-module (R + Python from the same .cpp — the 6 shipped examples)

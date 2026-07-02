@@ -74,6 +74,7 @@
         if (ch == "," && ang == 0L) { parts <- c(parts, buf); buf <- "" } else buf <- paste0(buf, ch)
     }
     parts <- c(parts, buf)
+    parts <- parts[nzchar(trimws(parts))]   # drop empty parts (e.g. trailing comma)
     lapply(parts, function(p) {
         p <- trimws(p); default <- NA_character_
         if (grepl("=", p)) { sp <- strsplit(p, "=", fixed = TRUE)[[1]]

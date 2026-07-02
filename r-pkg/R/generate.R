@@ -851,7 +851,12 @@ ai4bayescode_key_status <- function() {
 .ai4b_exec_readonly_tool <- function(name, input, root) {
     if (is.na(root))
         return("(AI4BayesCode package not installed; read_file/grep/glob unavailable.)")
-    rel <- function(f) sub(paste0("^", root, "/?"), "", f)
+    # Strip the install-root prefix by LENGTH, not as a regex: `root` is an
+    # absolute path that can contain regex metachars (+, ., (, Windows \).
+    rel <- function(f) {
+        r <- if (startsWith(f, root)) substring(f, nchar(root) + 1L) else f
+        sub("^/", "", r)
+    }
     if (identical(name, "read_file")) {
         p <- .ai4b_safe_pkg_path(input$path, root)
         if (is.null(p) || !file.exists(p))

@@ -86,7 +86,7 @@ def _collapse_plates(edges: list, data_inputs: list) -> tuple[list, list, dict]:
     return new_edges, new_data_inputs, plate_sizes
 
 
-def ai4bayescode_plot_dag(
+def plot_dag(
     model: Any,
     *,
     out_path: Optional[str | Path] = None,
@@ -119,7 +119,7 @@ def ai4bayescode_plot_dag(
         import matplotlib.pyplot as plt
     except ImportError as e:
         raise ImportError(
-            "ai4bayescode_plot_dag requires networkx and matplotlib.\n"
+            "plot_dag requires networkx and matplotlib.\n"
             "Install with: pip install networkx matplotlib"
         ) from e
 

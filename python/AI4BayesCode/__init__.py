@@ -3,7 +3,7 @@
 Public API mirrors the R helper (AI4BayesCode_helpers.R):
 
     sourceCpp(cpp_file, ai4bayescode_path)   # compile a .cpp with pybind11
-    ai4bayescode_plot_dag(model, ...)                 # visualize the model DAG
+    plot_dag(model, ...)                 # visualize the model DAG
     run_chains(model_ctor, ...)          # parallel multi-chain MCMC
     rhat(samples), ess_bulk(samples)     # convergence diagnostics
 
@@ -31,8 +31,9 @@ from .generate import prompt, generate, models, skills_path, set_key, key_status
 from .sourceCpp import sourceCpp
 from .install_block import (
     install_block, available_blocks, installed_blocks, remove_block, blocks_path)
-from .plot_dag import ai4bayescode_plot_dag
+from .plot_dag import plot_dag
 from .run_chains import run_chains
+from .perf_hint import perf_hint
 from .diagnose import diagnose
 from .utils import rhat, ess_bulk, ess_tail, posterior_summary
 from ._blocks import blocks
@@ -56,8 +57,9 @@ __all__ = [
     "installed_blocks",
     "remove_block",
     "blocks_path",
-    "ai4bayescode_plot_dag",
+    "plot_dag",
     "run_chains",
+    "perf_hint",
     "diagnose",
     "rhat",
     "ess_bulk",

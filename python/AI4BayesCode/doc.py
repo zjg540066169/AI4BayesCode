@@ -174,7 +174,7 @@ _CANONICAL = {
     "get_current":  "get_current()            current draw of each parameter -> dict",
     "set_current":  "set_current(params)      set the current draw (dict)",
     "predict_at":   "predict_at(new_data)     posterior prediction at new_data",
-    "get_dag":      "get_dag()                model DAG (feed to ai4bayescode_plot_dag)",
+    "get_dag":      "get_dag()                model DAG (feed to plot_dag)",
     "get_history":  "get_history()            all kept draws (needs keep_history=True)",
     "readapt_NUTS": "readapt_NUTS(n, adapt)   re-run NUTS warm-up (online / sequential use)",
 }
