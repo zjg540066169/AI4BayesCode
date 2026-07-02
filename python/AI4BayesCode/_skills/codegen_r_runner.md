@@ -218,8 +218,8 @@ model$predict_at(list(<X> = <X>_test))
 ## Example (uncomment in real sequential-update use):
 ## model$set_current(list(<data inputs> = <updated values>))
 ## model$step(1L)               ## refresh derived state — hybrid composites only
-## model$readapt_NUTS(500L, FALSE)  ## re-tune metric (Rcpp needs BOTH args; reset = FALSE)
-## ## model$readapt_NUTS(500L, TRUE)   ## use reset=TRUE if data change is dramatic
+## model$readapt_NUTS(500L, FALSE, -1L)  ## re-tune metric (Rcpp needs ALL 3 args; reset=FALSE, max_tree_depth=-1 = configured depth)
+## ## model$readapt_NUTS(500L, TRUE, -1L)   ## use reset=TRUE if data change is dramatic
 ```
 
 The example must run as-is on the synthetic shapes generated in the
@@ -616,12 +616,12 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep,
     total <- as.integer(n_burnin + n_keep)
     full  <- total %/% readapt_every
     for (i in seq_len(full)) {
-        model$readapt_NUTS(readapt_n, FALSE)
+        model$readapt_NUTS(readapt_n, FALSE, -1L)
         model$step(as.integer(readapt_every))
     }
     remainder <- total - full * readapt_every
     if (remainder > 0L) {
-        model$readapt_NUTS(readapt_n, FALSE)
+        model$readapt_NUTS(readapt_n, FALSE, -1L)
         model$step(as.integer(remainder))
     }
     t1 <- Sys.time()

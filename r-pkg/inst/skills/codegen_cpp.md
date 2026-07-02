@@ -2221,12 +2221,24 @@ your backend at the tail of the `.cpp`.
 **Rule:** if the wrapper's composite contains at least one
 `nuts_block` or `joint_nuts_block`
 child, the wrapper MUST expose a 7th R-level method
-`readapt_NUTS(int n, bool reset = false)` and carry a 3rd RNG
-member `readapt_rng_`. If the composite has no NUTS-family
+`readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1)` and carry a
+3rd RNG member `readapt_rng_`. If the composite has no NUTS-family
 child (pure BART, pure Gibbs, pure VI, pure HMM, pure SBP, pure
 RJMCMC, pure slice), the wrapper has exactly the 6 core methods
 and 2 RNGs. See `system_design.md §1` (conditional 7th method),
 §8 (3rd RNG), §13 NUTS-family contract, and `validator.md §24`.
+
+**ALWAYS register the 3-arg form.** Use EXACTLY
+`readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1)` (the code
+template below). Some shipped examples show a shorter 2-arg
+`readapt_NUTS(int n, bool reset = false)` — do NOT copy that shorter form; the
+3-arg signature is the current standard, and the R runner calls it with all
+three arguments (Rcpp drops C++ defaults, so the caller passes all three).
+`max_tree_depth = -1` = "use each block's configured depth" — this is the value
+the runner passes (`readapt_NUTS(N, FALSE, -1L)`) for essentially EVERY model, so
+you do NOT need to think about tree depth. Tuning it to a positive value (faster
+re-adaptation on a stiff / ill-conditioned target) is RARE and decided per-model
+during generation; leave it at `-1L` unless a model specifically needs it.
 
 **Wrapper-class additions (NUTS-using wrappers only):**
 
