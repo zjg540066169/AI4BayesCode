@@ -1128,11 +1128,12 @@ ai4bayescode_stream_check <- function(LLM = "claude-opus-4-8", API_key = NULL,
     list(stop_reason = stop_reason, content = content)
 }
 
-# One request to the OpenAI Chat Completions API. The Anthropic-shaped `ask_user`
-# tool is converted to the OpenAI {type:"function", function:{...}} shape;
-# `reasoning_effort` is sent for reasoning models when `effort` is a non-empty
-# string. Mirrors `.ai4b_anthropic_request`'s timeout + transient retry. Returns
-# the Anthropic-shaped parsed response.
+# One request to the OpenAI Chat Completions API. ALL Anthropic-shaped tools
+# (ask_user, read_file, grep, glob) are converted generically to the OpenAI
+# {type:"function", function:{...}} shape, so the agent's file-reading tools work
+# through this path too; `reasoning_effort` is sent for reasoning models when
+# `effort` is a non-empty string. Mirrors `.ai4b_anthropic_request`'s timeout +
+# transient retry. Returns the Anthropic-shaped parsed response.
 #' @keywords internal
 #' @noRd
 .ai4b_openai_request <- function(system, messages, model, effort, tools,
