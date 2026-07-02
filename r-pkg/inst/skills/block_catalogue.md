@@ -16,6 +16,43 @@ kernels under `bart_pure_cpp/src/BART` and `bart_pure_cpp/src/GENBART`;
 the project-wide license is the same regardless of which block you use.
 See `LICENSE` / `THIRD_PARTY_LICENSES.md` at the repo root.
 
+## Contributed blocks — search local + downloaded BEFORE core
+
+The blocks in THIS file are the **core** tier. Two more tiers may add blocks that
+are ALSO usable in a generated sampler (both are already on the compile `-I` path,
+so `#include "<Block>.hpp"` resolves):
+
+| Tier | Where | Trust |
+|---|---|---|
+| **local** | `blocks_local/<Block>/` — your work-in-progress blocks | self |
+| **downloaded** | `blocks_download/<Block>/` — installed from the registry | provenance |
+| **core** | this file | maintainer-vetted |
+
+**Priority when several fit: local > downloaded > core** (prefer the user's own /
+reviewed block over a generic core one). Block names are globally unique (core
+names are reserved; local + downloaded are checked at creation / install), so
+there is never a name collision to resolve.
+
+**Two-stage, token-bounded selection** — do this BEFORE settling on a core block;
+it stays cheap no matter how many blocks are installed (bounded by relevance, not
+by block count):
+
+1. **Index (cheap).** Build a one-line-per-block index from the manifests:
+   `glob blocks_local/*/manifest.dcf`, then `glob blocks_download/*/manifest.dcf`,
+   and read each manifest's `Block` + `RoutingKey` (one short line each). Do NOT
+   read the full cards yet. (No local/downloaded blocks present → skip to core.)
+2. **Filter.** From that index (local rows first, then downloaded), pick the 5–10
+   blocks whose `RoutingKey` plausibly matches the model.
+3. **Read cards — survivors only.** For each candidate read its `SelectWhen` and
+   full card `blocks_local/<Block>/skills/<Block>.md` (or
+   `blocks_download/<Block>/skills/<Block>.md`); choose the best fit.
+4. If NO local / downloaded block fits, use a **core** block from the table below.
+5. `#include "<Block>.hpp"` for the chosen block (already on the `-I` path).
+
+**Confirm it.** Surface the selected block + the alternative candidates in the
+existing model-confirmation gate (`codegen.md §2` / `start.md` Stage 3) so the user
+can switch. (Full design: `block_design_skills/contrib.md`.)
+
 ## Block type table
 
 | Parameter kind | Block type | Constraint wrap |
