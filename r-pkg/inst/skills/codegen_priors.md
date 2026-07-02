@@ -266,13 +266,17 @@ rank — do NOT read "item 1" as "try this first":
      Laplace leaf proposals — a GENERIC engine that is **substantially
      SLOWER than `bart_block`** (no conjugate leaf; every leaf update
      runs a Laplace approximation, `score`/`obs_info` called n times
-     per tree). Use it **ONLY when `bart_block` cannot express the
-     model** — a NON-Gaussian response (Logistic / Poisson / NB /
-     Heteroscedastic / AFT / Beta / Gamma_shape / Beta-Binomial /
-     user-supplied) or a Gaussian with non-constant variance
-     (heteroscedastic). ⚠️ **Do NOT use `genbart_block + normal_lik`
-     for a standard homoscedastic Gaussian regression — that is exactly
-     `bart_block`, only sampled far slower.** `normal_lik` exists for
+     per tree). **It is a LAST RESORT.** Before choosing it, WALK THE
+     `bart_block` REDUCTION LADDER (in the `genbart_block` card): (1)
+     Gaussian direct, (2) data augmentation → `bart_block` (e.g. probit),
+     (3) additive/varying-coefficient via backfitting + `weights_key`,
+     (4) known per-obs weights → `weights_key`, (5) Gaussian working
+     response → `working_response_key`. Use `genbart_block` **ONLY when
+     EVERY rung fails** — a genuinely non-Gaussian likelihood in `f`
+     (Logistic / Poisson / NB / AFT / Beta / Gamma_shape / Beta-Binomial /
+     unknown-variance heteroscedastic / user-supplied). ⚠️ **Do NOT use
+     `genbart_block + normal_lik` for a standard homoscedastic Gaussian
+     regression — that is exactly `bart_block`, only sampled far slower.** `normal_lik` exists for
      composition, not as the Gaussian default. (Custom families outside
      the 10 shipped: subclass `genbart::likelihood`; see
      `codegen_cpp.md §6c`.)

@@ -11,25 +11,38 @@ likelihood.
 
 `current()` returns a length-N arma::vec of r(X_i).
 
-### When to use -- PREFER `bart_block` first
+### When to use -- REDUCE to `bart_block` FIRST (general rule, not just VC-BART)
 
-`genbart_block` is the GENERIC engine: Linero 2022 reversible-jump MCMC with
-Laplace-approximated leaf proposals, **substantially slower** than `bart_block`'s
-conjugate Gaussian-leaf backfitting (`score` / `obs_info` are called n times per
-tree update). Do NOT reach for it by default.
+`genbart_block` is the GENERIC engine (Linero 2022 reversible-jump MCMC with
+Laplace-approximated leaf proposals) and is **substantially slower** than
+`bart_block`'s conjugate Gaussian-leaf backfitting (`score` / `obs_info` are
+called n times per tree update). **It is a LAST RESORT, not a default.**
 
-- **Plain Gaussian mean, constant noise -> `bart_block`** (the `BartNoise`
-  example). Using `genbart_block + normal_lik` for standard homoscedastic
-  Gaussian regression is a common mistake: identical model, far slower sampler.
-  `normal_lik` exists for composition, not as the Gaussian default.
-- **Composite / varying-coefficient / additive-ensemble BART** (VC-BART, where
-  each coefficient function is its own BART) is ALSO a `bart_block` job --
-  compose one `bart_block` per ensemble via backfitting, using `weights_key` for
-  the per-observation covariate scaling. See the `bart_block` card, "Composite /
-  varying-coefficient BART via BACKFITTING". Do NOT write a custom VC likelihood.
-- **Use `genbart_block` ONLY when `bart_block` cannot express the model** -- a
-  genuinely NON-Gaussian response (Logistic / Poisson / NB / Heteroscedastic /
-  AFT / Beta / Gamma_shape / Beta-Binomial / custom).
+The recurring failure mode: the AI sees a "non-standard" BART model and jumps
+straight to `genbart_block` + a custom likelihood. **Do not.** First ask *"is
+there a GAUSSIAN working representation of the tree function `f`?"* and walk this
+reduction ladder — each rung keeps you in fast conjugate `bart_block`:
+
+1. **Gaussian response, constant noise** -> `bart_block` directly.
+2. **Latent-Gaussian / augmentable likelihood** — a data augmentation makes the
+   conditional Gaussian in `f` (e.g. probit via Albert-Chib) -> the augmentation
+   block + `bart_block` (`probit_aug_block` + `bart_block(binary=true)`).
+3. **Additive / multiplicative combination of ensembles** — VC-BART,
+   varying-coefficient, additive-BART -> one `bart_block` per ensemble via Gibbs
+   backfitting; `weights_key` carries any per-obs covariate multiplier `x_ij`
+   (see the `bart_block` card "Composite / varying-coefficient BART via
+   BACKFITTING").
+4. **Known per-observation weights / variances** — heteroscedastic with KNOWN
+   `v_i`, meta-analysis with known SEs -> `bart_block` + `weights_key`
+   (`w_i = 1/sqrt(v_i)`).
+5. **Conditional-on-the-other-blocks is Gaussian in `f`** — set the Gaussian
+   working response each sweep via `working_response_key` + `bart_block`.
+
+**Use `genbart_block` ONLY when EVERY rung fails** — the likelihood is genuinely
+non-Gaussian in `f` with no augmentation / weighting / backfitting reduction:
+Logistic / Poisson / NB / AFT / Beta / Gamma_shape / Beta-Binomial /
+unknown-variance heteroscedastic / user-supplied. (For those, `genbart_block` +
+the matching `genbart::lik::*` is correct and expected.)
 
 ### Shipped likelihoods (`genbart::lik::*`)
 
