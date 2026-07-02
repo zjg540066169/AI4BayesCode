@@ -81,7 +81,7 @@ loo_report <- function(LLarr_chain1, LLarr_chain2, tag) {
 # 1. GaussianLocationScale
 # ============================================================================
 cat("\n======== 1. GaussianLocationScale ========\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "GaussianLocationScale.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "GaussianLocationScale.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 set.seed(1)
@@ -137,7 +137,7 @@ loo_report(ll1, ll2, "Gaussian")
 # 2. BetaBernoulli
 # ============================================================================
 cat("\n======== 2. BetaBernoulli ========\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "BetaBernoulli.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "BetaBernoulli.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 set.seed(42)
@@ -185,7 +185,7 @@ loo_report(ll1, ll2, "Bernoulli")
 # 3. BartNoise
 # ============================================================================
 cat("\n======== 3. BartNoise ========\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "BartNoise.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "BartNoise.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 set.seed(42)
@@ -251,7 +251,7 @@ loo_report(ll1, ll2, "BART")
 # 4. ARDLasso
 # ============================================================================
 cat("\n======== 4. ARDLasso ========\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "ARDLasso.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "ARDLasso.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 set.seed(42)

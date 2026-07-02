@@ -51,10 +51,10 @@
 //   X <- matrix(rnorm(N * p), N, p)                 # NO intercept column (alpha is built in)
 //   Y <- as.numeric(alpha_true + X %*% beta_true + sigma_true * rnorm(N))
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(ARDLasso, X, Y, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(ARDLasso, X, Y, 20260621L, TRUE)       # X (Nxp), Y (len N), seed, keep_history
 //   m$step(2500); str(m$get_current())
@@ -71,7 +71,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.ARDLasso(X, Y, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.ARDLasso(X, Y, 20260621, True)           # (X (Nxp), Y (len N), seed, keep_history)
 //   m.step(2500); print(m.get_current())

@@ -46,7 +46,7 @@ check <- function(cond, msg) {
 #  Test 1-3: BartNoise
 # ============================================================================
 cat("=== BartNoise predict DAG tests ===\n")
-AI4BayesCode_sourceCpp(
+ai4bayescode_sourceCpp(
     file.path(script_dir, "BartNoise.cpp"),
     AI4BayesCode_path = AI4BayesCode_dir)
 
@@ -112,7 +112,7 @@ check(err2, "predict_at rejects wrong column count")
 #  Test 4: GBartPoisson
 # ============================================================================
 cat("\n=== GBartPoisson predict DAG tests ===\n")
-AI4BayesCode_sourceCpp(
+ai4bayescode_sourceCpp(
     file.path(script_dir, "GBartPoisson.cpp"),
     AI4BayesCode_path = AI4BayesCode_dir)
 
@@ -141,7 +141,7 @@ check("X" %in% dag_p[["data_inputs"]],
 #  Test 5-6: GaussianLocationScale (no covariates)
 # ============================================================================
 cat("\n=== GaussianLocationScale (no covariates) ===\n")
-AI4BayesCode_sourceCpp(
+ai4bayescode_sourceCpp(
     file.path(script_dir, "GaussianLocationScale.cpp"),
     AI4BayesCode_path = AI4BayesCode_dir)
 
@@ -164,7 +164,7 @@ check(length(dag_g[["data_inputs"]]) == 0L,
 #  Test 7: DirichletSimplex (no covariates)
 # ============================================================================
 cat("\n=== DirichletSimplex (no covariates) ===\n")
-AI4BayesCode_sourceCpp(
+ai4bayescode_sourceCpp(
     file.path(script_dir, "DirichletSimplex.cpp"),
     AI4BayesCode_path = AI4BayesCode_dir)
 
@@ -183,7 +183,7 @@ check(length(dag_ds[["data_inputs"]]) == 0L,
 #  Test 8: DirichletSparse (no covariates)
 # ============================================================================
 cat("\n=== DirichletSparse (no covariates) ===\n")
-AI4BayesCode_sourceCpp(
+ai4bayescode_sourceCpp(
     file.path(script_dir, "DirichletSparse.cpp"),
     AI4BayesCode_path = AI4BayesCode_dir)
 
@@ -202,7 +202,7 @@ check(length(dag_sp[["data_inputs"]]) == 0L,
 #  Test 9: DirichletHierarchical (no covariates)
 # ============================================================================
 cat("\n=== DirichletHierarchical (no covariates) ===\n")
-AI4BayesCode_sourceCpp(
+ai4bayescode_sourceCpp(
     file.path(script_dir, "DirichletHierarchical.cpp"),
     AI4BayesCode_path = AI4BayesCode_dir)
 

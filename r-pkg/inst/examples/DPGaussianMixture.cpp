@@ -134,10 +134,10 @@
 //   y <- rbind(matrix(rnorm(n_per * d, 0, 0.7), n_per, d) + rep(mu_true[1, ], each = n_per),
 //              matrix(rnorm(n_per * d, 0, 0.7), n_per, d) + rep(mu_true[2, ], each = n_per))
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(DPGaussianMixture, y, 60L, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(DPGaussianMixture, y, 60L, 42L, TRUE)        # y (N x d), K_trunc=60, seed=42, keep_history
 //   m$step(2000L); cur <- m$get_current()                # $z $pi $mu $lambda $alpha $K_trunc
@@ -157,7 +157,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DPGaussianMixture(y, 60, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.DPGaussianMixture(y, 60, 42, True)             # (y N x d, K_trunc, seed, keep_history)
 //   m.step(2000); cur = m.get_current()                   # 'z' 'pi' 'mu' 'lambda' 'alpha' 'K_trunc'
@@ -580,7 +580,7 @@ public:
         //        V_k ~ Beta(1, alpha) -> stick_V -> pi;
         //        (mu_k, lambda_k) ~ NormalGamma(mu_0, kappa_0,
         //                                       a_lambda_0, b_lambda_0).
-        //      Drawn faded by plot_dag.
+        //      Drawn faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("a_alpha",     {"alpha"});
         impl_->data().declare_context_edges("b_alpha",     {"alpha"});
         impl_->data().declare_context_edges("alpha",       {"stick_V"});

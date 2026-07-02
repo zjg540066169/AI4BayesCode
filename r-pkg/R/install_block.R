@@ -34,7 +34,7 @@ ai4bayescode_blocks_path <- function(name = NULL) {
 }
 
 # -I flags for every installed block: the block dir (for "<block>.hpp") plus each
-# vendored dependency dir. Folded into the compile flags by AI4BayesCode_sourceCpp.
+# vendored dependency dir. Folded into the compile flags by ai4bayescode_sourceCpp.
 #' @keywords internal
 #' @noRd
 .ai4b_block_cppflags <- function() {

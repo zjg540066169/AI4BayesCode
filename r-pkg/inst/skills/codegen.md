@@ -167,7 +167,7 @@ later, at §2 and §3. **Once the model is confirmed**, ask the upfront question
 
 1. **Runtime backend.** Which host language will call the sampler?
    - **R** (default) — emit `RCPP_MODULE` block. Runner is `.R` using
-     `AI4BayesCode_sourceCpp()`. Classic Rcpp workflow.
+     `ai4bayescode_sourceCpp()`. Classic Rcpp workflow.
    - **Python** — emit `PYBIND11_MODULE` block. Runner is `.py` using
      `AI4BayesCode.sourceCpp()`. Requires `pybind11>=2.11` + Python ≥ 3.11.
    - **C++** — emit a standalone `int main()` with the class used
@@ -458,10 +458,10 @@ Deliverable on PASS:
   the R runner content **up to (excluding) the first two-chain
   diagnostic chain** (`c1 <- run_chain_<ClassName>(... seed=101 ...)`),
   WITH comments retained: header comment, `source(AI4BayesCode
-  helpers)` + `AI4BayesCode_sourceCpp(...)`, the constructor
+  helpers)` + `ai4bayescode_sourceCpp(...)`, the constructor
   reference block, the **full `run_chain_<ClassName>()` definition**
   (WITH its `diagnosis = FALSE` parameter, whose diagnosis branch CALLS
-  the shipped `ai4b_diagnose()` — the diagnostics table AND
+  the shipped `ai4bayescode_diagnose()` — the diagnostics table AND
   the trace+ACF+density plot are a library function, NOT a hand-emitted
   helper),
   simulation/toy-data code, a monolithic non-stateful
@@ -482,8 +482,8 @@ Deliverable on PASS:
 Codegen LLMs reliably write their OWN `run_chain` (a `clear_history()` /
 `get_current()` loop, a custom return shape) instead of copying the
 template, and in doing so they drop the diagnostics. The diagnostics +
-plot are now a SHIPPED library function — `ai4b_diagnose()`
-(R) / `AI4BayesCode.ai4b_diagnose()` (Python) — so the runner just CALLS
+plot are now a SHIPPED library function — `ai4bayescode_diagnose()`
+(R) / `AI4BayesCode.diagnose()` (Python) — so the runner just CALLS
 it and must NOT reimplement it. The recurring bug is a bespoke runner
 with an inline `posterior::summarise_draws(...)` / `az.summary(...)`
 assigned to `$summary` (or `hist$diagnosis`) with **NO plot**. This is
@@ -492,19 +492,19 @@ contract — run:
 
 ```bash
 # R:
-grep -q 'ai4b_diagnose' example_<ClassName>.R && grep -q 'diagnosis_plot' example_<ClassName>.R
+grep -q 'ai4bayescode_diagnose' example_<ClassName>.R && grep -q 'diagnosis_plot' example_<ClassName>.R
 # Python:
-grep -q 'ai4b_diagnose' example_<ClassName>.py && grep -q 'diagnosis_plot' example_<ClassName>.py
+grep -q 'ai4bayescode_diagnose' example_<ClassName>.py && grep -q 'diagnosis_plot' example_<ClassName>.py
 ```
 
 If either grep fails, the runner is non-compliant — REWRITE it so it:
-(1) CALLS `ai4b_diagnose()` (R) / `AI4BayesCode.ai4b_diagnose()`
+(1) CALLS `ai4bayescode_diagnose()` (R) / `AI4BayesCode.diagnose()`
 (Python) — never an inline reimplementation; (2) takes `diagnosis = FALSE`;
 (3) attaches BOTH `$diagnosis` (the returned summary) AND `$diagnosis_plot`
 (the returned plot). This is INDEPENDENT of how the runner collects draws
 — whatever named draw list you built (`get_history` slice,
 `clear_history()`+loop, or `get_current()` loop), pass THAT to the library
-function, e.g. `ai4b_diagnose(list(beta = beta, sigma = sigma))`.
+function, e.g. `ai4bayescode_diagnose(list(beta = beta, sigma = sigma))`.
 Do NOT deliver until both greps pass.
 
 On FAIL within `max_attempts`: stop-and-report (per "Generation
@@ -1021,7 +1021,7 @@ samples the WRONG posterior), so clear L2 first. Fix-and-re-run a layer before t
 
 ### Step 1: Compile check
 
-Run `AI4BayesCode_sourceCpp("<file>.cpp", ...)` and verify it compiles
+Run `ai4bayescode_sourceCpp("<file>.cpp", ...)` and verify it compiles
 without errors. If it fails, read the error, fix the code, and retry.
 
 ### Step 2: Validator checklist (L2 semantic — run BEFORE the runtime checks)
@@ -1334,7 +1334,7 @@ run, and produce reasonable samples out of the box.
   note shown in `codegen_cpp.md §4a`. Set `USES_JOINT_NUTS <- TRUE`
   in the runner so R3's Bayesian-p-value threshold tightens from
   (0.05, 0.95) to (0.02, 0.98).
-- **Always emit `AI4BayesCode_perf_hint(...)` at the end of the R
+- **Always emit `ai4bayescode_perf_hint(...)` at the end of the R
   runner** (see `codegen_r_runner.md §9` template). The helper emits
   a friendly escape-hatch hint if per-sweep time is slow. Set
   `uses_joint_nuts = TRUE` when the runner already uses joint NUTS.

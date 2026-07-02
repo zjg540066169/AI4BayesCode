@@ -9,7 +9,7 @@
   `ai4bayescode_key_status()`.
 * Expanded to 39 bundled reference examples and the full AI codegen skill
   corpus under `inst/skills/`.
-* `source_AI4BayesCode(code)` -- canonical, self-contained sourcer/loader.
+* `ai4bayescode_source(code)` -- canonical, self-contained sourcer/loader.
   Resolves the full include tree (AI4BayesCode, mcmclib, BaseMatrixOps,
   Eigen, celerite, libgp_kernels) + the three preprocessor defines +
   platform BLAS/LAPACK from the **installed package** via a temporary
@@ -22,7 +22,7 @@
   Rcpp-plugin path forwarded only the first `-I` and dropped all `-D`, so
   examples needing eigen / celerite / libgp could not compile.
 * `ai4bayescode_sourceCpp()` is now a thin back-compatibility alias for
-  `source_AI4BayesCode()`.
+  `ai4bayescode_source()`.
 
 # AI4BayesCode 0.9.0
 

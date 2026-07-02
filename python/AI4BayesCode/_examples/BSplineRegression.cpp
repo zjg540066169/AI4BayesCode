@@ -84,7 +84,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.BSplineRegression(y, Bsp, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.BSplineRegression(y, Bsp, 7, True); m.step(2500); print(m.get_current())
 // @example:end

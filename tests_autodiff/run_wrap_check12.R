@@ -28,7 +28,7 @@ diag_one <- function(label, r) {
 }
 
 cat("----- test_wrap_autodiff_vs_hand.cpp -----\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "tests_autodiff",
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "tests_autodiff",
                               "test_wrap_autodiff_vs_hand.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir, verbose = FALSE)
 
@@ -43,7 +43,7 @@ for (cfg in list(c(0.0, 1.0), c(1.5, 0.5), c(-0.5, 2.0))) {
 }
 
 cat("\n----- test_wrap_simplex.cpp -----\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "tests_autodiff",
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "tests_autodiff",
                               "test_wrap_simplex.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir, verbose = FALSE)
 y_counts <- c(10, 25, 30, 20, 15)

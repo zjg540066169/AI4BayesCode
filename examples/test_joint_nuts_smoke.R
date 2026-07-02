@@ -19,7 +19,7 @@ script_dir <- local({
 AI4BayesCode_dir <- normalizePath(file.path(script_dir, ".."))
 source(file.path(AI4BayesCode_dir, "R", "AI4BayesCode_helpers.R"))
 
-AI4BayesCode_sourceCpp(file.path(script_dir, "IRT1PL_joint.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "IRT1PL_joint.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 n_pass <- 0L

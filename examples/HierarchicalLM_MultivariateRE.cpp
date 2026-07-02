@@ -435,7 +435,7 @@ public:
 
         // ---- Q7=A full predict-DAG reconstruction --------------------
         // Deterministic chain reconstructed as first-class nodes (so
-        // plot_dag shows the generative story, not 8 sources collapsed
+        // ai4bayescode_plot_dag shows the generative story, not 8 sources collapsed
         // into y_rep):
         //   mu_fixed = X*beta                      (fixed effects, len N)
         //   u        = diag(tau) @ L @ z           (realized RE, D x J,

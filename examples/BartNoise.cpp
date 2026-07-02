@@ -251,7 +251,7 @@ public:
         //      (calibrated): sigma_nu / sigma_lambda are sigma's prior
         //      parents. The BART forest is itself a sampled generative
         //      parent of f_bart alongside X (cf. MetaRegBartSpline). All
-        //      drawn faded by plot_dag.
+        //      drawn faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("sigma_nu",     {"sigma"});
         impl_->data().declare_context_edges("sigma_lambda", {"sigma"});
         impl_->data().declare_context_edges("BART",         {"f_bart"});

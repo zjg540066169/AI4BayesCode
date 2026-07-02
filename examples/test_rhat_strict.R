@@ -43,7 +43,7 @@ all_ok <- TRUE
 #  1. GaussianLocationScale
 # ============================================================================
 cat("=== 1. GaussianLocationScale ===\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "GaussianLocationScale.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "GaussianLocationScale.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 set.seed(42)
@@ -78,7 +78,7 @@ results[["Gaussian"]] <- max_rh
 #  2. DirichletSimplex (K=5)
 # ============================================================================
 cat("\n=== 2. DirichletSimplex ===\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "DirichletSimplex.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "DirichletSimplex.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 y_dir <- c(15, 25, 30, 20, 10)
@@ -114,7 +114,7 @@ results[["Dirichlet"]] <- max_rh
 #  3. BartNoise
 # ============================================================================
 cat("\n=== 3. BartNoise ===\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "BartNoise.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "BartNoise.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 set.seed(42)
@@ -162,7 +162,7 @@ results[["BART"]] <- max_rh
 #  4. BetaBernoulli (interval constraint)
 # ============================================================================
 cat("\n=== 4. BetaBernoulli ===\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "BetaBernoulli.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "BetaBernoulli.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 set.seed(42)
@@ -200,7 +200,7 @@ results[["Beta"]] <- rh_p
 #  6. ARDLasso (cross-implementation with R)
 # ============================================================================
 cat("\n=== 6. ARDLasso ===\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "ARDLasso.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "ARDLasso.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 set.seed(42)

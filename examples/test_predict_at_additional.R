@@ -25,7 +25,7 @@ library(loo)
 # 1. DirichletSimplex + loo (Multinomial log-likelihood)
 # ============================================================================
 cat("\n======== DirichletSimplex ========\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "DirichletSimplex.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "DirichletSimplex.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 y_dir <- c(15, 25, 30, 20, 10)
@@ -61,7 +61,7 @@ for (seed in c(101L, 202L)) {
 # 2. DirichletSparse
 # ============================================================================
 cat("\n======== DirichletSparse ========\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "DirichletSparse.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "DirichletSparse.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 set.seed(42)
@@ -94,7 +94,7 @@ for (seed in c(101L, 202L)) {
 # 3. DirichletHierarchical
 # ============================================================================
 cat("\n======== DirichletHierarchical ========\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "DirichletHierarchical.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "DirichletHierarchical.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 set.seed(42)
@@ -131,7 +131,7 @@ for (seed in c(101L, 202L)) {
 # 4. GBartPoisson — predict_at at new X returns r (log-rate) + rate
 # ============================================================================
 cat("\n======== GBartPoisson (genBART Poisson at test X) ========\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "GBartPoisson.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "GBartPoisson.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 set.seed(42)
@@ -159,7 +159,7 @@ cat("  r + rate returned correctly at test X.\n")
 # 5. BartNoise with X_new — posterior predictive at test points
 # ============================================================================
 cat("\n======== BartNoise w/ X_new ========\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "BartNoise.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "BartNoise.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 set.seed(42)

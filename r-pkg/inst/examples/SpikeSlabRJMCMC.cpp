@@ -90,10 +90,10 @@
 //   X <- matrix(rnorm(N * p), N, p); X <- scale(X, center = TRUE, scale = FALSE)  # center cols (no intercept)
 //   y <- as.numeric(X %*% beta_true + rnorm(N, 0, sigma_true)); y <- y - mean(y)  # center y
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(SpikeSlabRJMCMC, X, y, 1.0, 1.0, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(SpikeSlabRJMCMC, X, y, 1.0, 1.0, 7L, TRUE)  # X (N x p), y, a_pi=1, b_pi=1 (Beta prior on pi), seed=7, keep_history=TRUE
 //   m$step(2500); str(m$get_current())
@@ -108,7 +108,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.SpikeSlabRJMCMC(X, y, 1.0, 1.0, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.SpikeSlabRJMCMC(X, y, 1.0, 1.0, 7, True)  # (X, y, a_pi=1, b_pi=1, seed=7, keep_history=True)
 //   m.step(2500); print(m.get_current())              # gamma ~ {0,3,6} active, sigma ~ 1
@@ -541,7 +541,7 @@ public:
         // Predict DAG + y_rep refresher.
         // X, beta, sigma all directly produce y_rep in the generative
         // model y_rep ~ N(X*beta, sigma^2). All three are declared as
-        // predict-edge parents so the DAG visualization (plot_dag) shows
+        // predict-edge parents so the DAG visualization (ai4bayescode_plot_dag) shows
         // X → y_rep. X is also registered as a data_input so it can be
         // replaced via predict_at(list(X = X_new)).
         //
@@ -591,7 +591,7 @@ public:
         //      pi ~ Beta(a_pi, b_pi); gamma_j ~ Bernoulli(pi);
         //      beta_j | gamma_j, sigma, tau ~ N(0, sigma^2 tau^2).
         //      tau, sigma ~ Jeffreys (no hyperparam slot). Drawn faded
-        //      by plot_dag.
+        //      by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("a_pi",  {"pi"});
         impl_->data().declare_context_edges("b_pi",  {"pi"});
         impl_->data().declare_context_edges("pi",    {"gamma"});

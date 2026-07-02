@@ -5,19 +5,16 @@
 # wrapper has been compiled. These are shipped so that generated runners can
 # call the SAME functions by name instead of re-emitting them:
 #
-#   * ai4b_diagnose()          -- model-independent posterior diagnostics + plot
+#   * ai4bayescode_diagnose()          -- model-independent posterior diagnostics + plot
 #                                 (codegen_r_runner.md mandates the runner call
-#                                  the SHIPPED ai4b_diagnose()).
-#   * AI4BayesCode_perf_hint() -- post-run per-sweep performance hint.
-#   * plot_dag()               -- render the model prediction DAG.
-#   * AI4BayesCode_sourceCpp() -- standalone Makevars-based sourceCpp wrapper
-#                                 (the name the generated example_<Class>.R and
-#                                  the skill templates call by string).
-#   * AI4BayesCode_run_chains() -- multi-chain runner for any wrapper class.
-#   * AI4BayesCode_rhat_summary() -- R-hat / ESS summary across chains.
+#                                  the SHIPPED ai4bayescode_diagnose()).
+#   * ai4bayescode_perf_hint() -- post-run per-sweep performance hint.
+#   * ai4bayescode_plot_dag()               -- render the model prediction DAG.
+#   * ai4bayescode_run_chains() -- multi-chain runner for any wrapper class.
+#   * ai4bayescode_rhat_summary() -- R-hat / ESS summary across chains.
 #
 # Ported verbatim (behavior-preserving) from the standalone scripts
-# AI4BayesCode/R/AI4BayesCode_helpers.R and AI4BayesCode/R/AI4BayesCode_run_chains.R
+# AI4BayesCode/R/AI4BayesCode_helpers.R and AI4BayesCode/R/ai4bayescode_run_chains.R
 # so that `library(AI4BayesCode)` provides them too.
 # ----------------------------------------------------------------------------
 
@@ -39,112 +36,6 @@ AI4BayesCode_generated_dir <- function(AI4BayesCode_path = "./AI4BayesCode") {
     gen_dir
 }
 
-#' Compile and load an AI4BayesCode sampler from a standalone checkout
-#'
-#' @description Wraps `Rcpp::sourceCpp()` with a generated Makevars file so the
-#'   AI4BayesCode include roots (mcmclib, BaseMatrixOps, eigen, libgp, celerite)
-#'   and required preprocessor defines are forwarded to the compiler. This is the
-#'   `source()`-the-helpers entry point referenced by the generated
-#'   `example_<Class>.R` and the skill templates; it expects a reachable
-#'   AI4BayesCode checkout (use [ai4bayescode_source()] for the self-contained,
-#'   install-only path).
-#' @param cpp_file Path to the `.cpp` file declaring the Rcpp module.
-#' @param AI4BayesCode_path Path to the AI4BayesCode folder containing the
-#'   `include/`, `libgp_kernels/`, and `celerite/` subtrees.
-#' @param rebuild Logical; force recompilation. Defaults to `TRUE`.
-#' @param verbose Logical; pass compiler output through. Defaults to `FALSE`.
-#' @param extra_cppflags Character vector of extra `-I`/`-D` flags appended to
-#'   `PKG_CPPFLAGS`.
-#' @param extra_libs Character vector of extra linker flags appended to
-#'   `PKG_LIBS`.
-#' @return Invisibly `NULL`; the side effect is that the module class becomes
-#'   loadable in the global environment.
-#' @name AI4BayesCode_sourceCpp_checkout
-#' @aliases AI4BayesCode_sourceCpp
-#' @export
-AI4BayesCode_sourceCpp <- function(cpp_file,
-                                AI4BayesCode_path = "./AI4BayesCode",
-                                rebuild        = TRUE,
-                                verbose        = FALSE,
-                                extra_cppflags = character(),
-                                extra_libs     = character()) {
-    if (!requireNamespace("Rcpp", quietly = TRUE)) {
-        stop("Rcpp is required but not installed.")
-    }
-    if (!requireNamespace("RcppArmadillo", quietly = TRUE)) {
-        stop("RcppArmadillo is required but not installed.")
-    }
-
-    cpp_file <- normalizePath(cpp_file, mustWork = TRUE)
-    pkg_root <- normalizePath(AI4BayesCode_path, mustWork = TRUE)
-
-    inc_root  <- file.path(pkg_root, "include")
-    inc_mc    <- file.path(pkg_root, "include", "mcmclib")
-    inc_bmo   <- file.path(pkg_root, "include", "mcmclib",
-                           "BaseMatrixOps", "include")
-    # autodiff is at inc_root/autodiff/ -> users include as
-    # `<autodiff/reverse/var.hpp>`. No separate -I needed (inc_root covers it).
-    # Eigen is at inc_root/eigen/Eigen/ -> needs a dedicated -I for
-    # `<Eigen/Dense>` to resolve.
-    inc_eigen <- file.path(pkg_root, "include", "eigen")
-    # libgp kernel subsystem (vendored, BSD-3) lives at pkg_root/libgp_kernels/.
-    # Its internal headers use bare `#include "cov.h"` etc., so we add the
-    # directory directly to the include path.
-    inc_libgp <- file.path(pkg_root, "libgp_kernels")
-    # celerite (vendored, MIT) for O(N) 1-D time-series GP. Header-only
-    # under pkg_root/celerite/include/. Headers include as
-    # `<celerite/celerite.h>` so we add pkg_root/celerite/include to -I.
-    inc_celerite <- file.path(pkg_root, "celerite", "include")
-    for (p in c(inc_root, inc_mc, inc_bmo)) {
-        if (!dir.exists(p)) {
-            stop("Could not find expected AI4BayesCode directory: ", p,
-                 "\nDid you pass the right AI4BayesCode_path?")
-        }
-    }
-
-    cppflags <- c(
-        paste0("-I", shQuote(inc_root)),
-        paste0("-I", shQuote(inc_mc)),
-        paste0("-I", shQuote(inc_bmo)),
-        if (dir.exists(inc_eigen)) paste0("-I", shQuote(inc_eigen)) else character(),
-        if (dir.exists(inc_libgp)) paste0("-I", shQuote(inc_libgp)) else character(),
-        if (dir.exists(inc_celerite)) paste0("-I", shQuote(inc_celerite)) else character(),
-        .ai4b_block_cppflags(),   # installed contributed blocks (ai4bayescode_install_block)
-        "-DMCMC_ENABLE_ARMA_WRAPPERS",
-        "-DARMA_DONT_USE_WRAPPER",
-        "-DAI4BAYESCODE_RCPP_MODULE",
-        extra_cppflags
-    )
-
-    libs <- if (Sys.info()[["sysname"]] == "Darwin") {
-        c("-framework Accelerate", extra_libs)
-    } else {
-        c("$(BLAS_LIBS)", "$(LAPACK_LIBS)", extra_libs)
-    }
-
-    mk_file <- tempfile(pattern = "AI4BayesCode_Makevars_", fileext = "")
-    writeLines(c(
-        paste("PKG_CPPFLAGS =", paste(cppflags, collapse = " ")),
-        paste("PKG_LIBS =",     paste(libs,     collapse = " "))
-    ), mk_file)
-    on.exit(unlink(mk_file), add = TRUE)
-
-    old_makevars <- Sys.getenv("R_MAKEVARS_USER", unset = NA)
-    Sys.setenv(R_MAKEVARS_USER = mk_file)
-    on.exit({
-        if (is.na(old_makevars)) {
-            Sys.unsetenv("R_MAKEVARS_USER")
-        } else {
-            Sys.setenv(R_MAKEVARS_USER = old_makevars)
-        }
-    }, add = TRUE)
-
-    Rcpp::sourceCpp(cpp_file,
-                    rebuild = rebuild,
-                    verbose = verbose,
-                    env     = globalenv())
-    invisible(NULL)
-}
 
 
 #' Render the model prediction (generative) DAG
@@ -167,7 +58,7 @@ AI4BayesCode_sourceCpp <- function(cpp_file,
 #' @return Invisibly `NULL` when drawing interactively, or the PNG path when
 #'   `out_path` is supplied.
 #' @export
-plot_dag <- function(model,
+ai4bayescode_plot_dag <- function(model,
                      out_path = NULL,
                      main     = NULL,
                      width    = 1600,
@@ -176,7 +67,7 @@ plot_dag <- function(model,
                      plate    = TRUE,
                      ...) {
     if (!requireNamespace("igraph", quietly = TRUE)) {
-        stop("plot_dag requires the igraph package.\n",
+        stop("ai4bayescode_plot_dag requires the igraph package.\n",
              "Install with: install.packages('igraph')")
     }
 
@@ -507,7 +398,7 @@ plot_dag <- function(model,
 #'   when per-sweep time exceeds it.
 #' @return Invisibly `NULL`. Side effect: prints to stderr via `message()`.
 #' @export
-AI4BayesCode_perf_hint <- function(wall_sec,
+ai4bayescode_perf_hint <- function(wall_sec,
                                 n_sweeps_total,
                                 uses_joint_nuts = FALSE,
                                 thresholds = list(slow_sweep_sec = 0.5)) {
@@ -589,12 +480,12 @@ AI4BayesCode_perf_hint <- function(wall_sec,
 #' @param order_components Logical; if `TRUE`, sort each draw's components within
 #'   every matrix-valued key (order statistics) before summarising -> a LABEL-
 #'   INVARIANT per-component summary for exchangeable (mixture/cluster) params.
-#'   Defaults to `FALSE`, in which case `ai4b_diagnose` still scans for label
+#'   Defaults to `FALSE`, in which case `ai4bayescode_diagnose` still scans for label
 #'   switching and warns when a high R-hat is a labelling artefact.
 #' @export
-ai4b_diagnose <- function(hist, plot = TRUE, order_components = FALSE) {
+ai4bayescode_diagnose <- function(hist, plot = TRUE, order_components = FALSE) {
     if (!requireNamespace("posterior", quietly = TRUE)) {
-        stop("ai4b_diagnose() needs the 'posterior' package. ",
+        stop("ai4bayescode_diagnose() needs the 'posterior' package. ",
              "Install it with install.packages('posterior').", call. = FALSE)
     }
     if (!is.list(hist) || is.null(names(hist)) || !all(nzchar(names(hist)))) {
@@ -607,7 +498,7 @@ ai4b_diagnose <- function(hist, plot = TRUE, order_components = FALSE) {
     if (length(label_switch) && !isTRUE(order_components)) {
         ex <- label_switch[[1L]]
         message(sprintf(
-"ai4b_diagnose: possible LABEL SWITCHING in %s -- the high R-hat is a labelling\n  artefact, NOT non-convergence (e.g. %s: %.2f -> %.2f after ordering components\n  within each draw). Pass order_components = TRUE for a label-invariant summary,\n  or canonicalize the labels in the sampler.",
+"ai4bayescode_diagnose: possible LABEL SWITCHING in %s -- the high R-hat is a labelling\n  artefact, NOT non-convergence (e.g. %s: %.2f -> %.2f after ordering components\n  within each draw). Pass order_components = TRUE for a label-invariant summary,\n  or canonicalize the labels in the sampler.",
             paste(names(label_switch), collapse = ", "),
             names(label_switch)[1L], ex$raw, ex$ordered))
     }
@@ -656,7 +547,7 @@ ai4b_diagnose <- function(hist, plot = TRUE, order_components = FALSE) {
 #'   + keep on each, and returns the per-chain `get_history()` results, the seeds
 #'   used, and the per-chain wall time. Each chain instantiates a fresh Rcpp
 #'   module object in its own worker, so object ownership is handled cleanly.
-#' @param model_ctor Function of one argument `seed` returning a fresh wrapper
+#' @param model_ctor Function of one argument (the integer seed, passed positionally; the parameter name is irrelevant) returning a fresh wrapper
 #'   object exposing `step()` and `get_history()`. Must be deterministic in
 #'   `seed`.
 #' @param n_chains Number of chains. Defaults to 4.
@@ -671,7 +562,7 @@ ai4b_diagnose <- function(hist, plot = TRUE, order_components = FALSE) {
 #' @return A list with `histories` (list of per-chain `get_history()` returns),
 #'   `seeds`, and `wall` (per-chain seconds).
 #' @export
-AI4BayesCode_run_chains <- function(model_ctor,
+ai4bayescode_run_chains <- function(model_ctor,
                                  n_chains  = 4,
                                  n_burn    = 2000,
                                  n_keep    = 10000,
@@ -691,7 +582,7 @@ AI4BayesCode_run_chains <- function(model_ctor,
 
     one_chain <- function(seed_val) {
         t0 <- Sys.time()
-        m <- model_ctor(seed = seed_val)
+        m <- model_ctor(seed_val)
         m$step(as.integer(n_burn))
         m$step(as.integer(n_keep))
         t1 <- Sys.time()
@@ -713,7 +604,7 @@ AI4BayesCode_run_chains <- function(model_ctor,
 
     if (use_parallel && mc.cores > 1) {
         if (verbose)
-            message("AI4BayesCode_run_chains: running ", n_chains,
+            message("ai4bayescode_run_chains: running ", n_chains,
                     " chains on ", mc.cores, " cores (parallel)")
         results <- parallel::mclapply(seeds, one_chain, mc.cores = mc.cores,
                                       mc.set.seed = TRUE)
@@ -723,7 +614,7 @@ AI4BayesCode_run_chains <- function(model_ctor,
             # (vecLib), whose GCD worker threads do not survive fork(), so a
             # chain doing heavier linear algebra segfaults under mclapply.
             # Recover by re-running every chain sequentially (no fork).
-            warning("AI4BayesCode_run_chains: a parallel chain failed (likely a ",
+            warning("ai4bayescode_run_chains: a parallel chain failed (likely a ",
                     "fork-unsafe multithreaded BLAS, e.g. macOS Accelerate); ",
                     "re-running all chains sequentially. To keep parallelism set ",
                     "VECLIB_MAXIMUM_THREADS=1 before starting R, or pass ",
@@ -732,7 +623,7 @@ AI4BayesCode_run_chains <- function(model_ctor,
         }
     } else {
         if (verbose)
-            message("AI4BayesCode_run_chains: running ", n_chains,
+            message("ai4bayescode_run_chains: running ", n_chains,
                     " chains sequentially")
         results <- lapply(seeds, one_chain)
     }
@@ -740,7 +631,7 @@ AI4BayesCode_run_chains <- function(model_ctor,
     # Detect failures (after any sequential fallback -- a real model/data error).
     for (i in seq_along(results)) {
         if (!chain_ok(results[[i]])) {
-            stop("AI4BayesCode_run_chains: chain ", i, " failed")
+            stop("ai4bayescode_run_chains: chain ", i, " failed")
         }
     }
 
@@ -755,8 +646,8 @@ AI4BayesCode_run_chains <- function(model_ctor,
 #'
 #' @description Computes split-R-hat and bulk-ESS (via the \pkg{posterior}
 #'   package) for each scalar or matrix history key across the chains returned by
-#'   [AI4BayesCode_run_chains()].
-#' @param run The list returned by [AI4BayesCode_run_chains()] (needs at least
+#'   [ai4bayescode_run_chains()].
+#' @param run The list returned by [ai4bayescode_run_chains()] (needs at least
 #'   two chains).
 #' @param keys Optional character vector of history keys to summarise; defaults
 #'   to all keys.
@@ -773,7 +664,7 @@ AI4BayesCode_run_chains <- function(model_ctor,
 #'   detected, the affected keys (each with their `raw` and `ordered` max R-hat)
 #'   are also attached as `attr(<result>, "label_switch")`.
 #' @export
-AI4BayesCode_rhat_summary <- function(run, keys = NULL, drop_burn = 0,
+ai4bayescode_rhat_summary <- function(run, keys = NULL, drop_burn = 0,
                                       order_components = FALSE) {
     if (!requireNamespace("posterior", quietly = TRUE)) {
         stop("posterior package required for R-hat summary")
@@ -841,10 +732,35 @@ AI4BayesCode_rhat_summary <- function(run, keys = NULL, drop_burn = 0,
         if (!isTRUE(order_components)) {
             ex <- label_switch[[1L]]
             message(sprintf(
-"AI4BayesCode_rhat_summary: possible LABEL SWITCHING in %s -- the high R-hat is a\n  labelling artefact, NOT non-convergence (e.g. %s: %.2f -> %.2f after ordering\n  components within each draw). Pass order_components = TRUE for a label-invariant\n  summary, or canonicalize the labels in the sampler.",
+"ai4bayescode_rhat_summary: possible LABEL SWITCHING in %s -- the high R-hat is a\n  labelling artefact, NOT non-convergence (e.g. %s: %.2f -> %.2f after ordering\n  components within each draw). Pass order_components = TRUE for a label-invariant\n  summary, or canonicalize the labels in the sampler.",
                 paste(names(label_switch), collapse = ", "),
                 names(label_switch)[1L], ex$raw, ex$ordered))
         }
     }
     out
 }
+
+
+# ---- Back-compat aliases -----------------------------------------------------
+# Deprecated spellings kept so existing user scripts keep working. The canonical
+# public names are the ai4bayescode_* forms defined above.
+
+#' @rdname ai4bayescode_run_chains
+#' @export
+AI4BayesCode_run_chains <- ai4bayescode_run_chains
+
+#' @rdname ai4bayescode_perf_hint
+#' @export
+AI4BayesCode_perf_hint <- ai4bayescode_perf_hint
+
+#' @rdname ai4bayescode_rhat_summary
+#' @export
+AI4BayesCode_rhat_summary <- ai4bayescode_rhat_summary
+
+#' @rdname ai4bayescode_diagnose
+#' @export
+ai4b_diagnose <- ai4bayescode_diagnose
+
+#' @rdname ai4bayescode_plot_dag
+#' @export
+plot_dag <- ai4bayescode_plot_dag

@@ -8,7 +8,7 @@
 source("R/AI4BayesCode_helpers.R")
 suppressPackageStartupMessages(library(posterior))
 
-AI4BayesCode_sourceCpp("r-pkg/inst/examples/GBartPoisson.cpp",
+ai4bayescode_sourceCpp("r-pkg/inst/examples/GBartPoisson.cpp",
                        AI4BayesCode_path = ".")
 
 NBURN <- 4000L

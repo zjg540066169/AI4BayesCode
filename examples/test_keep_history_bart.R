@@ -38,7 +38,7 @@ fail <- function(msg) { cat(sprintf("  FAIL: %s\n", msg)); n_fail <<- n_fail + 1
 check <- function(cond, msg) { if (isTRUE(cond)) pass(msg) else fail(msg) }
 
 cat("=== Compiling BartNoise ===\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "BartNoise.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "BartNoise.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir, verbose = FALSE)
 
 set.seed(123)

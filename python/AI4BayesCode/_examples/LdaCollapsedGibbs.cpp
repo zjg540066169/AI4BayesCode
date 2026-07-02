@@ -131,7 +131,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.LdaCollapsedGibbs(w, doc, M, V, K, np.ones(K), np.ones(V), seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.LdaCollapsedGibbs(w, doc, M, V, K,        # w/doc length-N (1-indexed) tokens & doc ids
 //                             np.ones(K), np.ones(V), 7, True)  # alpha, beta, seed, keep_history

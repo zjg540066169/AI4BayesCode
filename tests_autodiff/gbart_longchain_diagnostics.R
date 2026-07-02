@@ -38,7 +38,7 @@ diagnose_r <- function(r1, r2, example_name) {
 
 # ------------------------- GBartPoisson ---------------------------------
 cat("\n===== GBartPoisson =====\n")
-AI4BayesCode_sourceCpp("r-pkg/inst/examples/GBartPoisson.cpp",
+ai4bayescode_sourceCpp("r-pkg/inst/examples/GBartPoisson.cpp",
                        AI4BayesCode_path = ".")
 set.seed(1); N <- 200L; p <- 3L
 X <- matrix(runif(N*p), N, p)
@@ -58,7 +58,7 @@ cat(sprintf("  recovery cor(posterior mean, truth) = %.3f\n",
 
 # ------------------------- GBartLogistic ---------------------------------
 cat("\n===== GBartLogistic =====\n")
-AI4BayesCode_sourceCpp("r-pkg/inst/examples/GBartLogistic.cpp",
+ai4bayescode_sourceCpp("r-pkg/inst/examples/GBartLogistic.cpp",
                        AI4BayesCode_path = ".")
 set.seed(2); N <- 200L
 X <- matrix(runif(N*p), N, p)
@@ -81,7 +81,7 @@ cat(sprintf("  classification accuracy @ 0.5 = %.3f\n",
 
 # ------------------------- GBartMultinomial -----------------------------
 cat("\n===== GBartMultinomial (C=3) =====\n")
-AI4BayesCode_sourceCpp("r-pkg/inst/examples/GBartMultinomial.cpp",
+ai4bayescode_sourceCpp("r-pkg/inst/examples/GBartMultinomial.cpp",
                        AI4BayesCode_path = ".")
 set.seed(3); N <- 300L; C <- 3L
 X <- matrix(runif(N*p), N, p)
@@ -109,7 +109,7 @@ for (j in 1:(C-1)) {
 
 # ------------------------- GBartHeteroscedastic --------------------------
 cat("\n===== GBartHeteroscedastic =====\n")
-AI4BayesCode_sourceCpp("r-pkg/inst/examples/GBartHeteroscedastic.cpp",
+ai4bayescode_sourceCpp("r-pkg/inst/examples/GBartHeteroscedastic.cpp",
                        AI4BayesCode_path = ".")
 set.seed(5); N <- 200L
 X <- matrix(runif(N*p), N, p)

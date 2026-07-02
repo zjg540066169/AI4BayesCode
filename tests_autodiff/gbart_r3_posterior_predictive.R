@@ -69,7 +69,7 @@ run_r3 <- function(example_name, build_fn, y_obs, stats_list = bp_stats) {
 }
 
 # -- GBartPoisson R3 --
-AI4BayesCode_sourceCpp("r-pkg/inst/examples/GBartPoisson.cpp",
+ai4bayescode_sourceCpp("r-pkg/inst/examples/GBartPoisson.cpp",
                        AI4BayesCode_path = ".")
 set.seed(1); N <- 200L; p <- 3L; X <- matrix(runif(N*p), N, p)
 truth <- -1 + X[,1] - 0.5*X[,2]; y_p <- rpois(N, exp(truth))
@@ -78,7 +78,7 @@ res_p <- run_r3("GBartPoisson",
                 y_p, bp_stats)
 
 # -- GBartLogistic R3 (binary) --
-AI4BayesCode_sourceCpp("r-pkg/inst/examples/GBartLogistic.cpp",
+ai4bayescode_sourceCpp("r-pkg/inst/examples/GBartLogistic.cpp",
                        AI4BayesCode_path = ".")
 set.seed(2); X <- matrix(runif(N*p), N, p)
 y_l <- rbinom(N, 1, plogis(-0.5 + 2*X[,1] - X[,2]))

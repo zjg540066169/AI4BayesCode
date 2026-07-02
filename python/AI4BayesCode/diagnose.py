@@ -3,7 +3,7 @@
 Ships the diagnostics + plot used by generated
 ``run_chain_<Model>(diagnosis=True)`` runners, so each runner calls one
 library function instead of re-emitting the code by hand. Mirrors the R
-``ai4b_diagnose()`` in the AI4BayesCode R package.
+``ai4bayescode_diagnose()`` in the AI4BayesCode R package.
 
 Per parameter it reports split-R-hat, bulk / tail ESS, and posterior
 mean / sd / 90% CI (all numpy, via utils.py), plus a combined trace +
@@ -73,14 +73,14 @@ def _label_switch_scan(hist, hi=1.05, drop=0.1):
 
 class _SummaryDict(dict):
     """A dict that also carries an ``.attrs`` mapping (parity with
-    ``pandas.DataFrame.attrs``), so ``ai4b_diagnose`` can expose ``label_switch``
+    ``pandas.DataFrame.attrs``), so ``diagnose`` can expose ``label_switch``
     even when pandas is unavailable and the summary is a plain dict of dicts."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.attrs = {}
 
 
-def ai4b_diagnose(hist, n_burn=0, plot=True, order_components=False):
+def diagnose(hist, n_burn=0, plot=True, order_components=False):
     """Compute draws-only diagnostics and a trace / ACF / density plot.
 
     Parameters
@@ -111,7 +111,7 @@ def ai4b_diagnose(hist, n_burn=0, plot=True, order_components=False):
     label_switch = _label_switch_scan(hb)
     if label_switch and not order_components:
         nm0 = next(iter(label_switch)); ex = label_switch[nm0]
-        print(f"ai4b_diagnose: possible LABEL SWITCHING in {', '.join(label_switch)} -- the "
+        print(f"diagnose: possible LABEL SWITCHING in {', '.join(label_switch)} -- the "
               f"high R-hat is a labelling artefact, NOT non-convergence (e.g. {nm0}: "
               f"{ex['raw']:.2f} -> {ex['ordered']:.2f} after ordering components within each "
               f"draw). Pass order_components=True for a label-invariant summary, or "
@@ -130,7 +130,7 @@ def ai4b_diagnose(hist, n_burn=0, plot=True, order_components=False):
     except Exception:
         summary = _SummaryDict(rows)            # dict-of-dicts + an .attrs mapping
     # Expose label switching the SAME way with or without pandas (parity with the
-    # R ai4b_diagnose()$label_switch): attach it to summary.attrs so callers can
+    # R ai4bayescode_diagnose()$label_switch): attach it to summary.attrs so callers can
     # read it even when pandas is absent (a bare dict would otherwise drop it).
     summary.attrs["label_switch"] = label_switch
 
@@ -161,3 +161,7 @@ def ai4b_diagnose(hist, n_burn=0, plot=True, order_components=False):
                 return fig
 
     return summary, plot_fn
+
+
+# Deprecated pre-1.0 alias; canonical name is diagnose().
+ai4b_diagnose = diagnose

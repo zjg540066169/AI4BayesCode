@@ -82,7 +82,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HierarchicalLM_joint(y, X, g.astype(np.int32), G, 1.0, 1.0, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.HierarchicalLM_joint(y, X, g.astype(np.int32), G, 1.0, 1.0, 7, True)  # y,X,g_idx(1-based),G,sigma_init,tau_init,seed,keep_history
 //   m.step(2500); print(m.get_current())

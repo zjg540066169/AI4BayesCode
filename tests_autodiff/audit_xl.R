@@ -85,7 +85,7 @@ run_one_example <- function(name, fn_simulate, fn_run, fn_diagnose) {
 }
 
 # ====== 1. GaussianLocationScale ======
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GaussianLocationScale.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GaussianLocationScale.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 run_one_example("Gaussian",
     fn_simulate = function(s) { set.seed(s); list(y=rnorm(100, 2, 1.5),
@@ -121,7 +121,7 @@ run_one_example("Gaussian",
 )
 
 # ====== 2. BetaBernoulli ======
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BetaBernoulli.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BetaBernoulli.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 run_one_example("BetaBernoulli",
     fn_simulate = function(s) { set.seed(s); list(y=rbinom(200, 1, 0.3),
@@ -150,7 +150,7 @@ run_one_example("BetaBernoulli",
 )
 
 # ====== 3. DirichletSimplex ======
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletSimplex.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletSimplex.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 run_one_example("DirichletSimplex",
     fn_simulate = function(s) {
@@ -180,7 +180,7 @@ run_one_example("DirichletSimplex",
 )
 
 # ====== 4. DirichletSparse ======
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletSparse.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletSparse.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 run_one_example("DirichletSparse",
     fn_simulate = function(s) {
@@ -213,7 +213,7 @@ run_one_example("DirichletSparse",
 )
 
 # ====== 5. DirichletHierarchical ======
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletHierarchical.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletHierarchical.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 run_one_example("DirichletHierarchical",
     fn_simulate = function(s) {
@@ -255,7 +255,7 @@ run_one_example("DirichletHierarchical",
 )
 
 # ====== 6. BartNoise ======
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BartNoise.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BartNoise.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 run_one_example("BartNoise",
     fn_simulate = function(s) {
@@ -293,7 +293,7 @@ run_one_example("BartNoise",
 )
 
 # ====== 7. GBartPoisson (genBART RJMCMC) ======
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GBartPoisson.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GBartPoisson.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 run_one_example("GBartPoisson",
     fn_simulate = function(s) {
@@ -324,7 +324,7 @@ run_one_example("GBartPoisson",
 )
 
 # ====== 8. ARDLasso ======
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "ARDLasso.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "ARDLasso.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 run_one_example("ARDLasso",
     fn_simulate = function(s) {
@@ -366,7 +366,7 @@ run_one_example("ARDLasso",
 )
 
 # ====== 9. IRT1PL_joint (N=30, J=8 — baseline) ======
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "IRT1PL_joint.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "IRT1PL_joint.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 run_one_example("IRT1PL_joint",
     fn_simulate = function(s) {
@@ -411,7 +411,7 @@ run_one_example("IRT1PL_joint",
 )
 
 # ====== 10. HierarchicalLM_joint ======
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "HierarchicalLM_joint.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "HierarchicalLM_joint.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 run_one_example("HierarchicalLM_joint",
     fn_simulate = function(s) {
@@ -455,7 +455,7 @@ run_one_example("HierarchicalLM_joint",
 )
 
 # ====== 11. LinearRegJointMixed ======
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "LinearRegJointMixed.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "LinearRegJointMixed.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 run_one_example("LinearRegJointMixed",
     fn_simulate = function(s) {
@@ -503,7 +503,7 @@ run_one_example("LinearRegJointMixed",
 
 # ====== 12. GBartLogistic (binary classification via genBART direct sigmoid;
 #            replaces archived LogisticBART + multinomial_gamma path) ======
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GBartLogistic.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GBartLogistic.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 run_one_example("GBartLogistic",
     fn_simulate = function(s) {
@@ -552,7 +552,7 @@ run_one_example("GBartLogistic",
 
 # ====== 13. GBartMultinomial (C=4 via genBART + poisson_multinomial_aug_block;
 #            replaces archived MultinomialLogisticBART) ======
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
                               "GBartMultinomial.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 run_one_example("GBartMultinomial",

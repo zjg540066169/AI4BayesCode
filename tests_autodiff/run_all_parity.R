@@ -16,7 +16,7 @@ run_parity <- function(cpp, fn_name, data_args = list(),
                        pass_condition = function(r) r$all_pass) {
     cat(sprintf("\n----- %s -----\n", basename(cpp)))
     t0 <- Sys.time()
-    AI4BayesCode_sourceCpp(cpp, AI4BayesCode_path = AI4BayesCode_dir, verbose = FALSE)
+    ai4bayescode_sourceCpp(cpp, AI4BayesCode_path = AI4BayesCode_dir, verbose = FALSE)
     res <- tryCatch({
         fn <- get(fn_name, envir = globalenv())
         do.call(fn, data_args)

@@ -110,7 +110,7 @@ for (k in seq_len(N_SAMPLERS)) {
     # is a word character and there's no \b between MODEL and _).
     cpp_text  <- gsub(paste0("\\b", MODEL_NAME, "\\b"), new_class, cpp_text)
     writeLines(cpp_text, tmp_cpp)
-    AI4BayesCode_sourceCpp(tmp_cpp,
+    ai4bayescode_sourceCpp(tmp_cpp,
                            AI4BayesCode_path = "sim2/AI4BayesCode")
     ai_classes[k] <- new_class
 }

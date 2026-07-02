@@ -19,7 +19,7 @@ source(file.path(AI4BayesCode_dir, "R", "AI4BayesCode_helpers.R"))
 
 suppressPackageStartupMessages(library(posterior))
 
-AI4BayesCode_sourceCpp(file.path(script_dir, "HierarchicalLM_joint.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "HierarchicalLM_joint.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 # --- Simulate --------------------------------------------------------------

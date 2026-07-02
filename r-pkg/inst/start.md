@@ -178,7 +178,7 @@ run automatically without asking.
 | Model confirmation / DAG sign-off after presenting the inline DAG + table | YES |
 | Ship-ready confirmation ("save final files and finish?") | YES |
 | **Procedural workflow steps** | NO — run automatically |
-| Compile the generated `.cpp` (`AI4BayesCode_sourceCpp(...)` in R, equivalent in Python) | NO |
+| Compile the generated `.cpp` (`ai4bayescode_sourceCpp(...)` in R, equivalent in Python) | NO |
 | L3 R1 smoke test (10 steps, finiteness, `predict_at` non-mutation, throwaway `verify_*.cpp` Check #12) | NO |
 | L3 R2 two-chain diagnostic (4k+4k, R-hat, ESS) | NO |
 | L3 R3 posterior-predictive Bayesian p-values + PSIS-LOO | NO |
@@ -314,7 +314,7 @@ runtime — it decides the compile call AND whether to even ask for a library pa
 
 - Ask the "Path to AI4BayesCode folder?" question, and use the checkout form
   (`source("<path>/R/AI4BayesCode_helpers.R")` + capital
-  `AI4BayesCode_sourceCpp("<ClassName>.cpp", AI4BayesCode_path="<path>")`).
+  `ai4bayescode_sourceCpp("<ClassName>.cpp", AI4BayesCode_path="<path>")`).
 
 The generated `@example` header block (what `doc()` shows) ALWAYS uses the
 installed-package form when the package is present — the clean relative

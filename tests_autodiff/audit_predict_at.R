@@ -70,35 +70,35 @@ check_predict <- function(name, ctor_expr, predict_input = list()) {
 results <- list()
 
 # 1. Gaussian
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GaussianLocationScale.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GaussianLocationScale.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); y <- rnorm(100, 2, 1.5)
 results$Gaussian <- check_predict("GaussianLocationScale",
     quote(new(GaussianLocationScale, y, 1L, TRUE)))
 
 # 2. BetaBernoulli
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BetaBernoulli.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BetaBernoulli.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); y <- as.numeric(rbinom(200, 1, 0.3))
 results$BetaBernoulli <- check_predict("BetaBernoulli",
     quote(new(BetaBernoulli, y, 1.0, 1.0, 1L, TRUE)))
 
 # 3. DirichletSimplex
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletSimplex.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletSimplex.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 y_counts <- as.numeric(c(15,25,30,20,10)); alpha_pr <- rep(1,5)
 results$DirichletSimplex <- check_predict("DirichletSimplex",
     quote(new(DirichletSimplex, y_counts, alpha_pr, 1L, TRUE)))
 
 # 4. DirichletSparse
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletSparse.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletSparse.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 y_sp <- as.numeric(c(100, 80, 50, 30, 20, rep(2, 15)))
 results$DirichletSparse <- check_predict("DirichletSparse",
     quote(new(DirichletSparse, y_sp, 1L, TRUE)))
 
 # 5. DirichletHierarchical
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletHierarchical.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletHierarchical.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); K <- 4L; P <- 20L
 S_obs <- matrix(NA_real_, K, P)
@@ -107,7 +107,7 @@ results$DirichletHierarchical <- check_predict("DirichletHierarchical",
     quote(new(DirichletHierarchical, S_obs, 1.0, 1.0, 1L, TRUE)))
 
 # 6. BartNoise — predict_at with X_new
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BartNoise.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BartNoise.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); X_b <- matrix(rnorm(80*3), 80, 3); y_b <- as.numeric(3*X_b[,1] + rnorm(80, 0, 0.8))
 X_test <- matrix(rnorm(20*3), 20, 3)
@@ -116,7 +116,7 @@ results$BartNoise <- check_predict("BartNoise",
     predict_input = list(X = X_test))
 
 # 7. GBartPoisson
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GBartPoisson.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GBartPoisson.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); X_l <- matrix(runif(80*3), 80, 3); y_l <- as.numeric(rpois(80, exp(1 + 2*X_l[,1])))
 X_lt <- matrix(runif(20*3), 20, 3)
@@ -127,7 +127,7 @@ results$GBartPoisson <- check_predict("GBartPoisson",
     predict_input = list(X = X_lt))
 
 # 8. ARDLasso
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "ARDLasso.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "ARDLasso.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); X_a <- matrix(rnorm(100*10), 100, 10)
 y_a <- as.numeric(2 + X_a %*% c(3, -2, 0, 0, 1.5, rep(0,5)) + rnorm(100))
@@ -137,7 +137,7 @@ results$ARDLasso <- check_predict("ARDLasso",
     predict_input = list(X = X_at))
 
 # 9. IRT1PL_joint — empty predict
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "IRT1PL_joint.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "IRT1PL_joint.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); N_i <- 30L; J_i <- 8L
 theta_t <- rnorm(N_i); b_t <- rnorm(J_i, 0, 0.8)
@@ -147,7 +147,7 @@ results$IRT1PL_joint <- check_predict("IRT1PL_joint",
     quote(new(IRT1PL_joint, Y_i, rep(0, N_i), rep(0, J_i), 1.0, 1L, TRUE)))
 
 # 10. HierarchicalLM_joint
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "HierarchicalLM_joint.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "HierarchicalLM_joint.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); G_hl <- 10L; Np_hl <- 15L; N_hl <- G_hl*Np_hl
 X_hl <- matrix(rnorm(N_hl*3), N_hl, 3)
@@ -157,7 +157,7 @@ results$HierarchicalLM_joint <- check_predict("HierarchicalLM_joint",
     quote(new(HierarchicalLM_joint, y_hl, X_hl, as.integer(g_idx_hl), G_hl, 1.0, 1.0, 1L, TRUE)))
 
 # 11. LinearRegJointMixed
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "LinearRegJointMixed.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "LinearRegJointMixed.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); X_lr <- matrix(rnorm(200*5), 200, 5)
 y_lr <- as.numeric(1.5 + X_lr %*% c(2, -1, 0.5, 0, 3) + rnorm(200, 0, 1.2))
@@ -168,7 +168,7 @@ results$LinearRegJointMixed <- check_predict("LinearRegJointMixed",
 
 # 12. SpikeSlabRJMCMC — Dirac spike-and-slab, all hyperparameters sampled
 #     Empty predict (no X replacement yet; DAG marks X as a data input).
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "SpikeSlabRJMCMC.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "SpikeSlabRJMCMC.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); N_ss <- 80L; p_ss <- 10L
 X_ss <- matrix(rnorm(N_ss*p_ss), N_ss, p_ss)
@@ -181,7 +181,7 @@ results$SpikeSlabRJMCMC <- check_predict("SpikeSlabRJMCMC",
               1.0, 1.0, 1L, TRUE)))
 
 # 13. LogisticRegression (T12)
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "LogisticRegression.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "LogisticRegression.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); N_lg <- 200L; p_lg <- 5L
 X_lg <- matrix(rnorm(N_lg*p_lg), N_lg, p_lg)
@@ -196,7 +196,7 @@ results$LogisticRegression <- check_predict("LogisticRegression",
 # 13b. ProbitRegression (probit_aug_block + nuts_block on beta)
 # predict_at supports optional X (vectorised column-major); empty list
 # returns y_rep at training X.
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "ProbitRegression.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "ProbitRegression.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); N_pr <- 100L; p_pr <- 3L
 X_pr <- matrix(rnorm(N_pr * p_pr), N_pr, p_pr)
@@ -207,7 +207,7 @@ results$ProbitRegression <- check_predict("ProbitRegression",
     quote(new(ProbitRegression, X_pr, y_pr, 10.0, 1L, TRUE)))
 
 # 14. HMMGaussian2State (T10)
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "HMMGaussian2State.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "HMMGaussian2State.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); T_hmm <- 50L
 A_hmm  <- c(0.8, 0.2, 0.3, 0.7)
@@ -221,7 +221,7 @@ results$HMMGaussian2State <- check_predict("HMMGaussian2State",
     quote(new(HMMGaussian2State, y_hmm, A_hmm, pi_hmm, mu_hmm, 1.0, 1L, TRUE)))
 
 # 15. GBartLogistic (direct genBART sigmoid; replaces archived LogisticBART)
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GBartLogistic.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GBartLogistic.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); N_lb <- 100L; p_lb <- 5L
 X_lb <- matrix(rnorm(N_lb * p_lb), N_lb, p_lb)
@@ -235,7 +235,7 @@ results$GBartLogistic <- check_predict("GBartLogistic",
     predict_input = list(X = X_lb_test))
 
 # 16. GBartMultinomial (C=4; C-1 coupled + poisson_multinomial_aug; replaces archived MultinomialLogisticBART)
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
                               "GBartMultinomial.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); N_ml <- 80L; p_ml <- 5L; C_ml <- 4L
@@ -256,7 +256,7 @@ results$GBartMultinomial <- check_predict("GBartMultinomial",
     predict_input = list(X = X_ml_test))
 
 # 17. GPRegression (ESS + libgp SE kernel)
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GPRegression.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GPRegression.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); N_gp <- 60L; p_gp <- 1L
 X_gp <- matrix(seq(-3, 3, length.out=N_gp), N_gp, p_gp)
@@ -268,7 +268,7 @@ results$GPRegression <- check_predict("GPRegression",
 
 # 18. GPTimeSeries v0.5 (celerite + slice block for hyperparams;
 #     predict_at takes list(t = t_new) rather than X).
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GPTimeSeries.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GPTimeSeries.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); N_gts <- 60L
 t_gts <- sort(runif(N_gts, 0, 10))
@@ -279,7 +279,7 @@ results$GPTimeSeries <- check_predict("GPTimeSeries",
     predict_input = list(t = t_gts_test))
 
 # 19. GPClassification (ESS + libgp SE kernel + Bernoulli-logit)
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GPClassification.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GPClassification.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); N_gc <- 60L; p_gc <- 1L
 X_gc <- matrix(seq(-3, 3, length.out = N_gc), N_gc, p_gc)
@@ -293,7 +293,7 @@ results$GPClassification <- check_predict("GPClassification",
 
 # 20-22. BNP DP / PY / DerivedAlpha — predict_at(list()) returns y_rep
 # at training X (Q3=a; covariate-dependent BNP = future).
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
                               "DPGaussianMixture.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); N_dp <- 60L; d_dp <- 2L
@@ -305,7 +305,7 @@ results$DPGaussianMixture <- check_predict("DPGaussianMixture",
               0.1, 2.0, 1.0, 1.0, 1.0, 1L, TRUE)),
     predict_input = list())
 
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
                               "PYGaussianMixture.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 results$PYGaussianMixture <- check_predict("PYGaussianMixture",
@@ -313,7 +313,7 @@ results$PYGaussianMixture <- check_predict("PYGaussianMixture",
               0.1, 2.0, 1.0, 1.0, 1.0, 1L, TRUE)),
     predict_input = list())
 
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
                               "DPGaussianMixture_DerivedAlpha.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 results$DPGaussianMixture_DerivedAlpha <- check_predict(
@@ -323,7 +323,7 @@ results$DPGaussianMixture_DerivedAlpha <- check_predict(
     predict_input = list())
 
 # 23. FiniteGaussianMixture (finite K, dirichlet_gibbs on π)
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
                               "FiniteGaussianMixture.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 results$FiniteGaussianMixture <- check_predict(
@@ -333,7 +333,7 @@ results$FiniteGaussianMixture <- check_predict(
     predict_input = list())
 
 # 24. HDPGaussianMixture (truncated HDP across G groups)
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
                               "HDPGaussianMixture.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 g_idx_hdp <- as.integer(rep(0:1, each = nrow(y_dp) / 2))

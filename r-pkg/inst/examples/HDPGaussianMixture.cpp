@@ -140,10 +140,10 @@
 //   y <- rbind(draw_group(0L), draw_group(1L))
 //   group_idx <- c(rep(0L, Ng), rep(1L, Ng))
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(HDPGaussianMixture, y, group_idx, 6L, c(0, 0), 0.1, diag(d), 4.0, 1.0, 1.0, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(HDPGaussianMixture,
 //            y, group_idx, 6L,                 # y (N x d), group_idx, K_trunc
@@ -173,7 +173,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HDPGaussianMixture(y, group_idx, 6, np.zeros(d), 0.1, np.eye(d), 4.0, 1.0, 1.0, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.HDPGaussianMixture(y, group_idx, 6, np.zeros(d), 0.1,
 //                              np.eye(d), 4.0, 1.0, 1.0, 7, False)
@@ -608,7 +608,7 @@ public:
         //        beta | m ~ Dir(gamma_0/T + m)  (top-level sticks);
         //        pi_j | beta, alpha ~ Dir(alpha * beta)  per group j;
         //        (mu_k, Sigma_k) ~ NIW(mu_0, kappa_0, Psi_0, nu_0).
-        //      Drawn faded by plot_dag.
+        //      Drawn faded by ai4bayescode_plot_dag.
         std::vector<std::string> pi_keys;
         for (std::size_t g = 0; g < G_; ++g)
             pi_keys.push_back(pi_key_for_group(g));

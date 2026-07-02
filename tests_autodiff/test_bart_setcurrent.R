@@ -22,7 +22,7 @@ cat("=========================================\n")
 cat("  BART / genBART set_current(X, y)      \n")
 cat("=========================================\n")
 
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BartNoise.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BartNoise.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 # ============================================================================
@@ -159,7 +159,7 @@ cat("\n\n=========================================\n")
 cat("  GBartPoisson set_current(X, y)         \n")
 cat("=========================================\n")
 
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GBartPoisson.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GBartPoisson.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 # ============================================================================

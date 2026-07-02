@@ -75,7 +75,7 @@ node (`BART → f_bart`, `amplitude → K_matrix`).
 **These edges are NEVER traversed by predict_at's BFS.**
 `predict_downstream_of` / `predict_stochastic_sampleable` in
 shared_data.hpp do not read `context_edges_`. They exist solely so
-`get_dag()` (R: `plot_dag`) can render the full **generative DAG**:
+`get_dag()` (R: `ai4bayescode_plot_dag`) can render the full **generative DAG**:
 the solid predict sub-DAG (exactly the set `predict_at` recomputes)
 plus the faded prior/hyperprior context.
 
@@ -86,7 +86,7 @@ the prior edge to the predict DAG would wrongly make the BFS
 recompute the parameter when the hyperparam is replaced. Keep the two
 maps disjoint. Zero correctness risk by construction (viz-only); the
 only failure mode is a misleading paper figure, caught by the
-plot_dag visual check and validator Check #6.
+ai4bayescode_plot_dag visual check and validator Check #6.
 
 Topology is **read from the model's own prior code, not invented**:
 if the wrapper sets a slot `a_smooth` and the log-density uses it as
@@ -154,7 +154,7 @@ replaced-key validation (data_inputs ∪ block names) structurally
 cannot accept. The loop MUST use the SAME generative formula as the
 registered refreshers (verified by an equivalence / R-reference
 gate). The STATEFUL (`keep_history=FALSE`) path MUST still route
-through `impl_->predict_at` — no shadow there — and `plot_dag` must
+through `impl_->predict_at` — no shadow there — and `ai4bayescode_plot_dag` must
 still reflect the fully reconstructed predict DAG. Gold standard
 MetaRegBartSpline is conformant under this carve-out. See
 validator.md Check #6.

@@ -37,7 +37,7 @@ script_dir <- local({
 AI4BayesCode_dir <- normalizePath(file.path(script_dir, ".."))
 
 source(file.path(AI4BayesCode_dir, "R", "AI4BayesCode_helpers.R"))
-AI4BayesCode_sourceCpp(
+ai4bayescode_sourceCpp(
     cpp_file       = file.path(script_dir, "BartNoise.cpp"),
     AI4BayesCode_path = AI4BayesCode_dir)
 

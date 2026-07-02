@@ -1,12 +1,12 @@
 ---
 name: AI4BayesCode-codegen-r-runner
 description: |
-  R runner template for AI4BayesCode samplers — AI4BayesCode_sourceCpp
+  R runner template for AI4BayesCode samplers — ai4bayescode_sourceCpp
   setup, constructor-argument reference block,
   run_chain_<ClassName>() helper with
   keep_history = TRUE, Layer 3 validator wiring (R1 smoke check, R2
   rank-normalized R-hat + ESS via posterior, R3 Bayesian p-values +
-  PSIS-LOO via loo), AI4BayesCode_perf_hint call, joint-NUTS threshold
+  PSIS-LOO via loo), ai4bayescode_perf_hint call, joint-NUTS threshold
   tightening, and the reference-template catalogue (examples/*.cpp).
   Extracted from codegen.md (sections 9 and 10). The entry-point
   skill `codegen.md` points here for R runner emission.
@@ -15,10 +15,10 @@ description: |
 # AI4BayesCode codegen — R runner + reference templates
 
 Companion skill to `codegen.md`. Load this when writing the generated
-`.R` runner: AI4BayesCode_sourceCpp setup, constructor-argument reference
+`.R` runner: ai4bayescode_sourceCpp setup, constructor-argument reference
 block, run_chain_<ClassName>() helper, Layer 3 validator wiring
 (R-hat, ESS,
-Bayesian p-values, PSIS-LOO), `AI4BayesCode_perf_hint`, and the
+Bayesian p-values, PSIS-LOO), `ai4bayescode_perf_hint`, and the
 reference-template catalogue.
 
 For prior elicitation + block selection, see `codegen_priors.md`.
@@ -80,10 +80,10 @@ documentation a first-time user reads):
    `ai4bayescode_sourceCpp("<ClassName>.cpp")` — a bare RELATIVE filename, NO
    `AI4BayesCode_path=`, NO `source(".../AI4BayesCode_helpers.R")`. ONLY for a raw
    checkout fall back to `source("<path>/R/AI4BayesCode_helpers.R")` +
-   `AI4BayesCode_sourceCpp("<ClassName>.cpp", AI4BayesCode_path = "<path>")`. NEVER
+   `ai4bayescode_sourceCpp("<ClassName>.cpp", AI4BayesCode_path = "<path>")`. NEVER
    an absolute `/Users/...` path (it breaks on another machine or if the folder moves).
    IMPORTANT — where the class binds: `ai4bayescode_sourceCpp()` /
-   `source_AI4BayesCode()` bind the compiled class into the CALLER'S frame
+   `ai4bayescode_source()` bind the compiled class into the CALLER'S frame
    (`env = parent.frame()`). So compile at the TOP LEVEL of the runner. If you wrap
    the compile inside a helper FUNCTION, pass `env = globalenv()` explicitly, else
    `new(<ClassName>, ...)` fails with 'object <ClassName> not found'.
@@ -93,10 +93,10 @@ documentation a first-time user reads):
    SAME definition as in the R runner template above (data inputs as
    args, `keep_history = TRUE` inside, the `diagnosis = FALSE`
    parameter, and the `if (isTRUE(diagnosis))` block that calls the
-   shipped `ai4b_diagnose()` and attaches `out$diagnosis`
+   shipped `ai4bayescode_diagnose()` and attaches `out$diagnosis`
    + `out$diagnosis_plot`). Include the whole function body, not a stub.
    The diagnostics TABLE and the trace+ACF+density PLOT both come from
-   `ai4b_diagnose()` — a SHIPPED library function. Do NOT
+   `ai4bayescode_diagnose()` — a SHIPPED library function. Do NOT
    emit your own helper and do NOT inline a summary-only substitute (see
    the HARD RULE box after the runner template).
 5. **Simulation / toy-data code** — generate `<data_args>` (+ a
@@ -131,7 +131,7 @@ Skeleton (parameterized; mirror this structure, fill placeholders):
 # Compile + load the C++ model (the class becomes available by name).
 # Packaged API — no AI4BayesCode checkout / helper sourcing needed.
 library(AI4BayesCode)
-source_AI4BayesCode("./<ClassName>/<ClassName>.cpp")
+ai4bayescode_source("./<ClassName>/<ClassName>.cpp")
 
 # <constructor reference: one comment line per new() argument>
 
@@ -146,13 +146,13 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep,
     #     the `out` list), then the diagnosis attach that CALLS the shipped
     #     library function (do NOT write your own helper):
     #   if (isTRUE(diagnosis)) {
-    #       dg <- ai4b_diagnose(out$hist)
+    #       dg <- ai4bayescode_diagnose(out$hist)
     #       out$diagnosis <- dg$summary; out$diagnosis_plot <- dg$plot
     #   }
     #   ... return out ...
 }
 # NOTE: the diagnostics TABLE and the trace+ACF+density PLOT come from the
-# SHIPPED ai4b_diagnose() — there is NO helper to emit here.
+# SHIPPED ai4bayescode_diagnose() — there is NO helper to emit here.
 
 # Simulate a toy data set
 # <commented synthetic generation of <data_args> + a held-out X test>
@@ -274,7 +274,7 @@ ai4bayescode_source("<folder>/<ClassName>.cpp")   # relative path; no AI4BayesCo
 # AI4BayesCode/ checkout sitting next to `<folder>/`; run from the project
 # root that contains BOTH directories:
 #   source("AI4BayesCode/R/AI4BayesCode_helpers.R")
-#   AI4BayesCode_sourceCpp("<folder>/<ClassName>.cpp", AI4BayesCode_path = "AI4BayesCode")
+#   ai4bayescode_sourceCpp("<folder>/<ClassName>.cpp", AI4BayesCode_path = "AI4BayesCode")
 
 # ===========================================================================
 #  Constructor arguments for <ClassName>
@@ -352,12 +352,12 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep, diagnosis
                 pp       = slice(model$predict_at(list())),  # no-input posterior predictive
                 wall_sec = as.numeric(difftime(t1, t0, units = "secs")))
     # diagnosis = TRUE attaches model-INDEPENDENT posterior diagnostics via the
-    # SHIPPED library function ai4b_diagnose() — do NOT reimplement:
+    # SHIPPED library function ai4bayescode_diagnose() — do NOT reimplement:
     #   out$diagnosis      -> per-parameter table (R-hat / ESS / MCSE / mean / sd /
     #                         median / 90% CI)
     #   out$diagnosis_plot -> trace + autocorrelation + density plot
     if (isTRUE(diagnosis)) {
-        dg <- ai4b_diagnose(out$hist)
+        dg <- ai4bayescode_diagnose(out$hist)
         out$diagnosis      <- dg$summary
         out$diagnosis_plot <- dg$plot
     }
@@ -367,11 +367,11 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep, diagnosis
 # ======================================================================
 #  HARD RULE — the `diagnosis = TRUE` path is NON-NEGOTIABLE
 # ======================================================================
-# The diagnostics AND the plot are a SHIPPED function `ai4b_diagnose()` — you do
+# The diagnostics AND the plot are a SHIPPED function `ai4bayescode_diagnose()` — you do
 # NOT write them. It is provided BOTH by `library(AI4BayesCode)` (the R package)
 # AND by `source("AI4BayesCode/R/AI4BayesCode_helpers.R")`, so call it UNqualified
 # (no `AI4BayesCode::`) and it resolves whichever load path the runner used.
-# `ai4b_diagnose(<named list of draws>)` returns
+# `ai4bayescode_diagnose(<named list of draws>)` returns
 #   list(summary = <per-param R-hat / ESS / MCSE / mean / sd / median / 90% CI
 #                   table, via posterior>,
 #        plot    = <trace + autocorrelation + density, via bayesplot, with a
@@ -381,15 +381,15 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep, diagnosis
 #
 # Every generated runner MUST:
 #   (1) take a `diagnosis = FALSE` argument;
-#   (2) when diagnosis = TRUE, CALL ai4b_diagnose() and attach
+#   (2) when diagnosis = TRUE, CALL ai4bayescode_diagnose() and attach
 #       BOTH out$diagnosis (= dg$summary) AND out$diagnosis_plot (= dg$plot).
 #
 # Do NOT reimplement the diagnostics or the plot inline. The whole point of
-# shipping ai4b_diagnose() is that the runner stops re-emitting it (earlier
+# shipping ai4bayescode_diagnose() is that the runner stops re-emitting it (earlier
 # generations kept rewriting a summary-only helper and DROPPING the plot).
 # This is INDEPENDENT of how the runner collects draws: pass WHATEVER named
 # list of kept draws you built, e.g.
-#   ai4b_diagnose(list(beta = beta, sigma = sigma)).
+#   ai4bayescode_diagnose(list(beta = beta, sigma = sigma)).
 # The contract does not depend on the field being called `hist`.
 #
 # FORBIDDEN — an inline summary-only diagnosis that drops the plot:
@@ -397,7 +397,7 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep, diagnosis
 #   if (diagnosis && requireNamespace("posterior", quietly = TRUE)) {
 #       out$summary <- posterior::summarise_draws(...)
 #   }
-# ALWAYS route through ai4b_diagnose() and expose
+# ALWAYS route through ai4bayescode_diagnose() and expose
 # out$diagnosis + out$diagnosis_plot.
 # ======================================================================
 
@@ -554,7 +554,7 @@ if (pct_k_lo < 50 || pct_k_hi >= 10) {
 # in the R2 parallel block — it is the actual elapsed wall time. Do NOT
 # use `c1$wall_sec + c2$wall_sec`, which double-counts under parallel
 # execution.
-AI4BayesCode_perf_hint(
+ai4bayescode_perf_hint(
     wall_sec        = total_wall_sec,
     n_sweeps_total  = 2L * (n_burnin + n_keep),
     uses_joint_nuts = USES_JOINT_NUTS)

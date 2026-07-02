@@ -125,10 +125,10 @@
 //   z_true  <- sample.int(3L, N, replace = TRUE)
 //   y <- mu_true[z_true, ] + matrix(rnorm(N * d, sd = 0.7), N, d)
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(PYGaussianMixture, y, 12L, 0.0, seed),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(PYGaussianMixture, y, 12L, 0.0, 7L)  # (y, K_trunc, discount=0(DP), seed)
 //   m$step(2000)
@@ -148,7 +148,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.PYGaussianMixture(y, 12, 0.0, seed),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.PYGaussianMixture(y, 12, 0.0, 7)   # (y, K_trunc, discount=0(DP), seed)
 //   m.step(2000); print(m.get_current())
@@ -526,7 +526,7 @@ public:
         //        stick_V -> pi;
         //        (mu_k, lambda_k) ~ NormalGamma(mu_0, kappa_0,
         //                                       a_lambda_0, b_lambda_0).
-        //      Drawn faded by plot_dag.
+        //      Drawn faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("a_alpha",     {"alpha"});
         impl_->data().declare_context_edges("b_alpha",     {"alpha"});
         impl_->data().declare_context_edges("alpha",       {"stick_V"});

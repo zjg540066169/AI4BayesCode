@@ -175,7 +175,7 @@ public:
         //   mean_r = exp(r)                    (conditional mean, det)
         //   phi    = lik_ptr->phi()            (dispersion, synced from
         //            the likelihood object into a first-class slot so
-        //            plot_dag shows phi -> y_rep and predict_at can see
+        //            ai4bayescode_plot_dag shows phi -> y_rep and predict_at can see
         //            it; updated by the conjugate Gamma inside the r
         //            block each step)
         //   y_rep ~ N(mean_r, phi * mean_r)    (stochastic; reads ONLY

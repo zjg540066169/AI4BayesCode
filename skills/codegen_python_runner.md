@@ -205,36 +205,36 @@ def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
            "pp":   model.predict_at(newdata),
            "wall_sec": time.time() - t0}
     # diagnosis=True attaches model-INDEPENDENT posterior diagnostics via the
-    # SHIPPED library function AI4BayesCode.ai4b_diagnose() -- do NOT reimplement:
+    # SHIPPED library function AI4BayesCode.diagnose() -- do NOT reimplement:
     #   out["diagnosis"]      -> per-parameter table (R-hat / ESS / mean / sd / 90% CI)
     #   out["diagnosis_plot"] -> a callable drawing trace + autocorrelation + density
     # get_history() returns burn-in + keep, so pass n_burn to strip it.
     if diagnosis:
         out["diagnosis"], out["diagnosis_plot"] = \
-            AI4BayesCode.ai4b_diagnose(out["hist"], n_burn=int(n_burn))
+            AI4BayesCode.diagnose(out["hist"], n_burn=int(n_burn))
     return out
 
-# NOTE: ai4b_diagnose (the diagnostics table + the trace/ACF/density plot) is a
+# NOTE: ai4bayescode_diagnose (the diagnostics table + the trace/ACF/density plot) is a
 # SHIPPED function in the AI4BayesCode package -- the runner CALLS it (above);
 # it does NOT define its own copy. The summary uses split-R-hat / ESS (numpy),
 # correct for the single chain a runner produces, and the plot uses matplotlib.
 ```
 
 **HARD RULE — the `diagnosis=True` path is non-negotiable.** The diagnostics
-AND the plot are a SHIPPED library function, `AI4BayesCode.ai4b_diagnose(hist,
+AND the plot are a SHIPPED library function, `AI4BayesCode.diagnose(hist,
 n_burn=...)`, which returns `(summary_table, plot_fn)` where `plot_fn()` draws
 trace + autocorrelation + density with matplotlib. Every generated runner MUST
 (1) take a `diagnosis=False` argument; (2) when `diagnosis=True`, CALL
-`AI4BayesCode.ai4b_diagnose()` and attach BOTH `out["diagnosis"]` (table) AND
+`AI4BayesCode.diagnose()` and attach BOTH `out["diagnosis"]` (table) AND
 `out["diagnosis_plot"]` (callable). Do NOT reimplement it inline. This is
 independent of how the runner collects draws: pass whatever named dict of kept
-draws you built as `AI4BayesCode.ai4b_diagnose(draws, n_burn=...)` — use
+draws you built as `AI4BayesCode.diagnose(draws, n_burn=...)` — use
 `n_burn=0` when the draws are already burn-in-stripped (`get_history()` returns
 burn-in + keep, so pass the burn-in length there). FORBIDDEN — an inline
 summary-only diagnosis that drops the plot (e.g. `out["summary"] =
 az.summary(...)` with no `diagnosis_plot`): that returns a table with NO
 trace/ACF/density plot and renames the field. ALWAYS route through
-`AI4BayesCode.ai4b_diagnose()` and expose `out["diagnosis"]` +
+`AI4BayesCode.diagnose()` and expose `out["diagnosis"]` +
 `out["diagnosis_plot"]`.
 
 Skip the periodic schedule (use plain `model.step(n_burn);
@@ -252,7 +252,7 @@ The generated `run_<ClassName>.py` must include:
 2. A burnin phase and a draw-collection loop (the periodic readapt
    pattern above when applicable).
 3. The `diagnosis=False` parameter on `run_chain_<ClassName>`, and when
-   `diagnosis=True` a CALL to the shipped `AI4BayesCode.ai4b_diagnose()`
+   `diagnosis=True` a CALL to the shipped `AI4BayesCode.diagnose()`
    giving `chain["diagnosis"]` (table) and `chain["diagnosis_plot"]`
    (trace + ACF + density). Do NOT write your own helper and never inline
    a summary-only substitute (see the HARD RULE below).
@@ -297,15 +297,15 @@ mod = AI4BayesCode.source_AI4BayesCode("<folder>/<ClassName>.cpp")
 
 # Per-chain runner helper (with periodic readapt — see § above).
 # Signature MUST include diagnosis=False; when diagnosis=True, CALL the
-# shipped AI4BayesCode.ai4b_diagnose() — do NOT write your own helper.
+# shipped AI4BayesCode.diagnose() — do NOT write your own helper.
 def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
                           readapt_every=500, readapt_n=50, newdata=None,
                           diagnosis=False):
     ...  # verbatim from the template above, INCLUDING the attach:
     #   if diagnosis:
     #       out["diagnosis"], out["diagnosis_plot"] = \
-    #           AI4BayesCode.ai4b_diagnose(out["hist"], n_burn=int(n_burn))
-# NOTE: ai4b_diagnose (table + trace/ACF/density plot) is SHIPPED in the
+    #           AI4BayesCode.diagnose(out["hist"], n_burn=int(n_burn))
+# NOTE: ai4bayescode_diagnose (table + trace/ACF/density plot) is SHIPPED in the
 # AI4BayesCode package — there is NO helper to define here.
 
 # === R1. Smoke test ===

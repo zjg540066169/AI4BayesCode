@@ -82,7 +82,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.BartNoise(X, y, 50, 2.0, 2.0, 0.95, 3.0, 100, False, False, seed, False, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.BartNoise(X, y, 50, 2.0, 2.0, 0.95, 3.0, 100, False, False, 42, False, False)
 //   m.step(2000); print(m.get_current())                 # 'f_bart' fitted mean, 'sigma' noise SD

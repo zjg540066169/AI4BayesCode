@@ -27,7 +27,7 @@ AI4BayesCode_dir <- normalizePath(file.path(script_dir, ".."))
 source(file.path(AI4BayesCode_dir, "R", "AI4BayesCode_helpers.R"))
 suppressPackageStartupMessages({ library(posterior) })
 
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "SpikeSlabRJMCMC.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "SpikeSlabRJMCMC.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 gen_X_iid <- function(N, p, seed) {

@@ -63,7 +63,7 @@ rhat_of <- function(x1, x2) {
 #  Test 1: GaussianLocationScale — history API + 2-chain R-hat
 # ============================================================================
 cat("=== Test 1: GaussianLocationScale (history API) ===\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "GaussianLocationScale.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "GaussianLocationScale.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 set.seed(42)
@@ -99,7 +99,7 @@ check(abs(mean(pool_mu) - mean(y)) < 0.2, "mu posterior near ybar")
 #  Test 2: BartNoise — history API + history-mode predict_at
 # ============================================================================
 cat("\n=== Test 2: BartNoise (history API + predict_at matrix) ===\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "BartNoise.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "BartNoise.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 set.seed(42)
@@ -149,7 +149,7 @@ check(abs(mean(sigma_keep) - 0.5) < 0.2, "sigma near truth")
 #  Test 3: DirichletSimplex — history API + analytic posterior
 # ============================================================================
 cat("\n=== Test 3: DirichletSimplex (history API + analytic check) ===\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "DirichletSimplex.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "DirichletSimplex.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 model_d <- new(DirichletSimplex, c(10, 20, 30, 40), c(1, 1, 1, 1), 42L,

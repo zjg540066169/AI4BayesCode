@@ -11,7 +11,7 @@ AI4BayesCode_dir <- normalizePath(file.path(script_dir, ".."))
 source(file.path(AI4BayesCode_dir, "R", "AI4BayesCode_helpers.R"))
 
 cat("Compiling ode_rk45 parity test...\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "test_ode_rk45.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "test_ode_rk45.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 cat("\nRunning parity tests (4 canonical ODE problems)...\n")

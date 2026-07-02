@@ -86,7 +86,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.SoftBartNoise(X, y, 50, 2.0, 10.0, False, seed, keep_history=True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.SoftBartNoise(X, y, 50, 2.0, 10.0, False, 42)  # X,y,ntrees,k,tau_rate,dart,seed
 //   m.step(2000); print(m.get_current())            # f_softbart, sigma

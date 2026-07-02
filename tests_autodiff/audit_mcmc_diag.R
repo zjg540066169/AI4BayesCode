@@ -53,7 +53,7 @@ results <- list()
 # C.1 GaussianLocationScale
 # ============================================================================
 cat("\n[C.1] GaussianLocationScale\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GaussianLocationScale.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GaussianLocationScale.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1)
 y <- rnorm(100, mean = 2.0, sd = 1.5)

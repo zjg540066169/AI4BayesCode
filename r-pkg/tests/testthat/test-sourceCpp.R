@@ -6,10 +6,12 @@ test_that("ai4bayescode_example compiles GaussianLocationScale", {
     skip_if_not_installed("Rcpp")
     skip_if_not_installed("RcppArmadillo")
 
-    # Should compile without error and register the Rcpp module.
-    expect_silent({
-        ai4bayescode_example("GaussianLocationScale")
-    })
+    # Should compile without error and register the Rcpp module. The loader
+    # prints a "Loaded '<Class>'" confirmation (and Rcpp may emit compiler
+    # notes), so assert it compiles WITHOUT ERROR rather than being fully silent.
+    expect_no_error(
+        suppressMessages(ai4bayescode_example("GaussianLocationScale"))
+    )
 
     # Class should now be available in the test environment.
     expect_true(exists("GaussianLocationScale"))

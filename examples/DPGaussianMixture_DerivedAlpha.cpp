@@ -488,7 +488,7 @@ public:
         //      (derived-alpha pattern, alpha is a refresher of phi);
         //      alpha drives the stick-breaking; (mu_k, lambda_k) ~
         //      NormalGamma(mu_0, kappa_0, a_lambda_0, b_lambda_0).
-        //      Drawn faded by plot_dag.
+        //      Drawn faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("phi",         {"alpha"});
         impl_->data().declare_context_edges("alpha",       {"stick_V"});
         impl_->data().declare_context_edges("stick_V",     {"pi"});

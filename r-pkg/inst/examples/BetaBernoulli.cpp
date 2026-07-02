@@ -27,10 +27,10 @@
 //   # new(BetaBernoulli, y, a, b, seed, keep_history):
 //   #   y = data, a = 2 / b = 2 Beta prior shapes, seed = 7, keep_history = TRUE
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(BetaBernoulli, y, 2, 2, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(BetaBernoulli, y, 2, 2, 7L, TRUE)
 //   m$step(2500); str(m$get_current())  # posterior mean p ~= (a+sum_y)/(a+b+N)
@@ -45,7 +45,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.BetaBernoulli(y, 2.0, 2.0, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.BetaBernoulli(y, 2.0, 2.0, 7, True)
 //   m.step(2500); print(m.get_current())
@@ -170,7 +170,7 @@ public:
         // ---- Generative-DAG context (VIZ-ONLY; predict_at BFS never
         //      reads context_edges_). p ~ Beta(a, b): the Beta
         //      hyperparameters are p's prior parents, drawn faded by
-        //      plot_dag so the full generative story is visible.
+        //      ai4bayescode_plot_dag so the full generative story is visible.
         impl_->data().declare_context_edges("a", {"p"});
         impl_->data().declare_context_edges("b", {"p"});
 

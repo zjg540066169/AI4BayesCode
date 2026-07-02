@@ -12,7 +12,7 @@ AI4BayesCode_dir <- normalizePath(file.path(script_dir, ".."))
 source(file.path(AI4BayesCode_dir, "R", "AI4BayesCode_helpers.R"))
 
 cat("Compiling GPTimeSeries...\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GPTimeSeries.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GPTimeSeries.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir, verbose = FALSE)
 
 # Simulate an OU-like time series

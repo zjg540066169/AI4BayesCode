@@ -13,7 +13,7 @@ AI4BayesCode_dir <- normalizePath(file.path(script_dir, ".."))
 source(file.path(AI4BayesCode_dir, "R", "AI4BayesCode_helpers.R"))
 
 cat("Compiling univariate_slice_sampling_block parity test...\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "block_tests",
+ai4bayescode_sourceCpp(file.path(script_dir, "block_tests",
                               "test_univariate_slice_sampling_block.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 

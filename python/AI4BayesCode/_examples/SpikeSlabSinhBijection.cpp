@@ -83,7 +83,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.SpikeSlabSinhBijection(y, x, sigma, slab_sd, pi_incl, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.SpikeSlabSinhBijection(y, x, sigma, slab_sd, pi_incl, 7, True)
 //   m.step(2000); print(m.get_current())            # dict: gamma (~1), beta (~1.5)

@@ -22,7 +22,7 @@ inlineCxxPlugin <- function() {
     # Avoid shQuote: Rcpp's PKG_CPPFLAGS parser only picks up the first
     # `-I` when paths are single-quoted. Plain unquoted -I works for paths
     # without spaces (R library paths typically have no spaces). Mirror the
-    # six include roots resolved by source_AI4BayesCode() so examples needing
+    # six include roots resolved by ai4bayescode_source() so examples needing
     # eigen / celerite / libgp also compile via the Rcpp plugin path.
     cppflags <- paste(
         paste0("-I", inc),

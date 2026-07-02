@@ -15,7 +15,7 @@ suppressPackageStartupMessages({
 })
 
 cat("Compiling GPRegression...\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GPRegression.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GPRegression.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 # ---------------- 1-D smooth signal --------------------

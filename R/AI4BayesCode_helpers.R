@@ -3,7 +3,7 @@
 #
 # User-facing convenience helpers for using AI4BayesCode from an R script.
 # Source this file once at the top of your analysis script and then call
-# AI4BayesCode_sourceCpp("MyModel.cpp", AI4BayesCode_path = "./AI4BayesCode").
+# ai4bayescode_sourceCpp("MyModel.cpp", AI4BayesCode_path = "./AI4BayesCode").
 #
 # Why this file exists
 # --------------------
@@ -17,7 +17,7 @@
 # Usage
 # -----
 #     source("path/to/AI4BayesCode/R/AI4BayesCode_helpers.R")
-#     AI4BayesCode_sourceCpp("MyModel.cpp", AI4BayesCode_path = "./AI4BayesCode")
+#     ai4bayescode_sourceCpp("MyModel.cpp", AI4BayesCode_path = "./AI4BayesCode")
 #     model <- new(MyModel, ...)
 #
 # Requirements
@@ -36,7 +36,7 @@ AI4BayesCode_generated_dir <- function(AI4BayesCode_path = "./AI4BayesCode") {
     gen_dir
 }
 
-AI4BayesCode_sourceCpp <- function(cpp_file,
+ai4bayescode_sourceCpp <- function(cpp_file,
                                 AI4BayesCode_path = "./AI4BayesCode",
                                 rebuild        = TRUE,
                                 verbose        = FALSE,
@@ -120,7 +120,7 @@ AI4BayesCode_sourceCpp <- function(cpp_file,
 }
 
 # ----------------------------------------------------------------------------
-# plot_dag -- render the model prediction DAG.
+# ai4bayescode_plot_dag -- render the model prediction DAG.
 #
 # Default behavior: draws to the current R graphics device (screen /
 # RStudio plot pane). This is what end users almost always want.
@@ -142,15 +142,15 @@ AI4BayesCode_sourceCpp <- function(cpp_file,
 #        into a single node labeled `<prefix>_i [n=K]`
 #
 # Usage:
-#     plot_dag(model)                                   # interactive (default)
-#     plot_dag(model, out_path = "generated/my_dag.png") # PNG to file
-#     plot_dag(model, width = 1800, height = 1200, res = 160)
-#     plot_dag(model, plate = FALSE)                    # disable plate collapse
+#     ai4bayescode_plot_dag(model)                                   # interactive (default)
+#     ai4bayescode_plot_dag(model, out_path = "generated/my_dag.png") # PNG to file
+#     ai4bayescode_plot_dag(model, width = 1800, height = 1200, res = 160)
+#     ai4bayescode_plot_dag(model, plate = FALSE)                    # disable plate collapse
 #
 # Returns: invisibly NULL (interactive) or the PNG path (if out_path given).
 # ----------------------------------------------------------------------------
 
-plot_dag <- function(model,
+ai4bayescode_plot_dag <- function(model,
                      out_path = NULL,
                      main     = NULL,
                      width    = 1600,
@@ -159,7 +159,7 @@ plot_dag <- function(model,
                      plate    = TRUE,
                      ...) {
     if (!requireNamespace("igraph", quietly = TRUE)) {
-        stop("plot_dag requires the igraph package.\n",
+        stop("ai4bayescode_plot_dag requires the igraph package.\n",
              "Install with: install.packages('igraph')")
     }
 
@@ -498,7 +498,7 @@ plot_dag <- function(model,
 
 
 # ----------------------------------------------------------------------------
-# AI4BayesCode_perf_hint
+# ai4bayescode_perf_hint
 #
 # Emit a friendly post-run performance message. The generated R runner
 # template calls this once at the end so users who default to modular
@@ -522,7 +522,7 @@ plot_dag <- function(model,
 #
 # Returns nothing; prints to stderr via message().
 # ----------------------------------------------------------------------------
-AI4BayesCode_perf_hint <- function(wall_sec,
+ai4bayescode_perf_hint <- function(wall_sec,
                                 n_sweeps_total,
                                 uses_joint_nuts = FALSE,
                                 thresholds = list(slow_sweep_sec = 0.5)) {
@@ -566,19 +566,19 @@ AI4BayesCode_perf_hint <- function(wall_sec,
 
 
 # ----------------------------------------------------------------------------
-# ai4b_diagnose() -- model-independent posterior diagnostics + plot.
+# ai4bayescode_diagnose() -- model-independent posterior diagnostics + plot.
 #
 # Shipped so generated run_chain_<Model>(diagnosis = TRUE) runners CALL one
-# function instead of re-emitting it. Identical to AI4BayesCode::ai4b_diagnose()
+# function instead of re-emitting it. Identical to AI4BayesCode::ai4bayescode_diagnose()
 # in the R package -- defined HERE too so the source()-the-helpers workflow (no
 # package install) also has diagnostics. Per parameter: split-R-hat, bulk/tail
 # ESS, MCSE, mean/sd/median/90% CI (via posterior), plus a combined trace +
 # autocorrelation + density plot (via bayesplot, base-R fallback). No PSIS-LOO
 # (that needs a model-specific pointwise log-likelihood).
 # ----------------------------------------------------------------------------
-ai4b_diagnose <- function(hist, plot = TRUE) {
+ai4bayescode_diagnose <- function(hist, plot = TRUE) {
     if (!requireNamespace("posterior", quietly = TRUE)) {
-        stop("ai4b_diagnose() needs the 'posterior' package. ",
+        stop("ai4bayescode_diagnose() needs the 'posterior' package. ",
              "Install it with install.packages('posterior').", call. = FALSE)
     }
     if (!is.list(hist) || is.null(names(hist)) || !all(nzchar(names(hist)))) {

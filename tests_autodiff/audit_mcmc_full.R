@@ -64,7 +64,7 @@ results <- list()
 # C.1 GaussianLocationScale
 # ============================================================================
 cat("\n[C.1] GaussianLocationScale\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GaussianLocationScale.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GaussianLocationScale.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); y <- rnorm(100, 2, 1.5); truth <- list(mu = 2.0, sigma = 1.5)
 run <- function(seed, nb, nk) {
@@ -95,7 +95,7 @@ cat(sprintf("  wall=%.2fs Rhat=%.4f ESS_bulk=%.0f rec=(mu:%s,sig:%s) LOO k<0.5=%
 # C.2 BetaBernoulli
 # ============================================================================
 cat("\n[C.2] BetaBernoulli\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BetaBernoulli.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BetaBernoulli.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(42); y <- rbinom(200, 1, 0.3); truth <- list(p = 0.3)
 run <- function(seed, nb, nk) {
@@ -123,7 +123,7 @@ cat(sprintf("  wall=%.2fs Rhat=%.4f ESS_bulk=%.0f rec=%s  post_p=%.3f(true 0.3) 
 # C.3 DirichletSimplex
 # ============================================================================
 cat("\n[C.3] DirichletSimplex\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletSimplex.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletSimplex.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 y_counts <- c(15, 25, 30, 20, 10); alpha <- rep(1,5)
 # Truth theta = y_counts/sum(y_counts) roughly (posterior approximately)
@@ -154,7 +154,7 @@ cat(sprintf("  wall=%.2fs Rhat=%.4f ESS_bulk=%.0f rec=%.0f%%  post=%s  truth=%s\
 # C.4 DirichletSparse
 # ============================================================================
 cat("\n[C.4] DirichletSparse\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletSparse.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletSparse.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(42); P <- 20L; N_tot <- 500L
 # True simplex: 5 large, rest near zero
@@ -186,7 +186,7 @@ cat(sprintf("  wall=%.2fs  s: Rhat=%.4f ESS=%.0f  theta: Rhat=%.4f ESS=%.0f  top
 # C.5 DirichletHierarchical
 # ============================================================================
 cat("\n[C.5] DirichletHierarchical\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletHierarchical.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "DirichletHierarchical.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(42); K_obs <- 20L; P_dim <- 4L
 s_true_dh <- c(0.1, 0.3, 0.4, 0.2); kappa_true <- 20.0
@@ -218,7 +218,7 @@ cat(sprintf("  wall=%.2fs  s Rhat=%.4f  kappa Rhat=%.4f  theta Rhat=%.4f\n",
 # C.6 BartNoise
 # ============================================================================
 cat("\n[C.6] BartNoise (small, short chains)\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BartNoise.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BartNoise.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(42); N_b <- 80L; p_b <- 3L
 X_b <- matrix(rnorm(N_b*p_b), N_b, p_b)
@@ -255,7 +255,7 @@ cat(sprintf("  wall=%.2fs  sigma Rhat=%.4f ESS=%.0f post_sigma=%.3f(true 0.8)  f
 # C.7 GBartPoisson (Linero 2022 genBART)
 # ============================================================================
 cat("\n[C.7] GBartPoisson\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GBartPoisson.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GBartPoisson.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(42); N_l <- 80L; p_l <- 3L
 X_l <- matrix(runif(N_l*p_l), N_l, p_l)
@@ -285,7 +285,7 @@ cat(sprintf("  wall=%.2fs  r RMSE=%.3f  LOO k<0.5=%.0f%%\n",
 # C.8 ARDLasso
 # ============================================================================
 cat("\n[C.8] ARDLasso\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "ARDLasso.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "ARDLasso.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(42); N_a <- 100L; p_a <- 10L
 X_a <- matrix(rnorm(N_a*p_a), N_a, p_a)
@@ -319,7 +319,7 @@ cat(sprintf("  wall=%.2fs  beta Rhat=%.4f ESS=%.0f rec=%.0f%%  LOO k<0.5=%.0f%%\
 # C.9 IRT1PL_joint — small dimension (N=30, J=8; dim 38)
 # ============================================================================
 cat("\n[C.9] IRT1PL_joint (N=30, J=8; dim 38 — below known mass-matrix ceiling)\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "IRT1PL_joint.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "IRT1PL_joint.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); N_i <- 30L; J_i <- 8L
 theta_t <- rnorm(N_i, 0, 1); sigma_b_t <- 0.8
@@ -356,7 +356,7 @@ cat(sprintf("  wall=%.1fs  theta Rhat=%.3f  b Rhat=%.3f  sb Rhat=%.3f  rec=(th:%
 # C.10 HierarchicalLM_joint
 # ============================================================================
 cat("\n[C.10] HierarchicalLM_joint\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "HierarchicalLM_joint.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "HierarchicalLM_joint.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); G <- 10L; Np <- 15L; N_hl <- G*Np; p_hl <- 3L
 alpha_t <- 1.0; beta_t <- c(2, -1, 0.5); sigma_t <- 0.8; tau_t <- 1.5
@@ -396,7 +396,7 @@ cat(sprintf("  wall=%.1fs a Rhat=%.3f b Rhat=%.3f u Rhat=%.3f s Rhat=%.3f t Rhat
 # C.11 LinearRegJointMixed
 # ============================================================================
 cat("\n[C.11] LinearRegJointMixed\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "LinearRegJointMixed.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "LinearRegJointMixed.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 set.seed(1); N_lr <- 200L; p_lr <- 5L
 X_lr <- matrix(rnorm(N_lr*p_lr), N_lr, p_lr)

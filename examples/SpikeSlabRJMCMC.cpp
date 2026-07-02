@@ -507,7 +507,7 @@ public:
         // Predict DAG + y_rep refresher.
         // X, beta, sigma all directly produce y_rep in the generative
         // model y_rep ~ N(X*beta, sigma^2). All three are declared as
-        // predict-edge parents so the DAG visualization (plot_dag) shows
+        // predict-edge parents so the DAG visualization (ai4bayescode_plot_dag) shows
         // X → y_rep. X is also registered as a data_input so it can be
         // replaced via predict_at(list(X = X_new)).
         //
@@ -557,7 +557,7 @@ public:
         //      pi ~ Beta(a_pi, b_pi); gamma_j ~ Bernoulli(pi);
         //      beta_j | gamma_j, sigma, tau ~ N(0, sigma^2 tau^2).
         //      tau, sigma ~ Jeffreys (no hyperparam slot). Drawn faded
-        //      by plot_dag.
+        //      by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("a_pi",  {"pi"});
         impl_->data().declare_context_edges("b_pi",  {"pi"});
         impl_->data().declare_context_edges("pi",    {"gamma"});

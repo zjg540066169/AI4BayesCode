@@ -26,9 +26,9 @@ source(file.path(AI4BayesCode_dir, "R", "AI4BayesCode_helpers.R"))
 
 suppressPackageStartupMessages(library(posterior))
 
-AI4BayesCode_sourceCpp(file.path(script_dir, "IRT1PL.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "IRT1PL.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
-AI4BayesCode_sourceCpp(file.path(script_dir, "IRT1PL_joint.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "IRT1PL_joint.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 sim_irt <- function(N, J, sigma_b, miss_rate = 0.1, seed = 1L) {

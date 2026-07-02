@@ -74,7 +74,7 @@ struct dag_info {
     std::unordered_map<std::string, std::vector<std::string>> gibbs_invalidates;
     std::unordered_map<std::string, std::vector<std::string>> predict_edges;
     std::vector<std::string> data_inputs;
-    // VIZ-ONLY prior / hyperprior parents. Rendered faded by plot_dag
+    // VIZ-ONLY prior / hyperprior parents. Rendered faded by ai4bayescode_plot_dag
     // as the generative context around the (solid) predict sub-DAG;
     // never traversed by predict_at. See shared_data::declare_context_edges.
     std::unordered_map<std::string, std::vector<std::string>> context_edges;

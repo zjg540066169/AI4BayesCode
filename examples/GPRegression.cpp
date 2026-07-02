@@ -404,7 +404,7 @@ public:
         //      half-Normal(0, amp_prior_sd); lengthscale ~
         //      InverseGamma(ell_prior_shape, ell_prior_scale). f ~
         //      GP(0,K) so L_chol is f's generative parent. sigma ~
-        //      Jeffreys (no slot). Drawn faded by plot_dag.
+        //      Jeffreys (no slot). Drawn faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("amp_prior_sd",   {"amplitude"});
         impl_->data().declare_context_edges("ell_prior_shape",{"lengthscale"});
         impl_->data().declare_context_edges("ell_prior_scale",{"lengthscale"});

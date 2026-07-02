@@ -46,7 +46,7 @@ cat("\n################ PART 1: T10 hmm_block extended ################\n")
 # examples/HMMGaussian2State.cpp is hard-coded to K=2. For this audit we
 # write a test-only wrapper via sourceCpp over a K=3 model definition.
 # For K=2, use the existing HMMGaussian2State example.
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "HMMGaussian2State.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "HMMGaussian2State.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 simulate_hmm <- function(T, A_row_major, pi_init, mu, sigma, seed) {
@@ -186,7 +186,7 @@ harness_cpp <- paste(c(
 
 harness_file <- tempfile(fileext=".cpp")
 writeLines(harness_cpp, harness_file)
-AI4BayesCode_sourceCpp(harness_file, AI4BayesCode_path = AI4BayesCode_dir)
+ai4bayescode_sourceCpp(harness_file, AI4BayesCode_path = AI4BayesCode_dir)
 
 corr_mat <- function(D, rho) {
     m <- matrix(rho, D, D); diag(m) <- 1; m
@@ -235,7 +235,7 @@ results$D2 <- run_dense_suite(50, 0.95, n_keep=3000, label="D2")
 # Part 3 — T12 pg_logistic_block extended scenarios
 # ===========================================================================
 cat("\n################ PART 3: T12 pg_logistic_block extended ################\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "LogisticRegression.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "LogisticRegression.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 run_LG <- function(X, y, prior_sd, seed, nb, nk) {

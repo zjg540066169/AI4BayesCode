@@ -60,7 +60,7 @@ test_set_current_stress <- function(example_name, build_fn, update_keys,
 }
 
 # --------- GBartPoisson -----------
-AI4BayesCode_sourceCpp("r-pkg/inst/examples/GBartPoisson.cpp",
+ai4bayescode_sourceCpp("r-pkg/inst/examples/GBartPoisson.cpp",
                        AI4BayesCode_path = ".")
 set.seed(1); N <- 80L; p <- 3L; X <- matrix(runif(N*p), N, p)
 y <- rpois(N, exp(-1 + X[,1] - 0.5*X[,2]))
@@ -72,7 +72,7 @@ test_set_current_stress(
     "r", rnorm(5))
 
 # --------- GBartLogistic -----------
-AI4BayesCode_sourceCpp("r-pkg/inst/examples/GBartLogistic.cpp",
+ai4bayescode_sourceCpp("r-pkg/inst/examples/GBartLogistic.cpp",
                        AI4BayesCode_path = ".")
 set.seed(2); X <- matrix(runif(N*p), N, p)
 y <- rbinom(N, 1, plogis(-0.5 + 2*X[,1]))
@@ -84,7 +84,7 @@ test_set_current_stress(
     "r", rnorm(5))
 
 # --------- GBartMultinomial -----------
-AI4BayesCode_sourceCpp("r-pkg/inst/examples/GBartMultinomial.cpp",
+ai4bayescode_sourceCpp("r-pkg/inst/examples/GBartMultinomial.cpp",
                        AI4BayesCode_path = ".")
 set.seed(3); N <- 120L; X <- matrix(runif(N*p), N, p)
 y <- sample(0:2, N, replace = TRUE)
@@ -96,7 +96,7 @@ test_set_current_stress(
     "r_1", rnorm(5))
 
 # --------- GBartHeteroscedastic -----------
-AI4BayesCode_sourceCpp("r-pkg/inst/examples/GBartHeteroscedastic.cpp",
+ai4bayescode_sourceCpp("r-pkg/inst/examples/GBartHeteroscedastic.cpp",
                        AI4BayesCode_path = ".")
 set.seed(5); X <- matrix(runif(N*p), N, p)
 mu <- exp(3 + X[,1])

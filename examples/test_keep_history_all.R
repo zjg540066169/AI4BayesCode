@@ -65,7 +65,7 @@ diag_block <- function(name, chain_list_of_vecs,
 # 1. GaussianLocationScale
 # ============================================================================
 cat("\n=== 1. GaussianLocationScale ===\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "GaussianLocationScale.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "GaussianLocationScale.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir, verbose = FALSE)
 
 set.seed(1); y <- rnorm(60, 3, 1.5)
@@ -102,7 +102,7 @@ diag_block("sigma", list(c1$sigma, c2$sigma))
 # 2. BetaBernoulli
 # ============================================================================
 cat("\n=== 2. BetaBernoulli ===\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "BetaBernoulli.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "BetaBernoulli.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir, verbose = FALSE)
 
 set.seed(2); y_bb <- rbinom(200, 1, 0.35)
@@ -132,7 +132,7 @@ diag_block("p", list(c1$p, c2$p))
 # 3. DirichletSimplex
 # ============================================================================
 cat("\n=== 3. DirichletSimplex ===\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "DirichletSimplex.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "DirichletSimplex.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir, verbose = FALSE)
 
 K <- 4
@@ -168,7 +168,7 @@ diag_block("theta[4]", list(c1$theta4, c2$theta4))
 # 4. DirichletSparse
 # ============================================================================
 cat("\n=== 4. DirichletSparse ===\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "DirichletSparse.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "DirichletSparse.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir, verbose = FALSE)
 
 P <- 5
@@ -206,7 +206,7 @@ diag_block("theta", list(c1$theta, c2$theta), ess_thresh = 50)
 # 5. DirichletHierarchical
 # ============================================================================
 cat("\n=== 5. DirichletHierarchical ===\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "DirichletHierarchical.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "DirichletHierarchical.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir, verbose = FALSE)
 
 set.seed(5)
@@ -253,7 +253,7 @@ diag_block("theta", list(c1$theta, c2$theta))
 # 6. ARDLasso — history buffers (self-contained, no composite)
 # ============================================================================
 cat("\n=== 6. ARDLasso ===\n")
-AI4BayesCode_sourceCpp(file.path(script_dir, "ARDLasso.cpp"),
+ai4bayescode_sourceCpp(file.path(script_dir, "ARDLasso.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir, verbose = FALSE)
 
 set.seed(7)

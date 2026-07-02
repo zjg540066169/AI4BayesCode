@@ -66,10 +66,10 @@
 //     y <- y + h/6*(k1+2*k2+2*k3+k4); I_true[k] <- y[2] }
 //   I_obs <- I_true * exp(sigma_t * rnorm(15))              # LogNormal noise
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(ODE_SIR, S0, I0, R0, t_obs, I_obs, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(ODE_SIR, S0, I0, R0, t_obs, I_obs, 7L, TRUE)   # S0,I0,R0,t_obs,I_obs,seed,keep_history
 //   m$step(2500); str(m$get_current())
@@ -92,7 +92,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.ODE_SIR(S0, I0, R0, t_obs, I_obs, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.ODE_SIR(S0, I0, R0, t_obs, I_obs, 7, True); m.step(2500); print(m.get_current())
 // @example:end

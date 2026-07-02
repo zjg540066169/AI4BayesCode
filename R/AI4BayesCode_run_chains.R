@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# AI4BayesCode_run_chains.R (T13)
+# ai4bayescode_run_chains.R (T13)
 #
 # R-level multi-chain runner for any AI4BayesCode wrapper class. Spawns
 # n_chains chains (parallel or sequential), runs warmup + keep on each,
@@ -8,11 +8,11 @@
 #
 # Usage
 # -----
-#   source("path/to/AI4BayesCode_run_chains.R")
+#   source("path/to/ai4bayescode_run_chains.R")
 #   model_ctor <- function(seed) {
 #       new(SpikeSlabRJMCMC, X, y, a_pi, b_pi, as.integer(seed), TRUE)
 #   }
-#   results <- AI4BayesCode_run_chains(model_ctor, n_chains = 4,
+#   results <- ai4bayescode_run_chains(model_ctor, n_chains = 4,
 #                                    n_burn = 2000, n_keep = 10000,
 #                                    parallel = TRUE, seeds = c(101, 202, 303, 404))
 #   # results$histories : list of n_chains $get_history() returns
@@ -29,7 +29,7 @@
 # (seed, other args), the wrapper produces identical state.
 # ----------------------------------------------------------------------------
 
-AI4BayesCode_run_chains <- function(model_ctor,
+ai4bayescode_run_chains <- function(model_ctor,
                                  n_chains  = 4,
                                  n_burn    = 2000,
                                  n_keep    = 10000,
@@ -71,7 +71,7 @@ AI4BayesCode_run_chains <- function(model_ctor,
 
     if (use_parallel && mc.cores > 1) {
         if (verbose)
-            message("AI4BayesCode_run_chains: running ", n_chains,
+            message("ai4bayescode_run_chains: running ", n_chains,
                     " chains on ", mc.cores, " cores (parallel)")
         results <- parallel::mclapply(seeds, one_chain, mc.cores = mc.cores,
                                       mc.set.seed = TRUE)
@@ -81,7 +81,7 @@ AI4BayesCode_run_chains <- function(model_ctor,
             # (vecLib), whose GCD worker threads do not survive fork(), so a
             # chain doing heavier linear algebra segfaults under mclapply.
             # Recover by re-running every chain sequentially (no fork).
-            warning("AI4BayesCode_run_chains: a parallel chain failed (likely a ",
+            warning("ai4bayescode_run_chains: a parallel chain failed (likely a ",
                     "fork-unsafe multithreaded BLAS, e.g. macOS Accelerate); ",
                     "re-running all chains sequentially. To keep parallelism set ",
                     "VECLIB_MAXIMUM_THREADS=1 before starting R, or pass ",
@@ -90,7 +90,7 @@ AI4BayesCode_run_chains <- function(model_ctor,
         }
     } else {
         if (verbose)
-            message("AI4BayesCode_run_chains: running ", n_chains,
+            message("ai4bayescode_run_chains: running ", n_chains,
                     " chains sequentially")
         results <- lapply(seeds, one_chain)
     }
@@ -98,7 +98,7 @@ AI4BayesCode_run_chains <- function(model_ctor,
     # Detect failures (after any sequential fallback -- a real model/data error).
     for (i in seq_along(results)) {
         if (!chain_ok(results[[i]])) {
-            stop("AI4BayesCode_run_chains: chain ", i, " failed")
+            stop("ai4bayescode_run_chains: chain ", i, " failed")
         }
     }
 
@@ -113,7 +113,7 @@ AI4BayesCode_run_chains <- function(model_ctor,
 # Helper: compute R-hat / ESS for scalar-history keys across chains.
 # Requires `posterior` package.
 # ----------------------------------------------------------------------------
-AI4BayesCode_rhat_summary <- function(run, keys = NULL, drop_burn = 0) {
+ai4bayescode_rhat_summary <- function(run, keys = NULL, drop_burn = 0) {
     if (!requireNamespace("posterior", quietly = TRUE)) {
         stop("posterior package required for R-hat summary")
     }

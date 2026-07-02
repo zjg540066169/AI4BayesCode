@@ -136,7 +136,7 @@ public:
         // ---- Generative-DAG context (VIZ-ONLY; predict_at BFS never
         //      reads context_edges_). p ~ Beta(a, b): the Beta
         //      hyperparameters are p's prior parents, drawn faded by
-        //      plot_dag so the full generative story is visible.
+        //      ai4bayescode_plot_dag so the full generative story is visible.
         impl_->data().declare_context_edges("a", {"p"});
         impl_->data().declare_context_edges("b", {"p"});
 

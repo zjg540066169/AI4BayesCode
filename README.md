@@ -211,7 +211,7 @@ AI4BayesCode/
 │   ├── validator.md                       3-layer audit (syntactic / semantic / runtime)
 │   └── rcpp_api.md                        Rcpp / arma type + API pitfalls
 ├── R/
-│   └── AI4BayesCode_helpers.R              AI4BayesCode_sourceCpp + AI4BayesCode_perf_hint
+│   └── AI4BayesCode_helpers.R              ai4bayescode_sourceCpp + ai4bayescode_perf_hint
 ├── include/
 │   ├── AI4BayesCode/                       Layer-1 header-only library
 │   │   ├── block_sampler.hpp              abstract 4-method interface
@@ -264,7 +264,7 @@ AI4BayesCode/
 
 | Backend | Module macro | Helper | Python/R call |
 |---|---|---|---|
-| **R (default)** | `RCPP_MODULE(...)` | `R/AI4BayesCode_helpers.R` | `AI4BayesCode_sourceCpp(...)` |
+| **R (default)** | `RCPP_MODULE(...)` | `R/AI4BayesCode_helpers.R` | `ai4bayescode_sourceCpp(...)` |
 | **Python** | `PYBIND11_MODULE(...)` | `python/AI4BayesCode/` | `AI4BayesCode.source(...)` |
 | **Standalone C++** | `int main()` | user-supplied Makefile/CMake | direct compile |
 | **Dual (R + Python)** | both, guarded by `#ifdef` | both helpers | either, from the same `.cpp` |
@@ -279,7 +279,7 @@ described above).
 
 ```r
 source("AI4BayesCode/R/AI4BayesCode_helpers.R")
-AI4BayesCode_sourceCpp("AI4BayesCode/examples/GaussianLocationScale.cpp",
+ai4bayescode_sourceCpp("AI4BayesCode/examples/GaussianLocationScale.cpp",
                     AI4BayesCode_path = "AI4BayesCode")
 
 set.seed(1)
@@ -364,7 +364,7 @@ To use one of these models from **R** or **Python**, point the
 corresponding helper at the `.cpp` so it is wrapped and imported as a
 module:
 
-- **R** — `AI4BayesCode_sourceCpp("examples/GaussianLocationScale.cpp",
+- **R** — `ai4bayescode_sourceCpp("examples/GaussianLocationScale.cpp",
   AI4BayesCode_path = "AI4BayesCode")` (see "Quick start — R").
 - **Python** — `AI4BayesCode.source("examples/GaussianLocationScale.cpp",
   ai4bayescode_path="AI4BayesCode")` (see "Quick start — Python").
@@ -459,7 +459,7 @@ Every generated sampler passes through three layers of audit:
      *right* posterior? 6 Bayesian p-values + PSIS-LOO via `loo::loo()`.
 
 The generated R runner emits all three layers plus a
-`AI4BayesCode_perf_hint()` call at the end that nudges the user toward
+`ai4bayescode_perf_hint()` call at the end that nudges the user toward
 `joint_nuts_block` if per-sweep time is slow.
 
 See `skills/validator.md` for the full semantic-check registry and

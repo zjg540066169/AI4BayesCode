@@ -157,7 +157,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DPGaussianMixture(y, 60, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.DPGaussianMixture(y, 60, 42, True)             # (y N x d, K_trunc, seed, keep_history)
 //   m.step(2000); cur = m.get_current()                   # 'z' 'pi' 'mu' 'lambda' 'alpha' 'K_trunc'

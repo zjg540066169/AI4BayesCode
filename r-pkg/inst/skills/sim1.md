@@ -407,8 +407,8 @@ worthwhile insurance for a 100-replicate batch.
    sampler expects, fix the DGP wrapper before proceeding.
 
 5. **mclapply + Rcpp module** — the Rcpp module class (`new(<id>, ...)`)
-   is registered in the parent process via `AI4BayesCode_sourceCpp` and
-   inherited by fork. Do NOT call `AI4BayesCode_sourceCpp` inside the
+   is registered in the parent process via `ai4bayescode_sourceCpp` and
+   inherited by fork. Do NOT call `ai4bayescode_sourceCpp` inside the
    worker — it will recompile in every fork.
 
 6. **cmdstanr verbosity** — wrap every `stan_mod$sample(...)` and

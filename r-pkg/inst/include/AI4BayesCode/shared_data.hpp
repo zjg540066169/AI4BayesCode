@@ -341,7 +341,7 @@ public:
      * forest, etc.). These edges are NEVER traversed by predict_at's
      * BFS — `predict_downstream_of` and `predict_stochastic_sampleable`
      * do not read `context_edges_`. They exist solely so `get_dag()`
-     * (and `plot_dag` in R) can render the full *generative* DAG with
+     * (and `ai4bayescode_plot_dag` in R) can render the full *generative* DAG with
      * the prior / hyperprior context shown faded, while the solid
      * sub-DAG remains exactly the set predict_at recomputes.
      *
@@ -549,7 +549,7 @@ public:
     predict_edges() const noexcept { return predict_edges_; }
 
     /// Read-only access to the VIZ-ONLY context (prior/hyperprior)
-    /// edges. Consumed by get_dag() / plot_dag only — never by the
+    /// edges. Consumed by get_dag() / ai4bayescode_plot_dag only — never by the
     /// predict_at BFS.
     const std::unordered_map<std::string, std::vector<std::string>>&
     context_edges() const noexcept { return context_edges_; }

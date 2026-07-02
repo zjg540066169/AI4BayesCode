@@ -551,7 +551,7 @@ public:
         //        beta | m ~ Dir(gamma_0/T + m)  (top-level sticks);
         //        pi_j | beta, alpha ~ Dir(alpha * beta)  per group j;
         //        (mu_k, Sigma_k) ~ NIW(mu_0, kappa_0, Psi_0, nu_0).
-        //      Drawn faded by plot_dag.
+        //      Drawn faded by ai4bayescode_plot_dag.
         std::vector<std::string> pi_keys;
         for (std::size_t g = 0; g < G_; ++g)
             pi_keys.push_back(pi_key_for_group(g));

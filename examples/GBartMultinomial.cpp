@@ -283,7 +283,7 @@ public:
         //      reads context_edges_). Each r_j ~ independent
         //      generalized-BART prior: the shared genBART forest is a
         //      sampled generative parent of every r_j alongside X. Drawn
-        //      faded by plot_dag.
+        //      faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("genBART", r_all);
 
         // Deterministic refresher: probs = softmax(0, r_1, ..., r_{C-1}).

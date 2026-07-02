@@ -53,7 +53,7 @@ results_F2 <- list()
 
 # ===== 1. Gaussian — mu, sigma =====
 cat("\n[F2:Gaussian] coverage over", N_REPS, "reps\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GaussianLocationScale.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GaussianLocationScale.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 truth <- list(mu = 2.0, sigma = 1.5)
 cov_mu <- logical(N_REPS); cov_sigma <- logical(N_REPS)
@@ -82,7 +82,7 @@ cat(sprintf("  mu coverage = %.1f%% (%.0f/%d)  sigma coverage = %.1f%% (%.0f/%d)
 
 # ===== 2. BetaBernoulli — p =====
 cat("\n[F2:BetaBernoulli] coverage over", N_REPS, "reps\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BetaBernoulli.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "BetaBernoulli.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 truth_p <- 0.3
 cov_p <- logical(N_REPS)
@@ -107,7 +107,7 @@ cat(sprintf("  p coverage = %.1f%% (%.0f/%d)  wall=%.1fs\n",
 
 # ===== 3. ARDLasso — alpha, beta (vec), sigma2 =====
 cat("\n[F2:ARDLasso] coverage over", N_REPS, "reps\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "ARDLasso.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "ARDLasso.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 truth_ard <- list(alpha = 2.0, beta = c(3, -2, 0, 0, 1.5, 0, 0, 0, 0, 0), sigma = 1.0)
 cov_alpha <- logical(N_REPS)
@@ -145,7 +145,7 @@ cat(sprintf("  alpha cov=%.1f%%  beta avg cov=%.1f%% (per-j: %s)  sigma2 cov=%.1
 
 # ===== 4. LinearRegJointMixed — alpha, beta (vec), sigma =====
 cat("\n[F2:LinearRegJointMixed] coverage over", N_REPS, "reps\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "LinearRegJointMixed.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "LinearRegJointMixed.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 truth_lr <- list(alpha = 1.5, beta = c(2, -1, 0.5, 0, 3), sigma = 1.2)
 cov_alpha <- logical(N_REPS)

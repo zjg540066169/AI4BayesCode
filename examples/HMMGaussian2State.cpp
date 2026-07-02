@@ -122,7 +122,7 @@ public:
         //      reads context_edges_). z_1 ~ Categorical(pi);
         //      z_t | z_{t-1} ~ Categorical(A_{z_{t-1},:}): the initial
         //      distribution pi and transition matrix A are z's
-        //      generative parents. Drawn faded by plot_dag.
+        //      generative parents. Drawn faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("pi", {"z"});
         impl_->data().declare_context_edges("A",  {"z"});
         impl_->data().set("y_rep", arma::vec(T_, arma::fill::zeros));

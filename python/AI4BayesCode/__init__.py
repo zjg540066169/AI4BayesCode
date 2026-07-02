@@ -33,7 +33,7 @@ from .install_block import (
     install_block, available_blocks, installed_blocks, remove_block, blocks_path)
 from .plot_dag import plot_dag
 from .run_chains import run_chains
-from .diagnose import ai4b_diagnose
+from .diagnose import diagnose, ai4b_diagnose
 from .utils import rhat, ess_bulk, ess_tail, posterior_summary
 from ._blocks import blocks
 
@@ -59,7 +59,7 @@ __all__ = [
     "blocks_path",
     "plot_dag",
     "run_chains",
-    "ai4b_diagnose",
+    "diagnose",
     "rhat",
     "ess_bulk",
     "ess_tail",

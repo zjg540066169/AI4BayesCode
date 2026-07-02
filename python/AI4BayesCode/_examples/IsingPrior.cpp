@@ -80,7 +80,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.IsingPrior(16, 16, 2, 0.44, True, False, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.IsingPrior(16, 16,   # L_x, L_y: lattice dims (N = 256 sites)
 //                      2,         # Q: state count (2 = Ising)

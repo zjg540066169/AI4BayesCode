@@ -240,7 +240,7 @@ public:
         //      reads context_edges_). sigma^2 ~ IG(nu/2, nu*lambda/2):
         //      sigma_nu / sigma_lambda are sigma's prior parents. The
         //      SoftBART forest is a sampled generative parent of
-        //      f_softbart alongside X. Drawn faded by plot_dag.
+        //      f_softbart alongside X. Drawn faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("sigma_nu",     {"sigma"});
         impl_->data().declare_context_edges("sigma_lambda", {"sigma"});
         impl_->data().declare_context_edges("SoftBART",     {"f_softbart"});

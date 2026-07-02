@@ -91,7 +91,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GPTimeSeries(t, y, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GPTimeSeries(t, y, 7, True)                 # t, y, rng_seed, keep_history
 //   m.step(2500); print(m.get_current())               # dict: amp / tau / sigma / logp

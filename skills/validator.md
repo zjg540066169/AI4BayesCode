@@ -381,7 +381,7 @@ writes the recomputed value. **`N`'s computation must NOT live
 inside any other node's refresher**, even if it would be more
 "efficient" to inline. Inlining breaks the predict-DAG walk's
 ability to replace `N` (e.g. `predict_at(list(theta = theta_new))`)
-and breaks `plot_dag(model)`'s ability to visualize the generative
+and breaks `ai4bayescode_plot_dag(model)`'s ability to visualize the generative
 story.
 
 **(4) `N`'s outgoing edges go to nodes that read ONLY `N`, not
@@ -510,7 +510,7 @@ Diagnosing each missing piece:
 - Strip the four `d.get("f_bart")` etc. calls from `y_rep`'s
   lambda; it now reads ONLY `theta` and `v2`.
 
-After the fix, all four conditions (A)-(D) pass and `plot_dag()`
+After the fix, all four conditions (A)-(D) pass and `ai4bayescode_plot_dag()`
 matches the user-approved DAG exactly.
 
 **Sibling check — `predict_at` Rcpp wrapper must forward to the
@@ -575,7 +575,7 @@ if (keep_history_) {
 
 A shadow implementation always emits the FULL set of downstream
 keys (because the manual loop never checks availability), masking
-silent default-substitution bugs and contradicting `plot_dag()`'s
+silent default-substitution bugs and contradicting `ai4bayescode_plot_dag()`'s
 promise to faithfully reflect the predict-DAG. The history-mode
 branch MUST iterate posterior draws, install each draw's
 parameters into a fresh `replaced` context, and call
@@ -752,14 +752,14 @@ pattern.
 (`declare_context_edges`) must match the model's prior structure and
 stay DISJOINT from `predict_edges`.** This is part of Check #6 (DAG
 consistency), not a separate numbered check — it verifies the
-`get_dag()$context_edges` map that `plot_dag` renders faded.
+`get_dag()$context_edges` map that `ai4bayescode_plot_dag` renders faded.
 
 `declare_context_edges(from, {to})` declares the prior / hyperprior
 parents of sampled parameters (and forest/kernel params feeding a
 deterministic mean node). It is VIZ-ONLY: `predict_downstream_of` /
 `predict_stochastic_sampleable` in shared_data.hpp never read
 `context_edges_`, so a wrong context edge cannot corrupt any
-posterior — the only failure mode is a misleading `plot_dag` figure.
+posterior — the only failure mode is a misleading `ai4bayescode_plot_dag` figure.
 
 Acceptance conditions (all must hold):
 
@@ -785,7 +785,7 @@ Acceptance conditions (all must hold):
    context edge (`BART→f_bart`, `genBART→r`, `amplitude→K_matrix`),
    parallel to the user-approved MetaRegBartSpline `BART→f_bart`.
 
-Detection: `plot_dag(model)` must render the prior context faded and
+Detection: `ai4bayescode_plot_dag(model)` must render the prior context faded and
 the solid predict sub-DAG unchanged; `predict_at(list())` output keys
 must be IDENTICAL with and without context edges (proves BFS
 isolation). See codegen_cpp.md §6c "Generative-DAG context edges" and
@@ -812,7 +812,7 @@ the framework's replaced-key validation (data_inputs ∪ block names)
 cannot accept. Conditions: the loop computes `y_rep` with the SAME
 generative formula as the registered refreshers (gate: equivalence /
 R-reference); the STATEFUL path still routes through
-`impl_->predict_at` (no shadow there); `plot_dag` still reflects the
+`impl_->predict_at` (no shadow there); `ai4bayescode_plot_dag` still reflects the
 fully reconstructed predict DAG. Forbidden pattern C does NOT apply
 to these. Gold standard MetaRegBartSpline is conformant under this
 carve-out. See system_design.md §5 (Q5 ruling).
@@ -2055,7 +2055,7 @@ on.exit(parallel::stopCluster(cl), add = TRUE)
 
 parallel::clusterEvalQ(cl, {
     source("AI4BayesCode/R/AI4BayesCode_helpers.R")
-    AI4BayesCode_sourceCpp(
+    ai4bayescode_sourceCpp(
         "models/<MODEL_ID>/<MODEL_ID>.cpp",     # path RELATIVE to project root
         AI4BayesCode_path = "AI4BayesCode")
 })
@@ -2144,7 +2144,7 @@ if (ess_ratio < 0.01) {
 
 # `total_wall_sec` is the actual elapsed wall time across both stages —
 # pass it (not c1$wall_sec + c2$wall_sec, which double-counts in parallel)
-# to AI4BayesCode_perf_hint() at the end of the runner.
+# to ai4bayescode_perf_hint() at the end of the runner.
 ```
 
 If R-hat stays >= 1.05 even at the 20k+20k extended budget, the likely

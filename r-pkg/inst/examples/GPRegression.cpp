@@ -76,10 +76,10 @@
 //   y <- f_true + rnorm(N, 0, 0.30)               # Gaussian noise, sigma_true = 0.30
 //   X <- matrix(x, ncol = 1)                       # X is N x 1
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
-//   run <- AI4BayesCode_run_chains(
+//   run <- ai4bayescode_run_chains(
 //       function(seed) new(GPRegression, X, y, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4b_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GPRegression, X, y, 11L, TRUE)        # X, y, seed=11, keep_history=TRUE
 //   m$step(2500); str(m$get_current())             # single chain; f / amplitude / lengthscale / sigma
@@ -95,7 +95,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GPRegression(X, y, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.ai4b_diagnose(chains[0]["hist"])   # summary + diagnostics
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GPRegression(X, y, 11, True)           # X, y, seed=11, keep_history=True
 //   m.step(2500); print(m.get_current())           # dict: f, amplitude, lengthscale, sigma
@@ -443,7 +443,7 @@ public:
         //      half-Normal(0, amp_prior_sd); lengthscale ~
         //      InverseGamma(ell_prior_shape, ell_prior_scale). f ~
         //      GP(0,K) so L_chol is f's generative parent. sigma ~
-        //      Jeffreys (no slot). Drawn faded by plot_dag.
+        //      Jeffreys (no slot). Drawn faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("amp_prior_sd",   {"amplitude"});
         impl_->data().declare_context_edges("ell_prior_shape",{"lengthscale"});
         impl_->data().declare_context_edges("ell_prior_scale",{"lengthscale"});

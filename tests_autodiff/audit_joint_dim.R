@@ -38,7 +38,7 @@ N_KEEP <- 10000L
 
 # ===== IRT1PL_joint dim stress =====
 cat("\n[F3] IRT1PL_joint dim stress\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "IRT1PL_joint.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "IRT1PL_joint.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 irt_cases <- list(
@@ -87,7 +87,7 @@ for (cs in irt_cases) {
 
 # ===== HierarchicalLM_joint dim stress =====
 cat("\n\n[F3] HierarchicalLM_joint dim stress\n")
-AI4BayesCode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "HierarchicalLM_joint.cpp"),
+ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "HierarchicalLM_joint.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 hlm_cases <- list(

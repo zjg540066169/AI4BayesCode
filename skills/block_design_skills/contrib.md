@@ -58,7 +58,7 @@ AI4BayesCode/blocks_local/<Block>/ # in the tree, separate from core include/
 - **The core→package sync does NOT auto-package `blocks_local/` into the R-package `inst/`.**
  Local is a dev area; "shipping a block" is the [FUTURE] registry/submission path. (Same
  rule as the `.bak` / `_archive` dev-only strip: dev content stays in dev, never ships.)
-- Compile include-path wiring for `AI4BayesCode_sourceCpp` (putting `blocks_local/*/` on
+- Compile include-path wiring for `ai4bayescode_sourceCpp` (putting `blocks_local/*/` on
  `-I`) is an [OPEN] integration detail — staging/compile is a Stage-4/5 "go" action, not
  something this reference resolves.
 

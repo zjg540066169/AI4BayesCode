@@ -252,7 +252,7 @@ that when a runner is slow (e.g. one that stayed modular as a fallback),
 the user gets a clear joint-escape suggestion:
 
 ```r
-AI4BayesCode_perf_hint(
+ai4bayescode_perf_hint(
     wall_sec = total_wall_sec,                # actual elapsed time across stages
     n_sweeps_total = 2 * (n_burnin + n_keep),
     uses_joint_nuts = FALSE                   # TRUE if this runner already uses joint
@@ -484,7 +484,7 @@ Rules:
   `AI4BayesCode_path=`, NEVER a `source(".../AI4BayesCode_helpers.R")` runner line.**
   Absolute or checkout paths break on another machine or if the folder moves, and
   the `@example` `doc()` shows runs inside the installed package. The legacy
-  checkout form (`source(helpers.R)` + capital `AI4BayesCode_sourceCpp(...,
+  checkout form (`source(helpers.R)` + capital `ai4bayescode_sourceCpp(...,
   AI4BayesCode_path=)`) belongs ONLY in a standalone runner when the package is
   NOT installed — never in the `@example`.
 - **Single source of the DGP**: the toy data here is the SAME simulation the
@@ -1163,7 +1163,7 @@ declare_predict_edges("v2",     {"y_rep"});
 
 This is **WRONG** for two reasons:
 
-1. **DAG visualization lies to the user.** `plot_dag(model)` no longer
+1. **DAG visualization lies to the user.** `ai4bayescode_plot_dag(model)` no longer
    matches the DAG they approved at the verification step. The
    collapsed DAG drops `theta` and `theta_raw`. The user signed off
    on a multi-layer generative story; the code ships a single-layer
@@ -1271,7 +1271,7 @@ is invariant to sampler parameterization choices.
 ### Generative-DAG context edges (`declare_context_edges`) — required
 
 After the predict-DAG edges, emit `declare_context_edges(from, {to})`
-for the model's **prior / hyperprior** structure so `plot_dag(model)`
+for the model's **prior / hyperprior** structure so `ai4bayescode_plot_dag(model)`
 renders the full generative story (solid predict sub-DAG + faded
 prior context). These are VIZ-ONLY: predict_at's BFS never reads
 `context_edges_` (shared_data.hpp). Rules:
@@ -1327,7 +1327,7 @@ verification code.
      - Adds a single `verify_MyModel_grad(...)` function with [[Rcpp::export]]
 
   3. AI compiles + runs:
-       AI4BayesCode_sourceCpp("tests_autodiff/verify_MyModel.cpp", ...)
+       ai4bayescode_sourceCpp("tests_autodiff/verify_MyModel.cpp", ...)
        r <- verify_MyModel_grad(synthetic_data, n_points = 5, seed = 12345)
      Assert every `max_diff_<block> < 1e-8` for AD-differentiable
      blocks, `< 1e-5` for FD-based blocks (see "Fallback" below).
@@ -1522,7 +1522,7 @@ derivative of lp; AD confirms grad matches reverse-mode autodiff.
 
 ```r
 source("AI4BayesCode/R/AI4BayesCode_helpers.R")
-AI4BayesCode_sourceCpp("tests_autodiff/verify_<ClassName>.cpp",
+ai4bayescode_sourceCpp("tests_autodiff/verify_<ClassName>.cpp",
                     AI4BayesCode_path = "AI4BayesCode")
 
 # Synthetic data matching the model's shape
@@ -2039,7 +2039,7 @@ go through the SAME predict-DAG walk.
 Why declare the edge AT ALL if the refresher reads `X` via
 `d.get("X")` anyway? Two reasons, both critical:
 
-1. **plot_dag visualisation.** Without the edge, `X` appears as an
+1. **ai4bayescode_plot_dag visualisation.** Without the edge, `X` appears as an
    orphan node in the rendered DAG — the user can't see that `X`
    produces `y_rep` in the generative story.
 2. **Full-Reconstruction Discipline (validator Check #6 (B)/(C)/(D)).**

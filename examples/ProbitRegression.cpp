@@ -257,7 +257,7 @@ public:
         //      reads context_edges_). beta ~ N(0, prior_sd^2 I): the
         //      prior sd is beta's prior parent. (Albert-Chib z is a
         //      sampling-augmentation latent, not a generative node.)
-        //      Drawn faded by plot_dag.
+        //      Drawn faded by ai4bayescode_plot_dag.
         impl_->data().declare_context_edges("prior_sd", {"beta"});
         impl_->data().set("y_rep", arma::vec(N_, arma::fill::zeros));
         impl_->data().register_stochastic_refresher(
