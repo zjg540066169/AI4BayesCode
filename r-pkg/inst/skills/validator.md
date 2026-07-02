@@ -13,6 +13,17 @@ cheapest to most expensive. Sub-steps within Layer 3 share the same
 2-chain run, so running them in sequence is essentially free after the
 chains finish.
 
+> **Contributed-block checks (local / downloaded blocks).** If the sampler uses a
+> LOCAL (`blocks_local/`) or DOWNLOADED (`blocks_download/`) block, that block ships
+> its OWN validation skill. In ADDITION to the core checks below, load the block's
+> `ValidationSkill` (its manifest's `ValidationSkill:` field →
+> `<tier>/<Block>/skills/<Block>_validation.md`) and apply exactly the checks its
+> manifest names in `ChecksApplicable:` (e.g. `#17; BL1..BL6` — the `BL*` entries are
+> the block's OWN checks, defined in that validation skill). The block's bundled
+> example + library test (`test_<Block>.cpp`) are the reference for what a passing
+> run looks like. See `block_catalogue.md` ("Contributed blocks") for how the block
+> is selected + its Example loaded.
+
 1. **Syntactic** — compilation. The C++ compiler does this for free; no
    manual checklist. If `sourceCpp` fails, fix and retry.
 2. **Semantic** — code-level review. Twenty-five checks (#1-#25), all

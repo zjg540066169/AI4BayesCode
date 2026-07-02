@@ -49,6 +49,14 @@ by block count):
 4. If NO local / downloaded block fits, use a **core** block from the table below.
 5. `#include "<Block>.hpp"` for the chosen block (already on the `-I` path).
 
+**When you USE a contributed block, also load its bundle files (from its manifest):**
+- **Example** (`Example:` field → `<tier>/<Block>/examples/<Model>.cpp`): read it as
+  the concrete reference composition for THIS block — the analogue of a core
+  `examples/*.cpp`, showing the exact wiring, `set_current`, `predict_at`, runner.
+- **ValidationSkill** (`ValidationSkill:` field → `<tier>/<Block>/skills/<Block>_validation.md`)
+  + **`ChecksApplicable:`**: apply these block-specific checks at validation time —
+  see `validator.md` ("Contributed-block checks").
+
 **Confirm it.** Surface the selected block + the alternative candidates in the
 existing model-confirmation gate (`codegen.md §2` / `start.md` Stage 3) so the user
 can switch. (Full design: `block_design_skills/contrib.md`.)
