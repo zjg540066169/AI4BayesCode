@@ -409,9 +409,9 @@ means (the standard finite-K mixture convention). See
   is a product of N independent truncated Normals — a length-N
   closed-form vector conjugate sample where NUTS would be silly. Use
   `probit_aug_block` (whitelisted under Exception 3); see
-  `examples/ProbitRegression.cpp` (Albert-Chib + NUTS on beta) and
-  `examples/probit_BART_model.cpp` (Albert-Chib + bart_block with
-  `cfg.binary = true`) for reference compositions. Do NOT inline the
+  `examples/ProbitRegression.cpp` (Albert-Chib + NUTS on beta) for a
+  reference composition (for a BART probit mean, compose `probit_aug_block`
+  with a `bart_block` using `cfg.binary = true`). Do NOT inline the
   truncated-normal sampling in a wrapper — use the library-blessed
   block.
 
@@ -866,8 +866,7 @@ Discrete latent z found?
                               see `examples/ProbitRegression.cpp`
         - BART mean f(X):     bart_block with `cfg.binary = true` so the
                               leaf prior tau matches BART::pbart's
-                              `3 / (k * sqrt(ntrees))`; see
-                              `examples/probit_BART_model.cpp`
+                              `3 / (k * sqrt(ntrees))`
         - GP latent f:        elliptical_slice_sampling_block reading
                               z as Gaussian "data"
       sigma is FIXED at 1 (probit identifiability) — `probit_aug_block`
