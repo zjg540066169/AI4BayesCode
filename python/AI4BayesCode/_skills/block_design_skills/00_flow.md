@@ -311,7 +311,7 @@ gets the block AND its borrowed kernel together — nothing to fetch separately 
 it `Depends:` on). That is WHY vendored code goes in the block's own folder, not a shared tree.
 
 ```
-AI4BayesCode/blocks_local/<Block>/
+./blocks_local/<Block>/
  <Block>.hpp # Tier-B block (implements the block_sampler contract)
  test_<Block>.cpp # library test (FD / parity / recovery / cross-chain-Rhat / stress)
  manifest.dcf # routing + metadata (DCF / DESCRIPTION-style)

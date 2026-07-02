@@ -34,7 +34,7 @@ choice `(default)` — NEVER `(Recommended)`. Always include an
 
 **Staging discipline (TOP RULE).** Intake writes NOTHING to the real tree.
 It produces a captured spec held for DESIGN; the bundle directory
-`AI4BayesCode/blocks_local/<Block>/` is created only later, on explicit
+`./blocks_local/<Block>/` is created only later, on explicit
 "go". Nothing is compiled here.
 
 ---
@@ -224,7 +224,7 @@ Mechanically (exact, resolvable from the repo root):
  reserved core name). The routing table in `AI4BayesCode/skills/block_catalogue/index.md`
  lists the same names with prose, but the headers ARE the list — do not depend on the
  catalogue's path being known.
-- Existing local names: the `Block:` line of each `AI4BayesCode/blocks_local/*/manifest.dcf`.
+- Existing local names: the `Block:` line of each `./blocks_local/*/manifest.dcf`.
 
 Reject on any clash (reserved or duplicate) and ask for another name. Offer 2–3
 spec-derived candidate **stems** as labeled options — show them WITHOUT the `_block`

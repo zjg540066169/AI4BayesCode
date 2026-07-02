@@ -214,11 +214,11 @@ What to surface as you start (a heads-up, NOT a gate):
  -I AI4BayesCode/include -I AI4BayesCode/include/mcmclib \
  -I AI4BayesCode/include/mcmclib/BaseMatrixOps/include -I AI4BayesCode/include/eigen \
  -I /Library/Frameworks/R.framework/Versions/Current/Resources/library/RcppArmadillo/include \
- -I AI4BayesCode/blocks_local/<Block> \
+ -I ./blocks_local/<Block> \
  -DMCMC_ENABLE_ARMA_WRAPPERS -DARMA_DONT_USE_WRAPPER \
- -o /tmp/test_<Block> AI4BayesCode/blocks_local/<Block>/test_<Block>.cpp -framework Accelerate
+ -o /tmp/test_<Block> ./blocks_local/<Block>/test_<Block>.cpp -framework Accelerate
  ```
- Two non-obvious points an author WILL hit: (1) `-I AI4BayesCode/blocks_local/<Block>` is
+ Two non-obvious points an author WILL hit: (1) `-I ./blocks_local/<Block>` is
  REQUIRED so `#include "<Block>.hpp"` resolves; (2) the arma backend needs
  `-DMCMC_ENABLE_ARMA_WRAPPERS -DARMA_DONT_USE_WRAPPER` + RcppArmadillo's include dir on `-I`
  + `-framework Accelerate` (macOS; on Linux use `-lblas -llapack` instead). The block header
@@ -241,7 +241,7 @@ as a named failure with the reason — never hide it to inflate a pass count, ne
 loosen a tolerance post-hoc to flip the verdict.
 
 **Staging discipline (the delivery GUARD, not a gate):** compile+run happens AUTOMATICALLY against
-the STAGING copy — it moves nothing. The bundle MOVE to `AI4BayesCode/blocks_local/<Block>/` is also
+the STAGING copy — it moves nothing. The bundle MOVE to `./blocks_local/<Block>/` is also
 AUTOMATIC, once ALL checks pass (no "go" gate) — then REPORT the final path. Staging exists so a
 FAILED block is never delivered: if any check fails, the bundle STAYS in staging, you report what
 failed and STOP.

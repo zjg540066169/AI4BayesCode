@@ -30,7 +30,7 @@ were staged in earlier phases):
 
 All are STAGED to `.block_design_staging/<Block>/`, never written in place. The
 library test + example already compiled + ran AUTOMATICALLY in VALIDATE / EXAMPLE; once ALL checks
-pass the whole bundle MOVES to `AI4BayesCode/blocks_local/<Block>/` **automatically** (no "go") and
+pass the whole bundle MOVES to `./blocks_local/<Block>/` **automatically** (no "go") and
 the final path is REPORTED. Staging is the delivery guard — a FAILED block is never moved (TOP RULE).
 
 Every decision in this phase is a structured labeled-option prompt (AskUserQuestion, or
@@ -358,7 +358,7 @@ gate has NO loophole, same as §0.5.
 Then **deliver the bundle automatically — no "go" gate.** Once EVERY check has passed (VALIDATE
 T0–T4 + Check #12 + any vendored-correctness / stateful checks; the example if authored; the §5b
 doc-consistency; the §5c GPL-3 license check), MOVE the whole bundle from staging into
-`AI4BayesCode/blocks_local/<Block>/` and **REPORT the final path + the files written** (e.g.
+`./blocks_local/<Block>/` and **REPORT the final path + the files written** (e.g.
 "Block created at `…/blocks_local/<Block>/` — `<Block>.hpp`, `test_…`, `manifest.dcf`, `skills/…`,
 `vendor/…`"). Do NOT ask for a "go".
 
