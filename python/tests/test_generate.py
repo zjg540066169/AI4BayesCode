@@ -35,7 +35,9 @@ def test_prompt_mandates_validate_sentinel():
 def test_prompt_interactive_priors_instruct_ask_user():
     p = gen.prompt("Poisson GLM", priors="interactive")
     assert "ask_user" in p["user"]
-    assert "ELICIT the prior" in p["user"]
+    # interactive mode instructs elicitation of the (missing/ambiguous) priors via
+    # ask_user -- the prior-no-re-ask policy; wording is "ELICIT ... ONLY the ...".
+    assert "ELICIT" in p["user"]
 
 
 def test_prompt_has_no_gate_param():

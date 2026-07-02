@@ -14,12 +14,20 @@ test_that("ai4bayescode_doc parses a sampler class from a .cpp path", {
 })
 
 test_that("ai4bayescode_doc handles a [[Rcpp::export]] function file", {
-    cpp <- ai4bayescode_examples_path("SpikeSlabSinhBijection.cpp")
-    skip_if(!nzchar(cpp), "bundled example not found")
+    # Bundled examples are now class/module files (frontend-independent refactor),
+    # so use a synthetic function-style fixture to exercise the export-parsing path.
+    cpp <- tempfile(fileext = ".cpp")
+    writeLines(c(
+        "#include <Rcpp.h>",
+        "// [[Rcpp::export]]",
+        "Rcpp::NumericVector spike_slab_sinh_chain(int n, double a = 1.0) {",
+        "    return Rcpp::NumericVector(n);",
+        "}"), cpp)
+    on.exit(unlink(cpp))
 
     info <- ai4bayescode_doc(cpp)
-    expect_true(is.na(info$class))
-    expect_true("spike_slab_sinh_chain" %in% names(info$exports))
+    expect_true(is.na(info$class))                                   # no RCPP_MODULE class
+    expect_true("spike_slab_sinh_chain" %in% names(info$exports))    # the exported fn
 })
 
 test_that("ai4bayescode_doc surfaces @example:R and falls back when absent", {

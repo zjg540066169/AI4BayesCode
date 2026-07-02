@@ -23,7 +23,9 @@ test_that("prompt mandates the AI4BAYES_VALIDATE sentinel", {
 test_that("priors = 'interactive' instructs ask_user elicitation", {
     p <- ai4bayescode_prompt("Poisson GLM", priors = "interactive")
     expect_true(grepl("ask_user", p$user))
-    expect_true(grepl("ELICIT the prior", p$user))
+    # interactive mode instructs elicitation of the priors (only the missing /
+    # ambiguous ones -- the prior-no-re-ask policy), via the ask_user tool.
+    expect_true(grepl("ELICIT", p$user))
 })
 
 test_that("ai4bayescode_models + LLM resolution", {

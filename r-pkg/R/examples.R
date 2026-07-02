@@ -86,8 +86,13 @@ ai4bayescode_list_examples <- function() {
 #' @export
 ai4bayescode_list_skills <- function() {
     dir <- ai4bayescode_skills_path()
-    if (!nzchar(dir)) return(character(0))
-    sort(list.files(dir, pattern = "\\.md$"))
+    files <- if (!nzchar(dir)) character(0) else list.files(dir, pattern = "\\.md$")
+    # start.md is the entry-point skill; it lives at the package root (not in
+    # skills/) but IS reachable via ai4bayescode_skills_path("start.md"), so it
+    # belongs in the listing for a coherent API.
+    if (nzchar(system.file("start.md", package = "AI4BayesCode")))
+        files <- c("start.md", files)
+    sort(unique(files))
 }
 
 #' Return the installed AI4BayesCode package version
