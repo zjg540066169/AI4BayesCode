@@ -361,7 +361,12 @@ shared_data.
 ### BART-family (tree ensembles)
 
 `bart_block` (Gaussian BART, CRAN BART R package backfitting) and `genbart_block`
-(Linero 2022 RJMCMC with pluggable likelihoods). Tier B setters:
+(Linero 2022 RJMCMC with pluggable likelihoods). **Selection: `bart_block` is the
+default for any real-valued response with constant noise (conjugate leaves, fast);
+`genbart_block`'s RJMCMC is much slower, use it ONLY for non-Gaussian likelihoods
+`bart_block` cannot express. Additive / varying-coefficient ensembles (VC-BART)
+stay in `bart_block` via backfitting + `weights_key` — see the `bart_block`
+catalogue card.** Tier B setters:
 - `bart_block`: `set_X`, `set_Y`, `set_data`.
 - `genbart_block`: `set_X`, `set_Y`, `set_offset`, `set_data`.
 `set_current(arma::vec)` is `Rcpp::stop` on both — the tree forest

@@ -11,6 +11,26 @@ likelihood.
 
 `current()` returns a length-N arma::vec of r(X_i).
 
+### When to use -- PREFER `bart_block` first
+
+`genbart_block` is the GENERIC engine: Linero 2022 reversible-jump MCMC with
+Laplace-approximated leaf proposals, **substantially slower** than `bart_block`'s
+conjugate Gaussian-leaf backfitting (`score` / `obs_info` are called n times per
+tree update). Do NOT reach for it by default.
+
+- **Plain Gaussian mean, constant noise -> `bart_block`** (the `BartNoise`
+  example). Using `genbart_block + normal_lik` for standard homoscedastic
+  Gaussian regression is a common mistake: identical model, far slower sampler.
+  `normal_lik` exists for composition, not as the Gaussian default.
+- **Composite / varying-coefficient / additive-ensemble BART** (VC-BART, where
+  each coefficient function is its own BART) is ALSO a `bart_block` job --
+  compose one `bart_block` per ensemble via backfitting, using `weights_key` for
+  the per-observation covariate scaling. See the `bart_block` card, "Composite /
+  varying-coefficient BART via BACKFITTING". Do NOT write a custom VC likelihood.
+- **Use `genbart_block` ONLY when `bart_block` cannot express the model** -- a
+  genuinely NON-Gaussian response (Logistic / Poisson / NB / Heteroscedastic /
+  AFT / Beta / Gamma_shape / Beta-Binomial / custom).
+
 ### Shipped likelihoods (`genbart::lik::*`)
 
 | Likelihood class | Response | Nuisance param(s) | Reference example |

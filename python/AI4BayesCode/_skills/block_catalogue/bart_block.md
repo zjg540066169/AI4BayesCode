@@ -20,7 +20,45 @@ accepts any subset of `{X, y, sigma}` and routes them into the block
 methods are exposed; the unified six-method interface is the whole
 API. (System-design agents modifying `bart_block` itself should read
 `skills/system_design.md`; code-generation agents do NOT need
-to — see the top of `skills/codegen.md`.)
+to -- see the top of `skills/codegen.md`.)
+
+### Composite / varying-coefficient BART via BACKFITTING -- do NOT reach for `genbart_block`
+
+When the mean is an ADDITIVE combination of tree ensembles -- **VC-BART**
+(Deshpande et al.: `mu_i = beta_0(Z_i) + sum_j beta_j(Z_i) * x_ij`, each
+`beta_j` its own BART over a modifier `Z`), additive-BART, or any
+`mu = sum_j g_j(Z) * x_j` -- the observation is **still Gaussian**, so compose
+ONE `bart_block` per ensemble and Gibbs-**backfit** them. The AI's instinct to
+switch to `genbart_block` with a custom likelihood is WRONG here: it throws away
+`bart_block`'s conjugate leaves for a much slower RJMCMC, for no modelling gain.
+
+The per-observation multiplier `x_ij` is handled by **`weights_key`**, NOT a
+custom likelihood. Condition ensemble `j` on the others via the partial residual
+and fit the SCALED response:
+
+    r_i^(j) = y_i - sum_{k != j} x_ik * beta_k(Z_i)     (partial residual)
+    ytilde_i = r_i^(j) / x_ij                            (working response)
+    ytilde_i ~ N( beta_j(Z_i),  sigma^2 / x_ij^2 )
+
+so ensemble `j` is a `bart_block` with:
+- `x_train = Z`                       (the modifier -- NOT the predictors x)
+- `working_response_key` <- `ytilde^(j)`, refreshed each sweep (the `/ x_ij` step)
+- `weights_key`          <- `w_i = 1/|x_ij|`  (=> per-obs noise sd `w_i*sigma` via
+                           `update_step_weighted`; reproduces VC-BART's weighted
+                           leaf sufficient stats `sum x_ij^2` and `sum x_ij r_i` exactly)
+- `sigma_key`            <- the shared scalar noise sd
+The intercept ensemble `beta_0` has `x_i0 == 1` => `w_i = 1`, `ytilde = r^(0)`:
+a plain unweighted `bart_block`.
+
+Each sweep: for `j = 0..p` recompute `r^(j)`, `ytilde^(j)`, `w^(j)`, push to
+shared_data, `step()` ensemble `j`; then one shared-`sigma` draw. That is `p+1`
+CONJUGATE BART sweeps -- far faster than one genbart RJMCMC over a custom VC
+likelihood, and statistically exact (identical weighted posterior).
+
+**Edge case:** an observation with `x_ij == 0` carries no information about
+`beta_j` (`beta_j(Z_i)*0 = 0`) and would give `w_i = 1/0`. Drop such rows from
+ensemble `j`'s fit (equivalently their `x_ij^2` leaf weight is 0) -- never feed
+`Inf` weights to the block.
 
 ```cpp
 bart_block_config cfg;

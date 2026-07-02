@@ -251,14 +251,31 @@ rank — do NOT read "item 1" as "try this first":
 4. **`bart_block` / `genbart_block`** — tree-based nonparametric
    regression. Specialized; both pull in GPL-2.0-or-later.
    - `bart_block`: vanilla Gaussian BART via Bayesian backfitting
-     (Chipman et al. 2010).
-   - `genbart_block`: Linero 2022 generalized-BART via RJMCMC with
-     Laplace leaf proposals; accepts a plug-in `genbart::likelihood`
-     for Normal / Logistic / Poisson / NB / Heteroscedastic / AFT /
-     Beta / Gamma_shape / Beta-Binomial / user-supplied. Use this
-     whenever the response family is non-Gaussian OR when the user
-     needs a response family outside the 10 shipped ones (subclass
-     `genbart::likelihood`; see `codegen_cpp.md §6c`).
+     (Chipman et al. 2010) with CONJUGATE closed-form Gaussian-leaf
+     draws — FAST. **This is the DEFAULT for any real-valued response
+     with constant noise variance** (`y ~ N(BART(X), sigma^2)`,
+     including probit BART via Albert-Chib augmentation). **Additive
+     combinations of ensembles are ALSO `bart_block`, not genbart** —
+     VC-BART / varying-coefficient (`mu = sum_j beta_j(Z) * x_j`, each
+     `beta_j` its own BART) is built by composing one `bart_block` per
+     ensemble via Gibbs backfitting, with `weights_key` carrying the
+     per-obs `x_ij` scaling (see the `bart_block` card "Composite /
+     varying-coefficient BART via BACKFITTING"). The AI tends to
+     mis-route these to `genbart_block` + a custom likelihood — don't.
+   - `genbart_block`: Linero 2022 generalized-BART via **RJMCMC** with
+     Laplace leaf proposals — a GENERIC engine that is **substantially
+     SLOWER than `bart_block`** (no conjugate leaf; every leaf update
+     runs a Laplace approximation, `score`/`obs_info` called n times
+     per tree). Use it **ONLY when `bart_block` cannot express the
+     model** — a NON-Gaussian response (Logistic / Poisson / NB /
+     Heteroscedastic / AFT / Beta / Gamma_shape / Beta-Binomial /
+     user-supplied) or a Gaussian with non-constant variance
+     (heteroscedastic). ⚠️ **Do NOT use `genbart_block + normal_lik`
+     for a standard homoscedastic Gaussian regression — that is exactly
+     `bart_block`, only sampled far slower.** `normal_lik` exists for
+     composition, not as the Gaussian default. (Custom families outside
+     the 10 shipped: subclass `genbart::likelihood`; see
+     `codegen_cpp.md §6c`.)
 5. **`hmm_block`** — exact forward-filter backward-sample for
    finite-state Hidden Markov Models.
 
