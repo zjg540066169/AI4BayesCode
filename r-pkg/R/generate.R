@@ -52,13 +52,25 @@
 #' @keywords internal
 #' @noRd
 .ai4b_derive_class_name <- function(description) {
-    words <- regmatches(description, gregexpr("[A-Za-z][A-Za-z0-9]*", description))[[1]]
-    words <- words[nchar(words) >= 3L]          # drop noise tokens (y, i, X, ...)
+    d <- description %||% ""
+    # A filesystem path (a slash, no spaces) is NOT a model description -- deriving
+    # from its components yields garbage like "UsersJz3138Documents".
+    if (grepl("[/\\\\]", d) && !grepl("\\s", trimws(d))) return("GeneratedModel")
+    # Use only the PROSE before the first formula delimiter (`:` `~` `=` `(`), so a
+    # model like "linear regression: y ~ N(Xb, s2)" -> "LinearRegression", not
+    # "...RegressionBeta". Drop filler words so "I need a ..." -> the real name.
+    d0 <- sub("[:~=(].*$", "", d)
+    filler <- c("need","needs","want","wants","would","like","please","fit","fits","fitting",
+                "sample","sampler","model","models","the","this","that","using","use","with",
+                "for","data","have","has","give","make","build","create","code","generate",
+                "implement","and","from","our","your","some","just")
+    words <- regmatches(d0, gregexpr("[A-Za-z][A-Za-z0-9]*", d0))[[1]]
+    words <- words[nchar(words) >= 3L & !tolower(words) %in% filler]
     words <- head(words, 3L)
     if (!length(words)) return("GeneratedModel")
-    nm <- paste(paste0(toupper(substring(words, 1, 1)), substring(words, 2)), collapse = "")
+    nm <- paste(paste0(toupper(substring(words, 1L, 1L)), substring(words, 2L)), collapse = "")
     if (!grepl("^[A-Za-z_]", nm)) nm <- paste0("M_", nm)
-    substr(nm, 1, 60L)
+    substr(nm, 1L, 60L)
 }
 
 # Prior policy block. "interactive" -> instruct the model to elicit via ask_user.
@@ -148,7 +160,12 @@
 "Settings:\n",
 sprintf("  - Runtime backend: %s\n", backend),
 sprintf("  - Output folder:   %s/\n", output_path),
-sprintf("  - Class name:      %s (valid C++ identifier; use as-is)\n", classname),
+sprintf(paste0(
+"  - Class name:      %s (valid C++ identifier). Use this name; but if it is generic\n",
+"    (e.g. GeneratedModel) or does not describe the model, REPLACE it with a short,\n",
+"    descriptive PascalCase name (e.g. BayesianLinearRegression, PoissonGLMM). Use the\n",
+"    SAME name in the class declaration, the RCPP_MODULE, and the `// path:` file names.\n"),
+        classname),
 .ai4b_prior_block(priors), "\n",
 confirm_block,
 sprintf("  - Up to %d total generation attempts; iterate on failures.\n", max_attempts),

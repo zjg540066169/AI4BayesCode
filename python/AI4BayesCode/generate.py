@@ -65,8 +65,25 @@ def _default_skill_set(backend: str) -> list[str]:
     return out
 
 
+_CLASSNAME_FILLER = {
+    "need", "needs", "want", "wants", "would", "like", "please", "fit", "fits", "fitting",
+    "sample", "sampler", "model", "models", "the", "this", "that", "using", "use", "with",
+    "for", "data", "have", "has", "give", "make", "build", "create", "code", "generate",
+    "implement", "and", "from", "our", "your", "some", "just",
+}
+
+
 def _derive_class_name(description: str) -> str:
-    words = [w for w in re.findall(r"[A-Za-z][A-Za-z0-9]*", description) if len(w) >= 3][:3]
+    d = description or ""
+    # A filesystem path (a slash, no spaces) is NOT a model description -- deriving
+    # from its components yields garbage like "UsersJz3138Documents".
+    if re.search(r"[/\\]", d) and not re.search(r"\s", d.strip()):
+        return "GeneratedModel"
+    # Use only the PROSE before the first formula delimiter (`:` `~` `=` `(`), and
+    # drop filler words, so "I need a linear regression: y ~ ..." -> "LinearRegression".
+    d0 = re.split(r"[:~=(]", d, 1)[0]
+    words = [w for w in re.findall(r"[A-Za-z][A-Za-z0-9]*", d0)
+             if len(w) >= 3 and w.lower() not in _CLASSNAME_FILLER][:3]
     if not words:
         return "GeneratedModel"
     nm = "".join(w[:1].upper() + w[1:] for w in words)
@@ -144,7 +161,10 @@ def _build_user(description, backend, output_path, classname, priors, max_attemp
 "Settings:\n"
 f"  - Runtime backend: {backend}\n"
 f"  - Output folder:   {output_path}/\n"
-f"  - Class name:      {classname} (valid C++ identifier; use as-is)\n"
+f"  - Class name:      {classname} (valid C++ identifier). Use this name; but if it is\n"
+"    generic (e.g. GeneratedModel) or does not describe the model, REPLACE it with a\n"
+"    short descriptive PascalCase name (e.g. BayesianLinearRegression, PoissonGLMM). Use\n"
+"    the SAME name in the class, the module (RCPP_MODULE / PYBIND), and the `// path:` files.\n"
 f"{_prior_block(priors)}\n"
 f"{confirm_block}"
 f"  - Up to {max_attempts} total generation attempts; iterate on failures.\n"
