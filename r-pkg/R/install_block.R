@@ -15,13 +15,20 @@
 #' @keywords internal
 #' @noRd
 .ai4b_blocks_dir <- function() {
-    file.path(tools::R_user_dir("AI4BayesCode", "data"), "blocks")
+    # User-global, language-agnostic block store SHARED with the Python package
+    # (same `$AI4BAYESCODE_DATA_HOME` override). One directory across R / Python /
+    # C++ and across all projects, so a block installed once is found everywhere.
+    base <- Sys.getenv("AI4BAYESCODE_DATA_HOME",
+                       unset = file.path(path.expand("~"), ".AI4BayesCode"))
+    file.path(base, "blocks_download")
 }
 
 #' Path to the per-user contributed-block library
 #'
-#' The directory where [ai4bayescode_install_block()] installs blocks (under
-#' `tools::R_user_dir("AI4BayesCode", "data")/blocks/`). `ai4bayescode_sourceCpp()`
+#' The directory where [ai4bayescode_install_block()] installs blocks: the
+#' user-global, language-agnostic store `~/.AI4BayesCode/blocks_download/`
+#' (shared with the Python package; override the root with the
+#' `AI4BAYESCODE_DATA_HOME` environment variable). `ai4bayescode_sourceCpp()`
 #' adds every installed block (and its vendored dependencies) to the compile
 #' `-I` path automatically.
 #'

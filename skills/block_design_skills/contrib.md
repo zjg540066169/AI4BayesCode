@@ -22,12 +22,14 @@ keep such a block (a) isolated from vetted core and (b) impossible to ship witho
 |---|---|---|---|
 | **core / default** | team-vetted blocks shipped with AI4BayesCode (`block_catalogue/index.md`) | maintainer-only | high |
 | **local** | a block YOU build via this flow (work-in-progress) | you, freely | self |
-| **downloaded** **[FUTURE]** | pulled from the shared registry (someone else's) | immutable + versioned | provenance / badge |
+| **downloaded** | installed from the shared registry into the **user-global** store `~/.AI4BayesCode/blocks_download/<Block>/` (one shared store across R / Python / C++ and all projects; override root with `$AI4BAYESCODE_DATA_HOME`) via `ai4bayescode_install_block()`. The install client exists today; the registry SERVER + AI-review acceptance gate remain **[FUTURE]** | immutable + versioned | provenance / badge |
 
-**MVP scope = core + local only.** Everything that is "running a stranger's code" is
-deliberately deferred with the `downloaded` tier: the registry server, download/install, the
-AI-review acceptance gate, use-time sandboxing, and cross-version `block_sampler` interface
-stability. None of those concerns arise for a block you wrote and run yourself.
+**MVP scope = core + local + the install client.** `ai4bayescode_install_block()` already
+downloads a reviewed bundle into the user-global `~/.AI4BayesCode/blocks_download/`, and codegen
+discovers it (see `block_catalogue/index.md`). What stays deliberately deferred — the "running a
+stranger's code" surface — is the registry SERVER, the AI-review acceptance gate, use-time
+sandboxing, and cross-version `block_sampler` interface stability. None of those arise for a
+block you wrote and run yourself.
 
 Lifecycle (one line through the tiers):
 ```
@@ -47,7 +49,8 @@ local block lives INSIDE the AI4BayesCode tree — but in its OWN subdirectory, 
 the vetted core `include/`:
 
 ```
-AI4BayesCode/blocks_local/<Block>/ # in the tree, separate from core include/
+./blocks_local/<Block>/  # PROJECT-RELATIVE (your project — or the AI4BayesCode tree
+                         # if you are contributing to the library); separate from core include/
 ```
 
 - A local block is a **self-contained bundle** (`<Block>.hpp` + `test_<Block>.cpp` +

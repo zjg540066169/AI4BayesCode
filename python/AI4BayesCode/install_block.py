@@ -24,9 +24,12 @@ _HUB_REF = "main"
 # ---- per-user block library -------------------------------------------------
 
 def _blocks_dir() -> str:
+    # User-global, language-agnostic block store SHARED with the R package (same
+    # AI4BAYESCODE_DATA_HOME override). One dir across R / Python / C++ and all
+    # projects, so a block installed once is found everywhere.
     base = os.environ.get("AI4BAYESCODE_DATA_HOME") or os.path.join(
         os.path.expanduser("~"), ".AI4BayesCode")
-    return os.path.join(base, "blocks")
+    return os.path.join(base, "blocks_download")
 
 
 def blocks_path(name: str | None = None) -> str:

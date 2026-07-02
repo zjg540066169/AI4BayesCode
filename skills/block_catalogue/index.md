@@ -19,13 +19,13 @@ See `LICENSE` / `THIRD_PARTY_LICENSES.md` at the repo root.
 ## Contributed blocks — search local + downloaded BEFORE core
 
 The blocks in THIS file are the **core** tier. Two more tiers may add blocks that
-are ALSO usable in a generated sampler (both are already on the compile `-I` path,
-so `#include "<Block>.hpp"` resolves):
+are ALSO usable in a generated sampler — the compile step puts both on the `-I`
+path so `#include "<Block>.hpp"` resolves:
 
 | Tier | Where | Trust |
 |---|---|---|
-| **local** | `blocks_local/<Block>/` — your work-in-progress blocks | self |
-| **downloaded** | `blocks_download/<Block>/` — installed from the registry | provenance |
+| **local** | `./blocks_local/<Block>/` — **project-relative** (resolved against the current working directory): blocks you are developing or keep with this project | self |
+| **downloaded** | `~/.AI4BayesCode/blocks_download/<Block>/` — **user-global**, installed via `ai4bayescode_install_block()`; one shared store across R / Python / C++ **and** across all your projects (override root with `$AI4BAYESCODE_DATA_HOME`) | provenance |
 | **core** | this file | maintainer-vetted |
 
 **Priority when several fit: local > downloaded > core** (prefer the user's own /
@@ -38,14 +38,15 @@ it stays cheap no matter how many blocks are installed (bounded by relevance, no
 by block count):
 
 1. **Index (cheap).** Build a one-line-per-block index from the manifests:
-   `glob blocks_local/*/manifest.dcf`, then `glob blocks_download/*/manifest.dcf`,
-   and read each manifest's `Block` + `RoutingKey` (one short line each). Do NOT
-   read the full cards yet. (No local/downloaded blocks present → skip to core.)
+   `glob ./blocks_local/*/manifest.dcf`, then
+   `glob ~/.AI4BayesCode/blocks_download/*/manifest.dcf`, and read each manifest's
+   `Block` + `RoutingKey` (one short line each). Do NOT read the full cards yet.
+   (No local/downloaded blocks present → skip to core.)
 2. **Filter.** From that index (local rows first, then downloaded), pick the 5–10
    blocks whose `RoutingKey` plausibly matches the model.
 3. **Read cards — survivors only.** For each candidate read its `SelectWhen` and
-   full card `blocks_local/<Block>/skills/<Block>.md` (or
-   `blocks_download/<Block>/skills/<Block>.md`); choose the best fit.
+   full card `./blocks_local/<Block>/skills/<Block>.md` (or
+   `~/.AI4BayesCode/blocks_download/<Block>/skills/<Block>.md`); choose the best fit.
 4. If NO local / downloaded block fits, use a **core** block from the table below.
 5. `#include "<Block>.hpp"` for the chosen block (already on the `-I` path).
 
