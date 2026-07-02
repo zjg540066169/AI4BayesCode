@@ -24,12 +24,13 @@ classifiers = [
 dependencies = [
     "numpy>=1.24",
     "pybind11>=2.11",
+    "anthropic>=0.40",        # generate() Anthropic backend (a core dependency)
 ]
 
 [project.optional-dependencies]
 viz = ["networkx>=3.0", "matplotlib>=3.7"]
 diagnostics = ["arviz>=0.16"]
-generate = ["anthropic>=0.40"]
+generate = []                 # anthropic is now a core dependency; kept for `pip install AI4BayesCode[generate]` back-compat
 dev = ["pytest>=7.0", "pytest-cov"]
 
 [project.urls]

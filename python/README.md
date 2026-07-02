@@ -93,9 +93,9 @@ AI4BayesCode.generate(interactive=True)
 ```
 
 `AI4BayesCode.models()` lists the selectable models and their valid thinking
-levels. The OpenAI path uses stdlib `urllib` (no extra SDK); the Anthropic SDK
-path is the `[generate]` extra. With no key set, it writes the prompt to
-`PROMPT.txt`.
+levels. The OpenAI path uses stdlib `urllib` (no extra SDK); the Anthropic path
+uses the `anthropic` SDK, which is a core dependency (installed automatically).
+With no key set, it writes the prompt to `PROMPT.txt`.
 
 Prefer not to pass the key every call? Set it **once per session** (session-only,
 never written to disk):

@@ -38,11 +38,12 @@ setup(
     install_requires=[
         "numpy>=1.24",
         "pybind11>=2.11",
+        "anthropic>=0.40",        # generate() Anthropic backend (a core dependency)
     ],
     extras_require={
         "viz": ["networkx>=3.0", "matplotlib>=3.7"],
         "diagnostics": ["arviz>=0.16"],
-        "generate": ["anthropic>=0.40"],
+        "generate": [],           # anthropic is now core; kept for [generate] back-compat
         "dev": ["pytest>=7.0", "pytest-cov"],
     },
     classifiers=[

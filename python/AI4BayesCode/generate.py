@@ -529,9 +529,9 @@ def set_key(key: str, provider: str = "anthropic", check: bool = True) -> str:
         try:
             import anthropic  # noqa: F401
         except ImportError:
-            print("  (streaming self-check skipped: the 'anthropic' package is not "
-                  "installed -- run  pip install anthropic  to use the Anthropic backend; "
-                  "the key IS set for this session.)")
+            print("  (streaming self-check skipped: could not import 'anthropic' (a "
+                  "required dependency -- run  pip install anthropic  or reinstall "
+                  "AI4BayesCode); the key IS set for this session.)")
         else:
             try:
                 stream_check(API_key=key, progress=True)
@@ -788,8 +788,8 @@ def _anthropic_request(system, messages, model, effort, tools, api_key, max_toke
         import anthropic
     except ImportError as e:
         raise RuntimeError(
-            "The 'anthropic' package is required for the Anthropic backend. "
-            "Install it with:  pip install anthropic  "
+            "The 'anthropic' package (a required dependency of AI4BayesCode) is not "
+            "importable. Reinstall it with:  pip install anthropic  "
             "(the OpenAI backend uses only the standard library and needs no SDK).") from e
     # Streaming keeps the socket alive (token + ping events), so a generous cap
     # instead of the buffered "0 bytes for `timeout`s" death on long generations.
