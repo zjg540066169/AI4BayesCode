@@ -81,7 +81,7 @@ def _derive_class_name(description: str) -> str:
         return "GeneratedModel"
     # Use only the PROSE before the first formula delimiter (`:` `~` `=` `(`), and
     # drop filler words, so "I need a linear regression: y ~ ..." -> "LinearRegression".
-    d0 = re.split(r"[:~=(]", d, 1)[0]
+    d0 = re.split(r"[:~=(]", d, maxsplit=1)[0]
     words = [w for w in re.findall(r"[A-Za-z][A-Za-z0-9]*", d0)
              if len(w) >= 3 and w.lower() not in _CLASSNAME_FILLER][:3]
     if not words:
