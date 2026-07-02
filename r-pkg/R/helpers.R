@@ -760,10 +760,19 @@ AI4BayesCode_run_chains <- function(model_ctor,
 #'   to all keys.
 #' @param drop_burn Number of leading draws to drop per chain before computing
 #'   diagnostics. Defaults to 0.
+#' @param order_components Logical; if `TRUE`, sort each draw's components within
+#'   every matrix-valued key (order statistics) before computing R-hat/ESS -> a
+#'   LABEL-INVARIANT summary for exchangeable (mixture/cluster) parameters.
+#'   Defaults to `FALSE`, in which case the RAW R-hat is reported (unchanged
+#'   behaviour) but the function still scans for label switching and warns when a
+#'   high R-hat is only a labelling artefact.
 #' @return A named list, one entry per key, each with `rhat` and `ess_bulk`
-#'   (plus `max_rhat` / `min_ess` for matrix-valued keys).
+#'   (plus `max_rhat` / `min_ess` for matrix-valued keys). When label switching is
+#'   detected, the affected keys (each with their `raw` and `ordered` max R-hat)
+#'   are also attached as `attr(<result>, "label_switch")`.
 #' @export
-AI4BayesCode_rhat_summary <- function(run, keys = NULL, drop_burn = 0) {
+AI4BayesCode_rhat_summary <- function(run, keys = NULL, drop_burn = 0,
+                                      order_components = FALSE) {
     if (!requireNamespace("posterior", quietly = TRUE)) {
         stop("posterior package required for R-hat summary")
     }
@@ -774,12 +783,30 @@ AI4BayesCode_rhat_summary <- function(run, keys = NULL, drop_burn = 0) {
     all_keys <- names(histories[[1]])
     if (is.null(keys)) keys <- all_keys
 
-    out <- list()
+    # Per-column split-R-hat + bulk-ESS across chains for a list of per-chain
+    # matrices (draws in rows). Returns list(rhat = <p>, ess = <p>).
+    col_diag <- function(mats) {
+        p <- ncol(mats[[1]])
+        rh <- numeric(p); eb <- numeric(p)
+        for (j in seq_len(p)) {
+            per_chain <- lapply(mats, function(m) m[, j])
+            arr_j <- array(unlist(per_chain),
+                           dim = c(length(per_chain[[1]]), length(per_chain), 1))
+            rh[j] <- tryCatch(posterior::rhat(arr_j[,,1]), error = function(e) NA)
+            eb[j] <- tryCatch(posterior::ess_bulk(arr_j[,,1]), error = function(e) NA)
+        }
+        list(rhat = rh, ess = eb)
+    }
+    # Sort each draw's components within a chain (order statistics are invariant to
+    # relabelling); leaves scalars / single-column matrices unchanged.
+    sort_rows <- function(m) if (is.null(dim(m)) || ncol(m) < 2L) m else t(apply(m, 1L, sort))
+
+    out <- list(); label_switch <- list()
     for (k in keys) {
         if (!k %in% all_keys) next
         vals <- lapply(histories, function(h) h[[k]])
         if (is.null(dim(vals[[1]]))) {
-            # Scalar history per chain.
+            # Scalar history per chain (never label-switches).
             n <- length(vals[[1]])
             if (drop_burn > 0 && drop_burn < n)
                 vals <- lapply(vals, function(v) v[(drop_burn + 1):n])
@@ -791,24 +818,30 @@ AI4BayesCode_rhat_summary <- function(run, keys = NULL, drop_burn = 0) {
             out[[k]] <- list(rhat = rh, ess_bulk = eb)
         } else {
             # Matrix history (n_draws x dim per chain).
-            p <- ncol(vals[[1]])
             n <- nrow(vals[[1]])
             if (drop_burn > 0 && drop_burn < n)
                 vals <- lapply(vals, function(m) m[(drop_burn + 1):n, , drop=FALSE])
-            rhats <- numeric(p); ess   <- numeric(p)
-            for (j in seq_len(p)) {
-                per_chain <- lapply(vals, function(m) m[, j])
-                arr_j <- array(unlist(per_chain),
-                               dim = c(length(per_chain[[1]]),
-                                       length(per_chain), 1))
-                rhats[j] <- tryCatch(posterior::rhat(arr_j[,,1]),
-                                      error = function(e) NA)
-                ess[j]   <- tryCatch(posterior::ess_bulk(arr_j[,,1]),
-                                      error = function(e) NA)
-            }
-            out[[k]] <- list(rhat = rhats, ess_bulk = ess,
-                              max_rhat = max(rhats, na.rm = TRUE),
-                              min_ess  = min(ess,   na.rm = TRUE))
+            raw <- col_diag(vals)
+            ord <- if (ncol(vals[[1]]) >= 2L) col_diag(lapply(vals, sort_rows)) else raw
+            # Flag label switching: raw max R-hat is high but collapses after
+            # ordering the components within each draw (a labelling artefact).
+            mr <- max(raw$rhat, na.rm = TRUE); mo <- max(ord$rhat, na.rm = TRUE)
+            if (is.finite(mr) && is.finite(mo) && mr > 1.05 && (mr - mo) > 0.1)
+                label_switch[[k]] <- list(raw = mr, ordered = mo)
+            chosen <- if (isTRUE(order_components)) ord else raw
+            out[[k]] <- list(rhat = chosen$rhat, ess_bulk = chosen$ess,
+                              max_rhat = max(chosen$rhat, na.rm = TRUE),
+                              min_ess  = min(chosen$ess,  na.rm = TRUE))
+        }
+    }
+    if (length(label_switch)) {
+        attr(out, "label_switch") <- label_switch
+        if (!isTRUE(order_components)) {
+            ex <- label_switch[[1L]]
+            message(sprintf(
+"AI4BayesCode_rhat_summary: possible LABEL SWITCHING in %s -- the high R-hat is a\n  labelling artefact, NOT non-convergence (e.g. %s: %.2f -> %.2f after ordering\n  components within each draw). Pass order_components = TRUE for a label-invariant\n  summary, or canonicalize the labels in the sampler.",
+                paste(names(label_switch), collapse = ", "),
+                names(label_switch)[1L], ex$raw, ex$ordered))
         }
     }
     out
