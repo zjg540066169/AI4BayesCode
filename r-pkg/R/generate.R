@@ -221,10 +221,6 @@ if (backend %in% c("Python","both"))
     }
 
     # ---- 3. run the runner; capture stdout+stderr ----
-    # Run it FROM the output dir: the runner compiles its .cpp via a RELATIVE
-    # `ai4bayescode_sourceCpp("<Class>.cpp")` (the start.md convention), so it must
-    # execute with the .cpp in its working dir or it errors "... does not exist"
-    # (which the sentinel logic below would otherwise mislabel a "runtime crash").
     # Use the ABSOLUTE Rscript from this R's own install -- bare "Rscript" relies
     # on the PATH, which is minimal in RStudio / R.app / cron (Rscript not found
     # there), so the runner would silently never start and the sentinel below
@@ -232,14 +228,37 @@ if (backend %in% c("Python","both"))
     rscript <- file.path(R.home("bin"),
                          if (.Platform$OS.type == "windows") "Rscript.exe" else "Rscript")
     if (!file.exists(rscript)) rscript <- Sys.which("Rscript")   # last-resort PATH lookup
-    owd <- getwd()
-    out <- tryCatch({
-        setwd(dirname(runner_path))
-        suppressWarnings(system2(rscript, shQuote(runner_path),
-                                 stdout = TRUE, stderr = TRUE))
-    }, error = function(e) paste("runner error:", conditionMessage(e)))
-    setwd(owd)
+
+    # The runner compiles its .cpp via a RELATIVE path, but the convention varies:
+    # some emit `ai4bayescode_sourceCpp("<Class>.cpp")` (relative to the runner's
+    # OWN dir), others `"<out>/<Class>.cpp"` (relative to the PROJECT ROOT). Run the
+    # runner (by ABSOLUTE path, so it is found from any cwd) from its own dir first;
+    # if it could not find the .cpp, retry from the parent -- so BOTH conventions
+    # work regardless of where the user ran generate() from.
+    runner_abs <- normalizePath(runner_path, mustWork = FALSE)
+    gen_dir    <- dirname(runner_abs)
+    run_from <- function(wd) {
+        owd <- getwd()
+        o <- tryCatch({
+            setwd(wd)
+            suppressWarnings(system2(rscript, shQuote(runner_abs),
+                                     stdout = TRUE, stderr = TRUE))
+        }, error = function(e) paste("runner error:", conditionMessage(e)))
+        setwd(owd); o
+    }
+    out     <- run_from(gen_dir)
     out_txt <- paste(out, collapse = "\n")
+    cpp_missing <- !grepl("AI4BAYES_VALIDATE", out_txt) &&
+        grepl("neither an existing file nor recognizable|does not exist|[Cc]annot find",
+              out_txt)
+    if (cpp_missing) {                                # runner used a root-relative cpp path
+        out2     <- run_from(dirname(gen_dir))
+        out2_txt <- paste(out2, collapse = "\n")
+        if (grepl("AI4BAYES_VALIDATE", out2_txt) ||
+            nchar(trimws(out2_txt)) >= nchar(trimws(out_txt))) {
+            out <- out2; out_txt <- out2_txt
+        }
+    }
     # A failed launch (e.g. Rscript not found -> empty output, non-zero status)
     # is NOT convergence "incomplete"; surface it so the repair loop / user see it.
     st <- attr(out, "status")
