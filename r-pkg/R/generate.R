@@ -428,7 +428,7 @@ ai4bayescode_prompt <- function(model_description,
 ai4bayescode_models <- function() {
     data.frame(
         name = c("claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-4-6",
-                 "claude-haiku-4-5", "gpt-5.5", "codex"),
+                 "claude-haiku-4-5", "gpt-5.5", "gpt-5.5-codex"),
         provider = c("anthropic", "anthropic", "anthropic", "anthropic",
                      "openai", "openai"),
         model_id = c("claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-4-6",
@@ -463,6 +463,7 @@ ai4bayescode_models <- function() {
     key <- sub("^claude[ -]", "claude-", key)
     key <- gsub("[ ]+", "-", key)
     key <- sub("-(max|xhigh|high|medium|low|fast)$", "", key)   # strip effort/speed suffix
+    if (key == "codex") key <- "gpt-5.5-codex"                  # back-compat alias
     cand <- unique(c(key, gsub("\\.", "-", key)))
     for (k in cand) {
         hit <- which(tolower(m$name) == k | tolower(m$model_id) == k)
@@ -1358,7 +1359,16 @@ ai4bayescode_generate <- function(model_description = NULL,
             model_description <- ask("Model description (text, or path to a .txt)")
         # Pick the LLM model, then its thinking/effort level -- kept consistent
         # with the per-model effort check below (only that model's levels offered).
-        LLM <- ask("LLM model?", options = ai4bayescode_models()$name, default = LLM)
+        # Offer ONLY models whose provider has a key set THIS session: an Anthropic
+        # key must not surface OpenAI models, and vice versa. No key set yet -> offer
+        # all (the chosen model's provider key is then requested downstream).
+        .mdl    <- ai4bayescode_models()
+        .keyed  <- vapply(unique(.mdl$provider),
+                          function(pr) nzchar(.ai4b_provider_key(pr)), logical(1))
+        .provs  <- names(which(.keyed))
+        .choices <- if (length(.provs)) .mdl$name[.mdl$provider %in% .provs] else .mdl$name
+        LLM <- ask("LLM model?", options = .choices,
+                   default = if (!is.null(LLM) && LLM %in% .choices) LLM else .choices[1])
         llm <- .ai4b_resolve_llm(LLM)
         lv  <- .ai4b_model_effort_levels(llm$model)
         if (length(lv))

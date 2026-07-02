@@ -378,7 +378,7 @@ def models() -> list[dict]:
         {"name": "claude-sonnet-4-6", "provider": "anthropic", "model_id": "claude-sonnet-4-6", "implemented": True, "effort_levels": ["low", "medium", "high", "max"]},
         {"name": "claude-haiku-4-5", "provider": "anthropic", "model_id": "claude-haiku-4-5", "implemented": True, "effort_levels": []},
         {"name": "gpt-5.5", "provider": "openai", "model_id": "gpt-5.5", "implemented": True, "effort_levels": ["minimal", "low", "medium", "high"]},
-        {"name": "codex", "provider": "openai", "model_id": "gpt-5.5-codex", "implemented": True, "effort_levels": ["minimal", "low", "medium", "high"]},
+        {"name": "gpt-5.5-codex", "provider": "openai", "model_id": "gpt-5.5-codex", "implemented": True, "effort_levels": ["minimal", "low", "medium", "high"]},
     ]
 
 
@@ -395,6 +395,8 @@ def _resolve_llm(LLM: str) -> dict:
     key = re.sub(r"^claude[ -]", "claude-", key)
     key = re.sub(r"\s+", "-", key)
     key = re.sub(r"-(max|xhigh|high|medium|low|fast)$", "", key)
+    if key == "codex":
+        key = "gpt-5.5-codex"                       # back-compat alias
     cands = [key, key.replace(".", "-")]
     for m in models():
         if m["name"].lower() in cands or m["model_id"].lower() in cands:
@@ -1112,7 +1114,13 @@ def generate(model_description: str | None = None, *, classname: str | None = No
             model_description = ask("Model description (text, or path to a .txt)")
         # Pick the LLM model, then its thinking/effort level -- only this model's
         # valid levels are offered, consistent with the per-model effort check below.
-        LLM = ask("LLM model?", options=[m["name"] for m in models()], default=LLM)
+        # Offer ONLY models whose provider has a key set THIS session: an Anthropic
+        # key must not surface OpenAI models, and vice versa. No key set -> offer all.
+        _mdl = models()
+        _provs = {m["provider"] for m in _mdl if _provider_key(m["provider"])}
+        _choices = [m["name"] for m in _mdl if (m["provider"] in _provs) or not _provs]
+        LLM = ask("LLM model?", options=_choices,
+                  default=LLM if (LLM in _choices) else _choices[0])
         llm = _resolve_llm(LLM)
         lv = _model_effort_levels(llm["model"])
         if lv:
