@@ -9,8 +9,8 @@ resolves through models() to a (provider, model id); Claude/Anthropic is the
 implemented illustration, others are an extension point. `effort` is a separate
 knob (default "high"; low -> low-quality samplers). Interactive-if-missing: any
 None/empty argument is asked in the console; PRIORS are elicited interactively by
-the model via an `ask_user` tool. The online API path needs the optional
-``anthropic`` SDK (``pip install AI4BayesCode[generate]``); with no key the prompt
+the model via an `ask_user` tool. The online API path uses the ``anthropic``
+SDK (a core dependency, installed automatically); with no key the prompt
 is written to ``output_path/PROMPT.txt``.
 
 Validation is MANDATORY and runs a validate -> repair-to-convergence loop: each
@@ -256,7 +256,7 @@ def _offline_emit(p: dict, output_path: str, verbose: bool) -> dict:
         "  (A) Claude Code: \"Read AI4BayesCode/start.md first, then <model description>.\"\n"
         "  (B) Online: set a key once with AI4BayesCode.set_key(\"sk-YOUR-KEY-HERE\", \"anthropic\")\n"
         "      (or pass API_key= / LLM=), then re-run AI4BayesCode.generate(...).\n"
-        "      (Messages API path needs: pip install AI4BayesCode[generate].)\n"
+        "      (The Messages API path uses the 'anthropic' SDK, a core dependency.)\n"
         f"Target class: {p['classname']}   backend: {p['backend']}\n")
     if verbose:
         print(f"No API key -- wrote prompt to:\n  {pf}\n  {rf}")
@@ -1272,7 +1272,7 @@ def generate(model_description: str | None = None, *, classname: str | None = No
             import anthropic  # noqa: F401
         except ImportError:
             if verbose:
-                print("'anthropic' SDK not installed (pip install AI4BayesCode[generate]); "
+                print("'anthropic' SDK not importable (pip install anthropic); "
                       "emitting prompt offline instead.")
             return _offline_emit(p, output_path, verbose)
         tools = _agent_tools()

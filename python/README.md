@@ -164,7 +164,7 @@ python/
 │   ├── source.py           # compile-on-demand pybind11 wrapper
 │   ├── sourceCpp.py        # legacy alias for source.py
 │   ├── generate.py         # LLM-driven sampler generation
-│   ├── ai4bayescode_plot_dag.py         # networkx + matplotlib DAG viz
+│   ├── plot_dag.py          # networkx + matplotlib DAG viz
 │   ├── run_chains.py       # multiprocessing parallel chains
 │   ├── diagnose.py         # convergence diagnostics
 │   ├── doc.py              # block documentation lookup

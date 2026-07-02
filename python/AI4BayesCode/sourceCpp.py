@@ -1,6 +1,6 @@
 """Compile-on-demand pybind11 wrapper for AI4BayesCode `.cpp` files.
 
-Parallels the R-side `AI4BayesCode_sourceCpp(cpp_file, AI4BayesCode_path)`:
+Parallels the R-side `ai4bayescode_sourceCpp(cpp_file)`:
 Rcpp's sourceCpp mangles include paths via a temp Makevars, while the
 Python equivalent here spawns a minimal setuptools + pybind11 build,
 produces a `.so` under a cache directory, imports it, and returns the

@@ -51,9 +51,10 @@ def _chain_worker(factory: Callable[[int], Any], seed: int,
             hist = {k: hist[k] for k in history_keys if k in hist}
         return {"seed": seed, "wall": wall, "hist": hist}
     except Exception as e:  # noqa: BLE001
-        # Mirror R's ai4bayescode_run_chains: one failing chain must not take
-        # down the whole run. Warn loudly and return a marked-failed result
-        # (hist=None + "error") so the successful chains stay usable.
+        # NOTE: unlike R's ai4bayescode_run_chains (which stop()s the whole run
+        # on a genuine chain failure), the Python driver degrades gracefully: a
+        # failed chain warns loudly and returns a marked-failed result
+        # (hist=None + "error") so the surviving chains stay usable.
         import warnings
         warnings.warn(f"run_chains: chain seed={seed} failed: {e}")
         return {"seed": seed, "wall": time.time() - t0, "hist": None,

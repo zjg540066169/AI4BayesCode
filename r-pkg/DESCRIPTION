@@ -1,7 +1,7 @@
 Package: AI4BayesCode
 Title: Stateful Modular MCMC Building Blocks with AI-Friendly Skill Chain
 Version: 1.0.0
-Date: 2026-06-24
+Date: 2026-07-02
 Authors@R: c(
     person("Jungang", "Zou",
            email = "jungang.zou@gmail.com",
@@ -32,7 +32,6 @@ Suggests:
     posterior,
     bayesplot,
     igraph,
-    loo,
     httr2,
     jsonlite
 SystemRequirements: C++17, BLAS, LAPACK

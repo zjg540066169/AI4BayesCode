@@ -278,9 +278,8 @@ described above).
 ## Quick start — R
 
 ```r
-source("AI4BayesCode/R/AI4BayesCode_helpers.R")
-ai4bayescode_sourceCpp("AI4BayesCode/examples/GaussianLocationScale.cpp",
-                    AI4BayesCode_path = "AI4BayesCode")
+library(AI4BayesCode)   # headers ship inside the package -- no checkout path needed
+ai4bayescode_sourceCpp(file.path(ai4bayescode_examples_path(), "GaussianLocationScale.cpp"))
 
 set.seed(1)
 y <- rnorm(100, 2.0, 1.5)
@@ -317,9 +316,8 @@ import AI4BayesCode
 import numpy as np
 
 mod = AI4BayesCode.source(             # sourceCpp(...) is a back-compat alias
-    "AI4BayesCode/examples/GaussianLocationScale.cpp",
-    ai4bayescode_path="AI4BayesCode"
-)
+    "AI4BayesCode/examples/GaussianLocationScale.cpp"
+)                                      # headers ship inside the package -- no path needed
 
 np.random.seed(1)
 y = np.random.normal(2.0, 1.5, 100).astype(np.float64)
@@ -364,10 +362,10 @@ To use one of these models from **R** or **Python**, point the
 corresponding helper at the `.cpp` so it is wrapped and imported as a
 module:
 
-- **R** — `ai4bayescode_sourceCpp("examples/GaussianLocationScale.cpp",
-  AI4BayesCode_path = "AI4BayesCode")` (see "Quick start — R").
-- **Python** — `AI4BayesCode.source("examples/GaussianLocationScale.cpp",
-  ai4bayescode_path="AI4BayesCode")` (see "Quick start — Python").
+- **R** — `ai4bayescode_sourceCpp("examples/GaussianLocationScale.cpp")`
+  (see "Quick start — R"); the headers ship inside the package.
+- **Python** — `AI4BayesCode.source("examples/GaussianLocationScale.cpp")`
+  (see "Quick start — Python"); the headers ship inside the package.
 
 The two installable packages (R `r-pkg/`, Python `python/`) ship the
 same library headers and skill corpus, so `generate()` can emit a

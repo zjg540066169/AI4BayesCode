@@ -81,7 +81,7 @@ space; `offsets_/total_dim_` for the natural oracle space), gated by
 kinds (CHOLESKY_CORR/_FACTOR_COV, CORR_/COV_MATRIX) AUTO-ENABLE the diagonal
 metric (identity freezes their ill-conditioned posteriors). Validated 2026-06-17:
 FD K=2..6 ≤3e-9, multi-chain R-hat ~1.001 + correct recovery, incl. heterogeneous
-mixed blocks; see `JOINT_CONSTRAINT_TESTING/REPORT.md`. `stochastic_column`
+mixed blocks. `stochastic_column`
 remains single-`nuts_block`-only (wrap needs a columns count).
 
 ### §10.2 RJMCMC-family — three-tier Jacobian story
