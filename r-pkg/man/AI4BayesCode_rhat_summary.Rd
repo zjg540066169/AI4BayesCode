@@ -4,7 +4,12 @@
 \alias{AI4BayesCode_rhat_summary}
 \title{R-hat / ESS summary across chains}
 \usage{
-AI4BayesCode_rhat_summary(run, keys = NULL, drop_burn = 0)
+AI4BayesCode_rhat_summary(
+  run,
+  keys = NULL,
+  drop_burn = 0,
+  order_components = FALSE
+)
 }
 \arguments{
 \item{run}{The list returned by [AI4BayesCode_run_chains()] (needs at least
@@ -15,10 +20,19 @@ to all keys.}
 
 \item{drop_burn}{Number of leading draws to drop per chain before computing
 diagnostics. Defaults to 0.}
+
+\item{order_components}{Logical; if `TRUE`, sort each draw's components within
+every matrix-valued key (order statistics) before computing R-hat/ESS -> a
+LABEL-INVARIANT summary for exchangeable (mixture/cluster) parameters.
+Defaults to `FALSE`, in which case the RAW R-hat is reported (unchanged
+behaviour) but the function still scans for label switching and warns when a
+high R-hat is only a labelling artefact.}
 }
 \value{
 A named list, one entry per key, each with `rhat` and `ess_bulk`
-  (plus `max_rhat` / `min_ess` for matrix-valued keys).
+  (plus `max_rhat` / `min_ess` for matrix-valued keys). When label switching is
+  detected, the affected keys (each with their `raw` and `ordered` max R-hat)
+  are also attached as `attr(<result>, "label_switch")`.
 }
 \description{
 Computes split-R-hat and bulk-ESS (via the \pkg{posterior}

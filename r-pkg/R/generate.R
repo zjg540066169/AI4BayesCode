@@ -75,7 +75,7 @@
 "    literature-informed / fixed value / custom) ONLY the priors that are\n",
 "    MISSING or genuinely AMBIGUOUS (e.g. Gamma(2,3) rate-vs-scale). If the\n",
 "    description already specifies EVERY parameter's prior, ask NOTHING and go\n",
-"    straight to code (codegen.md §2: 'Spec already COMPLETE -> skip the entire\n",
+"    straight to code (codegen.md \u00a72: 'Spec already COMPLETE -> skip the entire\n",
 "    elicitation'). (See codegen_priors.md.)"))
     }
     if (is.list(priors)) {
@@ -120,10 +120,10 @@
 .ai4b_build_user <- function(description, backend, output_path, classname,
                              priors, max_attempts, confirm_model = FALSE) {
     confirm_block <- if (isTRUE(confirm_model)) paste0(
-"  - PRE-GENERATION MODEL CONFIRMATION -- do NOT skip it (codegen.md §3). After\n",
+"  - PRE-GENERATION MODEL CONFIRMATION -- do NOT skip it (codegen.md \u00a73). After\n",
 "    eliciting the priors and BEFORE writing ANY code, present the model AS YOU\n",
 "    UNDERSTOOD IT for the user to verify, via the `ask_user` tool. ALWAYS include both:\n",
-"      (a) the FULL model as display-math formulas (codegen.md §0b: `$$ ... $$`, never\n",
+"      (a) the FULL model as display-math formulas (codegen.md \u00a70b: `$$ ... $$`, never\n",
 "          inline `$...$`) -- the likelihood AND every prior; and\n",
 "      (b) a parameter summary table -- name / role / support / prior.\n",
 "    (A prediction DAG is OPTIONAL -- include it only if it clarifies a complex model.)\n",
@@ -517,6 +517,8 @@ ai4bayescode_models <- function() {
 #'   `claude setup-token`) works too -- the Bearer header is detected from the
 #'   `sk-ant-oat` prefix.
 #' @param provider One of `"anthropic"`, `"openai"`, `"google"`.
+#' @param check If `TRUE` (default), verify the key with a minimal API call
+#'   (Anthropic only) and warn if it is rejected; `FALSE` stores it unchecked.
 #' @return Invisibly, the provider name.
 #' @seealso [ai4bayescode_key_status()], [ai4bayescode_generate()]
 #' @examples
@@ -595,29 +597,29 @@ ai4bayescode_key_status <- function() {
 #' @keywords internal
 #' @noRd
 .ai4b_latex_map <- c(
-  "\\alpha"="α","\\beta"="β","\\gamma"="γ","\\delta"="δ",
-  "\\epsilon"="ε","\\varepsilon"="ε","\\zeta"="ζ","\\eta"="η",
-  "\\theta"="θ","\\vartheta"="θ","\\iota"="ι","\\kappa"="κ",
-  "\\lambda"="λ","\\mu"="μ","\\nu"="ν","\\xi"="ξ","\\pi"="π",
-  "\\rho"="ρ","\\sigma"="σ","\\tau"="τ","\\upsilon"="υ",
-  "\\phi"="φ","\\varphi"="φ","\\chi"="χ","\\psi"="ψ","\\omega"="ω",
-  "\\Gamma"="Γ","\\Delta"="Δ","\\Theta"="Θ","\\Lambda"="Λ",
-  "\\Xi"="Ξ","\\Pi"="Π","\\Sigma"="Σ","\\Phi"="Φ",
-  "\\Psi"="Ψ","\\Omega"="Ω",
-  "\\sim"="~","\\mid"="|","\\in"="∈","\\notin"="∉",
-  "\\leq"="≤","\\le"="≤","\\geq"="≥","\\ge"="≥",
-  "\\neq"="≠","\\ne"="≠","\\approx"="≈","\\equiv"="≡",
-  "\\propto"="∝","\\times"="×","\\cdot"="·","\\pm"="±",
-  "\\to"="→","\\rightarrow"="→","\\Rightarrow"="⇒","\\mapsto"="↦",
-  "\\infty"="∞","\\partial"="∂","\\nabla"="∇",
-  "\\sum"="Σ","\\prod"="∏","\\int"="∫",
-  "\\forall"="∀","\\exists"="∃","\\cup"="∪","\\cap"="∩",
-  "\\subseteq"="⊆","\\subset"="⊂","\\langle"="⟨","\\rangle"="⟩",
+  "\\alpha"="\u03b1","\\beta"="\u03b2","\\gamma"="\u03b3","\\delta"="\u03b4",
+  "\\epsilon"="\u03b5","\\varepsilon"="\u03b5","\\zeta"="\u03b6","\\eta"="\u03b7",
+  "\\theta"="\u03b8","\\vartheta"="\u03b8","\\iota"="\u03b9","\\kappa"="\u03ba",
+  "\\lambda"="\u03bb","\\mu"="\u03bc","\\nu"="\u03bd","\\xi"="\u03be","\\pi"="\u03c0",
+  "\\rho"="\u03c1","\\sigma"="\u03c3","\\tau"="\u03c4","\\upsilon"="\u03c5",
+  "\\phi"="\u03c6","\\varphi"="\u03c6","\\chi"="\u03c7","\\psi"="\u03c8","\\omega"="\u03c9",
+  "\\Gamma"="\u0393","\\Delta"="\u0394","\\Theta"="\u0398","\\Lambda"="\u039b",
+  "\\Xi"="\u039e","\\Pi"="\u03a0","\\Sigma"="\u03a3","\\Phi"="\u03a6",
+  "\\Psi"="\u03a8","\\Omega"="\u03a9",
+  "\\sim"="~","\\mid"="|","\\in"="\u2208","\\notin"="\u2209",
+  "\\leq"="\u2264","\\le"="\u2264","\\geq"="\u2265","\\ge"="\u2265",
+  "\\neq"="\u2260","\\ne"="\u2260","\\approx"="\u2248","\\equiv"="\u2261",
+  "\\propto"="\u221d","\\times"="\u00d7","\\cdot"="\u00b7","\\pm"="\u00b1",
+  "\\to"="\u2192","\\rightarrow"="\u2192","\\Rightarrow"="\u21d2","\\mapsto"="\u21a6",
+  "\\infty"="\u221e","\\partial"="\u2202","\\nabla"="\u2207",
+  "\\sum"="\u03a3","\\prod"="\u220f","\\int"="\u222b",
+  "\\forall"="\u2200","\\exists"="\u2203","\\cup"="\u222a","\\cap"="\u2229",
+  "\\subseteq"="\u2286","\\subset"="\u2282","\\langle"="\u27e8","\\rangle"="\u27e9",
   "\\ldots"="...","\\cdots"="...","\\dotsc"="...","\\dots"="...",
-  "\\lVert"="‖","\\rVert"="‖","\\Vert"="‖","\\lvert"="|","\\rvert"="|",
+  "\\lVert"="\u2016","\\rVert"="\u2016","\\Vert"="\u2016","\\lvert"="|","\\rvert"="|",
   "\\quad"="  ","\\qquad"="    ")
-.ai4b_latex_sup <- c("^{\\top}"="ᵀ","^\\top"="ᵀ","^{-1}"="⁻¹",
-  "^{2}"="²","^{3}"="³","^{T}"="ᵀ","^2"="²","^3"="³","^T"="ᵀ")
+.ai4b_latex_sup <- c("^{\\top}"="\u1d40","^\\top"="\u1d40","^{-1}"="\u207b\u00b9",
+  "^{2}"="\u00b2","^{3}"="\u00b3","^{T}"="\u1d40","^2"="\u00b2","^3"="\u00b3","^T"="\u1d40")
 
 # Render the model's LaTeX (display math) as plain text a bare console can show.
 # Not a LaTeX engine -- just the stats notation the elicitation prompts use.
@@ -639,16 +641,16 @@ ai4bayescode_key_status <- function() {
     t <- gsub("&", "", t, fixed = TRUE)             # alignment
     t <- gsub("\\\\(?:left|right|bigg|Bigg|big|Big)\\b", "", t, perl = TRUE)
     t <- gsub("\\\\(?:text|mathrm|mathbf|mathsf|mathtt|operatorname|hat|bar|tilde|widehat|widetilde|vec|boldsymbol|overline|underline)\\{([^{}]*)\\}", "\\1", t, perl = TRUE)
-    t <- gsub("\\mathbb{R}", "ℝ", t, fixed = TRUE)
-    t <- gsub("\\mathbb{N}", "ℕ", t, fixed = TRUE)
-    t <- gsub("\\mathbb{Z}", "ℤ", t, fixed = TRUE)
+    t <- gsub("\\mathbb{R}", "\u211d", t, fixed = TRUE)
+    t <- gsub("\\mathbb{N}", "\u2115", t, fixed = TRUE)
+    t <- gsub("\\mathbb{Z}", "\u2124", t, fixed = TRUE)
     t <- gsub("\\mathbb{E}", "E", t, fixed = TRUE)
     t <- gsub("\\\\math(?:cal|bb|frak|scr)\\{([^{}]*)\\}", "\\1", t, perl = TRUE)
     t <- gsub("\\\\frac\\{([^{}]*)\\}\\{([^{}]*)\\}", "(\\1)/(\\2)", t, perl = TRUE)
     t <- gsub("\\\\sqrt\\{([^{}]*)\\}", "sqrt(\\1)", t, perl = TRUE)
     ks <- names(.ai4b_latex_sup); ks <- ks[order(nchar(ks), decreasing = TRUE)]
     for (k in ks) t <- gsub(k, .ai4b_latex_sup[[k]], t, fixed = TRUE)
-    t <- gsub("\\top", "ᵀ", t, fixed = TRUE)
+    t <- gsub("\\top", "\u1d40", t, fixed = TRUE)
     km <- names(.ai4b_latex_map); km <- km[order(nchar(km), decreasing = TRUE)]
     for (k in km) t <- gsub(k, .ai4b_latex_map[[k]], t, fixed = TRUE)
     t <- gsub("\\\\[,;:! ]", " ", t, perl = TRUE)        # thin/medium spaces
@@ -1302,6 +1304,9 @@ ai4bayescode_stream_check <- function(LLM = "claude-opus-4-8", API_key = NULL,
 #'   hard to size up front, so the default avoids an arbitrary limit; if a reply is
 #'   still truncated the generator re-asks for the code for FREE (no attempt spent).
 #' @param timeout Request timeout, seconds (default 600).
+#' @param verify_stream If `TRUE` (default), run a tiny streaming self-check
+#'   (Anthropic only) before the full generation so a broken streaming transport
+#'   fails fast and cheap; pass `FALSE` to skip it.
 #' @param verbose Print progress (default `TRUE`). Never prints the key.
 #' @param ... Advanced/testing hooks: `.responder` (an injectable transport
 #'   `function(messages)` returning a parsed response, used to exercise the loop
@@ -1313,6 +1318,16 @@ ai4bayescode_stream_check <- function(LLM = "claude-opus-4-8", API_key = NULL,
 #'   `validated` (did the final attempt pass), `attempts` (number used), and
 #'   `validation` (the final `list(ok, stage, detail)`).
 #' @seealso [ai4bayescode_prompt()], [ai4bayescode_models()], [ai4bayescode_source()].
+#' @examples
+#' \dontrun{
+#' # Requires a provider API key (see [ai4bayescode_set_key()]); billed per token.
+#' ai4bayescode_set_key("sk-ant-...", "anthropic")
+#' res <- ai4bayescode_generate(
+#'   "Linear regression y ~ N(X beta, sigma^2), p(beta) propto 1, p(sigma) propto 1/sigma",
+#'   classname = "LinReg", backend = "R", interactive = FALSE)
+#' res$validated    # TRUE if the generated sampler compiled + converged
+#' res$cpp_path     # path to the emitted .cpp
+#' }
 #' @export
 ai4bayescode_generate <- function(model_description = NULL,
                               classname    = NULL,

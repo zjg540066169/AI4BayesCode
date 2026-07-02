@@ -4,17 +4,25 @@
 \alias{ai4b_diagnose}
 \title{Model-independent posterior diagnostics and plot}
 \usage{
-ai4b_diagnose(hist, plot = TRUE)
+ai4b_diagnose(hist, plot = TRUE, order_components = FALSE)
 }
 \arguments{
 \item{hist}{Named list of posterior draws: scalars as numeric vectors,
 vector parameters as matrices (draws in rows).}
 
 \item{plot}{Logical; build the diagnostic plot. Defaults to `TRUE`.}
+
+\item{order_components}{Logical; if `TRUE`, sort each draw's components within
+every matrix-valued key (order statistics) before summarising -> a LABEL-
+INVARIANT per-component summary for exchangeable (mixture/cluster) params.
+Defaults to `FALSE`, in which case `ai4b_diagnose` still scans for label
+switching and warns when a high R-hat is a labelling artefact.}
 }
 \value{
-A list with `summary` (a `posterior::summarise_draws` table) and
-  `plot` (a \pkg{bayesplot} object, a base-R plotting closure, or `NULL`).
+A list with `summary` (a `posterior::summarise_draws` table), `plot`
+  (a \pkg{bayesplot} object, a base-R plotting closure, or `NULL`), and
+  `label_switch` (named list of keys flagged as label-switching, each with the
+  `raw` and `ordered` max split-R-hat; empty if none).
 }
 \description{
 Computes per-parameter convergence diagnostics (split-R-hat,

@@ -8,7 +8,7 @@
 #'
 #' @importFrom Rcpp sourceCpp
 #' @importFrom RcppArmadillo RcppArmadillo.package.skeleton
-#' @importFrom utils packageVersion head
+#' @importFrom utils packageVersion head tail
 #'
 #' @param file Optional file name (relative to the directory). If
 #'   `NULL`, returns the directory itself.

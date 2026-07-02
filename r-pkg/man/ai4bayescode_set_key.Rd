@@ -4,15 +4,18 @@
 \alias{ai4bayescode_set_key}
 \title{Set an LLM provider API key for this session}
 \usage{
-ai4bayescode_set_key(key, provider = "anthropic")
+ai4bayescode_set_key(key, provider = "anthropic", check = TRUE)
 }
 \arguments{
-\item{key}{Non-empty API-key string (e.g. `"sk-ant-api..."`, `"sk-..."`).
+\item{key}{Non-empty API-key string (e.g. `"sk-ant-api..."`, `"sk-YOUR-KEY-HERE"`).
 An Anthropic subscription token (`"sk-ant-oat..."` from
 `claude setup-token`) works too -- the Bearer header is detected from the
 `sk-ant-oat` prefix.}
 
 \item{provider}{One of `"anthropic"`, `"openai"`, `"google"`.}
+
+\item{check}{If `TRUE` (default), verify the key with a minimal API call
+(Anthropic only) and warn if it is rejected; `FALSE` stores it unchecked.}
 }
 \value{
 Invisibly, the provider name.
@@ -28,7 +31,7 @@ call (you still can, to override per call).
 \examples{
 \dontrun{
 ai4bayescode_set_key("sk-ant-api-...", "anthropic")
-ai4bayescode_set_key("sk-...",         "openai")
+ai4bayescode_set_key("sk-YOUR-KEY-HERE",         "openai")
 ai4bayescode_generate("Linear regression.", LLM = "gpt-5.5")  # key picked up
 }
 }

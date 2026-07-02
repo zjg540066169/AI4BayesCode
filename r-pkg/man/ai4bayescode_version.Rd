@@ -18,6 +18,6 @@ compatibility.
 \dontrun{
 library(AI4BayesCode)
 ai4bayescode_version()
-#>  [1] '1.0.0'
+#>  [1] '0.9.0'
 }
 }

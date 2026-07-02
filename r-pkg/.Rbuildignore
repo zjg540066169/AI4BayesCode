@@ -12,3 +12,8 @@
 ^_PACKAGE_WORK_.*$
 ^inst/include/.*\.bak.*$
 ^.*\.bak_.*$
+# Vendored mcmclib/BaseMatrixOps upstream cruft: leftover .git pointer, .github,
+# .gitignore (hidden-file NOTE) + its own tests/ (GNU-make Makefile WARNING).
+# Only the include/ headers + LICENSE are needed by the package.
+^inst/include/mcmclib/BaseMatrixOps/\.git
+^inst/include/mcmclib/BaseMatrixOps/tests

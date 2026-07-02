@@ -59,6 +59,8 @@ AI4BayesCode_generated_dir <- function(AI4BayesCode_path = "./AI4BayesCode") {
 #'   `PKG_LIBS`.
 #' @return Invisibly `NULL`; the side effect is that the module class becomes
 #'   loadable in the global environment.
+#' @name AI4BayesCode_sourceCpp_checkout
+#' @aliases AI4BayesCode_sourceCpp
 #' @export
 AI4BayesCode_sourceCpp <- function(cpp_file,
                                 AI4BayesCode_path = "./AI4BayesCode",

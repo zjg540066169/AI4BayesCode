@@ -21,6 +21,7 @@ ai4bayescode_generate(
   max_tokens = NULL,
   timeout = 600,
   verbose = TRUE,
+  verify_stream = TRUE,
   ...
 )
 
@@ -40,6 +41,7 @@ ai4bayes_generate(
   max_tokens = NULL,
   timeout = 600,
   verbose = TRUE,
+  verify_stream = TRUE,
   ...
 )
 }
@@ -93,6 +95,10 @@ still truncated the generator re-asks for the code for FREE (no attempt spent).}
 
 \item{verbose}{Print progress (default `TRUE`). Never prints the key.}
 
+\item{verify_stream}{If `TRUE` (default), run a tiny streaming self-check
+(Anthropic only) before the full generation so a broken streaming transport
+fails fast and cheap; pass `FALSE` to skip it.}
+
 \item{...}{Advanced/testing hooks: `.responder` (an injectable transport
 `function(messages)` returning a parsed response, used to exercise the loop
 offline), `.ask` (a console-prompt function override), and `.validate` (an
@@ -123,6 +129,17 @@ A key bills pay-per-token; it is read from the provider env var (e.g.
 `ANTHROPIC_API_KEY`), sent only to the provider over TLS, and never logged.
 }
 
+\examples{
+\dontrun{
+# Requires a provider API key (see [ai4bayescode_set_key()]); billed per token.
+ai4bayescode_set_key("sk-ant-...", "anthropic")
+res <- ai4bayescode_generate(
+  "Linear regression y ~ N(X beta, sigma^2), p(beta) propto 1, p(sigma) propto 1/sigma",
+  classname = "LinReg", backend = "R", interactive = FALSE)
+res$validated    # TRUE if the generated sampler compiled + converged
+res$cpp_path     # path to the emitted .cpp
+}
+}
 \seealso{
 [ai4bayescode_prompt()], [ai4bayescode_models()], [ai4bayescode_source()].
 }
