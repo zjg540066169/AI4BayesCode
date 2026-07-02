@@ -482,11 +482,8 @@ Rules:
   then `Mod.<ClassName>(...)`. The path is ALWAYS the relative
   `<ClassName>.cpp` — **NEVER an absolute `/Users/...` path, NEVER
   `AI4BayesCode_path=`, NEVER a `source(".../AI4BayesCode_helpers.R")` runner line.**
-  Absolute or checkout paths break on another machine or if the folder moves, and
-  the `@example` `doc()` shows runs inside the installed package. The legacy
-  checkout form (`source(helpers.R)` + `ai4bayescode_sourceCpp(...,
-  AI4BayesCode_path=)`) belongs ONLY in a standalone runner when the package is
-  NOT installed — never in the `@example`.
+  Absolute paths break on another machine or if the folder moves, and the
+  `@example` `doc()` shows runs inside the installed package.
 - **Single source of the DGP**: the toy data here is the SAME simulation the
   runner skill (`codegen_r_runner.md` / `codegen_python_runner.md`) uses for the
   Layer-3 harness — write it once and mirror it here so the two cannot drift.
@@ -1521,9 +1518,7 @@ derivative of lp; AD confirms grad matches reverse-mode autodiff.
 ### At generation time, the AI runs
 
 ```r
-source("AI4BayesCode/R/AI4BayesCode_helpers.R")
-ai4bayescode_sourceCpp("tests_autodiff/verify_<ClassName>.cpp",
-                    AI4BayesCode_path = "AI4BayesCode")
+ai4bayescode_sourceCpp("tests_autodiff/verify_<ClassName>.cpp")
 
 # Synthetic data matching the model's shape
 set.seed(1)
@@ -2272,7 +2267,7 @@ Mix constant `0xBF58476D1CE4E5B9ULL` (SplitMix64) MUST be the same
 across all NUTS-using examples for consistency. Do not invent
 alternates.
 
-#### R-only (default, `AI4BAYESCODE_RCPP_MODULE` defined by AI4BayesCode_helpers.R)
+#### R-only (default, `AI4BAYESCODE_RCPP_MODULE` defined by `ai4bayescode_source()`)
 
 ```cpp
 #ifdef AI4BAYESCODE_RCPP_MODULE

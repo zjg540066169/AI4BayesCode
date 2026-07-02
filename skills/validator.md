@@ -2054,10 +2054,8 @@ doParallel::registerDoParallel(cl)
 on.exit(parallel::stopCluster(cl), add = TRUE)
 
 parallel::clusterEvalQ(cl, {
-    source("AI4BayesCode/R/AI4BayesCode_helpers.R")
-    ai4bayescode_sourceCpp(
-        "models/<MODEL_ID>/<MODEL_ID>.cpp",     # path RELATIVE to project root
-        AI4BayesCode_path = "AI4BayesCode")
+    library(AI4BayesCode)
+    ai4bayescode_sourceCpp("models/<MODEL_ID>/<MODEL_ID>.cpp")  # relative to project root
 })
 # Export every data input that `run_chain`'s body reads from global scope
 # (adjust per model — list every variable in the constructor's `...`):

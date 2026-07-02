@@ -307,13 +307,10 @@ runtime — it decides the compile call AND whether to even ask for a library pa
 - **SKIP the "Path to AI4BayesCode folder?" upfront question** — it is not needed.
 - **NEVER** emit `AI4BayesCode_path=`, a `source(".../AI4BayesCode_helpers.R")`
   runner line, or an absolute `/Users/...` / `C:\...` path anywhere (compile call,
-  runner, or `@example`). Absolute and checkout paths break on another machine or
-  if the folder moves.
-
-**Only if the package is NOT installed (raw checkout):**
-
-- Ask the "Path to AI4BayesCode folder?" question, and use the checkout form
-  (`source("<path>/R/AI4BayesCode_helpers.R")` +  `ai4bayescode_sourceCpp("<ClassName>.cpp", AI4BayesCode_path="<path>")`).
+  runner, or `@example`) — the packaged API needs none of them, and absolute /
+  checkout paths break on another machine or if the folder moves. (Working from a
+  raw git checkout instead of an installed package? Install it first —
+  `remotes::install_github(...)` / `pip install ...` — then use the packaged form.)
 
 The generated `@example` header block (what `doc()` shows) ALWAYS uses the
 installed-package form when the package is present — the clean relative
@@ -495,12 +492,6 @@ You should now:
 
    Class name (CamelCase)?
    (a) <a sensible model-derived suggestion> (default)
-   (b) Other / custom
-
-   Path to AI4BayesCode folder?  (ASK ONLY if the AI4BayesCode package is NOT
-   installed — see §1b. If it IS installed, SKIP this question entirely and use
-   the relative `ai4bayescode_sourceCpp("<ClassName>.cpp")` form.)
-   (a) ./AI4BayesCode (default)
    (b) Other / custom
 
    Sampler / block preference? (codegen.md §1.6)

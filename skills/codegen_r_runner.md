@@ -75,13 +75,11 @@ documentation a first-time user reads):
 1. **Header comment** — what the model is + a note that generation
    was validated by the full Layer-3 harness which is intentionally
    not shipped here (regenerate with the harness for diagnostics).
-2. **Compile** — pick the form by how AI4BayesCode is installed (see `start.md`
-   §1b). If the **package is installed** (the recommended setup):
-   `ai4bayescode_sourceCpp("<ClassName>.cpp")` — a bare RELATIVE filename, NO
-   `AI4BayesCode_path=`, NO `source(".../AI4BayesCode_helpers.R")`. ONLY for a raw
-   checkout fall back to `source("<path>/R/AI4BayesCode_helpers.R")` +
-   `ai4bayescode_sourceCpp("<ClassName>.cpp", AI4BayesCode_path = "<path>")`. NEVER
-   an absolute `/Users/...` path (it breaks on another machine or if the folder moves).
+2. **Compile** — the packaged API compiles the class from a bare RELATIVE
+   filename: `ai4bayescode_sourceCpp("<ClassName>.cpp")` (equivalently
+   `ai4bayescode_source("<ClassName>.cpp")`). NEVER `AI4BayesCode_path=`, NEVER a
+   `source(".../*_helpers.R")` line, NEVER an absolute `/Users/...` path (all three
+   break on another machine or if the folder moves).
    IMPORTANT — where the class binds: `ai4bayescode_sourceCpp()` /
    `ai4bayescode_source()` bind the compiled class into the CALLER'S frame
    (`env = parent.frame()`). So compile at the TOP LEVEL of the runner. If you wrap
@@ -270,12 +268,6 @@ in `<folder>` and `<ClassName>` from your generation context:
 library(AI4BayesCode)
 ai4bayescode_source("<folder>/<ClassName>.cpp")   # relative path; no AI4BayesCode_path=
 
-# Raw-checkout fallback only (package NOT installed) — requires a local
-# AI4BayesCode/ checkout sitting next to `<folder>/`; run from the project
-# root that contains BOTH directories:
-#   source("AI4BayesCode/R/AI4BayesCode_helpers.R")
-#   ai4bayescode_sourceCpp("<folder>/<ClassName>.cpp", AI4BayesCode_path = "AI4BayesCode")
-
 # ===========================================================================
 #  Constructor arguments for <ClassName>
 # ===========================================================================
@@ -368,9 +360,8 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep, diagnosis
 #  HARD RULE — the `diagnosis = TRUE` path is NON-NEGOTIABLE
 # ======================================================================
 # The diagnostics AND the plot are a SHIPPED function `ai4bayescode_diagnose()` — you do
-# NOT write them. It is provided BOTH by `library(AI4BayesCode)` (the R package)
-# AND by `source("AI4BayesCode/R/AI4BayesCode_helpers.R")`, so call it UNqualified
-# (no `AI4BayesCode::`) and it resolves whichever load path the runner used.
+# NOT write them. It is provided by `library(AI4BayesCode)`; call it UNqualified
+# (no `AI4BayesCode::`).
 # `ai4bayescode_diagnose(<named list of draws>)` returns
 #   list(summary = <per-param R-hat / ESS / MCSE / mean / sd / median / 90% CI
 #                   table, via posterior>,

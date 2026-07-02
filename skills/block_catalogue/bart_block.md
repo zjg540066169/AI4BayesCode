@@ -60,6 +60,8 @@ likelihood, and statistically exact (identical weighted posterior).
 ensemble `j`'s fit (equivalently their `x_ij^2` leaf weight is 0) -- never feed
 `Inf` weights to the block.
 
+**Worked example:** `examples/VCBart.cpp` compiles this recipe end-to-end (p+1 backfit ensembles, `weights_key` = 1/|x_ij|, shared sigma) and recovers the coefficient surfaces.
+
 ```cpp
 bart_block_config cfg;
 cfg.name                 = "f_bart";
