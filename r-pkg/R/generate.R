@@ -855,8 +855,17 @@ ai4bayescode_key_status <- function() {
             parts <- strsplit(txt, "```", fixed = TRUE)[[1]]
             cat("\n")
             for (k in seq_along(parts)) {
-                if (k %% 2L == 1L) cat(.ai4b_latex_to_console(parts[k]))   # prose
-                else               cat("```", parts[k], "```", sep = "")   # code, verbatim
+                if (k %% 2L == 1L) {
+                    cat(.ai4b_latex_to_console(parts[k]))                  # prose (rendered)
+                } else {
+                    # Do NOT flood the console with the generated code -- it is written
+                    # to the output files (.cpp / runner) and to the _transcript.md.
+                    # Show a compact placeholder so the console stays readable.
+                    n_lines <- max(length(strsplit(parts[k], "\n", fixed = TRUE)[[1]]) - 1L, 0L)
+                    cat(sprintf("\n  [... %d lines of code omitted from the console",
+                                n_lines),
+                        "(written to the output files) ...]\n", sep = " ")
+                }
             }
             cat("\n")
         } else {

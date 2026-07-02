@@ -801,10 +801,19 @@ def _anthropic_request(system, messages, model, effort, tools, api_key, max_toke
                     # readable) but keep CODE verbatim. split("```") -> even index =
                     # prose, odd index = code; re-wrap code segments in their fences.
                     parts = txt.split("```")
-                    rendered = "".join(
-                        _latex_to_console(seg) if k % 2 == 0 else "```" + seg + "```"
-                        for k, seg in enumerate(parts))
-                    print("\n" + rendered)
+                    segs = []
+                    for k, seg in enumerate(parts):
+                        if k % 2 == 0:
+                            segs.append(_latex_to_console(seg))          # prose (rendered)
+                        else:
+                            # Do NOT flood the console with the generated code -- it
+                            # is written to the output files (.cpp / runner) and to
+                            # the _transcript.md; show a compact placeholder instead.
+                            n_lines = max(seg.count("\n") - 1, 0)
+                            segs.append(
+                                f"\n  [... {n_lines} lines of code omitted from the "
+                                "console (written to the output files) ...]\n")
+                    print("\n" + "".join(segs))
                 else:
                     print("\n" + _latex_to_console(txt))
             cur["type"], cur["text"] = None, ""
