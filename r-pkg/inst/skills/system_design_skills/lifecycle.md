@@ -70,7 +70,7 @@ Write `examples/GPGaussian.cpp`:
 
 ### Step 4 — skills + catalogue
 
-- Add an entry in `skills/block_catalogue.md` describing `gp_block`:
+- Add an entry in `skills/block_catalogue/index.md` describing `gp_block`:
   when to use, config fields, Gibbs DAG conventions.
 - If any hyperparameter is non-obvious, mention it in
   `skills/codegen_priors.md`.
@@ -233,7 +233,7 @@ Before any PR touching Tier A / B / C lands:
       `audit_compile_smoke.R` and `audit_predict_at.R`.
 - [ ] **Two-chain R-hat sanity.** 10k+10k × 2 chains at the new
       block's typical use case; R-hat < 1.05 on every param.
-- [ ] **Documentation.** `skills/block_catalogue.md` entry. If new
+- [ ] **Documentation.** `skills/block_catalogue/index.md` entry. If new
       architectural concept, update this file.
 - [ ] **VI-family Layer-3 R2-VI PSIS-k̂ diagnostic (k̂ < 0.7).** If the
       change adds or modifies any `vi_block` subclass: a Layer-3 R2-VI

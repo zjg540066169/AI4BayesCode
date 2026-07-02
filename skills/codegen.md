@@ -12,7 +12,7 @@ description: |
   rule, top-level hard rules.
 
   Sub-skills (codegen_priors.md, codegen_cpp.md, codegen_r_runner.md,
-  block_catalogue.md, validator.md, system_design.md, etc.) are
+  block_catalogue/index.md, validator.md, system_design.md, etc.) are
   loaded ON DEMAND per phase — see §Token discipline at the top of
   this file. DO NOT preload them at session start.
 ---
@@ -41,7 +41,7 @@ per session.
   Skip until then.
 - `codegen_r_runner.md` — load only when emitting the R runner file
   (AFTER the `.cpp` is written).
-- `block_catalogue.md`, `validator.md`, `system_design.md`,
+- `block_catalogue/index.md`, `validator.md`, `system_design.md`,
   `hierarchical_re.md`, `label_switching.md`, `constraints.md`,
   `rcpp_api.md` — load **on demand** when their specific topic comes
   up in the current question/decision. Most generations need only
@@ -890,7 +890,7 @@ the structured picker UI. Three firm rules:
     probabilities, shrinks unimportant features toward zero split
     probability).
   - **No, don't enable** → leave DART flags at their defaults (off).
-  See `skills/block_catalogue.md` (`bart_block` / `genbart_block`
+  See `skills/block_catalogue/index.md` (`bart_block` / `genbart_block`
   sections) for the recipe.
 - **Spike-and-slab — Dirac vs normal-approximate spike (REQUIRED).**
   If the user describes any "spike-and-slab" / "variable selection
@@ -938,7 +938,7 @@ the structured picker UI. Three firm rules:
    Exception 4 custom code only for genuine structural gaps). If the
    model has any discrete latent, run through `codegen_priors.md §3a`
    (Class 1-5 decision tree) FIRST. Reference block catalogue:
-   `skills/block_catalogue.md`.
+   `skills/block_catalogue/index.md`.
 2. **Coupling analysis.** See `codegen_cpp.md §4a`. **Default is JOINT:**
    collect the continuous parameters not claimed by a specialized block
    into ONE `joint_nuts_block` — you write the joint natural-scale
@@ -959,7 +959,7 @@ the structured picker UI. Three firm rules:
      silently wrong posterior (cov_AI ≈ 0.07–0.75 vs cov_REF ≈ 0.94
      in the radon_*, surgical_model failures).
    - **LDA / topic-model** (`z_n` discrete, `theta`, `phi` Dirichlet):
-     read `skills/block_catalogue.md` `lda_collapsed_gibbs_block` §.
+     read `skills/block_catalogue/index.md` `lda_collapsed_gibbs_block` §.
 3. **Resolve priors** for each parameter using the decision flow in
    §2 above + `codegen_priors.md` for details. Ask the user when
    needed. Do NOT silently pick priors.
@@ -1280,14 +1280,14 @@ run, and produce reasonable samples out of the box.
   (a) `joint_nuts_block` over `(sigma_*, z_*)` per `codegen_cpp.md
   §4a` row "scale + raw effect"; (b) bump `n_warmup_first_call` to
   1500–3000; (c) better init via OLS / method of moments. Do NOT escape
-  to `n_warmup_per_step > 0`. See `skills/block_catalogue.md` "nuts_block
+  to `n_warmup_per_step > 0`. See `skills/block_catalogue/index.md` "nuts_block
   → Configuration discipline" for the full table of which fields
   code-gen may set; `validator.md` Check #20 catches violations.
 - **Never write a custom conjugate-Gibbs block.** Continuous parameters
   MUST be sampled by `nuts_block` regardless of whether a conjugate
   closed-form update is available. The ONLY Gibbs blocks you are allowed
   to instantiate are the `*_gibbs_block` types already shipped as header
-  files in `include/AI4BayesCode/` — see `skills/block_catalogue.md` for
+  files in `include/AI4BayesCode/` — see `skills/block_catalogue/index.md` for
   the authoritative list. Use whichever of those headers exist in the
   repo at generation time, verbatim; never fork, reimplement, or write a
   new one inline in the generated .cpp. When the core library grows a

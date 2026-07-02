@@ -197,7 +197,7 @@ inline double diag_normal_log_density(const double* y, const double* mu,
 class FiniteGaussianMixture {
 public:
     // Data-driven weakly-informative Normal-Gamma hypers (see CRITICAL
-    // note in skills/block_catalogue.md; verified on DPGaussianMixture).
+    // note in skills/block_catalogue/index.md; verified on DPGaussianMixture).
     static arma::vec dd_mu0_(const arma::mat& y) {
         const std::size_t n = y.n_rows, d = y.n_cols;
         arma::vec m(d, arma::fill::zeros);

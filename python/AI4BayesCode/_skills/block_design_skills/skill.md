@@ -80,7 +80,7 @@ when the block is auto-selected, so it pays its own token cost every time.
 
 ### 2.1 Catalogue entry — the parts the selector and the codegen agent read
 
-**(a) Routing row** — ONE row in the core `block_catalogue.md` 3-column shape
+**(a) Routing row** — ONE row in the core `block_catalogue/index.md` 3-column shape
 (`| parameter kind | block type | constraint wrap |`). Without this row the codegen agent
 cannot route a parameter to the block. Mirror the existing rows' density (parenthetical
 target-distribution sketch in the first cell). Example shape to match:
@@ -260,7 +260,7 @@ manifest supplies BOTH stages' inputs:
 
 - **Stage-A — facet pre-filter (the compact-index line).** Derived deterministically from
  `Block | EngineKind | ConstraintKinds | RoutingKey`. This one short line per block goes
- into the auto-rebuilt compact index (aggregated from core `block_catalogue.md` +
+ into the auto-rebuilt compact index (aggregated from core `block_catalogue/index.md` +
  `blocks_local/*/manifest.dcf`). Stage A is CONSERVATIVE (recall > precision): it drops
  only blocks whose engine/constraint/geometry clearly can't fit; when in doubt, keep.
  → So `RoutingKey` must be a faithful, terse facet of WHAT the block targets.

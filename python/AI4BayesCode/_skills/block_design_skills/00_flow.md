@@ -304,7 +304,7 @@ each module — they live in `start.md` §0 and are inherited here:
 ## 5. Output of this flow
 
 A single **self-contained bundle** — one folder `<Block>/` holding EVERYTHING the block needs, NOT a
-set of edits scattered into core `block_catalogue.md` / `Makefile` / `validator.md`. **Self-contained =
+set of edits scattered into core `block_catalogue/index.md` / `Makefile` / `validator.md`. **Self-contained =
 the whole `<Block>/` folder is ONE uploadable / downloadable unit** (the FUTURE registry ships exactly
 this folder): any vendored third-party code lives INSIDE it (`vendor/`), so whoever downloads the folder
 gets the block AND its borrowed kernel together — nothing to fetch separately (except the core library

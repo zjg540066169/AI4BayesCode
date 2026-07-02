@@ -265,7 +265,7 @@ rank — do NOT read "item 1" as "try this first":
    **Bayesian-nonparametric mixture infrastructure (SHIPPED 2026-05-02):**
    - **`stick_breaking_block`** — truncated stick-breaking simplex,
      covers DP / PY / ... / custom Beta-stick processes via user-supplied
-     `a_fn` / `b_fn`. See `block_catalogue.md`.
+     `a_fn` / `b_fn`. See `block_catalogue/index.md`.
    - **`normal_gamma_cluster_gibbs_block`** — vectorized diagonal
      Normal-Gamma cluster sampler over K_trunc clusters with empty-
      cluster prior draws.
@@ -274,7 +274,7 @@ rank — do NOT read "item 1" as "try this first":
 
    Reference examples: `DPGaussianMixture.cpp`, `PYGaussianMixture.cpp`,
    `DPGaussianMixture_DerivedAlpha.cpp`. The composition recipe is in
-   `block_catalogue.md` "BNP example summary"; the planned (not v0)
+   `block_catalogue/index.md` "BNP example summary"; the planned (not v0)
    pieces are `gamma_gibbs_block` (closed-form alpha update),
    `niw_cluster_gibbs_block` (full-covariance NIW), and
    `split_merge_block` (Jain-Neal 2004 partition acceleration).
@@ -333,7 +333,7 @@ rank — do NOT read "item 1" as "try this first":
    from finite-difference gradient noise), the next escalation is to
    replace the FD gradient inside the joint log-density with a
    reverse-mode Cholesky-AD analytic gradient (Murray 2016). See
-   `block_catalogue.md` **"GP convergence troubleshooting ladder"**
+   `block_catalogue/index.md` **"GP convergence troubleshooting ladder"**
    for the full escalation order, and **"GP composition recipes"**
    for heteroscedastic / hierarchical / multi-output GP patterns.
 8. **`gmrf_precision_block`** — Gaussian Markov Random Field latent
@@ -772,7 +772,7 @@ Follow the exact same **decision flow** as for any other parameter:
 
 The block sampling this is still a standard `nuts_block`; only the
 prior inside the log-density changes. See `examples/BartNoise.cpp` for
-the reference template, and `skills/block_catalogue.md` for the bart_block
+the reference template, and `skills/block_catalogue/index.md` for the bart_block
 usage recipe.
 
 ## Literature-informed prior elicitation

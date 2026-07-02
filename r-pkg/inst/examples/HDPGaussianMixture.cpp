@@ -28,7 +28,7 @@
 //  re-pointed to read m_·t instead of n_·t.
 //
 //  This caveat is documented prominently here (in the header comment),
-//  in `skills/block_catalogue.md` (HDP example summary), and in
+//  in `skills/block_catalogue/index.md` (HDP example summary), and in
 //  `BNP_AUDIT_STATUS.md`. Users who need rigorous HDP should look at
 //  BayesMix (Beraha et al. 2022, arXiv 2205.08144) for a reference
 //  implementation.

@@ -54,7 +54,7 @@ def _skill(name: str) -> str:
 
 
 def _default_skill_set(backend: str) -> list[str]:
-    base = ["start.md", "codegen.md", "codegen_cpp.md", "block_catalogue.md",
+    base = ["start.md", "codegen.md", "codegen_cpp.md", "block_catalogue/index.md",
             "constraints.md", "codegen_priors.md", "rcpp_api.md", "validator.md"]
     runner = {"R": ["codegen_r_runner.md"], "Python": ["codegen_python_runner.md"],
               "both": ["codegen_r_runner.md", "codegen_python_runner.md"]}[backend]

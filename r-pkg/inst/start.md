@@ -272,7 +272,7 @@ once per session.
 **On-demand instruction files** (load only when the topic comes up;
 many generations need 0 of these):
 
-- `skills/block_catalogue.md` — when picking a block type
+- `skills/block_catalogue/index.md` — when picking a block type
 - `skills/system_design.md` — for measure-theory questions, BLAS
   patterns, DAG semantics, the metric (diagonal/dense) + warmup
   (single-pilot/3-phase) decision (§13)
@@ -430,7 +430,7 @@ full list but the critical ones:
   ORDERED/SUM_TO_ZERO constraints; the old `joint_nuts_block_mixed`
   was folded into it 2026-06-18 — `pg_logistic_block`, conjugate-Gibbs
   blocks, `bart_block`, etc.) over emitting a custom block from
-  scratch. See `block_catalogue.md` for the full menu.
+  scratch. See `block_catalogue/index.md` for the full menu.
 - **Block-selection priority** (TWO-PHASE, not a linear "first item wins"):
   **specialized / structural blocks claim what they match FIRST** (by
   applicability — conjugate-Gibbs, `pg_logistic_block`, `bart_block`, `rjmcmc`,

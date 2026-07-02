@@ -319,7 +319,7 @@ private:
 class DPGaussianMixture_DerivedAlpha {
 public:
     // Data-driven weakly-informative Normal-Gamma hypers (see CRITICAL
-    // note in skills/block_catalogue.md; verified on DPGaussianMixture).
+    // note in skills/block_catalogue/index.md; verified on DPGaussianMixture).
     // Fixed mis-scaled hypers over-segment into a WRONG posterior R-hat
     // cannot flag; computing from y fixes it.
     static arma::vec dd_mu0_(const arma::vec& y_flat,

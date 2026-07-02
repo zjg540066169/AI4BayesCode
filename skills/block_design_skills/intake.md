@@ -214,14 +214,14 @@ So it must satisfy ALL of:
 3. **NOT a core-reserved name** — a contrib block may NOT take a core
  block's name. Core names are reserved.
 4. **Unique vs core + existing local** — check at creation against the
- core `block_catalogue.md` entries and every existing
+ core `block_catalogue/index.md` entries and every existing
  `blocks_local/*/manifest.dcf` `Block:` field. (Registry availability
  is a FUTURE check; local + core is the MVP check.)
 
 Mechanically (exact, resolvable from the repo root):
 - The **authoritative reserved-name list = the shipped block headers**:
  `ls AI4BayesCode/include/AI4BayesCode/*_block*.hpp` (each `<name>_block.hpp` is a
- reserved core name). The routing table in `AI4BayesCode/skills/block_catalogue.md`
+ reserved core name). The routing table in `AI4BayesCode/skills/block_catalogue/index.md`
  lists the same names with prose, but the headers ARE the list — do not depend on the
  catalogue's path being known.
 - Existing local names: the `Block:` line of each `AI4BayesCode/blocks_local/*/manifest.dcf`.

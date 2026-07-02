@@ -78,7 +78,7 @@ ai4bayescode_list_examples <- function() {
 #' \dontrun{
 #' library(AI4BayesCode)
 #' ai4bayescode_list_skills()
-#' #>  [1] "block_catalogue.md" "codegen.md" "codegen_cpp.md" ...
+#' #>  [1] "block_catalogue/index.md" "codegen.md" "codegen_cpp.md" ...
 #'
 #' # Read a skill file
 #' cat(readLines(ai4bayescode_skills_path("start.md")), sep = "\n")
@@ -92,6 +92,11 @@ ai4bayescode_list_skills <- function() {
     # belongs in the listing for a coherent API.
     if (nzchar(system.file("start.md", package = "AI4BayesCode")))
         files <- c("start.md", files)
+    # block_catalogue is now a folder (index.md + per-block cards) for lazy
+    # loading; list.files() above is non-recursive so it misses the index.
+    # Surface the index explicitly, the same way start.md is special-cased.
+    if (nzchar(dir) && file.exists(file.path(dir, "block_catalogue", "index.md")))
+        files <- c(files, "block_catalogue/index.md")
     sort(unique(files))
 }
 

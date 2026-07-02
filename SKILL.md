@@ -33,7 +33,7 @@ not load it.
 This skill bundles the AI4BayesCode C++ library, not just the guidance:
 
 - the **built-in block headers** + system dependencies are under **`include/`** at this skill's
-  root; the routing index of built-in blocks is **`skills/block_catalogue.md`**; reference
+  root; the routing index of built-in blocks is **`skills/block_catalogue/index.md`**; reference
   examples are in **`examples/`**.
 - **The AI4BayesCode library root IS this skill's directory** (where this `SKILL.md` / `start.md`
   live). Treat it as the RESOLVED AI4BayesCode path for the whole session: the codegen flow does

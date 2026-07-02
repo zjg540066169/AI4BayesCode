@@ -224,7 +224,7 @@ Settings 3 results (200 cells = 10 regens × 20 models):
 - `sim1_workflow.md` — defines the per-replicate rhat / coverage
   computation Stage C calls into.
 - `codegen.md`, `codegen_cpp.md`, `codegen_priors.md`,
-  `block_catalogue.md`, `hierarchical_re.md`, etc. — the
+  `block_catalogue/index.md`, `hierarchical_re.md`, etc. — the
   domain-knowledge skills the codegen agent USED during sim3
   generation. These were intentionally LEFT IN (per
   `scripts/README.md`); only `validator.md` and the L2/L3 retry

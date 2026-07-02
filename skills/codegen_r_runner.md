@@ -957,7 +957,7 @@ Modular (codegen default):
   shipped reference example using that block). Use when K is known
   (or chosen via model selection); for unknown K use the DP variant
   but understand its prior–data tradeoff (see the DP block notes in
-  `block_catalogue.md`).
+  `block_catalogue/index.md`).
   4-chain audit recovers truth μ within 0.21 σ on the 6-cluster
   N=600 fixture (R-hat 1.0004) — proves the shared infrastructure
   is unbiased when given correct K.

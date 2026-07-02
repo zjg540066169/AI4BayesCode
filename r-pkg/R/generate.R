@@ -40,7 +40,7 @@
 #' @keywords internal
 #' @noRd
 .ai4b_default_skill_set <- function(backend) {
-    base <- c("start.md", "codegen.md", "codegen_cpp.md", "block_catalogue.md",
+    base <- c("start.md", "codegen.md", "codegen_cpp.md", "block_catalogue/index.md",
               "constraints.md", "codegen_priors.md", "rcpp_api.md", "validator.md")
     runner <- switch(backend,
                      "R"      = "codegen_r_runner.md",

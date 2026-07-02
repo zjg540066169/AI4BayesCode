@@ -273,7 +273,7 @@ shows this prior has highly unstable behavior as ε → 0 and posterior
 inference is sensitive to ε. No new example or block may use
 IG(ε, ε) as its default variance prior. `inv_gamma_gibbs_block`
 is therefore DISCOURAGED as a default and carries a large warning
-in `skills/block_catalogue.md`.
+in `skills/block_catalogue/index.md`.
 
 **Escape when Jeffreys gives improper posterior (k=0 transient):**
 

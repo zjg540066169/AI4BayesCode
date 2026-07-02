@@ -354,7 +354,7 @@ double alpha_natural_log_density(const arma::vec& alpha_nat,
 class PYGaussianMixture {
 public:
     // Data-driven weakly-informative Normal-Gamma hypers (see CRITICAL
-    // note in skills/block_catalogue.md; verified on DPGaussianMixture).
+    // note in skills/block_catalogue/index.md; verified on DPGaussianMixture).
     static arma::vec dd_mu0_(const arma::mat& y) {
         const int n = static_cast<int>(y.n_rows), d = static_cast<int>(y.n_cols);
         arma::vec m(static_cast<arma::uword>(d));

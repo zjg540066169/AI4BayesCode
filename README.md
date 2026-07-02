@@ -206,7 +206,7 @@ The generator picks strategies in this priority order:
 AI4BayesCode/
 ├── skills/                              AI generator + validator skill chain
 │   ├── codegen.md                         natural-language → Rcpp .cpp + R runner
-│   ├── block_catalogue.md                 which block to pick per parameter
+│   ├── block_catalogue/index.md                 which block to pick per parameter
 │   ├── constraints.md                     the 16 constraint transforms + joint_constraint
 │   ├── validator.md                       3-layer audit (syntactic / semantic / runtime)
 │   └── rcpp_api.md                        Rcpp / arma type + API pitfalls

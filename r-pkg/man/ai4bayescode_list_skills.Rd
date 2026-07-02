@@ -19,7 +19,7 @@ Returns the names of all `.md` skill files shipped in the package's
 \dontrun{
 library(AI4BayesCode)
 ai4bayescode_list_skills()
-#>  [1] "block_catalogue.md" "codegen.md" "codegen_cpp.md" ...
+#>  [1] "block_catalogue/index.md" "codegen.md" "codegen_cpp.md" ...
 
 # Read a skill file
 cat(readLines(ai4bayescode_skills_path("start.md")), sep = "\n")

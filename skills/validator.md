@@ -21,7 +21,7 @@ chains finish.
 > manifest names in `ChecksApplicable:` (e.g. `#17; BL1..BL6` — the `BL*` entries are
 > the block's OWN checks, defined in that validation skill). The block's bundled
 > example + library test (`test_<Block>.cpp`) are the reference for what a passing
-> run looks like. See `block_catalogue.md` ("Contributed blocks") for how the block
+> run looks like. See `block_catalogue/index.md` ("Contributed blocks") for how the block
 > is selected + its Example loaded.
 
 1. **Syntactic** — compilation. The C++ compiler does this for free; no
@@ -89,7 +89,7 @@ during generation, confirms max-diff tolerances, and deletes the file
 on PASS. See §12 below for the full template.
 
 **Checks #15-17** are pre-merge obligations for any example using
-`*_gibbs_block` or hand-written Gibbs; the `block_catalogue.md` and
+`*_gibbs_block` or hand-written Gibbs; the `block_catalogue/index.md` and
 `system_design.md §11.7 / §16` both cite them. See the pre-merge
 checklist in `system_design.md §16` for how they roll up into the
 overall gate.
@@ -1398,7 +1398,7 @@ calibration init (per-county OLS, balanced floor, etc.) lands the chain
 in a friendly region; sim1 cross-dataset checks FAIL catastrophically.
 
 This check is the safety net. The codegen-time prevention is in
-`skills/codegen.md` Hard Rules + `skills/block_catalogue.md` "nuts_block
+`skills/codegen.md` Hard Rules + `skills/block_catalogue/index.md` "nuts_block
 → Configuration discipline" + the doc comment in
 `include/AI4BayesCode/nuts_block.hpp`. If those have been read, this
 check should never fire.

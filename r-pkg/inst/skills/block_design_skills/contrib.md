@@ -20,7 +20,7 @@ keep such a block (a) isolated from vetted core and (b) impossible to ship witho
 
 | Tier | What it is | Who edits it | Trust |
 |---|---|---|---|
-| **core / default** | team-vetted blocks shipped with AI4BayesCode (`block_catalogue.md`) | maintainer-only | high |
+| **core / default** | team-vetted blocks shipped with AI4BayesCode (`block_catalogue/index.md`) | maintainer-only | high |
 | **local** | a block YOU build via this flow (work-in-progress) | you, freely | self |
 | **downloaded** **[FUTURE]** | pulled from the shared registry (someone else's) | immutable + versioned | provenance / badge |
 
@@ -53,7 +53,7 @@ AI4BayesCode/blocks_local/<Block>/ # in the tree, separate from core include/
 - A local block is a **self-contained bundle** (`<Block>.hpp` + `test_<Block>.cpp` +
  `examples/<Model>.cpp` + `manifest.dcf` + `skills/<Block>.md`, plus optional `vendor/` +
  `benchmark/`). It does NOT
- edit core files — it does not scatter rows into `block_catalogue.md` / the Makefile /
+ edit core files — it does not scatter rows into `block_catalogue/index.md` / the Makefile /
  `validator.md`. Core stays untouched.
 - **The core→package sync does NOT auto-package `blocks_local/` into the R-package `inst/`.**
  Local is a dev area; "shipping a block" is the [FUTURE] registry/submission path. (Same
@@ -103,7 +103,7 @@ Stage B AI reads the surviving SelectWhen triggers, AUTO-selects ONE
  bundle quality bar, not boilerplate).
 - **A compact auto-generated index** is what the agent actually reads: ONE short line per
  block (`Block | EngineKind | ConstraintKinds | RoutingKey`), aggregated from core
- `block_catalogue.md` + every `blocks_local/*/manifest.dcf`, auto-rebuilt on add/remove (no
+ `block_catalogue/index.md` + every `blocks_local/*/manifest.dcf`, auto-rebuilt on add/remove (no
  manual drift). `SelectWhen` is loaded only for the Stage-A survivors. Context stays bounded
  regardless of block count N — ONE small file, not N files, not N prose entries.
 - When a local block is auto-selected, its block-local skill (`skills/<Block>.md`) loads

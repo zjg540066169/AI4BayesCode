@@ -81,7 +81,7 @@ leave `initial_step_size` at default 0 (auto path works fine).
 
 ## joint_constraint (for joint_nuts_block per-slice constraints)
 
-When you use `joint_nuts_block` (see `block_catalogue.md`) the
+When you use `joint_nuts_block` (see `block_catalogue/index.md`) the
 per-slice constraint is declared with the `joint_constraint` enum,
 NOT via the `constraints::<kind>::wrap` helpers. Supported:
 
