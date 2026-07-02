@@ -79,8 +79,11 @@
         if (grepl("=", p)) { sp <- strsplit(p, "=", fixed = TRUE)[[1]]
             default <- trimws(paste(sp[-1], collapse = "=")); p <- trimws(sp[1]) }
         toks <- strsplit(p, "\\s+")[[1]]
-        name <- gsub("[&*]", "", toks[length(toks)])
-        type <- trimws(sub(paste0(name, "$"), "", p))
+        last <- toks[length(toks)]
+        name <- gsub("[&*]", "", last)
+        # Strip the trailing name token by LENGTH, not as a regex (a name with
+        # regex metachars like '(' would otherwise crash sub()).
+        type <- trimws(substring(p, 1L, nchar(p) - nchar(last)))
         list(name = name, type = type, hint = .ai4b_type_hint(type), default = default)
     })
 }
@@ -90,6 +93,11 @@
 #' @noRd
 .ai4b_parse_constructor <- function(src, class_name) {
     if (is.null(class_name) || is.na(class_name) || !nzchar(class_name)) return(NULL)
+    # Strip C++ comments FIRST: a generated constructor can carry inline `//`
+    # notes (e.g. `double sigma,  // FIXED (exposed constructor arg, NOT sampled)`)
+    # whose parens/commas would otherwise corrupt the balanced-paren arg parse.
+    src <- gsub("//[^\n]*", "", src)                        # line comments
+    src <- gsub("(?s)/\\*.*?\\*/", "", src, perl = TRUE)    # block comments
     loc <- regexpr(sprintf("(?m)^[ \\t]*%s[ \\t]*\\(", class_name), src, perl = TRUE)
     if (loc < 0) return(NULL)
     .ai4b_args_after(src, loc + attr(loc, "match.length") - 1L)
