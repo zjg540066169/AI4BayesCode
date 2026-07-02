@@ -2080,7 +2080,10 @@ Rcpp::List predict_at(Rcpp::List new_data) const {
         Rcpp::CharacterVector names = new_data.names();
         for (R_xlen_t i = 0; i < new_data.size(); ++i) {
             std::string key = Rcpp::as<std::string>(names[i]);
-            if (!impl_->data().is_data_input(key)) {
+            // Membership test: shared_data_t exposes data_input_keys() (a
+            // std::set of the declared data-input keys); there is NO
+            // is_data_input(key) member. Test membership with .count(key).
+            if (impl_->data().data_input_keys().count(key) == 0u) {
                 Rcpp::stop("<ClassName>::predict_at: unknown key '%s'. "
                            "Valid keys: <list>.", key.c_str());
             }

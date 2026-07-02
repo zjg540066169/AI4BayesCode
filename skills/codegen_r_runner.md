@@ -82,6 +82,11 @@ documentation a first-time user reads):
    checkout fall back to `source("<path>/R/AI4BayesCode_helpers.R")` +
    `AI4BayesCode_sourceCpp("<ClassName>.cpp", AI4BayesCode_path = "<path>")`. NEVER
    an absolute `/Users/...` path (it breaks on another machine or if the folder moves).
+   IMPORTANT — where the class binds: `ai4bayescode_sourceCpp()` /
+   `source_AI4BayesCode()` bind the compiled class into the CALLER'S frame
+   (`env = parent.frame()`). So compile at the TOP LEVEL of the runner. If you wrap
+   the compile inside a helper FUNCTION, pass `env = globalenv()` explicitly, else
+   `new(<ClassName>, ...)` fails with 'object <ClassName> not found'.
 3. **Constructor reference block** — one comment line per `new()`
    argument (name, type, default/range).
 4. **The full `run_chain_<ClassName>()` definition** — verbatim the
