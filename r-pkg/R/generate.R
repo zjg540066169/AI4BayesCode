@@ -847,30 +847,19 @@ ai4bayescode_key_status <- function() {
     if (is.null(b) || !identical(b$type, "text") || isTRUE(b$flushed)) return(state)
     state$blocks[[i]]$flushed <- TRUE
     txt <- b$text %||% ""
-    if (progress && nzchar(txt)) {
-        if (grepl("```", txt, fixed = TRUE)) {
-            # Mixed prose + fenced code: render the PROSE (so $$...$$ math is readable)
-            # but keep CODE verbatim (never mangle C++/R). Split on ``` -> odd segments
-            # are prose, even segments are code; re-wrap code in its fences.
-            parts <- strsplit(txt, "```", fixed = TRUE)[[1]]
-            cat("\n")
-            for (k in seq_along(parts)) {
-                if (k %% 2L == 1L) {
-                    cat(.ai4b_latex_to_console(parts[k]))                  # prose (rendered)
-                } else {
-                    # Do NOT flood the console with the generated code -- it is written
-                    # to the output files (.cpp / runner) and to the _transcript.md.
-                    # Show a compact placeholder so the console stays readable.
-                    n_lines <- max(length(strsplit(parts[k], "\n", fixed = TRUE)[[1]]) - 1L, 0L)
-                    cat(sprintf("\n  [... %d lines of code omitted from the console",
-                                n_lines),
-                        "(written to the output files) ...]\n", sep = " ")
-                }
-            }
-            cat("\n")
-        } else {
-            cat("\n", .ai4b_latex_to_console(txt), "\n", sep = "")          # pure prose
-        }
+    if (progress && nzchar(trimws(txt))) {
+        # Keep the console readable: do NOT echo the model's text reply. Both the
+        # generated CODE and its prose explanation / summary can run to hundreds of
+        # lines (e.g. a Bayesian network), and everything is written to the output
+        # files (.cpp / runner) and the `_transcript.md`. Just note a reply arrived.
+        # (Progress -- thinking, tool use, attempt / validate status -- and the
+        #  ask_user questions come from other paths and are unaffected.)
+        if (grepl("```", txt, fixed = TRUE))
+            cat("\n  [... model wrote the sampler files",
+                "(code + explanation omitted from the console -- see the output files + transcript) ...]\n",
+                sep = " ")
+        else
+            cat("\n  [... model reply omitted from the console (see the transcript) ...]\n")
     }
     state
 }

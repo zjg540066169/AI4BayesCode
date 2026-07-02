@@ -794,28 +794,19 @@ def _anthropic_request(system, messages, model, effort, tools, api_key, max_toke
             # the LaTeX->console map so `$$ ... $$` math is readable; code-bearing
             # blocks print verbatim so C++/R source is never mangled. No-op when
             # live (already streamed raw). Idempotent (resets `cur`).
-            if progress and not live and cur["type"] == "text" and cur["text"]:
+            if progress and not live and cur["type"] == "text" and cur["text"].strip():
                 txt = cur["text"]
+                # Keep the console readable: do NOT echo the model's text reply. Both
+                # the generated CODE and its prose explanation / summary can run to
+                # hundreds of lines (e.g. a Bayesian network); everything is written to
+                # the output files (.cpp / runner) and the _transcript.md. Just note a
+                # reply arrived. Progress (thinking / tool use / attempt / validate) and
+                # ask_user questions come from other paths and are unaffected.
                 if "```" in txt:
-                    # Mixed prose + fenced code: render the PROSE (so $$...$$ math is
-                    # readable) but keep CODE verbatim. split("```") -> even index =
-                    # prose, odd index = code; re-wrap code segments in their fences.
-                    parts = txt.split("```")
-                    segs = []
-                    for k, seg in enumerate(parts):
-                        if k % 2 == 0:
-                            segs.append(_latex_to_console(seg))          # prose (rendered)
-                        else:
-                            # Do NOT flood the console with the generated code -- it
-                            # is written to the output files (.cpp / runner) and to
-                            # the _transcript.md; show a compact placeholder instead.
-                            n_lines = max(seg.count("\n") - 1, 0)
-                            segs.append(
-                                f"\n  [... {n_lines} lines of code omitted from the "
-                                "console (written to the output files) ...]\n")
-                    print("\n" + "".join(segs))
+                    print("\n  [... model wrote the sampler files (code + explanation "
+                          "omitted from the console -- see the output files + transcript) ...]")
                 else:
-                    print("\n" + _latex_to_console(txt))
+                    print("\n  [... model reply omitted from the console (see the transcript) ...]")
             cur["type"], cur["text"] = None, ""
 
         with client.messages.stream(**kwargs) as s:
