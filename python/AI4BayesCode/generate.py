@@ -106,15 +106,16 @@ def _derive_class_name(description: str) -> str:
 def _prior_block(priors) -> str:
     if priors == "interactive":
         return (
-"  - Priors: FIRST use every prior the model description ALREADY specifies -- e.g.\n"
-"    `p(beta) propto 1`, `p(sigma) propto 1/sigma`, `beta ~ N(0, 10)` -- EXACTLY,\n"
-"    and do NOT ask about them (a written prior IS the user's decision). ELICIT\n"
-"    (via the `ask_user` tool, ONE parameter at a time: non-informative (default)\n"
-"    / weakly-informative / literature-informed / fixed value / custom) ONLY the\n"
-"    priors that are MISSING or genuinely AMBIGUOUS. If the description already\n"
-"    specifies EVERY parameter's prior, ask NOTHING and go straight to code\n"
-"    (codegen.md §2: 'Spec already COMPLETE -> skip the entire elicitation').\n"
-"    (See codegen_priors.md.)")
+"  - Priors: FIRST use every prior the model description ALREADY specifies\n"
+"    -- e.g. `p(beta) propto 1`, `p(sigma) propto 1/sigma`, `beta ~ N(0, 10)`,\n"
+"    `sigma ~ Half-Normal(2.5)` -- EXACTLY, and do NOT ask about them (a written\n"
+"    prior IS the user's decision). ELICIT (via the `ask_user` tool, ONE\n"
+"    parameter at a time: non-informative (default) / weakly-informative /\n"
+"    literature-informed / fixed value / custom) ONLY the priors that are\n"
+"    MISSING or genuinely AMBIGUOUS (e.g. Gamma(2,3) rate-vs-scale). If the\n"
+"    description already specifies EVERY parameter's prior, ask NOTHING and go\n"
+"    straight to code (codegen.md §2: 'Spec already COMPLETE -> skip the entire\n"
+"    elicitation'). (See codegen_priors.md.)")
     if isinstance(priors, dict):
         lines = "\n".join(f"    - {k}: {v}" for k, v in priors.items())
         return ("  - Priors: use these EXACTLY where given; otherwise a strictly\n"
@@ -126,11 +127,14 @@ def _prior_block(priors) -> str:
 "  - Priors: where the model description specifies a prior, use it EXACTLY.\n"
 "    For any parameter whose prior is NOT specified, use a strictly\n"
 "    NON-INFORMATIVE prior (do NOT substitute a weakly-informative default):\n"
-"      * Real location / regression coef (mu, alpha, beta): FLAT IMPROPER p(.)∝1.\n"
+"      * Real location / regression coef (mu, alpha, beta): FLAT IMPROPER p(.)∝1\n"
+"        (omit the prior term in the log-density; likelihood only).\n"
 "      * Positive scale (sigma, tau): Jeffreys p(sigma)∝1/sigma.\n"
 "      * Probability on [0,1] (p): Beta(1,1) = uniform.\n"
-"      * Simplex: Dirichlet(1,...,1). Correlation matrix: LKJ(eta=1).\n"
-"      * Count rate (lambda): Jeffreys p(lambda)∝1/sqrt(lambda).\n"
+"      * Simplex (theta_1..theta_K): Dirichlet(1,...,1) = uniform simplex.\n"
+"      * Correlation matrix R: LKJ(eta=1) = uniform over correlation matrices.\n"
+"      * Count rate (lambda): Jeffreys p(lambda)∝1/sqrt(lambda) via log+Jacobian.\n"
+"      * Concentration (kappa): Jeffreys p(kappa)∝1/kappa.\n"
 "    Apply the non-informative default SILENTLY; do not stop to ask.")
 
 
@@ -191,19 +195,26 @@ f"{runner}"
 "    the arma::vec from the named entries (read `jblk.current()`, overwrite the\n"
 "    named slots) and call `<block>.set_current(cat)` -- see\n"
 "    `examples/GaussianLocationScale.cpp`. Passing a map does NOT compile.\n"
+"  - Any method with C++ default arguments (readapt_NUTS, ...) does NOT expose\n"
+"    them through the Rcpp / pybind11 module unless you re-declare each default in\n"
+"    the binding -- the caller must pass ALL arguments explicitly.\n"
 "\nMANDATORY VALIDATION (this is how the generator detects convergence):\n"
 "  - You MUST emit a self-contained Python runner (the runner shown above) that:\n"
 "      1. simulates data from the model at known parameter values,\n"
-"      2. compiles the sampler (via `AI4BayesCode.source`) and runs TWO\n"
-"         independent chains from over-dispersed inits. For a NUTS / joint_nuts\n"
-"         model, each chain MUST do step(n_burnin) -> readapt_NUTS(N) ->\n"
-"         step(n_keep) and keep the LAST n_keep draws: the first-call warmup\n"
-"         adapts the metric from the over-dispersed init, so without re-adapting\n"
-"         at the mode the two chains commonly stall at R-hat > 1.01,\n"
-"      3. computes the rank-normalized R-hat (Vehtari 2021; e.g.\n"
-"         `AI4BayesCode.rhat` / `arviz.rhat`) for EVERY model parameter across\n"
-"         the two chains, and\n"
-"      4. prints, as its VERY LAST line, EXACTLY one of:\n"
+"      2. compiles the sampler (via `AI4BayesCode.source`) so the class is\n"
+"         callable by name (see codegen_python_runner.md for where it binds),\n"
+"      3. runs TWO independent chains from over-dispersed inits. For a NUTS /\n"
+"         joint_nuts model, each chain MUST do:\n"
+"           m.step(n_burnin); m.readapt_NUTS(N, False, -1); m.step(n_keep)\n"
+"         The first-call warmup adapts the metric from the over-dispersed init,\n"
+"         so WITHOUT re-adapting at the mode R-hat commonly stays > 1.01. Pass\n"
+"         ALL 3 args to readapt_NUTS (the pybind11 module does not fill C++\n"
+"         default arguments unless re-declared; calling with fewer raises a\n"
+"         TypeError). Keep the LAST n_keep draws (readapt does not add history\n"
+"         rows).\n"
+"      4. computes the rank-normalized R-hat (`AI4BayesCode.rhat` / `arviz.rhat`,\n"
+"         Vehtari 2021) for EVERY model parameter across the two chains, and\n"
+"      5. prints, as its VERY LAST line, EXACTLY one of:\n"
 "           AI4BAYES_VALIDATE: PASS                    (if max rank-R-hat < 1.01)\n"
 "           AI4BAYES_VALIDATE: FAIL maxRhat=<value>    (otherwise)\n"
 "  - The generator runs this runner with the Python interpreter and greps for\n"
@@ -348,7 +359,7 @@ def _validate(cpp_path, runner_path, classname, verbose: bool = False) -> dict:
         if verbose:
             print("  [validate] ran but did not converge")
         return {"ok": False, "stage": "convergence", "detail": detail}
-    if re.search(r"Traceback \(most recent|^Error:|Segmentation fault|terminate called|Abort",
+    if re.search(r"Traceback \(most recent|^Error:|Segmentation fault|terminate called|Abort|runner error",
                  out_txt, re.M):                               # compiled but crashed at RUNTIME
         if verbose:
             print("  [validate] runner crashed at runtime")
@@ -380,7 +391,14 @@ def _repair_msg(result: dict) -> str:
     hint = {
         "compile": "The C++ did NOT COMPILE. Fix the compile error below.",
         "runtime": "The sampler COMPILED but the runner CRASHED at RUNTIME -- this is NOT a convergence problem; fix the C++/runner bug below.",
-        "incomplete": "The runner did NOT reach the `AI4BAYES_VALIDATE` line (it stopped early) -- find why it never finished.",
+        "incomplete": (
+            "The runner file WAS written and executed, but its output did not contain "
+            "the `AI4BAYES_VALIDATE` line. This is NOT a file-path / `// path:` / fence "
+            "problem (the runner was found and run) -- do NOT change the markers. Find "
+            "why the runner did not run to its final "
+            "`print(\"AI4BAYES_VALIDATE: ...\")`: an earlier crash, a hang, or (if the "
+            "detail below is EMPTY) the runner subprocess could not start in this "
+            "environment."),
         "convergence": "The runner ran to completion but rank-R-hat was too high (true non-convergence) -- fix the sampler/model.",
     }.get(result.get("stage"), "The generated sampler did not pass automated validation.")
     return (
@@ -681,12 +699,17 @@ def _agent_tools() -> list[dict]:
                          "points to (e.g. 'examples/GaussianLocationScale.cpp') BEFORE writing code; "
                          "do not guess an API you can read."),
          "input_schema": {"type": "object",
-                          "properties": {"path": {"type": "string"}}, "required": ["path"]}},
+                          "properties": {"path": {"type": "string",
+                              "description": "package-relative, e.g. 'examples/GaussianLocationScale.cpp'"}},
+                          "required": ["path"]}},
         {"name": "grep",
          "description": ("Regex-search file CONTENTS across the installed AI4BayesCode package. "
-                         "Returns `path:line: text`. Find which example/header uses a symbol/block."),
+                         "Returns `path:line: text`. Use to find which example/header uses a "
+                         "symbol or block (e.g. pattern='joint_nuts_block', glob='examples/*.cpp')."),
          "input_schema": {"type": "object",
-                          "properties": {"pattern": {"type": "string"}, "glob": {"type": "string"}},
+                          "properties": {"pattern": {"type": "string"},
+                                         "glob": {"type": "string",
+                              "description": "restrict search, default 'examples/*.cpp'"}},
                           "required": ["pattern"]}},
         {"name": "glob",
          "description": ("List files in the installed AI4BayesCode package matching a glob, e.g. "
