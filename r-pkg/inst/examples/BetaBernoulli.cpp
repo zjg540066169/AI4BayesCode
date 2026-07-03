@@ -39,7 +39,7 @@
 //   rng = np.random.default_rng(2026)
 //   N, p_true = 500, 0.30
 //   y = (rng.random(N) < p_true).astype(float)        # 0/1 data vector
-//   Mod = AI4BayesCode.source("BetaBernoulli.cpp")
+//   Mod = AI4BayesCode.example("BetaBernoulli")
 //   # BetaBernoulli(y, a, b, rng_seed, keep_history): a=2/b=2 Beta prior, seed=7
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
@@ -221,6 +221,7 @@ public:
         }
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -326,7 +327,8 @@ RCPP_MODULE(BetaBernoulli_module) {
         .constructor<arma::vec, double, double, int, bool>(
             "Construct with: y (0/1 vector), Beta prior a, b, seed, "
             "keep_history (default FALSE).")
-        .method("step",        &BetaBernoulli::step)
+        .method("step", (void (BetaBernoulli::*)())    &BetaBernoulli::step, "Run one sweep.")
+        .method("step", (void (BetaBernoulli::*)(int)) &BetaBernoulli::step, "Run n sweeps.")
         .method("get_current", &BetaBernoulli::get_current)
         .method("set_current", &BetaBernoulli::set_current)
         .method("predict_at",  &BetaBernoulli::predict_at)
@@ -348,7 +350,8 @@ PYBIND11_MODULE(BetaBernoulli, m) {
              pybind11::arg("keep_history") = false,
              "Bayesian Beta-Bernoulli conjugate. p ~ Beta(a,b); "
              "y ~ Bernoulli(p). Uses beta_gibbs_block (exact).")
-        .def("step",        &BetaBernoulli::step, pybind11::arg("n_steps"))
+        .def("step", (void (BetaBernoulli::*)())    &BetaBernoulli::step, "Run one sweep.")
+        .def("step", (void (BetaBernoulli::*)(int)) &BetaBernoulli::step, pybind11::arg("n_steps"))
         .def("get_current", &BetaBernoulli::get_current)
         .def("set_current", &BetaBernoulli::set_current, pybind11::arg("params"))
         .def("predict_at",  &BetaBernoulli::predict_at, pybind11::arg("new_data"))

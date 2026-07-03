@@ -61,6 +61,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("SoftBartNoise")
 //   set.seed(42); N <- 400L                       # well-identified smooth DGP
 //   X <- matrix(runif(N * 3L, -1, 1), N, 3L)      # x1,x2,x3 ~ Unif(-1,1)
 //   f <- sin(3 * X[,1]) + 0.5 * X[,2]^2 - X[,3]   # smooth low-dim mean
@@ -74,7 +75,7 @@
 //   X = rng.uniform(-1, 1, size=(N, 3))             # x1,x2,x3 ~ Unif(-1,1)
 //   f = np.sin(3 * X[:,0]) + 0.5 * X[:,1]**2 - X[:,2]   # smooth low-dim mean
 //   y = f + rng.normal(0, 0.5, size=N)              # sigma_true = 0.5
-//   Mod = AI4BayesCode.source("SoftBartNoise.cpp")
+//   Mod = AI4BayesCode.example("SoftBartNoise")
 //   m = Mod.SoftBartNoise(X, y, 50, 2.0, 10.0, False, 42)  # X,y,ntrees,k,tau_rate,dart,seed
 //   m.step(2000); print(m.get_current())            # f_softbart, sigma
 // @example:end
@@ -330,6 +331,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -630,7 +632,8 @@ RCPP_MODULE(SoftBartNoise_module) {
             "snapshots per step for predict_history; EXPENSIVE; default "
             "FALSE), keep_history (record numeric per-step buffers; "
             "cheap; default FALSE).")
-        .method("step",        &SoftBartNoise::step,
+        .method("step", (void (SoftBartNoise::*)())    &SoftBartNoise::step, "Run one sweep.")
+        .method("step", (void (SoftBartNoise::*)(int)) &SoftBartNoise::step,
                 "Run n Gibbs sweeps.")
         .method("get_current", &SoftBartNoise::get_current,
                 "Return the current draw as a named list with $f_softbart "
@@ -685,7 +688,8 @@ PYBIND11_MODULE(SoftBartNoise, m) {
              pybind11::arg("nu")           = 3.0,
              pybind11::arg("keep_tree")    = false,
              pybind11::arg("keep_history") = false)
-        .def("step",            &SoftBartNoise::step, pybind11::arg("n_steps"))
+        .def("step", (void (SoftBartNoise::*)())    &SoftBartNoise::step, "Run one sweep.")
+        .def("step", (void (SoftBartNoise::*)(int)) &SoftBartNoise::step, pybind11::arg("n_steps"))
         .def("get_current",     &SoftBartNoise::get_current)
         .def("get_tree",        &SoftBartNoise::get_tree)
         .def("set_current",     &SoftBartNoise::set_current, pybind11::arg("params"))

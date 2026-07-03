@@ -77,7 +77,7 @@
 //   u = rng.normal(0.0, 1.2, G)                                    # u_g ~ N(0, tau=1.2)
 //   X = rng.normal(0.0, 1.0, (N, p))                               # design matrix N x p
 //   y = 1.5 + X @ np.array([2.0, -1.0]) + u[g - 1] + rng.normal(0.0, 0.7, N)  # alpha=1.5,beta=(2,-1),sigma=0.7
-//   Mod = AI4BayesCode.source("HierarchicalLM_joint.cpp")
+//   Mod = AI4BayesCode.example("HierarchicalLM_joint")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HierarchicalLM_joint(y, X, g.astype(np.int32), G, 1.0, 1.0, seed, True),
@@ -454,6 +454,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -633,7 +634,8 @@ RCPP_MODULE(HierarchicalLM_joint_module) {
             "u_g = tau * z_u_g is exposed in get_current() for cross-val. "
             "Args: y, X (N x p), g_idx (1-based, length N), G, "
             "sigma_init (>0), tau_init (>0), seed (int), keep_history (default FALSE).")
-        .method("step",         &HierarchicalLM_joint::step,
+        .method("step", (void (HierarchicalLM_joint::*)())    &HierarchicalLM_joint::step, "Run one sweep.")
+        .method("step", (void (HierarchicalLM_joint::*)(int)) &HierarchicalLM_joint::step,
                 "Run n Gibbs sweeps (each is one joint NUTS step).")
         .method("get_current",  &HierarchicalLM_joint::get_current)
         .method("set_current",  &HierarchicalLM_joint::set_current,
@@ -661,7 +663,8 @@ PYBIND11_MODULE(HierarchicalLM_joint, m) {
              pybind11::arg("tau_init")   = 1.0,
              pybind11::arg("rng_seed")   = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",         &HierarchicalLM_joint::step,
+        .def("step", (void (HierarchicalLM_joint::*)())    &HierarchicalLM_joint::step, "Run one sweep.")
+        .def("step", (void (HierarchicalLM_joint::*)(int)) &HierarchicalLM_joint::step,
              pybind11::arg("n_steps"))
         .def("get_current",  &HierarchicalLM_joint::get_current)
         .def("set_current",  &HierarchicalLM_joint::set_current,

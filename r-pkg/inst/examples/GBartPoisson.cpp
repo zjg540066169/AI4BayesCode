@@ -82,7 +82,7 @@
 //   X = rng.uniform(-1.5, 1.5, size=(N, p))              # covariates ~ U(-1.5,1.5)
 //   r = 0.8 * np.sin(2 * X[:,0]) + 0.6 * X[:,1] - 0.4 * X[:,2]  # true log-rate
 //   y = rng.poisson(np.exp(r)).astype(float)             # y ~ Poisson(exp(r))
-//   Mod = AI4BayesCode.source("GBartPoisson.cpp")
+//   Mod = AI4BayesCode.example("GBartPoisson")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GBartPoisson(X, y, 50, seed, False, True),
@@ -258,6 +258,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -505,7 +506,8 @@ RCPP_MODULE(GBartPoisson_module) {
             "keep_tree (forest snapshots per step; EXPENSIVE; default "
             "FALSE), keep_history (numeric per-step buffers; cheap; "
             "default FALSE).")
-        .method("step",        &GBartPoisson::step,
+        .method("step", (void (GBartPoisson::*)())    &GBartPoisson::step, "Run one sweep.")
+        .method("step", (void (GBartPoisson::*)(int)) &GBartPoisson::step,
                 "Run n generalized-BART RJMCMC sweeps.")
         .method("get_current", &GBartPoisson::get_current,
                 "Return the current draw as a named list with $r (log "
@@ -553,7 +555,8 @@ PYBIND11_MODULE(GBartPoisson, m) {
              pybind11::arg("rng_seed")     = 1,
              pybind11::arg("keep_tree")    = false,
              pybind11::arg("keep_history") = false)
-        .def("step",             &GBartPoisson::step, pybind11::arg("n_steps"))
+        .def("step", (void (GBartPoisson::*)())    &GBartPoisson::step, "Run one sweep.")
+        .def("step", (void (GBartPoisson::*)(int)) &GBartPoisson::step, pybind11::arg("n_steps"))
         .def("get_current",      &GBartPoisson::get_current)
         .def("get_tree",         &GBartPoisson::get_tree)
         .def("set_current",      &GBartPoisson::set_current, pybind11::arg("params"))

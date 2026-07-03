@@ -86,7 +86,7 @@
 //   beta  = np.array([1.5,1.5,1.5, 1.5,1.5,1.5, 0.2])
 //   h     = np.array([[0,0.6],[0,0.4],[0,0.2], [0,-0.3],[0,-0.5],[0,-0.7]])  # 6 x K field
 //   cliques = [[1,2,3], [4,5,6]]   # clique partition = triangles (1-based)
-//   Mod = AI4BayesCode.source("StructuredPottsVI.cpp")
+//   Mod = AI4BayesCode.example("StructuredPottsVI")
 //   m = Mod.StructuredPottsVI(6, 2, edges, beta, h, cliques, True, 7, True)
 //   #            n_nodes, K, edges, edge_strengths, h, clique_list, exact_enum, seed, keep_history
 //   m.step(5000)
@@ -262,6 +262,7 @@ public:
 
     // ---- backend-neutral interface ---------------------------------
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -419,7 +420,8 @@ RCPP_MODULE(StructuredPottsVI_module) {
             "(use exact gradient if prod K_i <= exact_state_cap; else "
             "MC), rng_seed, keep_history. Structured (clique-level) "
             "mean-field VI per Saul-Jordan 1996.")
-        .method("step",        &StructuredPottsVI::step)
+        .method("step", (void (StructuredPottsVI::*)())    &StructuredPottsVI::step, "Run one sweep.")
+        .method("step", (void (StructuredPottsVI::*)(int)) &StructuredPottsVI::step, "Run n sweeps.")
         .method("get_current", &StructuredPottsVI::get_current,
                 "Returns a named list. clique_phi = flat concat of "
                 "per-clique joint Categorical probabilities (length "
@@ -458,7 +460,8 @@ PYBIND11_MODULE(StructuredPottsVI, m) {
              pybind11::arg("exact_enumeration"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",         &StructuredPottsVI::step, pybind11::arg("n_steps"))
+        .def("step", (void (StructuredPottsVI::*)())    &StructuredPottsVI::step, "Run one sweep.")
+        .def("step", (void (StructuredPottsVI::*)(int)) &StructuredPottsVI::step, pybind11::arg("n_steps"))
         .def("get_current",  &StructuredPottsVI::get_current)
         .def("set_current",  &StructuredPottsVI::set_current, pybind11::arg("params"))
         .def("predict_at",   &StructuredPottsVI::predict_at,  pybind11::arg("new_data"))

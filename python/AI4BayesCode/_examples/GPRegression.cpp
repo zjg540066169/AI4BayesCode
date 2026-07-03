@@ -90,7 +90,7 @@
 //   f_true = np.sin(3.0 * x) + 0.5 * x             # known smooth latent function
 //   y = f_true + rng.normal(0.0, 0.30, N)          # Gaussian noise, sigma_true = 0.30
 //   X = x.reshape(N, 1)                            # X is N x 1
-//   Mod = AI4BayesCode.source("GPRegression.cpp")
+//   Mod = AI4BayesCode.example("GPRegression")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GPRegression(X, y, seed, True),
@@ -550,6 +550,8 @@ public:
         }
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
+
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -919,7 +921,8 @@ RCPP_MODULE(GPRegression_module) {
         .constructor<arma::mat, arma::vec, int, bool>(
             "Construct GP regression with X (N x p), y (length N), seed, "
             "keep_history. Gibbs sweep = amplitude, lengthscale, sigma, f.")
-        .method("step",        &GPRegression::step)
+        .method("step", (void (GPRegression::*)())    &GPRegression::step, "Run one sweep.")
+        .method("step", (void (GPRegression::*)(int)) &GPRegression::step, "Run n sweeps.")
         .method("get_current", &GPRegression::get_current)
         .method("set_current", &GPRegression::set_current)
         .method("predict_at",  &GPRegression::predict_at)
@@ -939,7 +942,8 @@ PYBIND11_MODULE(GPRegression, m) {
              pybind11::arg("y"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",         &GPRegression::step,  pybind11::arg("n_steps"))
+        .def("step", (void (GPRegression::*)())    &GPRegression::step, "Run one sweep.")
+        .def("step", (void (GPRegression::*)(int)) &GPRegression::step, pybind11::arg("n_steps"))
         .def("get_current",  &GPRegression::get_current)
         .def("set_current",  &GPRegression::set_current, pybind11::arg("params"))
         .def("predict_at",   &GPRegression::predict_at,  pybind11::arg("new_data"))

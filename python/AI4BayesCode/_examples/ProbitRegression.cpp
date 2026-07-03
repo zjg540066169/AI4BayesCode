@@ -75,7 +75,7 @@
 //   beta_true = np.array([-0.4, 1.2, -0.8])
 //   X = np.column_stack([np.ones(N), rng.standard_normal((N, p - 1))])
 //   y = (rng.random(N) < norm.cdf(X @ beta_true)).astype(float)  # Bernoulli(Phi(Xb))
-//   Mod = AI4BayesCode.source("ProbitRegression.cpp")
+//   Mod = AI4BayesCode.example("ProbitRegression")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.ProbitRegression(X, y, 10, seed, True),
@@ -347,6 +347,8 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
+
     void step(int n_steps) {
         if (n_steps < 0) throw std::runtime_error("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -523,7 +525,8 @@ RCPP_MODULE(ProbitRegression_module) {
             "Construct ProbitRegression(X, y, prior_sd, seed, keep_history). "
             "X is N x p, y is length N (0/1). beta ~ N(0, prior_sd^2 I). "
             "Albert-Chib data augmentation with NUTS on beta.")
-        .method("step",        &ProbitRegression::step)
+        .method("step", (void (ProbitRegression::*)())    &ProbitRegression::step, "Run one sweep.")
+        .method("step", (void (ProbitRegression::*)(int)) &ProbitRegression::step, "Run n sweeps.")
         .method("get_current", &ProbitRegression::get_current)
         .method("set_current", &ProbitRegression::set_current)
         .method("predict_at",  &ProbitRegression::predict_at)
@@ -545,7 +548,8 @@ PYBIND11_MODULE(ProbitRegression, m) {
              pybind11::arg("keep_history") = false,
              "Bayesian probit regression via Albert-Chib data augmentation. "
              "y_i ~ Bernoulli(Phi(X_i' beta)), beta ~ N(0, prior_sd^2).")
-        .def("step",        &ProbitRegression::step,
+        .def("step", (void (ProbitRegression::*)())    &ProbitRegression::step, "Run one sweep.")
+        .def("step", (void (ProbitRegression::*)(int)) &ProbitRegression::step,
              pybind11::arg("n_steps"))
         .def("get_current", &ProbitRegression::get_current)
         .def("set_current", &ProbitRegression::set_current,

@@ -59,7 +59,7 @@
 //   cats = rng.choice(K, size=N, p=theta_true)
 //   y = np.bincount(cats, minlength=K).astype(float)   # category counts
 //   alpha = np.ones(K)                                  # flat Dirichlet prior
-//   Mod = AI4BayesCode.source("DirichletSimplex.cpp")
+//   Mod = AI4BayesCode.example("DirichletSimplex")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DirichletSimplex(y, alpha, seed, True),
@@ -239,6 +239,8 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
+
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -347,7 +349,8 @@ RCPP_MODULE(DirichletSimplex_module) {
             "joint_nuts_block. Construct with category counts y_counts (length K), "
             "Dirichlet prior alpha (length K), RNG seed (0 = random), "
             "and keep_history (record every draw; default FALSE).")
-        .method("step",         &DirichletSimplex::step)
+        .method("step", (void (DirichletSimplex::*)())    &DirichletSimplex::step, "Run one sweep.")
+        .method("step", (void (DirichletSimplex::*)(int)) &DirichletSimplex::step, "Run n sweeps.")
         .method("get_current",  &DirichletSimplex::get_current)
         .method("set_current",  &DirichletSimplex::set_current)
         .method("predict_at",   &DirichletSimplex::predict_at)
@@ -368,7 +371,8 @@ PYBIND11_MODULE(DirichletSimplex, m) {
              pybind11::arg("keep_history") = false,
              "Joint-NUTS Dirichlet(alpha) prior on the simplex with multinomial "
              "likelihood. Uses joint_nuts_block on stick-breaking unconstraining.")
-        .def("step",         &DirichletSimplex::step,        pybind11::arg("n_steps"))
+        .def("step", (void (DirichletSimplex::*)())    &DirichletSimplex::step, "Run one sweep.")
+        .def("step", (void (DirichletSimplex::*)(int)) &DirichletSimplex::step, pybind11::arg("n_steps"))
         .def("get_current",  &DirichletSimplex::get_current)
         .def("set_current",  &DirichletSimplex::set_current, pybind11::arg("params"))
         .def("predict_at",   &DirichletSimplex::predict_at,  pybind11::arg("new_data"))

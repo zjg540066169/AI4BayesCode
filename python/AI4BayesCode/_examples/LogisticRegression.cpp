@@ -76,7 +76,7 @@
 //   X = np.column_stack([np.ones(N), rng.standard_normal((N, p - 1))])  # intercept + N(0,1)
 //   prob = 1.0 / (1.0 + np.exp(-(X @ beta_true)))                       # sigmoid(X beta)
 //   y = (rng.random(N) < prob).astype(float)                           # Bernoulli 0/1
-//   Mod = AI4BayesCode.source("LogisticRegression.cpp")
+//   Mod = AI4BayesCode.example("LogisticRegression")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.LogisticRegression(X, y, 10.0, seed, True),
@@ -238,6 +238,8 @@ public:
     }
 
     // ---- Canonical 6-method R interface ----
+
+    void step() { step(1); }              // no-arg convenience: one sweep
 
     void step(int n_steps) {
         if (n_steps < 0) throw std::runtime_error("n_steps must be >= 0");
@@ -405,7 +407,8 @@ RCPP_MODULE(LogisticRegression_module) {
             "Legacy constructor; keep_history defaults to FALSE.")
         .constructor<arma::mat, arma::vec, double, int, bool>(
             "Construct with X (N x p), y (length N, 0/1), prior_sd, seed, keep_history.")
-        .method("step",        &LogisticRegression::step)
+        .method("step", (void (LogisticRegression::*)())    &LogisticRegression::step, "Run one sweep.")
+        .method("step", (void (LogisticRegression::*)(int)) &LogisticRegression::step, "Run n sweeps.")
         .method("get_current", &LogisticRegression::get_current)
         .method("set_current", &LogisticRegression::set_current)
         .method("predict_at",  &LogisticRegression::predict_at)
@@ -427,7 +430,8 @@ PYBIND11_MODULE(LogisticRegression, m) {
              "Bayesian logistic regression via Polya-Gamma augmentation "
              "(Polson-Scott-Windle 2013). 10-100x faster than NUTS on "
              "logistic for moderate p.")
-        .def("step",        &LogisticRegression::step, pybind11::arg("n_steps"))
+        .def("step", (void (LogisticRegression::*)())    &LogisticRegression::step, "Run one sweep.")
+        .def("step", (void (LogisticRegression::*)(int)) &LogisticRegression::step, pybind11::arg("n_steps"))
         .def("get_current", &LogisticRegression::get_current)
         .def("set_current", &LogisticRegression::set_current, pybind11::arg("params"))
         .def("predict_at",  &LogisticRegression::predict_at, pybind11::arg("new_data"))

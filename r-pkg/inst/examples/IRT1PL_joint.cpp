@@ -99,7 +99,7 @@
 //   b     = sigma_b * rng.standard_normal(J)     # item difficulties b_j = sigma_b * z_b_j
 //   eta   = theta[:, None] - b[None, :]          # eta_ij = theta_i - b_j   (N x J)
 //   Y     = (rng.random((N, J)) < 1 / (1 + np.exp(-eta))).astype(float)    # Bernoulli responses
-//   Mod = AI4BayesCode.source("IRT1PL_joint.cpp")
+//   Mod = AI4BayesCode.example("IRT1PL_joint")
 //   # ctor: Y, theta_init (len N), b_init (len J), sigma_b_init (>0), seed, keep_history
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
@@ -456,6 +456,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -633,7 +634,8 @@ RCPP_MODULE(IRT1PL_joint_module) {
             "NCR version: Y (N x J, NA for missing), theta_init (length N), "
             "b_init (length J), sigma_b_init (>0), RNG seed, keep_history. "
             "Joint block: (theta, z_b, sigma_b) with b = sigma_b*z_b derived.")
-        .method("step",            &IRT1PL_joint::step)
+        .method("step", (void (IRT1PL_joint::*)())    &IRT1PL_joint::step, "Run one sweep.")
+        .method("step", (void (IRT1PL_joint::*)(int)) &IRT1PL_joint::step, "Run n sweeps.")
         .method("get_current",     &IRT1PL_joint::get_current)
         .method("get_current_raw", &IRT1PL_joint::get_current_raw)
         .method("set_current",     &IRT1PL_joint::set_current)
@@ -658,7 +660,8 @@ PYBIND11_MODULE(IRT1PL_joint, m) {
              pybind11::arg("keep_history") = false,
              "NCR Rasch (1PL IRT) model: joint NUTS on (theta, z_b, sigma_b) "
              "with b = sigma_b * z_b reconstructed.")
-        .def("step",            &IRT1PL_joint::step,
+        .def("step", (void (IRT1PL_joint::*)())    &IRT1PL_joint::step, "Run one sweep.")
+        .def("step", (void (IRT1PL_joint::*)(int)) &IRT1PL_joint::step,
              pybind11::arg("n_steps"))
         .def("get_current",     &IRT1PL_joint::get_current)
         .def("get_current_raw", &IRT1PL_joint::get_current_raw)

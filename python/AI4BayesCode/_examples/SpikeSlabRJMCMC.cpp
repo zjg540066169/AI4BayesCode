@@ -103,7 +103,7 @@
 //   beta_true = np.zeros(p); beta_true[[0, 3, 6]] = [2.5, -1.8, 1.2]   # actives {1,4,7}
 //   X = rng.standard_normal((N, p)); X = X - X.mean(axis=0)             # center cols (no intercept)
 //   y = X @ beta_true + rng.normal(0.0, sigma_true, N); y = y - y.mean()  # center y
-//   Mod = AI4BayesCode.source("SpikeSlabRJMCMC.cpp")
+//   Mod = AI4BayesCode.example("SpikeSlabRJMCMC")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.SpikeSlabRJMCMC(X, y, 1.0, 1.0, seed, True),
@@ -719,6 +719,7 @@ public:
 
     // ---- Canonical 6-method R interface ----
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -1007,7 +1008,8 @@ RCPP_MODULE(SpikeSlabRJMCMC_module) {
             "invariant. gamma_init uses marginal-OLS screening to ensure "
             "k >= 1 active signal at iteration 1, avoiding the improper "
             "conditional on tau at k = 0.")
-        .method("step",        &SpikeSlabRJMCMC::step)
+        .method("step", (void (SpikeSlabRJMCMC::*)())    &SpikeSlabRJMCMC::step, "Run one sweep.")
+        .method("step", (void (SpikeSlabRJMCMC::*)(int)) &SpikeSlabRJMCMC::step, "Run n sweeps.")
         .method("get_current", &SpikeSlabRJMCMC::get_current)
         .method("set_current", &SpikeSlabRJMCMC::set_current)
         .method("predict_at",  &SpikeSlabRJMCMC::predict_at)
@@ -1029,7 +1031,8 @@ PYBIND11_MODULE(SpikeSlabRJMCMC, m) {
              pybind11::arg("b_pi_prior") = 1.0,
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",         &SpikeSlabRJMCMC::step,  pybind11::arg("n_steps"))
+        .def("step", (void (SpikeSlabRJMCMC::*)())    &SpikeSlabRJMCMC::step, "Run one sweep.")
+        .def("step", (void (SpikeSlabRJMCMC::*)(int)) &SpikeSlabRJMCMC::step,  pybind11::arg("n_steps"))
         .def("get_current",  &SpikeSlabRJMCMC::get_current)
         .def("set_current",  &SpikeSlabRJMCMC::set_current, pybind11::arg("params"))
         .def("predict_at",   &SpikeSlabRJMCMC::predict_at,  pybind11::arg("new_data"))

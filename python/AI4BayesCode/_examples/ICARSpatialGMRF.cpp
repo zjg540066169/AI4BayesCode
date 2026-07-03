@@ -79,7 +79,7 @@
 //   node = np.repeat(np.arange(1, N+1), 5)                              # 5 replicate obs/node -> identifies sigma
 //   rng = np.random.default_rng(20260621)
 //   y = 4.0 + phi[node-1] + rng.normal(0.0, 0.5, N*5)                   # Intercept=4, sigma=0.5
-//   Mod = AI4BayesCode.source("ICARSpatialGMRF.cpp")
+//   Mod = AI4BayesCode.example("ICARSpatialGMRF")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.ICARSpatialGMRF(y, node.astype(float), N, ei.astype(float), ej.astype(float), seed, True),
@@ -468,6 +468,8 @@ public:
 
     // ---- Canonical 6-method R interface --------------------------------
 
+    void step() { step(1); }              // no-arg convenience: one sweep
+
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -576,7 +578,8 @@ RCPP_MODULE(ICARSpatialGMRF_module) {
             "edge endpoints; undirected), rng_seed, keep_history. "
             "gmrf_precision_block for phi (Rue 2001 direct draw + hard "
             "sum-to-zero) + ONE joint_nuts_block for (Intercept, tau, sigma).")
-        .method("step",         &ICARSpatialGMRF::step)
+        .method("step", (void (ICARSpatialGMRF::*)())    &ICARSpatialGMRF::step, "Run one sweep.")
+        .method("step", (void (ICARSpatialGMRF::*)(int)) &ICARSpatialGMRF::step, "Run n sweeps.")
         .method("get_current",  &ICARSpatialGMRF::get_current)
         .method("set_current",  &ICARSpatialGMRF::set_current,
                 "Overwrite any subset of {Intercept, tau, sigma, phi, y} "
@@ -607,7 +610,8 @@ PYBIND11_MODULE(ICARSpatialGMRF, m) {
              pybind11::arg("edges_j_1based"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",         &ICARSpatialGMRF::step,        pybind11::arg("n_steps"))
+        .def("step", (void (ICARSpatialGMRF::*)())    &ICARSpatialGMRF::step, "Run one sweep.")
+        .def("step", (void (ICARSpatialGMRF::*)(int)) &ICARSpatialGMRF::step,        pybind11::arg("n_steps"))
         .def("get_current",  &ICARSpatialGMRF::get_current)
         .def("set_current",  &ICARSpatialGMRF::set_current, pybind11::arg("params"))
         .def("predict_at",   &ICARSpatialGMRF::predict_at,  pybind11::arg("new_data"))

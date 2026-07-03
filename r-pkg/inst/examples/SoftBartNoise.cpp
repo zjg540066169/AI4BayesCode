@@ -81,7 +81,7 @@
 //   X = rng.uniform(-1, 1, size=(N, 3))             # x1,x2,x3 ~ Unif(-1,1)
 //   f = np.sin(3 * X[:,0]) + 0.5 * X[:,1]**2 - X[:,2]   # smooth low-dim mean
 //   y = f + rng.normal(0, 0.5, size=N)              # sigma_true = 0.5
-//   Mod = AI4BayesCode.source("SoftBartNoise.cpp")
+//   Mod = AI4BayesCode.example("SoftBartNoise")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.SoftBartNoise(X, y, 50, 2.0, 10.0, False, seed, keep_history=True),
@@ -343,6 +343,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -643,8 +644,8 @@ RCPP_MODULE(SoftBartNoise_module) {
             "snapshots per step for predict_history; EXPENSIVE; default "
             "FALSE), keep_history (record numeric per-step buffers; "
             "cheap; default FALSE).")
-        .method("step",        &SoftBartNoise::step,
-                "Run n Gibbs sweeps.")
+        .method("step", (void (SoftBartNoise::*)())    &SoftBartNoise::step, "Run one sweep.")
+        .method("step", (void (SoftBartNoise::*)(int)) &SoftBartNoise::step, "Run n Gibbs sweeps.")
         .method("get_current", &SoftBartNoise::get_current,
                 "Return the current draw as a named list with $f_softbart "
                 "and $sigma. The serialized SoftBart forest is available "
@@ -698,7 +699,8 @@ PYBIND11_MODULE(SoftBartNoise, m) {
              pybind11::arg("nu")           = 3.0,
              pybind11::arg("keep_tree")    = false,
              pybind11::arg("keep_history") = false)
-        .def("step",            &SoftBartNoise::step, pybind11::arg("n_steps"))
+        .def("step", (void (SoftBartNoise::*)())    &SoftBartNoise::step, "Run one sweep.")
+        .def("step", (void (SoftBartNoise::*)(int)) &SoftBartNoise::step, pybind11::arg("n_steps"))
         .def("get_current",     &SoftBartNoise::get_current)
         .def("get_tree",        &SoftBartNoise::get_tree)
         .def("set_current",     &SoftBartNoise::set_current, pybind11::arg("params"))

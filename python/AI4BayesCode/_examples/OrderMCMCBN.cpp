@@ -94,7 +94,7 @@
 //       flipmask = rng.uniform(size=N) < flip
 //       data[:, j] = np.where(flipmask, 1.0 - data[:, j-1], data[:, j-1])
 //   cards = np.full(n, 2.0)                                        # all binary
-//   Mod = AI4BayesCode.source("OrderMCMCBN.cpp")
+//   Mod = AI4BayesCode.example("OrderMCMCBN")
 //   # bdeu_alpha, max_parents, top_C, cache_F, prune, p_adj, init_order(empty), seed, keep_history
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
@@ -242,6 +242,8 @@ public:
 
     // ---- backend-neutral interface ---------------------------------
 
+    void step() { step(1); }              // no-arg convenience: one sweep
+
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -359,7 +361,8 @@ RCPP_MODULE(OrderMCMCBN_module) {
             "10), prob_adjacent_swap (default 0.5), initial_order (EMPTY "
             "numeric(0) -> random; else 1-based length-n permutation), "
             "rng_seed, keep_history.")
-        .method("step",        &OrderMCMCBN::step)
+        .method("step", (void (OrderMCMCBN::*)())    &OrderMCMCBN::step, "Run one sweep.")
+        .method("step", (void (OrderMCMCBN::*)(int)) &OrderMCMCBN::step, "Run n sweeps.")
         .method("get_current", &OrderMCMCBN::get_current,
                 "Returns list(order = length-n 1-based permutation, "
                 "sampled_DAG = n*n flattened COLUMN-MAJOR adjacency "
@@ -398,7 +401,8 @@ PYBIND11_MODULE(OrderMCMCBN, m) {
              pybind11::arg("initial_order")     = arma::vec(),
              pybind11::arg("rng_seed")          = 1,
              pybind11::arg("keep_history")      = false)
-        .def("step",        &OrderMCMCBN::step,        pybind11::arg("n_steps"))
+        .def("step", (void (OrderMCMCBN::*)())    &OrderMCMCBN::step, "Run one sweep.")
+        .def("step", (void (OrderMCMCBN::*)(int)) &OrderMCMCBN::step,        pybind11::arg("n_steps"))
         .def("get_current", &OrderMCMCBN::get_current)
         .def("set_current", &OrderMCMCBN::set_current, pybind11::arg("params"))
         .def("predict_at",  &OrderMCMCBN::predict_at,  pybind11::arg("new_data"))

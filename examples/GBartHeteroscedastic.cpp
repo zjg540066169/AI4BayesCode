@@ -51,6 +51,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("GBartHeteroscedastic")
 //   set.seed(42); N <- 600L                          # well-identified DGP
 //   X  <- matrix(runif(N * 2L, -1, 1), N, 2L)        # x1,x2 ~ Unif(-1,1)
 //   r  <- 1.0 + 0.8 * sin(2 * X[,1]) + 0.6 * X[,2]   # smooth log-mean
@@ -66,7 +67,7 @@
 //   r = 1.0 + 0.8 * np.sin(2 * X[:,0]) + 0.6 * X[:,1] # smooth log-mean
 //   m = np.exp(r)                                      # mean in ~[1.2, 6.0]
 //   y = m + np.sqrt(0.5 * m) * rng.standard_normal(N) # y~N(m, phi*m), phi=0.5
-//   Mod = AI4BayesCode.source("GBartHeteroscedastic.cpp")
+//   Mod = AI4BayesCode.example("GBartHeteroscedastic")
 //   m_ = Mod.GBartHeteroscedastic(X, y, 50, 1.0, 42, False, False)  # X,y,ntrees,phi_init,seed,keep_tree,keep_history
 //   m_.step(2000); print(m_.get_current())            # r, mean, phi
 // @example:end
@@ -253,6 +254,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -510,7 +512,8 @@ RCPP_MODULE(GBartHeteroscedastic_module) {
             "seed (RNG seed, 0 = random), keep_tree (forest snapshots; "
             "EXPENSIVE; default FALSE), keep_history (numeric per-step "
             "buffers for trace analysis; cheap; default FALSE).")
-        .method("step",        &GBartHeteroscedastic::step,
+        .method("step", (void (GBartHeteroscedastic::*)())    &GBartHeteroscedastic::step, "Run one sweep.")
+        .method("step", (void (GBartHeteroscedastic::*)(int)) &GBartHeteroscedastic::step,
                 "Run n RJMCMC sweeps.")
         .method("get_current", &GBartHeteroscedastic::get_current,
                 "Return the current draw as a named list with $r, $mean "
@@ -574,7 +577,8 @@ PYBIND11_MODULE(GBartHeteroscedastic, m) {
              pybind11::arg("rng_seed")     = 1,
              pybind11::arg("keep_tree")    = false,
              pybind11::arg("keep_history") = false)
-        .def("step",            &GBartHeteroscedastic::step,
+        .def("step", (void (GBartHeteroscedastic::*)())    &GBartHeteroscedastic::step, "Run one sweep.")
+        .def("step", (void (GBartHeteroscedastic::*)(int)) &GBartHeteroscedastic::step,
              pybind11::arg("n_steps"))
         .def("get_current",     &GBartHeteroscedastic::get_current)
         .def("get_tree",        &GBartHeteroscedastic::get_tree)

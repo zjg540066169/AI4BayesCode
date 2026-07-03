@@ -94,6 +94,7 @@ public:
         psi2_ = arma::vec(p_, arma::fill::ones);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         std::normal_distribution<double> norm01(0.0, 1.0);
 

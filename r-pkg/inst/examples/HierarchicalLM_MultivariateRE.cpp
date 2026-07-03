@@ -128,7 +128,7 @@
 //   gidx = group.astype(int) - 1
 //   mu = X @ beta_true + u[0, gidx] + X[:, 1] * u[1, gidx]
 //   y  = mu + sigma_true * rng.normal(size=N)
-//   Mod = AI4BayesCode.source("HierarchicalLM_MultivariateRE.cpp")
+//   Mod = AI4BayesCode.example("HierarchicalLM_MultivariateRE")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HierarchicalLM_MultivariateRE(y, X, group, seed, True),
@@ -700,6 +700,7 @@ public:
         // already set above.
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -852,7 +853,8 @@ RCPP_MODULE(HierarchicalLM_MultivariateRE_module) {
             "with cholesky_corr constraint. PRIMARY SHOWCASE for "
             "constraints::cholesky_corr::wrap. group is a 1-indexed numeric "
             "vector (integer labels stored as doubles).")
-        .method("step",        &HierarchicalLM_MultivariateRE::step)
+        .method("step", (void (HierarchicalLM_MultivariateRE::*)())    &HierarchicalLM_MultivariateRE::step, "Run one sweep.")
+        .method("step", (void (HierarchicalLM_MultivariateRE::*)(int)) &HierarchicalLM_MultivariateRE::step, "Run n sweeps.")
         .method("get_current", &HierarchicalLM_MultivariateRE::get_current)
         .method("set_current", &HierarchicalLM_MultivariateRE::set_current)
         .method("predict_at",  &HierarchicalLM_MultivariateRE::predict_at)
@@ -874,7 +876,8 @@ PYBIND11_MODULE(HierarchicalLM_MultivariateRE, m) {
              pybind11::arg("group"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",         &HierarchicalLM_MultivariateRE::step,
+        .def("step", (void (HierarchicalLM_MultivariateRE::*)())    &HierarchicalLM_MultivariateRE::step, "Run one sweep.")
+        .def("step", (void (HierarchicalLM_MultivariateRE::*)(int)) &HierarchicalLM_MultivariateRE::step,
              pybind11::arg("n_steps"))
         .def("get_current",  &HierarchicalLM_MultivariateRE::get_current)
         .def("set_current",  &HierarchicalLM_MultivariateRE::set_current,

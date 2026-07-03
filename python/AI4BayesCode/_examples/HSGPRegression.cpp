@@ -87,7 +87,7 @@
 //   rng = np.random.default_rng(601); N = 80; M = 25       # sample size, basis count
 //   x = rng.uniform(-3, 3, N)                              # 1-D inputs on [-3, 3]
 //   y = 1.5*np.sin(2*x) + 0.3*x + rng.normal(0, 0.4, N)    # smooth truth + N(0,0.4)
-//   Mod = AI4BayesCode.source("HSGPRegression.cpp")
+//   Mod = AI4BayesCode.example("HSGPRegression")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HSGPRegression(y, x, M, seed, True),
@@ -524,6 +524,8 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
+
     void step(int n_steps) {
         if (n_steps < 0) throw std::runtime_error("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -623,7 +625,8 @@ RCPP_MODULE(HSGPRegression_module) {
         .constructor<arma::vec, arma::vec, int, int, bool>(
             "1-D Hilbert-space GP regression (canonical reduced-rank GP).\n"
             "Args: y (N), x (N), M (basis count, e.g. 25), seed, keep_history.")
-        .method("step",        &HSGPRegression::step)
+        .method("step", (void (HSGPRegression::*)())    &HSGPRegression::step, "Run one sweep.")
+        .method("step", (void (HSGPRegression::*)(int)) &HSGPRegression::step, "Run n sweeps.")
         .method("get_current", &HSGPRegression::get_current)
         .method("set_current", &HSGPRegression::set_current)
         .method("predict_at",  &HSGPRegression::predict_at)
@@ -644,7 +647,8 @@ PYBIND11_MODULE(HSGPRegression_module, m) {
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false,
              "1-D HSGP regression (reduced-rank GP).")
-        .def("step",        &HSGPRegression::step,
+        .def("step", (void (HSGPRegression::*)())    &HSGPRegression::step, "Run one sweep.")
+        .def("step", (void (HSGPRegression::*)(int)) &HSGPRegression::step,
              pybind11::arg("n_steps"))
         .def("get_current", &HSGPRegression::get_current)
         .def("set_current", &HSGPRegression::set_current,

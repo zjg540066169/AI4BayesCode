@@ -168,7 +168,7 @@
 //       return centers[z] + rng.normal(0.0, 0.6, size=(Ng, d))
 //   y = np.vstack([draw_group(0), draw_group(1)])
 //   group_idx = np.concatenate([np.zeros(Ng), np.ones(Ng)])   # 0/1 group labels
-//   Mod = AI4BayesCode.source("HDPGaussianMixture.cpp")
+//   Mod = AI4BayesCode.example("HDPGaussianMixture")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HDPGaussianMixture(y, group_idx, 6, np.zeros(d), 0.1, np.eye(d), 4.0, 1.0, 1.0, seed, True),
@@ -803,6 +803,8 @@ public:
 
     // ---- Six-method R interface ----
 
+    void step() { step(1); }              // no-arg convenience: one sweep
+
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -1006,7 +1008,8 @@ RCPP_MODULE(HDPGaussianMixture_module) {
             "combined counts_t; NOT the rigorous Antoniak-table CRF). "
             "See header for caveat. group_idx: numeric vector length N "
             "with integer values in {0, 1, ..., G-1}.")
-        .method("step",        &HDPGaussianMixture::step)
+        .method("step", (void (HDPGaussianMixture::*)())    &HDPGaussianMixture::step, "Run one sweep.")
+        .method("step", (void (HDPGaussianMixture::*)(int)) &HDPGaussianMixture::step, "Run n sweeps.")
         .method("get_current", &HDPGaussianMixture::get_current)
         .method("set_current", &HDPGaussianMixture::set_current,
                 "Overwrite z, alpha, gamma_0, or y from a named list.")
@@ -1036,7 +1039,8 @@ PYBIND11_MODULE(HDPGaussianMixture, m) {
              pybind11::arg("gamma_0"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",        &HDPGaussianMixture::step, pybind11::arg("n_steps"))
+        .def("step", (void (HDPGaussianMixture::*)())    &HDPGaussianMixture::step, "Run one sweep.")
+        .def("step", (void (HDPGaussianMixture::*)(int)) &HDPGaussianMixture::step, pybind11::arg("n_steps"))
         .def("get_current", &HDPGaussianMixture::get_current)
         .def("set_current", &HDPGaussianMixture::set_current,
              pybind11::arg("params"))

@@ -53,7 +53,7 @@
 //   import numpy as np, AI4BayesCode
 //   rng = np.random.default_rng(42); N = 200
 //   y = rng.normal(3.0, 2.0, N)                    # DGP: true mu=3, sigma=2
-//   Mod = AI4BayesCode.source("GaussianLocationScale.cpp")
+//   Mod = AI4BayesCode.example("GaussianLocationScale")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GaussianLocationScale(y, seed, True),
@@ -223,6 +223,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -318,7 +319,8 @@ RCPP_MODULE(GaussianLocationScale_module) {
         .constructor<arma::vec, int, bool>(
             "Construct with data vector y, RNG seed (0 = random), and "
             "keep_history (record every draw; default FALSE).")
-        .method("step",         &GaussianLocationScale::step)
+        .method("step", (void (GaussianLocationScale::*)())    &GaussianLocationScale::step, "Run one sweep.")
+        .method("step", (void (GaussianLocationScale::*)(int)) &GaussianLocationScale::step, "Run n sweeps.")
         .method("get_current",  &GaussianLocationScale::get_current)
         .method("set_current",  &GaussianLocationScale::set_current)
         .method("predict_at",   &GaussianLocationScale::predict_at)
@@ -337,7 +339,8 @@ PYBIND11_MODULE(GaussianLocationScale, m) {
              pybind11::arg("y"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",         &GaussianLocationScale::step,  pybind11::arg("n_steps"))
+        .def("step", (void (GaussianLocationScale::*)())    &GaussianLocationScale::step, "Run one sweep.")
+        .def("step", (void (GaussianLocationScale::*)(int)) &GaussianLocationScale::step,  pybind11::arg("n_steps"))
         .def("get_current",  &GaussianLocationScale::get_current)
         .def("set_current",  &GaussianLocationScale::set_current, pybind11::arg("params"))
         .def("predict_at",   &GaussianLocationScale::predict_at,  pybind11::arg("new_data"))

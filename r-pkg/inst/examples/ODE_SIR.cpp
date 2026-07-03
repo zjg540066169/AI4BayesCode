@@ -87,7 +87,7 @@
 //       k3=sir(y+0.5*k2,[beta_t,gamma_t]); k4=sir(y+k3,[beta_t,gamma_t])
 //       y = y + (k1+2*k2+2*k3+k4)/6.0; I_true[k] = y[1]
 //   rng = np.random.default_rng(1); I_obs = I_true * np.exp(sigma_t * rng.standard_normal(15))
-//   Mod = AI4BayesCode.source("ODE_SIR.cpp")
+//   Mod = AI4BayesCode.example("ODE_SIR")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.ODE_SIR(S0, I0, R0, t_obs, I_obs, seed, True),
@@ -435,6 +435,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         if (n_steps < 0) throw std::runtime_error("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -570,7 +571,8 @@ RCPP_MODULE(ODE_SIR_module) {
             "Infers (beta, gamma, sigma) jointly via one joint_nuts_block. "
             "Priors: beta,gamma ~ half-Normal(0,1); sigma ~ Jeffreys. "
             "Gradient w.r.t. beta/gamma via central FD; w.r.t. sigma analytic.")
-        .method("step",         &ODE_SIR::step)
+        .method("step", (void (ODE_SIR::*)())    &ODE_SIR::step, "Run one sweep.")
+        .method("step", (void (ODE_SIR::*)(int)) &ODE_SIR::step, "Run n sweeps.")
         .method("get_current",  &ODE_SIR::get_current)
         .method("set_current",  &ODE_SIR::set_current)
         .method("predict_at",   &ODE_SIR::predict_at)
@@ -597,7 +599,8 @@ PYBIND11_MODULE(ODE_SIR, m) {
              "joint_nuts_block. Priors: beta,gamma ~ half-Normal(0,1); "
              "sigma ~ Jeffreys. Gradient w.r.t. beta/gamma via central FD; "
              "w.r.t. sigma analytic.")
-        .def("step",         &ODE_SIR::step, pybind11::arg("n_steps"))
+        .def("step", (void (ODE_SIR::*)())    &ODE_SIR::step, "Run one sweep.")
+        .def("step", (void (ODE_SIR::*)(int)) &ODE_SIR::step, pybind11::arg("n_steps"))
         .def("get_current",  &ODE_SIR::get_current)
         .def("set_current",  &ODE_SIR::set_current, pybind11::arg("params"))
         .def("predict_at",   &ODE_SIR::predict_at, pybind11::arg("new_data"))

@@ -71,7 +71,7 @@
 //   n, K = 4, 3                              # chain length (>= 2), states per node (K^n = 81 <= 4096 -> EXACT)
 //   beta = 0.8                               # ferromagnetic coupling (>= 0)
 //   h = np.full(n, 2.0)                      # strong field on state 1 -> identifies a non-uniform q
-//   Mod = AI4BayesCode.source("CategoricalIsingChainVI.cpp")
+//   Mod = AI4BayesCode.example("CategoricalIsingChainVI")
 //   m = Mod.CategoricalIsingChainVI(n, K, beta, h, True, 20260621, True)
 //   #   args: n_nodes, K, beta, h, exact_enumeration, rng_seed, keep_history
 //   m.step(6000)                             # run RAABBVI to convergence
@@ -220,6 +220,8 @@ public:
     }
 
     // ---- Canonical 6-method interface (backend-neutral) -----------------
+
+    void step() { step(1); }              // no-arg convenience: one sweep
 
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
@@ -379,7 +381,8 @@ RCPP_MODULE(CategoricalIsingChainVI_module) {
             "Discrete Potts chain mean-field VI via Bishop §10.1 + "
             "RAABBVI. Cross-validation at tests/test_categorical_"
             "meanfield_vi_chain.cpp.")
-        .method("step",        &CategoricalIsingChainVI::step)
+        .method("step", (void (CategoricalIsingChainVI::*)())    &CategoricalIsingChainVI::step, "Run one sweep.")
+        .method("step", (void (CategoricalIsingChainVI::*)(int)) &CategoricalIsingChainVI::step, "Run n sweeps.")
         .method("get_current", &CategoricalIsingChainVI::get_current,
                 "Returns list(phi (flat n*K column-major vector; reshape "
                 "matrix(phi, n, K)), z (latest q-sample), beta, h, elbo, "
@@ -416,7 +419,8 @@ PYBIND11_MODULE(CategoricalIsingChainVI, m) {
              pybind11::arg("exact_enumeration") = true,
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",        &CategoricalIsingChainVI::step, pybind11::arg("n_steps"))
+        .def("step", (void (CategoricalIsingChainVI::*)())    &CategoricalIsingChainVI::step, "Run one sweep.")
+        .def("step", (void (CategoricalIsingChainVI::*)(int)) &CategoricalIsingChainVI::step, pybind11::arg("n_steps"))
         .def("get_current", &CategoricalIsingChainVI::get_current)
         .def("set_current", &CategoricalIsingChainVI::set_current, pybind11::arg("params"))
         .def("predict_at",  &CategoricalIsingChainVI::predict_at,  pybind11::arg("new_data"))

@@ -70,7 +70,7 @@
 //   import numpy as np, AI4BayesCode
 //   # Pure-prior 2D ICAR: x ~ N(0, (kappa R)^{-1}) with sum(x)=0 on a 4x4
 //   # lattice. No data — x is an exact sparse-Cholesky prior draw each step.
-//   Mod = AI4BayesCode.source("GMRFPrior.cpp")
+//   Mod = AI4BayesCode.example("GMRFPrior")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GMRFPrior(4, 4, 2.0, False, False, seed, True),
@@ -202,6 +202,8 @@ public:
 
     // ---- Canonical backend-neutral interface ----------------------------
 
+    void step() { step(1); }              // no-arg convenience: one sweep
+
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -279,7 +281,8 @@ RCPP_MODULE(GMRFPrior_module) {
             "ICAR via gmrf_precision_block sparse-Cholesky direct "
             "sampling (Rue 2001). Sum-to-zero constraint enforced. "
             "Check #15 parity tests under tests/test_gmrf_precision_block.cpp.")
-        .method("step",        &GMRFPrior::step)
+        .method("step", (void (GMRFPrior::*)())    &GMRFPrior::step, "Run one sweep.")
+        .method("step", (void (GMRFPrior::*)(int)) &GMRFPrior::step, "Run n sweeps.")
         .method("get_current", &GMRFPrior::get_current)
         .method("set_current", &GMRFPrior::set_current,
                 "Overwrite x (length L_x*L_y) and/or kappa (length-1, > 0) "
@@ -305,7 +308,8 @@ PYBIND11_MODULE(GMRFPrior, m) {
              pybind11::arg("eight_nn") = false,
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",        &GMRFPrior::step, pybind11::arg("n_steps"))
+        .def("step", (void (GMRFPrior::*)())    &GMRFPrior::step, "Run one sweep.")
+        .def("step", (void (GMRFPrior::*)(int)) &GMRFPrior::step, pybind11::arg("n_steps"))
         .def("get_current", &GMRFPrior::get_current)
         .def("set_current", &GMRFPrior::set_current, pybind11::arg("params"))
         .def("predict_at",  &GMRFPrior::predict_at,  pybind11::arg("new_data"))

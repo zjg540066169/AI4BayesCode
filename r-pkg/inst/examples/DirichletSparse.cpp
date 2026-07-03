@@ -57,7 +57,7 @@
 //   s_true = np.array([0.50, 0.25, 0.15, 0.05, 0.03, 0.02])  # sparse P=6 simplex
 //   N = 1000                                                 # multinomial trials (N >> P)
 //   y = rng.multinomial(N, s_true).astype(float)             # observed category counts
-//   Mod = AI4BayesCode.source("DirichletSparse.cpp")
+//   Mod = AI4BayesCode.example("DirichletSparse")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DirichletSparse(y, seed, True),
@@ -234,6 +234,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -339,7 +340,8 @@ RCPP_MODULE(DirichletSparse_module) {
         .constructor<arma::vec, int>("Legacy constructor; keep_history defaults to FALSE.")
         .constructor<arma::vec, int, bool>(
             "Joint-NUTS DirichletSparse: (s, theta) in one joint_nuts_block.")
-        .method("step",        &DirichletSparse::step,
+        .method("step", (void (DirichletSparse::*)())    &DirichletSparse::step, "Run one sweep.")
+        .method("step", (void (DirichletSparse::*)(int)) &DirichletSparse::step,
                 "Run n sweeps (each: one JOINT NUTS update of (s, theta)).")
         .method("get_current", &DirichletSparse::get_current)
         .method("set_current", &DirichletSparse::set_current)
@@ -359,7 +361,8 @@ PYBIND11_MODULE(DirichletSparse, m) {
              pybind11::arg("y_counts"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",         &DirichletSparse::step,    pybind11::arg("n_steps"))
+        .def("step", (void (DirichletSparse::*)())    &DirichletSparse::step, "Run one sweep.")
+        .def("step", (void (DirichletSparse::*)(int)) &DirichletSparse::step,    pybind11::arg("n_steps"))
         .def("get_current",  &DirichletSparse::get_current)
         .def("set_current",  &DirichletSparse::set_current, pybind11::arg("params"))
         .def("predict_at",   &DirichletSparse::predict_at,  pybind11::arg("new_data"))

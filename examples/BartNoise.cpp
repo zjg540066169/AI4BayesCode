@@ -57,6 +57,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("BartNoise")
 //   set.seed(42); N <- 600L; p <- 3L                      # well-identified DGP (= int main)
 //   X <- matrix(runif(N * p, -1, 1), N, p)                # X ~ Uniform(-1, 1)
 //   f <- sin(3 * X[, 1]) + 0.5 * X[, 2]^2 - X[, 3]        # smooth low-dim mean
@@ -70,7 +71,7 @@
 //   X = rng.uniform(-1, 1, size=(N, p))                   # X ~ Uniform(-1, 1)
 //   f = np.sin(3 * X[:, 0]) + 0.5 * X[:, 1]**2 - X[:, 2]  # smooth low-dim mean
 //   y = f + rng.normal(0, 0.5, size=N)                    # y ~ N(f, sigma_true^2), sigma_true = 0.5
-//   Mod = AI4BayesCode.source("BartNoise.cpp")
+//   Mod = AI4BayesCode.example("BartNoise")
 //   m = Mod.BartNoise(X, y, 50, 2.0, 2.0, 0.95, 3.0, 100, False, False, 42, False, False)
 //   m.step(2000); print(m.get_current())                 # 'f_bart' fitted mean, 'sigma' noise SD
 // @example:end
@@ -347,6 +348,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -679,7 +681,8 @@ RCPP_MODULE(BartNoise_module) {
             "predict_history; EXPENSIVE; default FALSE), "
             "keep_history (record numeric per-step buffers for trace "
             "analysis; cheap; default FALSE).")
-        .method("step",        &BartNoise::step,
+        .method("step", (void (BartNoise::*)())    &BartNoise::step, "Run one sweep.")
+        .method("step", (void (BartNoise::*)(int)) &BartNoise::step,
                 "Run n Gibbs sweeps.")
         .method("get_current", &BartNoise::get_current,
                 "Return the current draw as a named list with $f_bart and "
@@ -737,7 +740,8 @@ PYBIND11_MODULE(BartNoise, m) {
              pybind11::arg("rng_seed")     = 1,
              pybind11::arg("keep_tree")    = false,
              pybind11::arg("keep_history") = false)
-        .def("step",            &BartNoise::step, pybind11::arg("n_steps"))
+        .def("step", (void (BartNoise::*)())    &BartNoise::step, "Run one sweep.")
+        .def("step", (void (BartNoise::*)(int)) &BartNoise::step, pybind11::arg("n_steps"))
         .def("get_current",     &BartNoise::get_current)
         .def("get_tree",        &BartNoise::get_tree)
         .def("set_current",     &BartNoise::set_current, pybind11::arg("params"))

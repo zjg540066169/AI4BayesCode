@@ -78,7 +78,7 @@
 //   beta_true, sigma, slab_sd, pi_incl = 1.5, 1.0, 5.0, 0.5
 //   x = rng.normal(size=N)
 //   y = beta_true * x + rng.normal(0.0, sigma, N)   # known nonzero truth -> inclusion favored
-//   Mod = AI4BayesCode.source("SpikeSlabSinhBijection.cpp")
+//   Mod = AI4BayesCode.example("SpikeSlabSinhBijection")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.SpikeSlabSinhBijection(y, x, sigma, slab_sd, pi_incl, seed, True),
@@ -313,6 +313,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -451,7 +452,8 @@ RCPP_MODULE(SpikeSlabSinhBijection_module) {
             "birth bijection (runtime-AD Jacobian). Construct with: y, x "
             "(equal length), sigma, slab_sd (both > 0), pi_inclusion in (0,1), "
             "rng_seed (0 = random), and keep_history (default FALSE).")
-        .method("step",         &SpikeSlabSinhBijection::step)
+        .method("step", (void (SpikeSlabSinhBijection::*)())    &SpikeSlabSinhBijection::step, "Run one sweep.")
+        .method("step", (void (SpikeSlabSinhBijection::*)(int)) &SpikeSlabSinhBijection::step, "Run n sweeps.")
         .method("get_current",  &SpikeSlabSinhBijection::get_current)
         .method("set_current",  &SpikeSlabSinhBijection::set_current)
         .method("predict_at",   &SpikeSlabSinhBijection::predict_at)
@@ -475,7 +477,8 @@ PYBIND11_MODULE(SpikeSlabSinhBijection, m) {
              pybind11::arg("pi_inclusion"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",         &SpikeSlabSinhBijection::step,  pybind11::arg("n_steps"))
+        .def("step", (void (SpikeSlabSinhBijection::*)())    &SpikeSlabSinhBijection::step, "Run one sweep.")
+        .def("step", (void (SpikeSlabSinhBijection::*)(int)) &SpikeSlabSinhBijection::step, pybind11::arg("n_steps"))
         .def("get_current",  &SpikeSlabSinhBijection::get_current)
         .def("set_current",  &SpikeSlabSinhBijection::set_current, pybind11::arg("params"))
         .def("predict_at",   &SpikeSlabSinhBijection::predict_at,  pybind11::arg("new_data"))

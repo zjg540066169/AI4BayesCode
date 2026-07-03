@@ -118,7 +118,7 @@
 //   N_k, d = 100, 2
 //   centers = np.array([[-4.0, -4.0], [0.0, 4.0], [5.0, -1.0]])
 //   y = np.vstack([rng.normal(centers[k], 0.7, size=(N_k, d)) for k in range(3)])
-//   Mod = AI4BayesCode.source("DPGaussianMixture_DerivedAlpha.cpp")
+//   Mod = AI4BayesCode.example("DPGaussianMixture_DerivedAlpha")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DPGaussianMixture_DerivedAlpha(y, 8, seed),
@@ -676,6 +676,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -865,7 +866,8 @@ RCPP_MODULE(DPGaussianMixture_DerivedAlpha_module) {
             "sampled by NUTS. Demonstrates the alpha-as-derived "
             "composition pattern from DESIGN_NOTES_BNP_GP_2026-04-20.md "
             "Q6.")
-        .method("step",        &DPGaussianMixture_DerivedAlpha::step)
+        .method("step", (void (DPGaussianMixture_DerivedAlpha::*)())    &DPGaussianMixture_DerivedAlpha::step, "Run one sweep.")
+        .method("step", (void (DPGaussianMixture_DerivedAlpha::*)(int)) &DPGaussianMixture_DerivedAlpha::step, "Run n sweeps.")
         .method("get_current", &DPGaussianMixture_DerivedAlpha::get_current)
         .method("set_current", &DPGaussianMixture_DerivedAlpha::set_current,
                 "Overwrite z, pi, phi, or y from a named list.")
@@ -903,7 +905,8 @@ PYBIND11_MODULE(DPGaussianMixture_DerivedAlpha, m) {
              pybind11::arg("b_lambda_0"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",         &DPGaussianMixture_DerivedAlpha::step,
+        .def("step", (void (DPGaussianMixture_DerivedAlpha::*)())    &DPGaussianMixture_DerivedAlpha::step, "Run one sweep.")
+        .def("step", (void (DPGaussianMixture_DerivedAlpha::*)(int)) &DPGaussianMixture_DerivedAlpha::step,
              pybind11::arg("n_steps"))
         .def("get_current",  &DPGaussianMixture_DerivedAlpha::get_current)
         .def("set_current",  &DPGaussianMixture_DerivedAlpha::set_current,

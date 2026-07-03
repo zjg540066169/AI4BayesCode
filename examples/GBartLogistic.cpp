@@ -60,6 +60,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("GBartLogistic")
 //   set.seed(42); N <- 800L; p <- 3L            # well-identified DGP (= int main)
 //   X <- matrix(runif(N * p, -1.5, 1.5), N, p)  # X ~ Uniform(-1.5, 1.5)
 //   eta <- 1.5 * X[, 1] - 1.0 * X[, 2] + 0.8 * X[, 3]   # smooth linear predictor
@@ -72,7 +73,7 @@
 //   X = rng.uniform(-1.5, 1.5, size=(N, p))                 # X ~ Uniform(-1.5, 1.5)
 //   eta = 1.5 * X[:, 0] - 1.0 * X[:, 1] + 0.8 * X[:, 2]     # smooth linear predictor
 //   y = (rng.uniform(size=N) < 1 / (1 + np.exp(-eta))).astype(float)  # Bernoulli(sigmoid)
-//   Mod = AI4BayesCode.source("GBartLogistic.cpp")
+//   Mod = AI4BayesCode.example("GBartLogistic")
 //   m = Mod.GBartLogistic(X, y, 50, 42, False, False)       # X, y, ntrees=50, seed=42
 //   m.step(2000); print(m.get_current())                   # 'r' linear predictor, 'p' fitted prob
 // @example:end
@@ -231,6 +232,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -458,7 +460,8 @@ RCPP_MODULE(GBartLogistic_module) {
             "Full ctor: X (N x p), y (0/1), ntrees, seed, keep_tree "
             "(forest snapshots per step; EXPENSIVE; default FALSE), "
             "keep_history (numeric per-step buffers; cheap; default FALSE).")
-        .method("step",        &GBartLogistic::step,
+        .method("step", (void (GBartLogistic::*)())    &GBartLogistic::step, "Run one sweep.")
+        .method("step", (void (GBartLogistic::*)(int)) &GBartLogistic::step,
                 "Run n genBART RJMCMC sweeps.")
         .method("get_current", &GBartLogistic::get_current,
                 "Return the current draw as a named list with $r (linear "
@@ -521,7 +524,8 @@ PYBIND11_MODULE(GBartLogistic, m) {
              pybind11::arg("rng_seed")     = 1,
              pybind11::arg("keep_tree")    = false,
              pybind11::arg("keep_history") = false)
-        .def("step",             &GBartLogistic::step, pybind11::arg("n_steps"))
+        .def("step", (void (GBartLogistic::*)())    &GBartLogistic::step, "Run one sweep.")
+        .def("step", (void (GBartLogistic::*)(int)) &GBartLogistic::step, pybind11::arg("n_steps"))
         .def("get_current",      &GBartLogistic::get_current)
         .def("get_tree",         &GBartLogistic::get_tree)
         .def("set_current",      &GBartLogistic::set_current, pybind11::arg("params"))

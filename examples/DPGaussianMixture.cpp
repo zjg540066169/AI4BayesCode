@@ -136,6 +136,7 @@
 
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("DPGaussianMixture")
 //   set.seed(42); n_per <- 150L; d <- 2L                  # well-identified DGP (= int main)
 //   mu_true <- rbind(c(-3, -3), c(3, 3))                  # 2 well-separated clusters, sd 0.7
 //   y <- rbind(matrix(rnorm(n_per * d, 0, 0.7), n_per, d) + rep(mu_true[1, ], each = n_per),

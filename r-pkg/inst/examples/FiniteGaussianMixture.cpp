@@ -109,7 +109,7 @@
 //   mu_true = np.array([[-3.0, -3.0], [3.0, 3.0]])   # well-separated, sd=1
 //   y = np.vstack([rng.normal(mu_true[0], 1.0, (n_per, 2)),
 //                  rng.normal(mu_true[1], 1.0, (n_per, 2))])
-//   Mod = AI4BayesCode.source("FiniteGaussianMixture.cpp")
+//   Mod = AI4BayesCode.example("FiniteGaussianMixture")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.FiniteGaussianMixture(y, K, seed, True),
@@ -473,6 +473,7 @@ public:
 
     // ---- Six-method R interface --------------------------------------------
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -653,7 +654,8 @@ RCPP_MODULE(FiniteGaussianMixture_module) {
             "prior. Gibbs sweep: z → (μ,λ) → π. Use this when K is "
             "known (or chosen via model selection); for unknown K use "
             "DPGaussianMixture.cpp.")
-        .method("step",        &FiniteGaussianMixture::step)
+        .method("step", (void (FiniteGaussianMixture::*)())    &FiniteGaussianMixture::step, "Run one sweep.")
+        .method("step", (void (FiniteGaussianMixture::*)(int)) &FiniteGaussianMixture::step, "Run n sweeps.")
         .method("get_current", &FiniteGaussianMixture::get_current)
         .method("set_current", &FiniteGaussianMixture::set_current,
                 "Overwrite z, pi, alpha_dir, or y from a named list.")
@@ -692,7 +694,8 @@ PYBIND11_MODULE(FiniteGaussianMixture, m) {
              pybind11::arg("alpha_dir"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",        &FiniteGaussianMixture::step, pybind11::arg("n_steps"))
+        .def("step", (void (FiniteGaussianMixture::*)())    &FiniteGaussianMixture::step, "Run one sweep.")
+        .def("step", (void (FiniteGaussianMixture::*)(int)) &FiniteGaussianMixture::step, pybind11::arg("n_steps"))
         .def("get_current", &FiniteGaussianMixture::get_current)
         .def("set_current", &FiniteGaussianMixture::set_current,
              pybind11::arg("params"))

@@ -59,6 +59,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("VCBart")
 //   set.seed(1); N <- 600L; p <- 2L
 //   Z  <- runif(N, -1, 1)                                  # single effect modifier
 //   X  <- matrix(runif(N * p, 0.5, 1.5), N, p)             # predictors (bounded away from 0)
@@ -74,7 +75,7 @@
 //   X  = rng.uniform(0.5, 1.5, size=(N, p))
 //   b0 = np.sin(3 * Z); b1 = Z**2; b2 = -Z
 //   y  = b0 + b1 * X[:, 0] + b2 * X[:, 1] + rng.normal(0, 0.3, size=N)
-//   Mod = AI4BayesCode.source("VCBart.cpp")
+//   Mod = AI4BayesCode.example("VCBart")
 //   m = Mod.VCBart(X, Z.reshape(-1, 1), y, 50, 2.0, 2.0, 0.95, 3.0, 100, 1)
 //   m.step(1500); cur = m.get_current()
 //   print(np.corrcoef(cur["beta_1"], Z**2)[0, 1])         # recovers beta_1(Z) = Z^2

@@ -70,7 +70,7 @@
 //   p_true = 1.0 / (1.0 + np.exp(-f_true))         # Bernoulli success prob
 //   y = (rng.uniform(size=N) < p_true).astype(float)   # 0/1 labels
 //   X = x.reshape(N, 1)                            # N x 1 design matrix
-//   Mod = AI4BayesCode.source("GPClassification.cpp")
+//   Mod = AI4BayesCode.example("GPClassification")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GPClassification(X, y, seed, True),
@@ -433,6 +433,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -790,7 +791,8 @@ RCPP_MODULE(GPClassification_module) {
             "Joint-NUTS GP classification: (amplitude, lengthscale) in one "
             "joint_nuts_block + ESS on latent f + Bernoulli-logit likelihood. "
             "Inputs: X (N x p), y in {0,1} length N, rng_seed, keep_history.")
-        .method("step",         &GPClassification::step)
+        .method("step", (void (GPClassification::*)())    &GPClassification::step, "Run one sweep.")
+        .method("step", (void (GPClassification::*)(int)) &GPClassification::step, "Run n sweeps.")
         .method("get_current",  &GPClassification::get_current)
         .method("set_current",  &GPClassification::set_current)
         .method("predict_at",   &GPClassification::predict_at)
@@ -810,7 +812,8 @@ PYBIND11_MODULE(GPClassification, m) {
              pybind11::arg("y"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",         &GPClassification::step,  pybind11::arg("n_steps"))
+        .def("step", (void (GPClassification::*)())    &GPClassification::step, "Run one sweep.")
+        .def("step", (void (GPClassification::*)(int)) &GPClassification::step,  pybind11::arg("n_steps"))
         .def("get_current",  &GPClassification::get_current)
         .def("set_current",  &GPClassification::set_current, pybind11::arg("params"))
         .def("predict_at",   &GPClassification::predict_at,  pybind11::arg("new_data"))

@@ -75,7 +75,7 @@
 //   # Pure-prior 2D Ising (Q=2) on a 16x16 periodic lattice, ferromagnetic
 //   # beta=0.44 (near the 2D critical coupling). No data: the proper discrete
 //   # MRF prior pi(x) is itself the target; we just sample the latent state x.
-//   Mod = AI4BayesCode.source("IsingPrior.cpp")
+//   Mod = AI4BayesCode.example("IsingPrior")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.IsingPrior(16, 16, 2, 0.44, True, False, seed, True),
@@ -189,6 +189,7 @@ public:
 
     // ---- Canonical backend-neutral interface ---------------------------
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -266,7 +267,8 @@ RCPP_MODULE(IsingPrior_module) {
             "keep_history. Pure-prior 2D Ising / Potts via Swendsen-Wang "
             "cluster sweep (ising_cluster_block). Check #15 parity tests "
             "under tests/test_ising_cluster_block*.cpp.")
-        .method("step",        &IsingPrior::step)
+        .method("step", (void (IsingPrior::*)())    &IsingPrior::step, "Run one sweep.")
+        .method("step", (void (IsingPrior::*)(int)) &IsingPrior::step, "Run n sweeps.")
         .method("get_current", &IsingPrior::get_current)
         .method("set_current", &IsingPrior::set_current,
                 "Overwrite x (length L_x*L_y, entries in {0..Q-1}) and/or "
@@ -294,7 +296,8 @@ PYBIND11_MODULE(IsingPrior, m) {
              pybind11::arg("eight_nn"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",        &IsingPrior::step, pybind11::arg("n_steps"))
+        .def("step", (void (IsingPrior::*)())    &IsingPrior::step, "Run one sweep.")
+        .def("step", (void (IsingPrior::*)(int)) &IsingPrior::step, pybind11::arg("n_steps"))
         .def("get_current", &IsingPrior::get_current)
         .def("set_current", &IsingPrior::set_current, pybind11::arg("params"))
         .def("predict_at",  &IsingPrior::predict_at, pybind11::arg("new_data"))

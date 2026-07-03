@@ -74,6 +74,7 @@
 //
 // @example:R
 //   library(AI4BayesCode)
+//   ai4bayescode_example("GBartMultinomial")
 //   set.seed(42); N <- 900L                       # well-identified C=3 DGP
 //   X <- matrix(runif(N * 3L, -1.5, 1.5), N, 3L)  # x1,x2,x3 ~ Unif(-1.5,1.5)
 //   r1 <-  1.2 * X[,1] - 0.8 * X[,2]              # class 1 vs ref log-odds
@@ -91,7 +92,7 @@
 //   E  = np.column_stack([np.ones(N), np.exp(r1), np.exp(r2)])  # softmax(0,r1,r2)
 //   P  = E / E.sum(1, keepdims=True)
 //   y  = np.array([rng.choice(3, p=P[i]) for i in range(N)], float)  # 0..2
-//   Mod = AI4BayesCode.source("GBartMultinomial.cpp")
+//   Mod = AI4BayesCode.example("GBartMultinomial")
 //   m = Mod.GBartMultinomial(X, y, 3, 50, 42, False, True)  # X,y,C,ntrees,seed,keep_tree,keep_history
 //   m.step(2000); print(m.get_current())            # r, probs, log_phi
 // @example:end
@@ -372,6 +373,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -709,7 +711,8 @@ RCPP_MODULE(GBartMultinomial_module) {
             "seed, keep_tree (forest snapshots; EXPENSIVE; default "
             "FALSE), keep_history (numeric buffers; cheap; default "
             "FALSE).")
-        .method("step",        &GBartMultinomial::step,
+        .method("step", (void (GBartMultinomial::*)())    &GBartMultinomial::step, "Run one sweep.")
+        .method("step", (void (GBartMultinomial::*)(int)) &GBartMultinomial::step,
                 "Run n Gibbs sweeps.")
         .method("get_current", &GBartMultinomial::get_current,
                 "Return the current draw as a named list with $r "
@@ -757,7 +760,8 @@ PYBIND11_MODULE(GBartMultinomial, m) {
              pybind11::arg("rng_seed")     = 1,
              pybind11::arg("keep_tree")    = false,
              pybind11::arg("keep_history") = false)
-        .def("step",             &GBartMultinomial::step, pybind11::arg("n_steps"))
+        .def("step", (void (GBartMultinomial::*)())    &GBartMultinomial::step, "Run one sweep.")
+        .def("step", (void (GBartMultinomial::*)(int)) &GBartMultinomial::step, pybind11::arg("n_steps"))
         .def("get_current",      &GBartMultinomial::get_current)
         .def("get_tree",         &GBartMultinomial::get_tree)
         .def("set_tree",         &GBartMultinomial::set_tree, pybind11::arg("tree_s"))

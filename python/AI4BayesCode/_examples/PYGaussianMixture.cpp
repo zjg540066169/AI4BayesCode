@@ -143,7 +143,7 @@
 //   mu_true = np.array([[-4.0, -4.0], [0.0, 4.0], [4.0, -2.0]])
 //   z_true  = rng.integers(0, 3, size=N)
 //   y = mu_true[z_true] + rng.normal(0.0, 0.7, size=(N, d))
-//   Mod = AI4BayesCode.source("PYGaussianMixture.cpp")
+//   Mod = AI4BayesCode.example("PYGaussianMixture")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.PYGaussianMixture(y, 12, 0.0, seed),
@@ -677,6 +677,8 @@ public:
 
     // ---- Six-method R interface (identical shape to DPGaussianMixture) ---
 
+    void step() { step(1); }              // no-arg convenience: one sweep
+
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -882,7 +884,8 @@ RCPP_MODULE(PYGaussianMixture_module) {
             "keep_history). Pitman-Yor variant of DPGaussianMixture; "
             "discount in [0, 1) FIXED at construction. discount=0 "
             "reduces exactly to DP.")
-        .method("step",        &PYGaussianMixture::step)
+        .method("step", (void (PYGaussianMixture::*)())    &PYGaussianMixture::step, "Run one sweep.")
+        .method("step", (void (PYGaussianMixture::*)(int)) &PYGaussianMixture::step, "Run n sweeps.")
         .method("get_current", &PYGaussianMixture::get_current)
         .method("set_current", &PYGaussianMixture::set_current,
                 "Overwrite z, pi, alpha, discount, or y from a named list.")
@@ -924,7 +927,8 @@ PYBIND11_MODULE(PYGaussianMixture, m) {
              pybind11::arg("b_alpha"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",         &PYGaussianMixture::step,  pybind11::arg("n_steps"))
+        .def("step", (void (PYGaussianMixture::*)())    &PYGaussianMixture::step, "Run one sweep.")
+        .def("step", (void (PYGaussianMixture::*)(int)) &PYGaussianMixture::step,  pybind11::arg("n_steps"))
         .def("get_current",  &PYGaussianMixture::get_current)
         .def("set_current",  &PYGaussianMixture::set_current, pybind11::arg("params"))
         .def("predict_at",   &PYGaussianMixture::predict_at,  pybind11::arg("new_data"))

@@ -86,7 +86,7 @@
 //       f[i] = rho * f[i-1] + innov * rng.standard_normal()
 //   t = np.arange(N) * dt
 //   y = f + sigma_true * rng.standard_normal(N)         # + observation noise
-//   Mod = AI4BayesCode.source("GPTimeSeries.cpp")
+//   Mod = AI4BayesCode.example("GPTimeSeries")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GPTimeSeries(t, y, seed, True),
@@ -421,6 +421,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -620,7 +621,8 @@ RCPP_MODULE(GPTimeSeries_module) {
             "Hyperparameters (amp, tau, sigma) sampled by "
             "univariate_slice_sampling_block (Neal 2003 section 4.1). "
             "See file header for v0.5 design notes.")
-        .method("step",        &GPTimeSeries::step)
+        .method("step", (void (GPTimeSeries::*)())    &GPTimeSeries::step, "Run one sweep.")
+        .method("step", (void (GPTimeSeries::*)(int)) &GPTimeSeries::step, "Run n sweeps.")
         .method("get_current", &GPTimeSeries::get_current)
         .method("set_current", &GPTimeSeries::set_current)
         .method("predict_at",  &GPTimeSeries::predict_at)
@@ -639,7 +641,8 @@ PYBIND11_MODULE(GPTimeSeries, m) {
              pybind11::arg("y"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",        &GPTimeSeries::step,  pybind11::arg("n_steps"))
+        .def("step", (void (GPTimeSeries::*)())    &GPTimeSeries::step, "Run one sweep.")
+        .def("step", (void (GPTimeSeries::*)(int)) &GPTimeSeries::step,  pybind11::arg("n_steps"))
         .def("get_current", &GPTimeSeries::get_current)
         .def("set_current", &GPTimeSeries::set_current, pybind11::arg("params"))
         .def("predict_at",  &GPTimeSeries::predict_at,  pybind11::arg("new_data"))

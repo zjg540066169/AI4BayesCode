@@ -62,7 +62,7 @@
 //   alpha, beta, sigma = 1.5, np.array([2.0, -1.0, 0.5]), 0.8
 //   X = rng.standard_normal((N, p))                     # iid N(0,1) design
 //   y = alpha + X @ beta + rng.standard_normal(N) * sigma
-//   Mod = AI4BayesCode.source("LinearRegJointMixed.cpp")
+//   Mod = AI4BayesCode.example("LinearRegJointMixed")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.LinearRegJointMixed(y, X, seed, True),
@@ -324,6 +324,8 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
+
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -488,7 +490,8 @@ RCPP_MODULE(LinearRegJointMixed_module) {
         .constructor<arma::vec, arma::mat, int, bool>(
             "Unified-class migration of LinearRegJointMixed. "
             "Construct with y, X, seed, keep_history.")
-        .method("step",         &LinearRegJointMixed::step)
+        .method("step", (void (LinearRegJointMixed::*)())    &LinearRegJointMixed::step, "Run one sweep.")
+        .method("step", (void (LinearRegJointMixed::*)(int)) &LinearRegJointMixed::step, "Run n sweeps.")
         .method("get_current",  &LinearRegJointMixed::get_current)
         .method("set_current",  &LinearRegJointMixed::set_current)
         .method("get_history",  &LinearRegJointMixed::get_history)
@@ -510,7 +513,8 @@ PYBIND11_MODULE(LinearRegJointMixed, m) {
              "Linear regression with (alpha, beta, sigma) sampled jointly "
              "via unified joint_nuts_block (REAL + POSITIVE per-slice). "
              "Migration of LinearRegJointMixed off the legacy mixed shim.")
-        .def("step",        &LinearRegJointMixed::step, pybind11::arg("n_steps"))
+        .def("step", (void (LinearRegJointMixed::*)())    &LinearRegJointMixed::step, "Run one sweep.")
+        .def("step", (void (LinearRegJointMixed::*)(int)) &LinearRegJointMixed::step, pybind11::arg("n_steps"))
         .def("get_current", &LinearRegJointMixed::get_current)
         .def("set_current", &LinearRegJointMixed::set_current, pybind11::arg("params"))
         .def("predict_at",  &LinearRegJointMixed::predict_at, pybind11::arg("new_data"))

@@ -75,7 +75,7 @@
 //   for t in range(1, T):
 //       z[t] = z[t-1] if rng.uniform() < A[z[t-1]*2 + z[t-1]] else 1 - z[t-1]
 //   y = mu[z] + sigma * rng.standard_normal(T)     # Gaussian emissions
-//   Mod = AI4BayesCode.source("HMMGaussian2State.cpp")
+//   Mod = AI4BayesCode.example("HMMGaussian2State")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HMMGaussian2State(y, A, pi0, mu, sigma, seed, True),
@@ -222,6 +222,7 @@ public:
 
     // ---- Canonical 6-method R interface ----
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -341,7 +342,8 @@ RCPP_MODULE(HMMGaussian2State_module) {
             "keep_history. Runs forward-filter backward-sample on z "
             "via hmm_block (Check #15 parity test at "
             "tests_autodiff/test_hmm_block.cpp).")
-        .method("step",        &HMMGaussian2State::step)
+        .method("step", (void (HMMGaussian2State::*)())    &HMMGaussian2State::step, "Run one sweep.")
+        .method("step", (void (HMMGaussian2State::*)(int)) &HMMGaussian2State::step, "Run n sweeps.")
         .method("get_current", &HMMGaussian2State::get_current)
         .method("set_current", &HMMGaussian2State::set_current,
                 "Overwrite z and/or y from a named list.")
@@ -366,7 +368,8 @@ PYBIND11_MODULE(HMMGaussian2State, m) {
              pybind11::arg("sigma"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",        &HMMGaussian2State::step, pybind11::arg("n_steps"))
+        .def("step", (void (HMMGaussian2State::*)())    &HMMGaussian2State::step, "Run one sweep.")
+        .def("step", (void (HMMGaussian2State::*)(int)) &HMMGaussian2State::step, pybind11::arg("n_steps"))
         .def("get_current", &HMMGaussian2State::get_current)
         .def("set_current", &HMMGaussian2State::set_current,
              pybind11::arg("params"))

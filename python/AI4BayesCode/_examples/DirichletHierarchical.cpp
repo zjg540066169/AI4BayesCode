@@ -81,7 +81,7 @@
 //       g = rng.gamma(shape=a, scale=1.0); return g / g.sum()
 //   S_obs = np.vstack([np.maximum(rdir(kappa_true * s_true), 1e-8) for _ in range(K)])
 //   S_obs = S_obs / S_obs.sum(axis=1, keepdims=True)
-//   Mod = AI4BayesCode.source("DirichletHierarchical.cpp")
+//   Mod = AI4BayesCode.example("DirichletHierarchical")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DirichletHierarchical(S_obs, 0.5, 1.0, seed, True),
@@ -394,6 +394,8 @@ public:
         }
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
+
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -535,8 +537,8 @@ RCPP_MODULE(DirichletHierarchical_module) {
             "joint_nuts_block (SIMPLEX + POSITIVE + POSITIVE). Construct with "
             "S_obs (K x P), Beta hyperprior shapes (beta_a, beta_b), RNG seed "
             "(0 = random), and keep_history (default FALSE).")
-        .method("step",        &DirichletHierarchical::step,
-                "Run n sweeps (each: one JOINT NUTS update of (s, kappa, theta)).")
+        .method("step", (void (DirichletHierarchical::*)())    &DirichletHierarchical::step, "Run one sweep.")
+        .method("step", (void (DirichletHierarchical::*)(int)) &DirichletHierarchical::step, "Run n sweeps (each: one JOINT NUTS update of (s, kappa, theta)).")
         .method("get_current", &DirichletHierarchical::get_current,
                 "Return current draw as a named list.")
         .method("set_current", &DirichletHierarchical::set_current,
@@ -562,7 +564,8 @@ PYBIND11_MODULE(DirichletHierarchical, m) {
              pybind11::arg("beta_b") = 1.0,
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",         &DirichletHierarchical::step,    pybind11::arg("n_steps"))
+        .def("step", (void (DirichletHierarchical::*)())    &DirichletHierarchical::step, "Run one sweep.")
+        .def("step", (void (DirichletHierarchical::*)(int)) &DirichletHierarchical::step, pybind11::arg("n_steps"))
         .def("get_current",  &DirichletHierarchical::get_current)
         .def("set_current",  &DirichletHierarchical::set_current, pybind11::arg("params"))
         .def("predict_at",   &DirichletHierarchical::predict_at,  pybind11::arg("new_data"))

@@ -79,7 +79,7 @@
 //   x = np.arange(N)/(N-1); knots = (np.arange(1,K_s+1))/(K_s+1)
 //   Bsp = np.maximum(x[:,None] - knots[None,:], 0.0)           # truncated-power basis (N x K_s)
 //   y = 0.4*np.sin(8*x) + 0.2*x**2 + rng.normal(0, 0.3, N)     # smooth(x) + N(0,0.3)
-//   Mod = AI4BayesCode.source("BSplineRegression.cpp")
+//   Mod = AI4BayesCode.example("BSplineRegression")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.BSplineRegression(y, Bsp, seed, True),
@@ -379,6 +379,7 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         if (n_steps < 0) throw std::runtime_error("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -486,7 +487,8 @@ RCPP_MODULE(BSplineRegression_module) {
         .constructor<arma::vec, arma::mat, int, bool>(
             "1-D penalized B-spline regression.\n"
             "Args: y (N), Bsp (N x K_s basis matrix), seed, keep_history.")
-        .method("step",        &BSplineRegression::step)
+        .method("step", (void (BSplineRegression::*)())    &BSplineRegression::step, "Run one sweep.")
+        .method("step", (void (BSplineRegression::*)(int)) &BSplineRegression::step, "Run n sweeps.")
         .method("get_current", &BSplineRegression::get_current)
         .method("set_current", &BSplineRegression::set_current)
         .method("predict_at",  &BSplineRegression::predict_at)
@@ -507,7 +509,8 @@ PYBIND11_MODULE(BSplineRegression_module, m) {
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false,
              "1-D penalized B-spline regression.")
-        .def("step",        &BSplineRegression::step,
+        .def("step", (void (BSplineRegression::*)())    &BSplineRegression::step, "Run one sweep.")
+        .def("step", (void (BSplineRegression::*)(int)) &BSplineRegression::step,
              pybind11::arg("n_steps"))
         .def("get_current", &BSplineRegression::get_current)
         .def("set_current", &BSplineRegression::set_current,

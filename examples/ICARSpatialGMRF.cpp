@@ -415,6 +415,7 @@ public:
 
     // ---- Canonical neutral-typed interface -----------------------------
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         if (n_steps < 0) throw std::runtime_error("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);

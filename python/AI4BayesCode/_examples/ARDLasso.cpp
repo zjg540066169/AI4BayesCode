@@ -66,7 +66,7 @@
 //   alpha_true, sigma_true = 1.0, 0.5
 //   X = rng.normal(size=(N, p))                      # NO intercept column (alpha is built in)
 //   Y = alpha_true + X @ beta_true + sigma_true * rng.normal(size=N)
-//   Mod = AI4BayesCode.source("ARDLasso.cpp")
+//   Mod = AI4BayesCode.example("ARDLasso")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.ARDLasso(X, Y, seed, True),
@@ -139,6 +139,8 @@ public:
         }
         psi2_ = arma::vec(p_, arma::fill::ones);
     }
+
+    void step() { step(1); }              // no-arg convenience: one sweep
 
     void step(int n_steps) {
         std::normal_distribution<double> norm01(0.0, 1.0);
@@ -410,8 +412,8 @@ RCPP_MODULE(ARDLasso_module) {
         .constructor<arma::mat, arma::vec, int, bool>(
             "Construct with: X (N x p), Y (length N), seed, "
             "keep_history (record every draw; default FALSE).")
-        .method("step",        &ARDLasso::step,
-                "Run n Gibbs sweeps.")
+        .method("step", (void (ARDLasso::*)())    &ARDLasso::step, "Run one sweep.")
+        .method("step", (void (ARDLasso::*)(int)) &ARDLasso::step, "Run n Gibbs sweeps.")
         .method("get_current", &ARDLasso::get_current,
                 "Return list(beta, alpha, sigma2, psi2).")
         .method("set_current", &ARDLasso::set_current,
@@ -440,7 +442,8 @@ PYBIND11_MODULE(ARDLasso, m) {
              pybind11::arg("Y"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",        &ARDLasso::step,        pybind11::arg("n_steps"))
+        .def("step", (void (ARDLasso::*)())    &ARDLasso::step, "Run one sweep.")
+        .def("step", (void (ARDLasso::*)(int)) &ARDLasso::step, pybind11::arg("n_steps"))
         .def("get_current", &ARDLasso::get_current)
         .def("set_current", &ARDLasso::set_current, pybind11::arg("params"))
         .def("get_dag",     &ARDLasso::get_dag)

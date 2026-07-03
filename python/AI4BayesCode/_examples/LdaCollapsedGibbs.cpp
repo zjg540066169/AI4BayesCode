@@ -126,7 +126,7 @@
 //       wd = [int(rng.choice(np.arange(1, V + 1), p=phi_true[k - 1])) for k in z]
 //       w.extend(wd); doc.extend([d] * Ld)
 //   w = np.asarray(w, float); doc = np.asarray(doc, float)
-//   Mod = AI4BayesCode.source("LdaCollapsedGibbs.cpp")
+//   Mod = AI4BayesCode.example("LdaCollapsedGibbs")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.LdaCollapsedGibbs(w, doc, M, V, K, np.ones(K), np.ones(V), seed, True),
@@ -359,6 +359,8 @@ public:
 
     // ---- Six-method R interface ------------------------------------------
 
+    void step() { step(1); }              // no-arg convenience: one sweep
+
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -579,7 +581,8 @@ RCPP_MODULE(LdaCollapsedGibbs_module) {
             "(default uniform = (1, ..., 1)). Sampler: Griffiths & "
             "Steyvers 2004 collapsed Gibbs over z, then conjugate "
             "Dirichlet draws of theta and phi from z-induced counts.")
-        .method("step",        &LdaCollapsedGibbs::step)
+        .method("step", (void (LdaCollapsedGibbs::*)())    &LdaCollapsedGibbs::step, "Run one sweep.")
+        .method("step", (void (LdaCollapsedGibbs::*)(int)) &LdaCollapsedGibbs::step, "Run n sweeps.")
         .method("get_current", &LdaCollapsedGibbs::get_current)
         .method("set_current", &LdaCollapsedGibbs::set_current,
                 "Overwrite z (length-N integer in {1..K}), or together "
@@ -617,7 +620,8 @@ PYBIND11_MODULE(LdaCollapsedGibbs, m) {
              pybind11::arg("beta"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",        &LdaCollapsedGibbs::step, pybind11::arg("n_steps"))
+        .def("step", (void (LdaCollapsedGibbs::*)())    &LdaCollapsedGibbs::step, "Run one sweep.")
+        .def("step", (void (LdaCollapsedGibbs::*)(int)) &LdaCollapsedGibbs::step, pybind11::arg("n_steps"))
         .def("get_current", &LdaCollapsedGibbs::get_current)
         .def("set_current", &LdaCollapsedGibbs::set_current, pybind11::arg("params"))
         .def("predict_at",  &LdaCollapsedGibbs::predict_at, pybind11::arg("new_data"))

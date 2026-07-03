@@ -152,7 +152,7 @@
 //   mu_true = np.array([[-3.0, -3.0], [3.0, 3.0]])         # 2 well-separated clusters, sd 0.7
 //   y = np.vstack([rng.normal(0.0, 0.7, (n_per, d)) + mu_true[0],
 //                  rng.normal(0.0, 0.7, (n_per, d)) + mu_true[1]])
-//   Mod = AI4BayesCode.source("DPGaussianMixture.cpp")
+//   Mod = AI4BayesCode.example("DPGaussianMixture")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DPGaussianMixture(y, 60, seed, True),
@@ -736,6 +736,7 @@ public:
 
     // ---- Six-method R interface --------------------------------------------
 
+    void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -997,7 +998,8 @@ RCPP_MODULE(DPGaussianMixture_module) {
             "WARNING: mis-scaled fixed hypers (e.g. b_lambda_0 = 1 on "
             "non-unit-variance data) mix poorly -- prefer the data-driven "
             "constructor.")
-        .method("step",        &DPGaussianMixture::step)
+        .method("step", (void (DPGaussianMixture::*)())    &DPGaussianMixture::step, "Run one sweep.")
+        .method("step", (void (DPGaussianMixture::*)(int)) &DPGaussianMixture::step, "Run n sweeps.")
         .method("get_current", &DPGaussianMixture::get_current)
         .method("set_current", &DPGaussianMixture::set_current,
                 "Overwrite z, pi, mu, lambda, alpha, or y from a named list.")
@@ -1033,7 +1035,8 @@ PYBIND11_MODULE(DPGaussianMixture, m) {
              pybind11::arg("b_alpha"),
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
-        .def("step",         &DPGaussianMixture::step,  pybind11::arg("n_steps"))
+        .def("step", (void (DPGaussianMixture::*)())    &DPGaussianMixture::step, "Run one sweep.")
+        .def("step", (void (DPGaussianMixture::*)(int)) &DPGaussianMixture::step, pybind11::arg("n_steps"))
         .def("get_current",  &DPGaussianMixture::get_current)
         .def("set_current",  &DPGaussianMixture::set_current, pybind11::arg("params"))
         .def("predict_at",   &DPGaussianMixture::predict_at,  pybind11::arg("new_data"))
