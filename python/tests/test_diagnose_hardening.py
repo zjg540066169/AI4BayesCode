@@ -13,6 +13,16 @@ diag = importlib.import_module("AI4BayesCode.diagnose")
 rs = importlib.import_module("AI4BayesCode.rhat_summary")
 
 
+# diagnose() returns a pandas DataFrame (rows=params) when pandas is installed,
+# else a dict-of-dicts. These helpers read either shape.
+def _params(summ):
+    return list(summ.index) if hasattr(summ, "loc") else list(summ)
+
+
+def _cell(summ, param, stat):
+    return summ.loc[param, stat] if hasattr(summ, "loc") else summ[param][stat]
+
+
 def _hist(seed=0, n=400):
     rng = np.random.default_rng(seed)
     return {"mu": rng.normal(size=n), "beta": rng.normal(size=(n, 3))}
@@ -27,7 +37,7 @@ def _record(seed=0, ok=True):
 def test_diagnose_accepts_run_record():
     # diagnose(runs[0]) auto-unwraps the record's ["hist"].
     summ, _ = diag.diagnose(_record(1, ok=True), n_burn=100, plot=False)
-    assert any(k.startswith("mu") for k in summ)
+    assert any(str(k).startswith("mu") for k in _params(summ))
 
 
 def test_diagnose_failed_chain_clear_error():
@@ -44,7 +54,7 @@ def test_diagnose_rejects_chain_list():
 def test_diagnose_drop_burn_alias():
     a, _ = diag.diagnose(_hist(3), n_burn=100, plot=False)
     b, _ = diag.diagnose(_hist(3), drop_burn=100, plot=False)
-    assert a["mu"]["mean"] == b["mu"]["mean"]
+    assert _cell(a, "mu", "mean") == _cell(b, "mu", "mean")
 
 
 def test_rhat_summary_n_burn_alias():

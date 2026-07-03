@@ -1339,10 +1339,15 @@ def generate(model_description: str | None = None, *, classname: str | None = No
         try:
             stream_check(LLM=llm["model"], API_key=API_key, progress=verbose)
         except Exception as e:  # noqa: BLE001
-            raise RuntimeError(
-                f"streaming pre-flight check failed ({e}); aborting before the paid "
-                "generation. Fix connectivity/key and retry, or pass verify_stream=False."
-            ) from e
+            # NON-FATAL: the streaming self-check is only a fast-feedback nicety, and the
+            # generation ALREADY falls back to non-streaming if the streaming transport is
+            # unavailable. A 429 here is a rate-limit on the streaming path, NOT a bad key --
+            # aborting would needlessly block a generation that would otherwise succeed
+            # non-streamed. Warn and continue.
+            warnings.warn(
+                f"streaming pre-flight check failed ({e}); continuing -- the generation "
+                f"will fall back to non-streaming. (429 = rate-limit on the streaming path, "
+                f"not a bad key; pass verify_stream=False to skip this check entirely.)")
 
     # ---- validate -> repair-to-convergence loop ----
     # `attempt` counts ONLY replies that produced code and went to the validator;

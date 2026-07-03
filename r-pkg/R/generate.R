@@ -1592,9 +1592,15 @@ ai4bayescode_generate <- function(model_description = NULL,
             ai4bayescode_stream_check(LLM = llm$model, API_key = API_key, effort = NULL,
                                       progress = verbose),
             error = function(e)
-                stop("streaming pre-flight check failed (", conditionMessage(e),
-                     "); aborting before the paid generation. Fix connectivity/key and ",
-                     "retry, or pass verify_stream = FALSE.", call. = FALSE))
+                # NON-FATAL: the streaming self-check is only a fast-feedback nicety, and
+                # the generation ALREADY falls back to non-streaming if the streaming
+                # transport is unavailable. A 429 here is a rate-limit on the streaming
+                # path (R's httr2 SSE), NOT a bad key -- aborting would needlessly block a
+                # generation that would otherwise succeed non-streamed. Warn and continue.
+                message("[warning] streaming pre-flight check failed (", conditionMessage(e),
+                        "); continuing -- the generation will fall back to non-streaming. ",
+                        "(429 = rate-limit on the streaming path, not a bad key; pass ",
+                        "verify_stream = FALSE to skip this check entirely.)"))
     }
 
     # ---- validate -> repair-to-convergence loop ----
