@@ -95,18 +95,25 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
 2. **AI4BayesCode.sourceCpp call** — exact same form as in the runner
    template below.
 3. **Constructor reference block** — identical to the runner.
-4. **Synthetic data block** — produces the same fixtures the harness
+4. **The FULL `run_chain_<ClassName>()` body VERBATIM** (not a stub) —
+   including the `diagnosis` parameter and the `AI4BayesCode.diagnose()`
+   call. This is the SAME definition as in the runner template above;
+   ship the whole function body so the example runs self-contained.
+5. **Synthetic data block** — produces the same fixtures the harness
    used so the example runs as-is.
-5. **One call to the runner helper** — typically
-   `chain = run_chain_<ClassName>(<data_args>, seed=42, n_burn=200,
-   n_keep=200)` (short budget so the example runs in seconds). Then show the
-   built-in model-independent diagnostics:
-   `chain = run_chain_<ClassName>(<data_args>, seed=42, n_burn=200, n_keep=200, diagnosis=True)`,
-   then `chain["diagnosis"]` (per-parameter R-hat / ESS / MCSE / summaries) and
-   `chain["diagnosis_plot"]()` (trace + autocorrelation + density; needs `arviz`).
-   No LOO (that is model-specific).
-6. **A `model.predict_at(...)` call** demonstrating posterior
-   predictive use.
+6. **Monolithic (non-stateful) single call** —
+   `mono = run_chain_<ClassName>(..., seed=1, n_burn=4000, n_keep=4000)`
+   with a `# Monolithic chain (non-stateful use)` comment, plus the
+   `diagnosis=True` variant showing `mono["diagnosis"]` (per-parameter
+   R-hat / ESS / MCSE / summaries) and `mono["diagnosis_plot"]()`
+   (trace + autocorrelation + density; needs `arviz`). No LOO (that is
+   model-specific).
+7. **Stateful-API usage**, in order: `model.step()`,
+   `model.get_history()`, `model.get_current()`,
+   `model.predict_at({"<X>": X_test})`, then
+   `model.set_current({...})` LAST, AFTER `predict_at`, and COMMENTED
+   OUT (its updated value comes from an outer Gibbs composition, so as
+   live code it would error in a standalone run).
 
 ```python
 # Initialize with full history (keep_history=False keeps only the last draw)
@@ -146,6 +153,89 @@ y_rep = model.predict_at({})["y_rep"]        # posterior predictive at training 
 # model.step(1)             # refresh derived state — hybrid composites only
 # model.readapt_NUTS(500)   # re-tune metric (default: reset=False)
 # model.readapt_NUTS(500, True)   # use reset=True if data change is dramatic
+```
+
+### Python runner template — standard body (DEFAULT)
+
+This is the DEFAULT `run_chain_<ClassName>` body. Use it unless the
+composite has a NUTS-family child whose conditional posterior shifts
+across outer Gibbs sweeps — in that case use the periodic-readapt body
+in the next subsection instead.
+
+```python
+def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
+                          newdata=None, diagnosis=False):
+    if newdata is None:
+        newdata = {}
+    model = mod.<ClassName>(<data_args>, rng_seed=int(seed), keep_history=True)
+    t0 = time.time()
+    model.step(int(n_burn))
+    model.step(int(n_keep))
+    wall = time.time() - t0
+    # get_history()/predict_at() return per-iteration draws for EVERY iteration
+    # stepped (burn-in + keep). Slice off burn-in so downstream sees only kept draws.
+    keep = slice(int(n_burn), int(n_burn) + int(n_keep))
+    def _slice(d):
+        return {k: (np.asarray(v)[keep] if np.asarray(v).ndim == 1 else np.asarray(v)[keep, ...])
+                for k, v in d.items()}
+    out = {"hist": _slice(model.get_history()),
+           "pp":   _slice(model.predict_at(newdata)),   # {} = posterior predictive at training X
+           "wall_sec": wall}
+    if diagnosis:
+        out["diagnosis"], out["diagnosis_plot"] = \
+            AI4BayesCode.diagnose(out["hist"], n_burn=0)   # already sliced -> n_burn=0
+    return out
+```
+
+**Note — pre-slice vs. n_burn.** The standard body above pre-slices the
+history inside the runner, so it calls `AI4BayesCode.diagnose(..., n_burn=0)`
+(the draws are already burn-in-stripped). The periodic-readapt body below
+does NOT pre-slice and passes `n_burn=int(n_burn)` — mixing these up (calling
+`diagnose(..., n_burn=int(n_burn))` on already-sliced draws, or vice versa) is
+an easy mistake that silently drops or double-strips warmup.
+
+**Return-shape contract.** `run_chain_<ClassName>` MUST return a dict
+whose `"hist"` is a dict of numpy arrays keyed by parameter name —
+scalars as `(n_keep,)` 1-D arrays, vectors as `(n_keep, dim)` 2-D
+arrays. NEVER a list-of-per-step-dicts (the R2 `_stack_param` helper
+branches on `arr.ndim == 1`, so a list breaks it). This is exactly what
+`model.get_history()` returns. For multi-chain R-hat, run 2+ chains with
+overdispersed init via `model.set_current(...)` after construction, then
+use `arviz` OR the shipped `AI4BayesCode.rhat_summary` (which exists but
+the rest of this skill never mentions).
+
+### Constructor reference block
+
+The constructor block must list ALL arguments the user can pass, their
+types, and brief descriptions. If hyperparameters are exposed as
+constructor arguments (see `codegen.md` §2 and `codegen_priors.md`),
+document those too with their defaults. Also document what
+`run_chain_<ClassName>()` returns (which keys, each array's shape).
+
+Concrete example — the constructor block for a BART model:
+
+```python
+# -------------------------------------------------------------------------
+#   BartNoise(
+#       X:            (N, p) float array   — predictor matrix
+#       y:            (N,)   float array   — response vector
+#       ntrees:       int    = 200         — number of trees
+#       rng_seed:     int                  — RNG seed (0 = random_device)
+#       keep_history: bool   = False       — record per-iter draws
+#   )
+#   NOTE: sigma is initialized internally to bart_model's OLS-based sigest.
+#         For an overdispersed start (R-hat diagnostics), call
+#         model.set_current({"sigma": ...}) AFTER construction.
+#
+#   Methods:
+#     .step(n)         — run n Gibbs sweeps (one BART + one NUTS-sigma)
+#     .get_current()   -> {"f_bart": (N,), "sigma": float}
+#     .set_current(d)  — overwrite sigma; f_bart is read-only
+#
+#   run_chain_<ClassName>() returns:
+#     out["hist"]["f_bart"] — (n_keep, N) posterior draws of f
+#     out["hist"]["sigma"]  — (n_keep,)   posterior draws of sigma
+# -------------------------------------------------------------------------
 ```
 
 ### Modular NUTS in composite — periodic readapt schedule (CONDITIONAL)
@@ -501,6 +591,9 @@ except NotImplementedError:
           "diagnostic only, does not gate.")
 
 # === Performance hint ===
+# total_wall_sec is the true elapsed wall time from _run_two_chains; do NOT
+# use c1["wall_sec"] + c2["wall_sec"] — the two chains run in PARALLEL under
+# multiprocessing, so summing per-chain times double-counts.
 AI4BayesCode.perf_hint(
     wall_sec=total_wall_sec,
     n_sweeps_total=2 * (n_burn + n_keep),
@@ -516,22 +609,69 @@ else:
 
 ### Special case: per-step outputs NOT in `get_history()`
 
-Same rule as R version: when a per-step posterior summary (e.g. an
+Same rule as the R version. When a per-step posterior summary (e.g. an
 intermediate quantity computed inside `step()` but not registered with
 shared_data) needs to flow into R3, generate a Python helper that
 recomputes from `get_history()` outputs and the cached `predict_at`
 result. Do NOT add `.method()` entries to `PYBIND11_MODULE` to expose
 intermediate scratch — that breaks the §1 invariant.
 
+**Codegen LLMs MUST NOT hallucinate history keys.** Before emitting
+`hist['<key>']` in a generated runner, verify `<key>` is in the block's
+documented `get_history()` output. If a field is only under
+`get_current()`, route it through `get_current()` per step — do NOT
+pretend it lives in `hist`. (Motivating bug: a runner referenced
+`hist['order_sampled_DAG']`, which does not exist — it compiled but
+crashed at first use.)
+
+**Known case:** `order_mcmc_block` exposes `sampled_DAG` (a p×p adjacency
+matrix) ONLY via `get_current()`; its `get_history()` returns only
+`order`, `order_log_score`, and (when a Tier-A wrapper adds it) `y_rep`.
+The DAG is history-omitted because it is heavy: p=20, T=40000 ≈ 130 MB;
+p=64 (block ceiling) ≈ 1.3 GB.
+
+**Collection-loop pattern** — step through burn-in, then collect the
+per-step `get_current()` field draw-by-draw, storing the result at the
+TOP LEVEL of `out` (parallel to `"hist"`, NOT inside it):
+
+```python
+model.step(int(n_burn))
+p_var = data_obs.shape[1]
+dags = np.zeros((int(n_keep), p_var, p_var), dtype=int)
+for s in range(int(n_keep)):
+    model.step(1)
+    # sampled_DAG[i, j] = 1 iff j is a parent of i (row-major).
+    dags[s] = np.asarray(model.get_current()["sampled_DAG"])
+out = {"hist": _slice(model.get_history()),
+       "dags": dags,                                    # top-level, NOT inside "hist"
+       "wall_sec": time.time() - t0}
+```
+
 ## 9a. Model-specific Python-side preprocessing
 
 The R-skill §9a documents the SoftBart `sigma_hat` recipe (R-side
-cross-validated lasso + variance scaling). The Python equivalent uses
-`sklearn.linear_model.LassoCV` (cross-validated lasso) followed by the
-same scale-by-sd-of-residuals step. See `codegen_r_runner.md` §9a for
-the exact recipe + hard rules (the math is language-agnostic); the
-Python translation is mechanical (`numpy` + `sklearn` for what R
-does with `glmnet` + base R).
+cross-validated lasso + variance scaling). See `codegen_r_runner.md`
+§9a for the full recipe + hard rules (the math is language-agnostic).
+The Python translation uses `sklearn.linear_model.LassoCV`, but three
+specifics must be reproduced by hand — sklearn does NOT match `glmnet`
+out of the box:
+
+1. **`LassoCV` has NO native 1-SE selection.** R's SoftBart uses
+   `lambda.1se` (more regularized than `lambda.min`). Implement 1-SE
+   manually from the per-alpha cross-validation MSE path: for each
+   alpha compute the mean and standard error of the CV MSE across
+   folds (`LassoCV` exposes `mse_path_`), find the minimum-mean alpha,
+   then pick the LARGEST alpha (strongest regularization) whose mean
+   MSE is within one SE of that minimum.
+2. **`sigma_hat` is RMSE, not `sd`.** Compute
+   `sqrt(mean(resid**2))` (denominator N), NOT `sd(resid)`
+   (denominator N-1), from the in-sample residuals at the 1-SE alpha.
+3. **Min-max normalize Y to [-0.5, 0.5] BEFORE the lasso**, and
+   un-normalize predictions on the way out. Save
+   `(a, b) = (min(y), max(y))`, fit the lasso on
+   `(y - a) / (b - a) - 0.5`, and inverse-transform any posterior
+   summary via `(z + 0.5) * (b - a) + a`. The C++ kernel side does not
+   change.
 
 ## 10. Reference templates
 
