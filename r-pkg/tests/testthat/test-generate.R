@@ -290,7 +290,12 @@ test_that("effort invalid for the model errors non-interactively", {
 test_that("ai4bayescode_set_key sets the session env var; never prints the full key", {
     old <- Sys.getenv("OPENAI_API_KEY", unset = NA)
     on.exit(if (is.na(old)) Sys.unsetenv("OPENAI_API_KEY") else Sys.setenv(OPENAI_API_KEY = old))
-    msg <- capture.output(ai4bayescode_set_key("sk-proj-abcdef123456789", "openai"), type = "message")
+    # Use testthat::capture_messages (a condition handler), NOT
+    # capture.output(type="message"): under devtools::test the progress reporter
+    # muffles messages at the condition level before they reach the message
+    # connection, so capture.output(type="message") returns character(0) and the
+    # masked-prefix check below silently fails. capture_messages() is reporter-safe.
+    msg <- testthat::capture_messages(ai4bayescode_set_key("sk-proj-abcdef123456789", "openai"))
     expect_identical(Sys.getenv("OPENAI_API_KEY"), "sk-proj-abcdef123456789")
     expect_identical(AI4BayesCode:::.ai4b_provider_key("openai"), "sk-proj-abcdef123456789")
     expect_false(any(grepl("abcdef123456789", msg)))   # full key NOT echoed in the message
@@ -308,7 +313,8 @@ test_that("ai4bayescode_key_status masks keys and returns a presence vector", {
     Sys.setenv(ANTHROPIC_API_KEY = "sk-ant-api-XYZ987654321")
     st  <- suppressMessages(ai4bayescode_key_status())
     expect_true(st[["anthropic"]])
-    msg <- capture.output(suppressWarnings(ai4bayescode_key_status()), type = "message")
+    msg <- testthat::capture_messages(suppressWarnings(ai4bayescode_key_status()))  # reporter-safe (see above)
+    expect_true(any(grepl("sk-ant", msg)))             # masked prefix IS shown (was vacuous before)
     expect_false(any(grepl("XYZ987654321", msg)))      # full key NOT echoed
 })
 
