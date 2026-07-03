@@ -414,12 +414,11 @@ for k, v_before in cur_before.items():
     assert np.allclose(v_before, v_after), f"R1: predict_at mutated {k}"
 print("R1 smoke OK")
 
-# === R2. 2-chain MCMC convergence (parallel via multiprocessing) ===
+# === R2. 2-chain MCMC convergence (sequential; see _run_two_chains) ===
 # Defer to validator.md §R2 for the budget/escalation policy + the
 # Dirac spike-and-slab §R2.s exclusion rule for per-coordinate slab
 # DISTRIBUTION parameters (e.g. per-j slab variance tau2_beta /
 # tau2_theta) — NOT the slab-modelled beta_j / theta_jk themselves.
-import multiprocessing as mp
 import arviz as az
 
 def _worker(args):
@@ -435,12 +434,20 @@ n_burn = 4000; n_keep = 4000
 USES_JOINT_NUTS = <True if composite has joint_nuts_block else False>
 
 def _run_two_chains(n_burn, n_keep):
-    """Run the two diagnostic chains in parallel; return (c1, c2, wall)."""
+    """Run the two diagnostic chains SEQUENTIALLY; return (c1, c2, wall).
+
+    Sequential ON PURPOSE: this runner is a standalone script run via
+    `python runner.py`. A module-level process Pool under the 'spawn' start
+    method (the macOS / Windows default) re-imports the runner in every worker
+    -> a bootstrapping RuntimeError, so the runner never reaches its
+    AI4BAYES_VALIDATE line (validation fails at stage `incomplete`). Two chains
+    run fast enough sequentially, and this mirrors the R runner, which also
+    runs its two validation chains sequentially.
+    """
     t0 = time.time()
-    ctx = mp.get_context("spawn")
-    with ctx.Pool(2) as pool:
-        chains = pool.map(_worker, [(101, n_burn, n_keep), (202, n_burn, n_keep)])
-    return chains[0], chains[1], time.time() - t0
+    c1 = _worker((101, n_burn, n_keep))
+    c2 = _worker((202, n_burn, n_keep))
+    return c1, c2, time.time() - t0
 
 c1, c2, total_wall_sec = _run_two_chains(n_burn, n_keep)
 
@@ -531,8 +538,13 @@ elif d["ess_ratio"] < 0.01:
 # R3.a Bayesian p-values on (up to) 6 summary statistics. y_rep is the
 # posterior-predictive draw matrix (n_keep × N) from predict_at(). The p-value
 # for statistic T is P(T(y_rep) >= T(y_obs)) over posterior-predictive draws.
-# Gate: every p-value strictly inside (pv_lo, pv_hi). Interval is (0.05, 0.95)
-# normally, tightened to (0.02, 0.98) when the composite uses joint_nuts_block.
+# DIAGNOSTIC ONLY -- print, WARN on an EGREGIOUS excursion, but NEVER assert /
+# gate on it. A posterior-predictive p-value is ~Uniform(0, 1) even for a
+# perfectly-sampled, CORRECTLY-specified model, so across 6 statistics ~22% of
+# CORRECT samplers would land at least one outside (0.02, 0.98) by chance, and
+# order statistics (min / max) are legitimately extreme. Sampler correctness is
+# gated by rank-R-hat (R2); a Bayesian p-value is a MODEL-FIT check the user
+# owns, not a sampler gate. (Mirrors R3.b PSIS-LOO, also diagnostic-only.)
 bp_stat = {
     "mean": np.mean, "sd": lambda x: np.std(x, ddof=1),
     "min": np.min,   "max": np.max,
@@ -542,19 +554,23 @@ bp_stat = {
 y_rep = np.asarray(c1["pp"]["y_rep"])      # (n_keep × N)
 pv = {nm: float(np.mean(np.array([f(row) for row in y_rep]) >= f(y_obs)))
       for nm, f in bp_stat.items()}
-pv_lo = 0.02 if USES_JOINT_NUTS else 0.05
-pv_hi = 1.0 - pv_lo
 print("\n  Bayesian p-values: " +
       "  ".join(f"{nm}={p:.2f}" for nm, p in pv.items()))
-assert all(pv_lo < p < pv_hi for p in pv.values()), \
-    f"R3 FAIL: a Bayesian p-value fell outside ({pv_lo}, {pv_hi}): {pv}"
+_bpv_extreme = {nm: p for nm, p in pv.items() if p < 0.005 or p > 0.995}
+if _bpv_extreme:
+    import warnings
+    warnings.warn(
+        f"[R3.a] Bayesian p-value(s) near 0/1 (DIAGNOSTIC, NOT a failure): "
+        f"{_bpv_extreme}. Expected for order statistics; investigate model fit "
+        f"only if a CENTRAL statistic (mean / sd) is extreme AND R-hat flags.")
 
 # R3.b PSIS-LOO (DIAGNOSTIC ONLY — NEVER gates). Pareto-k_hat measures LOO
 # importance-weight reliability, NOT sampler correctness; GP latent-variable
 # and hierarchical-latent models routinely fail this diagnostic even with a
 # correctly sampled posterior (Vehtari, Simpson, Gelman, Yao, Gabry, JMLR
-# 2024, arXiv:1507.02646). Sampler-correctness gates are R-hat (R2) and the
-# Bayesian p-values (R3.a); this is recorded + warned, never asserted.
+# 2024, arXiv:1507.02646). Sampler correctness is gated by R-hat (R2) ONLY;
+# the Bayesian p-values (R3.a) and this are diagnostics -- recorded + warned,
+# never asserted.
 #
 # Emit the per-observation log-likelihood that matches the model's
 # observation family (Gaussian example below; replace the body — see
@@ -591,9 +607,9 @@ except NotImplementedError:
           "diagnostic only, does not gate.")
 
 # === Performance hint ===
-# total_wall_sec is the true elapsed wall time from _run_two_chains; do NOT
-# use c1["wall_sec"] + c2["wall_sec"] — the two chains run in PARALLEL under
-# multiprocessing, so summing per-chain times double-counts.
+# total_wall_sec is the true elapsed wall time from _run_two_chains; the two
+# chains run SEQUENTIALLY, so it already reflects total work -- use it directly
+# rather than re-deriving from c1["wall_sec"] + c2["wall_sec"].
 AI4BayesCode.perf_hint(
     wall_sec=total_wall_sec,
     n_sweeps_total=2 * (n_burn + n_keep),
