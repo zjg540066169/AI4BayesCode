@@ -1182,7 +1182,7 @@ def _write_emitted(txt, output_path, classname):
 # generate()
 # ---------------------------------------------------------------------------
 def generate(model_description: str | None = None, *, classname: str | None = None,
-             LLM: str = "claude-opus-4-8", effort: str = "high",
+             LLM: str | None = None, effort: str | None = None,
              output_path: str = "./generated", backend: str | None = None,
              API_key: str | None = None, interactive: bool | None = None,
              use_cli: bool = False, priors=None, confirm_model: bool | None = None,
@@ -1232,9 +1232,9 @@ def generate(model_description: str | None = None, *, classname: str | None = No
             except Exception:
                 pass
     ask = _ask or _console_ask
-    llm = _resolve_llm(LLM)
+    llm = _resolve_llm(LLM or "claude-opus-4-8")
 
-    # interactive-if-missing
+    # interactive-if-missing: ONLY ask for a runtime setting the caller did NOT pass.
     if interactive:
         if not model_description:
             model_description = ask("Model description (text, or path to a .txt)")
@@ -1245,13 +1245,13 @@ def generate(model_description: str | None = None, *, classname: str | None = No
         # environment. (Filtering by env key used to HIDE every Claude model when a
         # stray OPENAI_API_KEY was present -- confusing. If the chosen provider has
         # no key, the request fails later with a clear set_key() message.)
-        _choices = [m["name"] for m in models()]
-        LLM = ask("LLM model?", options=_choices,
-                  default=LLM if (LLM in _choices) else _choices[0])
+        if LLM is None:                       # ask the model ONLY if not provided
+            _choices = [m["name"] for m in models()]
+            LLM = ask("LLM model?", options=_choices, default=_choices[0])
         llm = _resolve_llm(LLM)
         lv = _model_effort_levels(llm["model"])
-        if lv:
-            dflt = effort if (effort and effort in lv) else ("high" if "high" in lv else lv[-1])
+        if effort is None and lv:             # ask effort ONLY if not provided
+            dflt = "high" if "high" in lv else lv[-1]
             effort = ask("Thinking / effort level?", options=lv, default=dflt)
         if backend is None:
             backend = ask("Backend? (both = ONE .cpp usable from BOTH R and Python)",
@@ -1286,9 +1286,11 @@ def generate(model_description: str | None = None, *, classname: str | None = No
                 print(f"effort '{effort}' is not a valid level for {llm['model']}.")
             dflt = "high" if "high" in lv else lv[-1]
             effort = ask(f"Effort / reasoning level for {llm['model']}?", options=lv, default=dflt)
-        else:
+        elif effort:                           # provided but invalid -> error
             raise ValueError(
                 f"effort '{effort}' is not valid for {llm['model']}; valid: {', '.join(lv)}.")
+        else:                                  # not provided -> default to the model's 'high'
+            effort = "high" if "high" in lv else lv[-1]
 
     if API_key is None:
         API_key = _provider_key(llm["provider"])

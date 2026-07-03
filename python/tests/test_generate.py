@@ -153,7 +153,11 @@ def test_effort_levels_are_per_model():
 
 def test_default_llm_is_bare_model_id():
     import inspect
-    assert inspect.signature(gen.generate).parameters["LLM"].default == "claude-opus-4-8"
+    # LLM/effort now default to None (asked ONLY if not provided); the effective
+    # model when unset is the bare model id claude-opus-4-8.
+    assert inspect.signature(gen.generate).parameters["LLM"].default is None
+    assert inspect.signature(gen.generate).parameters["effort"].default is None
+    assert gen._resolve_llm("claude-opus-4-8")["model"] == "claude-opus-4-8"
 
 
 # ---------------------------------------------------------------------------
@@ -629,8 +633,9 @@ def test_effort_invalid_for_model_errors_non_interactive():
 
 
 def test_interactive_model_and_effort_menus_shown(tmp_path):
-    # interactive: the flow offers an LLM-model menu, then an effort menu drawn
-    # from THAT model's valid levels (sonnet excludes xhigh).
+    # interactive: LLM is PROVIDED here, so the model menu is NOT shown (it is
+    # asked only when unset). effort=xhigh is INVALID for sonnet, so the flow
+    # re-asks with an effort menu drawn from THAT model's levels (excludes xhigh).
     asked = []
     eff_opts = {}
     def ask(prompt, options=None, default=None):
@@ -649,8 +654,8 @@ def test_interactive_model_and_effort_menus_shown(tmp_path):
                        interactive=True, verbose=False,
                        _responder=responder, _ask=ask,
                        _validate=lambda *a, **k: {"ok": True})
-    assert any("LLM model" in p for p in asked)        # model menu shown
-    assert any("effort" in p.lower() for p in asked)   # effort menu shown
+    assert not any("LLM model" in p for p in asked)    # LLM provided -> model menu NOT shown
+    assert any("effort" in p.lower() for p in asked)   # invalid effort -> effort re-ask menu
     assert "xhigh" not in eff_opts["opts"]             # sonnet's levels exclude xhigh
     assert "high" in eff_opts["opts"]
     assert res["called_api"]

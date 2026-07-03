@@ -1449,8 +1449,8 @@ ai4bayescode_stream_check <- function(LLM = "claude-opus-4-8", API_key = NULL,
 #' @export
 ai4bayescode_generate <- function(model_description = NULL,
                               classname    = NULL,
-                              LLM          = "claude-opus-4-8",
-                              effort       = "high",
+                              LLM          = NULL,
+                              effort       = NULL,
                               output_path  = "./generated",
                               backend      = NULL,
                               API_key      = NULL,
@@ -1472,9 +1472,9 @@ ai4bayescode_generate <- function(model_description = NULL,
     # user's session (validation itself compiles into a throwaway env).
     caller_env <- parent.frame()
 
-    llm <- .ai4b_resolve_llm(LLM)
+    llm <- .ai4b_resolve_llm(LLM %||% "claude-opus-4-8")
 
-    # ---- interactive-if-missing fill ----
+    # ---- interactive-if-missing fill: ONLY ask for a setting the caller did NOT pass ----
     if (interactive) {
         if (is.null(model_description) || !nzchar(model_description))
             model_description <- ask("Model description (text, or path to a .txt)")
@@ -1484,16 +1484,16 @@ ai4bayescode_generate <- function(model_description = NULL,
         # is about CHOOSING a model, not about which key happens to be set. (Filtering
         # by env key used to HIDE every Claude model when a stray OPENAI_API_KEY was
         # present.) The chosen provider's key is requested downstream.
-        .mdl    <- ai4bayescode_models()
-        .choices <- .mdl$name
-        LLM <- ask("LLM model?", options = .choices,
-                   default = if (!is.null(LLM) && LLM %in% .choices) LLM else .choices[1])
-        llm <- .ai4b_resolve_llm(LLM)
+        if (is.null(LLM)) {                        # ask the model ONLY if not provided
+            .mdl     <- ai4bayescode_models()
+            .choices <- .mdl$name
+            LLM <- ask("LLM model?", options = .choices, default = .choices[1])
+        }
+        llm <- .ai4b_resolve_llm(LLM %||% "claude-opus-4-8")
         lv  <- .ai4b_model_effort_levels(llm$model)
-        if (length(lv))
+        if (is.null(effort) && length(lv))         # ask effort ONLY if not provided
             effort <- ask("Thinking / effort level?", options = lv,
-                          default = if (!is.null(effort) && !is.na(effort) && effort %in% lv) effort
-                                    else if ("high" %in% lv) "high" else lv[length(lv)])
+                          default = if ("high" %in% lv) "high" else lv[length(lv)])
         if (is.null(backend))
             backend <- ask("Backend? (both = ONE .cpp usable from BOTH R and Python)",
                            options = c("both", "R", "Python"), default = "both")
@@ -1527,9 +1527,11 @@ ai4bayescode_generate <- function(model_description = NULL,
             dflt <- if ("high" %in% lv) "high" else lv[length(lv)]
             effort <- ask(sprintf("Effort / reasoning level for %s?", llm$model),
                           options = lv, default = dflt)
-        } else {
+        } else if (!is.null(effort) && nzchar(effort)) {   # provided but invalid -> error
             stop("effort '", effort, "' is not valid for ", llm$model,
                  "; valid levels: ", paste(lv, collapse = ", "), ".", call. = FALSE)
+        } else {                                           # not provided -> default to 'high'
+            effort <- if ("high" %in% lv) "high" else lv[length(lv)]
         }
     }
 
