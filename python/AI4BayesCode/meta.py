@@ -24,9 +24,13 @@ def version() -> str:
 
 def include_path() -> str:
     """Absolute path to the bundled C++ header tree. Mirrors R
-    ``ai4bayescode_include_path()``; same target as ``vendored_include_path()``."""
+    ``ai4bayescode_include_path()``; same target as ``vendored_include_path()``.
+
+    Mirrors R's ``system.file()`` contract: returns ``""`` (empty string) when
+    the vendored include directory does not exist."""
     from .source import vendored_include_path
-    return str(vendored_include_path())
+    p = vendored_include_path()
+    return str(p) if p.is_dir() else ""
 
 
 def list_skills() -> list[str]:

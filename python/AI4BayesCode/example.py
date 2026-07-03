@@ -29,13 +29,16 @@ def examples_path(name: str | None = None) -> str:
     """Absolute path to the bundled examples directory, or to ``<name>.cpp`` in it.
 
     Python analogue of R's ``ai4bayescode_examples_path()``. ``example("Foo")`` is
-    the same as ``source(examples_path("Foo"))``.
+    the same as ``source(examples_path("Foo"))``. Mirrors R's ``system.file()``
+    contract: returns ``""`` (empty string) when the resolved directory
+    (``name is None``) or ``<name>.cpp`` file does not exist. Returns a ``str``.
     """
     d = _examples_dir()
     if name is None:
-        return str(d)
+        return str(d) if d.is_dir() else ""
     fname = name if name.endswith(".cpp") else f"{name}.cpp"
-    return str(d / fname)
+    p = d / fname
+    return str(p) if p.exists() else ""
 
 
 def example(name: str, *, rebuild: bool = False, quiet: bool = False, **kwargs):

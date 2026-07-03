@@ -135,7 +135,16 @@ def _check_core_dep(depends: str, name: str) -> None:
         return
 
     def _v(s):
-        return tuple(int(x) for x in s.split(".") if x.isdigit())
+        # Parse each dot-separated segment's LEADING-INTEGER run so mixed
+        # segments keep the patch level ("1.2.3a" -> (1, 2, 3)), matching R's
+        # utils::compareVersion (which compares numeric prefixes segment-wise).
+        # The old `if x.isdigit()` silently DROPPED any non-numeric segment,
+        # collapsing "1.2.3a" -> (1, 2) and losing the patch level.
+        out = []
+        for seg in s.split("."):
+            m = re.match(r"\d+", seg)
+            out.append(int(m.group(0)) if m else 0)
+        return tuple(out)
     if _v(have) < _v(need):
         print(f"warning: block '{name}' wants AI4BayesCode core (>= {need}) "
               f"but you have {have}; it may not compile.", file=sys.stderr)
@@ -233,7 +242,13 @@ def remove_block(name: str) -> bool:
     if not os.path.isdir(dest):
         print(f"Block '{name}' is not installed.")
         return False
-    shutil.rmtree(dest)
+    # A symlinked block dir must be unlinked, not rmtree'd: shutil.rmtree raises
+    # on a symlink to a directory, whereas R's unlink(recursive = TRUE) removes
+    # it. Guard to match R behavior (and avoid deleting through the symlink).
+    if os.path.islink(dest):
+        os.unlink(dest)
+    else:
+        shutil.rmtree(dest)
     print(f"Removed block '{name}'.")
     return True
 

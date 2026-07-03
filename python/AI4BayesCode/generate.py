@@ -37,18 +37,29 @@ __all__ = ["prompt", "generate", "models", "skills_path", "set_key", "key_status
 # ---------------------------------------------------------------------------
 # Skills
 # ---------------------------------------------------------------------------
-def skills_path(name: str | None = None) -> Path:
+def skills_path(name: str | None = None) -> str:
+    """Absolute path to the bundled skills directory, or to a named skill file.
+
+    Python analogue of R's ``ai4bayescode_skills_path()``. Mirrors R's
+    ``system.file()`` contract: returns ``""`` (empty string) when the resolved
+    directory (``name is None``) or file does not exist. Returns a ``str``.
+    """
     import importlib.resources
     pkg = Path(str(importlib.resources.files("AI4BayesCode")))
     if name == "start.md":   # entry-point doc at the package root, not in _skills/
-        return pkg / "start.md"
-    base = pkg / "_skills"
-    return base if name is None else base / name
+        p = pkg / "start.md"
+    else:
+        base = pkg / "_skills"
+        p = base if name is None else base / name
+    return str(p) if p.exists() else ""
 
 
 def _skill(name: str) -> str:
+    p = skills_path(name)
+    if not p:
+        return ""
     try:
-        return skills_path(name).read_text()
+        return Path(p).read_text()
     except OSError:
         return ""
 

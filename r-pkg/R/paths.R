@@ -10,8 +10,11 @@
 #' @importFrom RcppArmadillo RcppArmadillo.package.skeleton
 #' @importFrom utils packageVersion head tail
 #'
-#' @param file Optional file name (relative to the directory). If
-#'   `NULL`, returns the directory itself.
+#' @param name Optional file name (relative to the directory). If
+#'   `NULL`, returns the directory itself. For
+#'   `ai4bayescode_examples_path()`, a name without a `.cpp` extension
+#'   has `.cpp` appended (so `"GaussianLocationScale"` resolves the same
+#'   as `"GaussianLocationScale.cpp"`).
 #' @return Absolute path as a character string. Returns `""` if the
 #'   package is not installed correctly or the requested file does not
 #'   exist.
@@ -40,23 +43,27 @@ ai4bayescode_include_path <- function() {
 
 #' @rdname ai4bayescode_paths
 #' @export
-ai4bayescode_skills_path <- function(file = NULL) {
-    if (is.null(file)) {
+ai4bayescode_skills_path <- function(name = NULL) {
+    if (is.null(name)) {
         system.file("skills", package = "AI4BayesCode")
-    } else if (identical(file, "start.md")) {
+    } else if (identical(name, "start.md")) {
         # start.md is the entry-point doc at the package root, not in skills/
         system.file("start.md", package = "AI4BayesCode")
     } else {
-        system.file("skills", file, package = "AI4BayesCode")
+        system.file("skills", name, package = "AI4BayesCode")
     }
 }
 
 #' @rdname ai4bayescode_paths
 #' @export
-ai4bayescode_examples_path <- function(file = NULL) {
-    if (is.null(file)) {
+ai4bayescode_examples_path <- function(name = NULL) {
+    if (is.null(name)) {
         system.file("examples", package = "AI4BayesCode")
     } else {
-        system.file("examples", file, package = "AI4BayesCode")
+        # A bare stem (no .cpp) has .cpp appended, so
+        # examples_path("Foo") resolves the same as "Foo.cpp"
+        # (matches Python's examples_path()).
+        if (!grepl("\\.cpp$", name)) name <- paste0(name, ".cpp")
+        system.file("examples", name, package = "AI4BayesCode")
     }
 }

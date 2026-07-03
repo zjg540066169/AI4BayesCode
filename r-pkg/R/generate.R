@@ -1096,10 +1096,14 @@ ai4bayescode_key_status <- function() {
 #' @param LLM Model id (default `"claude-opus-4-8"`); see [ai4bayescode_models()].
 #' @param API_key Optional; defaults to the session key from [ai4bayescode_set_key()].
 #' @param effort Optional thinking level; default `NULL` (fast + cheap).
+#' @param progress Logical; if `TRUE` (default) print the framing messages
+#'   (`Streaming check -> ...` and `[streaming OK] ...`) and stream the reply
+#'   token-by-token. If `FALSE`, run the check silently (no console output) --
+#'   used by [ai4bayescode_generate()]'s pre-flight when `verbose = FALSE`.
 #' @return Invisibly, the parsed `list(content, stop_reason)`.
 #' @export
 ai4bayescode_stream_check <- function(LLM = "claude-opus-4-8", API_key = NULL,
-                                      effort = NULL) {
+                                      effort = NULL, progress = TRUE) {
     if (!requireNamespace("httr2", quietly = TRUE))
         stop("'httr2' is required for the streaming check.", call. = FALSE)
     llm <- .ai4b_resolve_llm(LLM)
@@ -1110,19 +1114,21 @@ ai4bayescode_stream_check <- function(LLM = "claude-opus-4-8", API_key = NULL,
            else .ai4b_provider_key(llm$provider)
     if (is.null(key) || !nzchar(key))
         stop("No API key. Pass API_key= or call ai4bayescode_set_key().", call. = FALSE)
-    message(sprintf("Streaming check -> %s. Reply should appear token-by-token:", llm$model))
+    if (isTRUE(progress))
+        message(sprintf("Streaming check -> %s. Reply should appear token-by-token:", llm$model))
     sys  <- "You are a connectivity test. Answer in ONE short sentence."
     msgs <- list(list(role = "user",
                       content = "In one short sentence, confirm you are streaming this reply."))
     t0 <- Sys.time()
     parsed <- .ai4b_anthropic_request(sys, msgs, llm$model, effort, tools = NULL,
                                       api_key = key, max_tokens = 128L, timeout = 60,
-                                      stream = TRUE, progress = TRUE, live = TRUE)
+                                      stream = TRUE, progress = progress, live = TRUE)
     txt <- paste(vapply(Filter(function(b) identical(b$type, "text"), parsed$content),
                         function(b) b$text, ""), collapse = "")
-    message(sprintf("[streaming OK] %d chars, stop=%s, %.1fs",
-                    nchar(txt), parsed$stop_reason %||% "?",
-                    as.numeric(difftime(Sys.time(), t0, units = "secs"))))
+    if (isTRUE(progress))
+        message(sprintf("[streaming OK] %d chars, stop=%s, %.1fs",
+                        nchar(txt), parsed$stop_reason %||% "?",
+                        as.numeric(difftime(Sys.time(), t0, units = "secs"))))
     invisible(parsed)
 }
 
@@ -1583,7 +1589,8 @@ ai4bayescode_generate <- function(model_description = NULL,
     if (isTRUE(verify_stream) && identical(llm$provider, "anthropic") &&
         !use_cli_transport && is.null(responder)) {
         tryCatch(
-            ai4bayescode_stream_check(LLM = llm$model, API_key = API_key, effort = NULL),
+            ai4bayescode_stream_check(LLM = llm$model, API_key = API_key, effort = NULL,
+                                      progress = verbose),
             error = function(e)
                 stop("streaming pre-flight check failed (", conditionMessage(e),
                      "); aborting before the paid generation. Fix connectivity/key and ",

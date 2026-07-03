@@ -502,6 +502,10 @@ ai4bayescode_perf_hint <- function(wall_sec,
 #'   model-specific pointwise log-likelihood).
 #' @param hist Named list of posterior draws: scalars as numeric vectors,
 #'   vector parameters as matrices (draws in rows).
+#' @param n_burn Integer; number of leading draws to drop from EVERY key before
+#'   summarising. `get_history()` includes burn-in, so pass the burn-in length
+#'   here; use `0` (default) when `hist` is already burn-in-stripped (no change
+#'   for existing callers). Errors if `n_burn` leaves no post-burn-in draws.
 #' @param plot Logical; build the diagnostic plot. Defaults to `TRUE`.
 #' @return A list with `summary` (a `posterior::summarise_draws` table), `plot`
 #'   (a \pkg{bayesplot} object, a base-R plotting closure, or `NULL`), and
@@ -512,8 +516,14 @@ ai4bayescode_perf_hint <- function(wall_sec,
 #'   INVARIANT per-component summary for exchangeable (mixture/cluster) params.
 #'   Defaults to `FALSE`, in which case `ai4bayescode_diagnose` still scans for label
 #'   switching and warns when a high R-hat is a labelling artefact.
+#' @examples
+#' \dontrun{
+#' hist <- list(mu = rnorm(2000), sigma = abs(rnorm(2000)))
+#' ai4bayescode_diagnose(hist)                 # all draws
+#' ai4bayescode_diagnose(hist, n_burn = 1000)  # drop the first 1000 draws first
+#' }
 #' @export
-ai4bayescode_diagnose <- function(hist, plot = TRUE, order_components = FALSE) {
+ai4bayescode_diagnose <- function(hist, n_burn = 0, plot = TRUE, order_components = FALSE) {
     if (!requireNamespace("posterior", quietly = TRUE)) {
         stop("ai4bayescode_diagnose() needs the 'posterior' package. ",
              "Install it with install.packages('posterior').", call. = FALSE)
@@ -522,6 +532,33 @@ ai4bayescode_diagnose <- function(hist, plot = TRUE, order_components = FALSE) {
         stop("`hist` must be a named list of posterior draws ",
              "(scalars as vectors, vector parameters as matrices).",
              call. = FALSE)
+    }
+    # Drop the first n_burn draws of EVERY key (scalars: leading elements; matrices:
+    # leading rows). get_history() returns burn-in + keep, so callers pass the
+    # burn-in length; n_burn = 0 leaves hist untouched. Mirrors Python diagnose()'s
+    # `np.asarray(x)[n_burn:]` + the "no post-burn-in draws" ValueError.
+    n_burn <- as.integer(n_burn)
+    if (is.na(n_burn) || n_burn < 0L)
+        stop("`n_burn` must be a non-negative integer.", call. = FALSE)
+    if (n_burn > 0L) {
+        drop_burn_key <- function(x) {
+            if (is.null(dim(x))) {
+                n <- length(x)
+                if (n_burn >= n) return(x[integer(0)])
+                x[(n_burn + 1L):n]
+            } else {
+                n <- nrow(x)
+                if (n_burn >= n) return(x[integer(0), , drop = FALSE])
+                x[(n_burn + 1L):n, , drop = FALSE]
+            }
+        }
+        hist <- lapply(hist, drop_burn_key)
+        lens <- vapply(hist, function(x)
+            if (is.null(dim(x))) length(x) else nrow(x), integer(1))
+        if (length(lens) && min(lens) == 0L)
+            stop(sprintf(
+"ai4bayescode_diagnose: n_burn=%d leaves no post-burn-in draws (the shortest history key has <= %d draws). Reduce n_burn.",
+                n_burn, n_burn), call. = FALSE)
     }
     # Detect label switching on the RAW draws (before any ordering).
     label_switch <- .ai4b_label_switch_scan(hist)

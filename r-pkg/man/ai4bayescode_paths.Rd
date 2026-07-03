@@ -9,13 +9,16 @@
 \usage{
 ai4bayescode_include_path()
 
-ai4bayescode_skills_path(file = NULL)
+ai4bayescode_skills_path(name = NULL)
 
-ai4bayescode_examples_path(file = NULL)
+ai4bayescode_examples_path(name = NULL)
 }
 \arguments{
-\item{file}{Optional file name (relative to the directory). If
-`NULL`, returns the directory itself.}
+\item{name}{Optional file name (relative to the directory). If
+`NULL`, returns the directory itself. For
+`ai4bayescode_examples_path()`, a name without a `.cpp` extension
+has `.cpp` appended (so `"GaussianLocationScale"` resolves the same
+as `"GaussianLocationScale.cpp"`).}
 }
 \value{
 Absolute path as a character string. Returns `""` if the

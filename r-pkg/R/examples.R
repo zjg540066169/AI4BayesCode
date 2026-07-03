@@ -32,6 +32,9 @@ ai4bayescode_example <- function(name, env = parent.frame(), ...) {
         stop("`name` must be a single character string", call. = FALSE)
     }
 
+    # Tolerate a trailing .cpp so example("Foo.cpp") works, matching Python's
+    # example(). ai4bayescode_examples_path() re-appends .cpp for a bare stem.
+    name <- sub("\\.cpp$", "", name)
     cpp <- ai4bayescode_examples_path(paste0(name, ".cpp"))
     if (!nzchar(cpp)) {
         avail <- ai4bayescode_list_examples()
@@ -62,7 +65,9 @@ ai4bayescode_list_examples <- function() {
     dir <- ai4bayescode_examples_path()
     if (!nzchar(dir)) return(character(0))
     files <- list.files(dir, pattern = "\\.cpp$")
-    sort(sub("\\.cpp$", "", files))
+    # radix sort = C-locale/byte order so the ordering matches Python's
+    # sorted() (a locale sort would reorder e.g. BSplineRegression vs BartNoise).
+    sort(sub("\\.cpp$", "", files), method = "radix")
 }
 
 #' List all bundled AI4BayesCode skill files
@@ -86,18 +91,22 @@ ai4bayescode_list_examples <- function() {
 #' @export
 ai4bayescode_list_skills <- function() {
     dir <- ai4bayescode_skills_path()
-    files <- if (!nzchar(dir)) character(0) else list.files(dir, pattern = "\\.md$")
-    # start.md is the entry-point skill; it lives at the package root (not in
-    # skills/) but IS reachable via ai4bayescode_skills_path("start.md"), so it
-    # belongs in the listing for a coherent API.
+    mid <- if (!nzchar(dir)) character(0) else list.files(dir, pattern = "\\.md$")
+    # radix sort = byte order to match Python's sorted() (list_skills).
+    mid <- sort(unique(mid), method = "radix")
+    # Order must match Python's list_skills() contract exactly:
+    #   start.md FIRST, then the top-level skills/*.md (byte order), then
+    #   block_catalogue/index.md LAST. start.md lives at the package root (not
+    #   in skills/) but IS reachable via ai4bayescode_skills_path("start.md");
+    #   block_catalogue is a folder (index.md + per-block cards) that the
+    #   non-recursive list.files() above misses. Do NOT sort these two into the
+    #   middle -- prepend / append them so the API order is stable and coherent.
+    files <- mid
     if (nzchar(system.file("start.md", package = "AI4BayesCode")))
         files <- c("start.md", files)
-    # block_catalogue is now a folder (index.md + per-block cards) for lazy
-    # loading; list.files() above is non-recursive so it misses the index.
-    # Surface the index explicitly, the same way start.md is special-cased.
     if (nzchar(dir) && file.exists(file.path(dir, "block_catalogue", "index.md")))
         files <- c(files, "block_catalogue/index.md")
-    sort(unique(files))
+    files
 }
 
 #' Return the installed AI4BayesCode package version

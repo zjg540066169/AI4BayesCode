@@ -4,11 +4,16 @@
 \alias{ai4bayescode_diagnose}
 \title{Model-independent posterior diagnostics and plot}
 \usage{
-ai4bayescode_diagnose(hist, plot = TRUE, order_components = FALSE)
+ai4bayescode_diagnose(hist, n_burn = 0, plot = TRUE, order_components = FALSE)
 }
 \arguments{
 \item{hist}{Named list of posterior draws: scalars as numeric vectors,
 vector parameters as matrices (draws in rows).}
+
+\item{n_burn}{Integer; number of leading draws to drop from EVERY key before
+summarising. `get_history()` includes burn-in, so pass the burn-in length
+here; use `0` (default) when `hist` is already burn-in-stripped (no change
+for existing callers). Errors if `n_burn` leaves no post-burn-in draws.}
 
 \item{plot}{Logical; build the diagnostic plot. Defaults to `TRUE`.}
 
@@ -33,4 +38,11 @@ Computes per-parameter convergence diagnostics (split-R-hat,
   `run_chain_<Model>(diagnosis = TRUE)` runners call ONE function instead of
   re-emitting it. PSIS-LOO is intentionally excluded (it needs a
   model-specific pointwise log-likelihood).
+}
+\examples{
+\dontrun{
+hist <- list(mu = rnorm(2000), sigma = abs(rnorm(2000)))
+ai4bayescode_diagnose(hist)                 # all draws
+ai4bayescode_diagnose(hist, n_burn = 1000)  # drop the first 1000 draws first
+}
 }

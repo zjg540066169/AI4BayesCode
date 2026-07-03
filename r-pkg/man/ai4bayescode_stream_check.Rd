@@ -7,7 +7,8 @@
 ai4bayescode_stream_check(
   LLM = "claude-opus-4-8",
   API_key = NULL,
-  effort = NULL
+  effort = NULL,
+  progress = TRUE
 )
 }
 \arguments{
@@ -16,6 +17,11 @@ ai4bayescode_stream_check(
 \item{API_key}{Optional; defaults to the session key from [ai4bayescode_set_key()].}
 
 \item{effort}{Optional thinking level; default `NULL` (fast + cheap).}
+
+\item{progress}{Logical; if `TRUE` (default) print the framing messages
+(`Streaming check -> ...` and `[streaming OK] ...`) and stream the reply
+token-by-token. If `FALSE`, run the check silently (no console output) --
+used by [ai4bayescode_generate()]'s pre-flight when `verbose = FALSE`.}
 }
 \value{
 Invisibly, the parsed `list(content, stop_reason)`.

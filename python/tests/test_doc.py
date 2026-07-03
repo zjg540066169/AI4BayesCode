@@ -55,13 +55,15 @@ def test_doc_surfaces_python_block(tmp_path, capsys):
     p = tmp_path / "Fix.cpp"
     p.write_text(_WITH)
     r = docmod.doc(str(p))
-    assert r is not None
-    assert r["example"] == docmod._parse_example(_WITH, "python")
+    assert r is None                       # doc() is a display fn: prints the card, returns None (no IPython echo)
+    out = capsys.readouterr().out
+    ex = docmod._parse_example(_WITH, "python")
+    assert ex is not None
+    assert any(ln.strip() and ln.strip() in out for ln in ex)   # python @example surfaced in the printed card
 
 
 def test_doc_falls_back_when_absent(tmp_path):
     p = tmp_path / "G.cpp"
     p.write_text(_WITHOUT)
-    r = docmod.doc(str(p))
-    assert r is not None
-    assert r["example"] is None
+    assert docmod.doc(str(p)) is None      # display fn returns None (prints the card, no echo)
+    assert docmod._parse_example(_WITHOUT, "python") is None   # no @example block to surface

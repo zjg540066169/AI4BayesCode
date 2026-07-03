@@ -34,14 +34,25 @@ _PLATE_RE = re.compile(r"^(.*)_([0-9]+)$")
 def _dag_to_edges(dag: dict) -> tuple[list, list]:
     """Flatten the dag dict into (edges, data_inputs).
 
-    PREDICTION-ONLY: gibbs_reads / gibbs_invalidates are intentionally
-    skipped — see module docstring.
+    Mirrors the R ``ai4bayescode_plot_dag``: renders BOTH the solid predict
+    edges (generative / causal data flow) AND the dashed-grey ``context_edges``
+    (VIZ-ONLY prior / hyperprior context, never traversed by ``predict_at``).
+    PREDICTION-ONLY for the internal Gibbs graph: gibbs_reads /
+    gibbs_invalidates are intentionally skipped — see module docstring.
     """
     edges = []  # list of (from, to, type)
     predict = dag.get("predict_edges", {}) or {}
     for src, dst_list in predict.items():
         for dst in dst_list:
             edges.append((src, dst, "predict"))
+    # VIZ-ONLY prior / hyperprior context (faded, dashed). Guard: older DAG
+    # exports have no "context_edges" key. These edges are NEVER traversed by
+    # predict_at; they exist so the rendered DAG shows the generative origin of
+    # each sampled-parameter root (matches the R helper's context_edges).
+    context = dag.get("context_edges", {}) or {}
+    for src, dst_list in context.items():
+        for dst in dst_list:
+            edges.append((src, dst, "context"))
     data_inputs = list(dag.get("data_inputs", []) or [])
     return edges, data_inputs
 
@@ -183,7 +194,10 @@ def plot_dag(
     edge_styles = {
         "gibbs": dict(edge_color="black", style="solid", arrows=True),
         "refresh": dict(edge_color="purple", style="dashed", arrows=True),
-        "predict": dict(edge_color="red", style="solid", arrows=True),
+        "predict": dict(edge_color="#D62728", style="solid", arrows=True),
+        # VIZ-ONLY prior context: grey + dashed, matching the R helper's
+        # context edges (#AAAAAA, lty = 2). NOT traversed by predict_at.
+        "context": dict(edge_color="#AAAAAA", style="dashed", arrows=True),
     }
     for t, style in edge_styles.items():
         subset = [(u, v) for u, v, data in G.edges(data=True)
@@ -202,6 +216,7 @@ def plot_dag(
 
     # Legend
     from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
     legend_items = [
         Patch(color="#2ecc71", label="Data input"),
         Patch(color="#3498db", label="Sampled param"),
@@ -209,8 +224,18 @@ def plot_dag(
         Patch(color="#e67e22", label="Terminal"),
         Patch(color="#95a5a6", label="Hyperparam"),
     ]
-    ax.legend(handles=legend_items, loc="upper right", fontsize=8,
-              frameon=True, title="Node role")
+    node_legend = ax.legend(handles=legend_items, loc="upper right",
+                            fontsize=8, frameon=True, title="Node role")
+    # Edge legend (matches R): solid red = predict (generative), dashed grey =
+    # prior context. Only show the context entry when such edges are present.
+    edge_items = [Line2D([0], [0], color="#D62728", lw=2, linestyle="-",
+                         label="predict (generative)")]
+    if any(data.get("type") == "context" for _, _, data in G.edges(data=True)):
+        edge_items.append(Line2D([0], [0], color="#AAAAAA", lw=1.5,
+                                 linestyle="--", label="prior context"))
+    ax.legend(handles=edge_items, loc="lower right", fontsize=8,
+              frameon=True, title="Edges")
+    ax.add_artist(node_legend)
 
     if out_path is None:
         import tempfile
