@@ -31,8 +31,16 @@ from typing import Any, Optional
 _PLATE_RE = re.compile(r"^(.*)_([0-9]+)$")
 
 
-def _dag_to_edges(dag: dict) -> tuple[list, list]:
-    """Flatten the dag dict into (edges, data_inputs).
+def _dag_get(dag, key, default):
+    """Read a field from a DAG that may be a plain dict (R-side / JSON export) OR
+    a pybind ``DagInfo`` object (what Python's ``get_dag()`` returns -- it holds
+    the fields as ATTRIBUTES and has no ``.get`` method)."""
+    val = dag.get(key, default) if isinstance(dag, dict) else getattr(dag, key, default)
+    return val if val else default
+
+
+def _dag_to_edges(dag) -> tuple[list, list]:
+    """Flatten the dag (dict or pybind DagInfo) into (edges, data_inputs).
 
     Mirrors the R ``ai4bayescode_plot_dag``: renders BOTH the solid predict
     edges (generative / causal data flow) AND the dashed-grey ``context_edges``
@@ -41,7 +49,7 @@ def _dag_to_edges(dag: dict) -> tuple[list, list]:
     gibbs_invalidates are intentionally skipped — see module docstring.
     """
     edges = []  # list of (from, to, type)
-    predict = dag.get("predict_edges", {}) or {}
+    predict = _dag_get(dag, "predict_edges", {})
     for src, dst_list in predict.items():
         for dst in dst_list:
             edges.append((src, dst, "predict"))
@@ -49,11 +57,11 @@ def _dag_to_edges(dag: dict) -> tuple[list, list]:
     # exports have no "context_edges" key. These edges are NEVER traversed by
     # predict_at; they exist so the rendered DAG shows the generative origin of
     # each sampled-parameter root (matches the R helper's context_edges).
-    context = dag.get("context_edges", {}) or {}
+    context = _dag_get(dag, "context_edges", {})
     for src, dst_list in context.items():
         for dst in dst_list:
             edges.append((src, dst, "context"))
-    data_inputs = list(dag.get("data_inputs", []) or [])
+    data_inputs = list(_dag_get(dag, "data_inputs", []))
     return edges, data_inputs
 
 

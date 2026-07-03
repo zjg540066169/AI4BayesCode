@@ -145,6 +145,11 @@ def _build_user(description, backend, output_path, classname, priors, max_attemp
         runner += f"  - {output_path}/{classname}_runner.R             (R runner / Layer-3 harness)\n"
     if backend in ("Python", "both"):
         runner += f"  - {output_path}/{classname}_runner.py            (Python runner)\n"
+    if backend == "both":
+        runner += ("  - backend=both -> the ONE .cpp above must contain BOTH an RCPP_MODULE\n"
+                   "    AND a PYBIND11_MODULE, each under its `#ifdef AI4BAYESCODE_RCPP_MODULE`\n"
+                   "    / `#ifdef AI4BAYESCODE_PYBIND_MODULE` guard, so the single file compiles\n"
+                   "    from R AND Python (dual-module -- see codegen_cpp.md / examples/ODE_SIR.cpp).\n")
     if confirm_model:
         confirm_block = (
 "  - PRE-GENERATION MODEL CONFIRMATION -- do NOT skip it (codegen.md §3). After\n"
@@ -228,7 +233,7 @@ f"{runner}"
 # ---------------------------------------------------------------------------
 # prompt()
 # ---------------------------------------------------------------------------
-def prompt(model_description: str, *, backend: str = "Python", output_path: str = "./generated",
+def prompt(model_description: str, *, backend: str = "both", output_path: str = "./generated",
            classname: str | None = None, priors="noninformative",
            max_attempts: int = 5,
            include_skills: bool = False, skills: Iterable[str] | None = None,
@@ -1249,7 +1254,8 @@ def generate(model_description: str | None = None, *, classname: str | None = No
             dflt = effort if (effort and effort in lv) else ("high" if "high" in lv else lv[-1])
             effort = ask("Thinking / effort level?", options=lv, default=dflt)
         if backend is None:
-            backend = ask("Backend?", options=["Python", "R", "both"], default="Python")
+            backend = ask("Backend? (both = ONE .cpp usable from BOTH R and Python)",
+                          options=["both", "Python", "R"], default="both")
         if not output_path:
             output_path = ask("Output folder", default="./generated")
         if not classname:
@@ -1257,7 +1263,7 @@ def generate(model_description: str | None = None, *, classname: str | None = No
     else:
         if not model_description:
             raise ValueError("model_description is required when interactive=False")
-        backend = backend or "Python"   # Python package -> default to a Python runner
+        backend = backend or "both"   # default: ONE .cpp usable from BOTH R and Python
         output_path = output_path or "./generated"
         classname = classname or _derive_class_name(model_description)
     backend = {"r": "R", "python": "Python", "both": "both"}.get(str(backend).strip().lower(), backend)

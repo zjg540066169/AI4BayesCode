@@ -175,6 +175,11 @@ if (backend %in% c("R","both"))
   sprintf("  - %s/%s_runner.R             (R runner / Layer-3 harness)\n", output_path, classname) else "",
 if (backend %in% c("Python","both"))
   sprintf("  - %s/%s_runner.py            (Python runner)\n", output_path, classname) else "",
+if (identical(backend, "both"))
+  paste0("  - backend=both -> the ONE .cpp above must contain BOTH an RCPP_MODULE\n",
+         "    AND a PYBIND11_MODULE, each under its `#ifdef AI4BAYESCODE_RCPP_MODULE`\n",
+         "    / `#ifdef AI4BAYESCODE_PYBIND_MODULE` guard, so the single file compiles\n",
+         "    from R AND Python (dual-module -- see codegen_cpp.md / examples/ODE_SIR.cpp).\n") else "",
 "  - Register a y_rep stochastic refresher for the observation likelihood\n",
 "    (MANDATORY -- Layer-3 R3 Bayesian p-values need posterior-predictive draws).\n",
 "  - Code comments in English only.\n",
@@ -372,7 +377,7 @@ if (backend %in% c("Python","both"))
 #' @return A list with `system`, `user`, `classname`, `backend`, `skills`.
 #' @export
 ai4bayescode_prompt <- function(model_description,
-                            backend        = c("R", "Python", "both"),
+                            backend        = c("both", "R", "Python"),
                             output_path    = "./generated",
                             classname      = NULL,
                             priors         = "noninformative",
@@ -1490,7 +1495,8 @@ ai4bayescode_generate <- function(model_description = NULL,
                           default = if (!is.null(effort) && !is.na(effort) && effort %in% lv) effort
                                     else if ("high" %in% lv) "high" else lv[length(lv)])
         if (is.null(backend))
-            backend <- ask("Backend?", options = c("R", "Python", "both"), default = "R")
+            backend <- ask("Backend? (both = ONE .cpp usable from BOTH R and Python)",
+                           options = c("both", "R", "Python"), default = "both")
         if (is.null(output_path) || !nzchar(output_path))
             output_path <- ask("Output folder", default = "./generated")
         if (is.null(classname) || !nzchar(classname)) {
@@ -1500,7 +1506,7 @@ ai4bayescode_generate <- function(model_description = NULL,
     } else {
         if (is.null(model_description) || !nzchar(model_description))
             stop("`model_description` is required when interactive = FALSE.", call. = FALSE)
-        if (is.null(backend)) backend <- "R"
+        if (is.null(backend)) backend <- "both"   # ONE .cpp usable from BOTH R and Python
         if (is.null(output_path)) output_path <- "./generated"
         if (is.null(classname)) classname <- .ai4b_derive_class_name(model_description)
     }
