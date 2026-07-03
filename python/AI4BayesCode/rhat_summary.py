@@ -69,6 +69,10 @@ def rhat_summary(chains, keys=None, drop_burn=0, order_components=False):
     hists = _hist_list(chains)
     if not hists:
         raise ValueError("no chains with a history to summarise")
+    if len(hists) == 1:
+        print("rhat_summary: only 1 chain -- reporting within-chain split-R-hat "
+              "(the one chain split in half); use >= 2 chains for the standard "
+              "between-chain R-hat.")
     all_keys = list(hists[0].keys())
     if keys is None:
         keys = all_keys
@@ -96,12 +100,13 @@ def rhat_summary(chains, keys=None, drop_burn=0, order_components=False):
             if np.isfinite(mr) and np.isfinite(mo) and mr > 1.05 and mo < 1.05:
                 label_switch[k] = {"raw": mr, "ordered": mo}
 
-        out[k] = {
-            "rhat": float(rh[0]) if dim == 1 else rh,
-            "ess_bulk": float(eb[0]) if dim == 1 else eb,
-            "max_rhat": float(np.nanmax(rh)),
-            "min_ess": float(np.nanmin(eb)),
-        }
+        # R parity: scalar keys report only {rhat, ess_bulk}; matrix keys also
+        # report {max_rhat, min_ess} across components.
+        if dim == 1:
+            out[k] = {"rhat": float(rh[0]), "ess_bulk": float(eb[0])}
+        else:
+            out[k] = {"rhat": rh, "ess_bulk": eb,
+                      "max_rhat": float(np.nanmax(rh)), "min_ess": float(np.nanmin(eb))}
 
     if label_switch:
         out["_label_switch"] = label_switch

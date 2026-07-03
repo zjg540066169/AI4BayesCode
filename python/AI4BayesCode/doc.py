@@ -180,7 +180,7 @@ _CANONICAL = {
 }
 
 
-def doc(x) -> dict | None:
+def doc(x) -> None:
     """Print a usage card for an AI4BayesCode sampler.
 
     `x` may be the loaded module, the loaded class, the class name (str), or a
@@ -272,5 +272,7 @@ def doc(x) -> dict | None:
         print("  m.step(2000); print(m.get_current())")
     print(bar)
 
-    return {"cls": class_name, "constructor": ctor, "methods": methods,
-            "description": desc, "example": ex_block, "source": src_path}
+    # doc() is a DISPLAY function -- the formatted card was just printed above.
+    # Return None so an interactive `doc(x)` in IPython/Jupyter does NOT echo the
+    # raw dict after the card (mirrors R's ai4bayescode_doc() -> invisible(list())).
+    return None

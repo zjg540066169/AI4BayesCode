@@ -65,8 +65,8 @@ def run_chains(
     factory: Callable[[int], Any],
     *,
     seeds: Iterable[int] = (101, 202, 303, 404),
-    n_burn: int = 1000,
-    n_keep: int = 1000,
+    n_burn: int = 2000,
+    n_keep: int = 10000,
     n_jobs: Optional[int] = None,
     history_keys: Optional[list[str]] = None,
     verbose: bool = True,
@@ -103,6 +103,8 @@ def run_chains(
     seeds = list(seeds)
     if not seeds:
         return []
+    if n_burn < 0 or n_keep < 1:   # R parity: stopifnot(n_burn>=0, n_keep>=1)
+        raise ValueError("n_burn must be >= 0 and n_keep >= 1")
     if n_jobs is None:
         n_jobs = min(len(seeds), os.cpu_count() or 1)
 

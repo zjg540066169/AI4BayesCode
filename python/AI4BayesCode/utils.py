@@ -129,18 +129,24 @@ def ess_tail(samples: np.ndarray, quantile_lo: float = 0.05,
     return float(min(ess_bulk(ind_lo), ess_bulk(ind_hi)))
 
 
-def posterior_summary(samples: np.ndarray, prob: float = 0.95) -> dict:
-    """Compact posterior summary: mean, sd, CI bounds, R-hat, ESS.
+def posterior_summary(samples: np.ndarray, prob: float = 0.90) -> dict:
+    """Compact posterior summary: mean, median, sd, mad, CI bounds, R-hat, ESS.
 
-    Works for scalar or vector parameters. For a vector, call this
-    per-component.
+    The credible-interval level defaults to ``prob=0.90`` to match R's
+    ``posterior::summarise_draws`` (q5/q95) -- the same 90% interval the shipped
+    diagnostics advertise. ``median`` and ``mad`` (normal-consistent, x1.4826)
+    are included for parity with the R summary. Works for a scalar or a single
+    vector component (call per-component for a vector).
     """
     x = _as_2d(samples)
     alpha = (1.0 - prob) / 2.0
     flat = x.reshape(-1)
+    med = float(np.median(flat))
     return {
         "mean": float(flat.mean()),
+        "median": med,
         "sd": float(flat.std(ddof=1)),
+        "mad": float(np.median(np.abs(flat - med)) * 1.4826),
         "ci_lower": float(np.quantile(flat, alpha)),
         "ci_upper": float(np.quantile(flat, 1 - alpha)),
         "rhat": rhat(samples),
