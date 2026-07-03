@@ -25,6 +25,35 @@ import numpy as np
 from .utils import posterior_summary
 
 
+def _as_single_hist(fn, hist):
+    """Normalise ``hist`` to a single chain's named-draw dict.
+
+    Accepts, for convenience + parity with :func:`rhat_summary`:
+      * a raw history dict ``{param: ndarray}`` (returned as-is),
+      * a ``run_chains()`` record ``{"seed","wall","hist",...}`` (unwrapped),
+    and raises a CLEAR error for the two natural mistakes:
+      * a whole ``run_chains()`` list (ambiguous -- which chain?),
+      * a record whose chain FAILED (``hist`` is ``None``) -- surfacing the
+        original construction error instead of a cryptic index error.
+    """
+    if isinstance(hist, (list, tuple)):
+        raise TypeError(
+            f"{fn}: expected ONE chain's history, but got a list of {len(hist)} "
+            f"chains. Use {fn}(runs[0]) or {fn}(runs[0]['hist']) for a single "
+            f"chain; use rhat_summary(runs) for the cross-chain R-hat.")
+    if isinstance(hist, dict) and "hist" in hist and ("seed" in hist or "wall" in hist):
+        inner = hist["hist"]                       # a run_chains() record
+        if inner is None:
+            err = hist.get("error")
+            raise ValueError(
+                f"{fn}: this chain has NO history -- it FAILED to run"
+                + (f" ({err})" if err else "")
+                + ". Fix the model construction and re-run. (A common cause: the "
+                  "constructor seed keyword is `rng_seed=`, not `seed=`.)")
+        return inner
+    return hist
+
+
 def _flatten(hist, n_burn=0):
     """Flatten a named draw dict into ``{col_name: 1-D ndarray}``.
 
@@ -83,7 +112,7 @@ class _SummaryDict(dict):
         self.attrs = {}
 
 
-def diagnose(hist, n_burn=0, plot=True, order_components=False):
+def diagnose(hist, n_burn=0, plot=True, order_components=False, *, drop_burn=None):
     """Compute draws-only diagnostics and a trace / ACF / density plot.
 
     Parameters
@@ -109,6 +138,9 @@ def diagnose(hist, n_burn=0, plot=True, order_components=False):
         matplotlib and returns the Figure, or ``None`` when ``plot=False``
         or matplotlib is not installed.
     """
+    if drop_burn is not None:      # accept rhat_summary's param name too
+        n_burn = drop_burn
+    hist = _as_single_hist("diagnose", hist)
     hb = {nm: np.asarray(x)[n_burn:] for nm, x in hist.items()}
     _lens = [np.asarray(v).shape[0] for v in hb.values()]
     if _lens and min(_lens) == 0:

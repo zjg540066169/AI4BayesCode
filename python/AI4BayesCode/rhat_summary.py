@@ -43,7 +43,7 @@ def _stack(hists, key, j, drop_burn, order):
     return np.column_stack([c[:n] for c in cols])
 
 
-def rhat_summary(chains, keys=None, drop_burn=0, order_components=False):
+def rhat_summary(chains, keys=None, drop_burn=0, order_components=False, *, n_burn=None):
     """Per-parameter cross-chain split-R-hat + bulk-ESS.
 
     Parameters
@@ -66,6 +66,8 @@ def rhat_summary(chains, keys=None, drop_burn=0, order_components=False):
         ``"_label_switch"`` entry (``{param: {"raw","ordered"}}``) is added for
         matrix keys where ordering resolves an otherwise-high R-hat.
     """
+    if n_burn is not None:      # accept diagnose's param name too
+        drop_burn = n_burn
     hists = _hist_list(chains)
     if not hists:
         raise ValueError("no chains with a history to summarise")

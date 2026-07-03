@@ -1452,14 +1452,12 @@ ai4bayescode_generate <- function(model_description = NULL,
             model_description <- ask("Model description (text, or path to a .txt)")
         # Pick the LLM model, then its thinking/effort level -- kept consistent
         # with the per-model effort check below (only that model's levels offered).
-        # Offer ONLY models whose provider has a key set THIS session: an Anthropic
-        # key must not surface OpenAI models, and vice versa. No key set yet -> offer
-        # all (the chosen model's provider key is then requested downstream).
+        # Offer the FULL registry, defaulting to the flagship Claude model: the menu
+        # is about CHOOSING a model, not about which key happens to be set. (Filtering
+        # by env key used to HIDE every Claude model when a stray OPENAI_API_KEY was
+        # present.) The chosen provider's key is requested downstream.
         .mdl    <- ai4bayescode_models()
-        .keyed  <- vapply(unique(.mdl$provider),
-                          function(pr) nzchar(.ai4b_provider_key(pr)), logical(1))
-        .provs  <- names(which(.keyed))
-        .choices <- if (length(.provs)) .mdl$name[.mdl$provider %in% .provs] else .mdl$name
+        .choices <- .mdl$name
         LLM <- ask("LLM model?", options = .choices,
                    default = if (!is.null(LLM) && LLM %in% .choices) LLM else .choices[1])
         llm <- .ai4b_resolve_llm(LLM)

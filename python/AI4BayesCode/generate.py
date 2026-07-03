@@ -1215,11 +1215,12 @@ def generate(model_description: str | None = None, *, classname: str | None = No
             model_description = ask("Model description (text, or path to a .txt)")
         # Pick the LLM model, then its thinking/effort level -- only this model's
         # valid levels are offered, consistent with the per-model effort check below.
-        # Offer ONLY models whose provider has a key set THIS session: an Anthropic
-        # key must not surface OpenAI models, and vice versa. No key set -> offer all.
-        _mdl = models()
-        _provs = {m["provider"] for m in _mdl if _provider_key(m["provider"])}
-        _choices = [m["name"] for m in _mdl if (m["provider"] in _provs) or not _provs]
+        # Offer the FULL registry, defaulting to the flagship Claude model: the
+        # menu is about CHOOSING a model, not about which key happens to be in the
+        # environment. (Filtering by env key used to HIDE every Claude model when a
+        # stray OPENAI_API_KEY was present -- confusing. If the chosen provider has
+        # no key, the request fails later with a clear set_key() message.)
+        _choices = [m["name"] for m in models()]
         LLM = ask("LLM model?", options=_choices,
                   default=LLM if (LLM in _choices) else _choices[0])
         llm = _resolve_llm(LLM)
@@ -1266,8 +1267,8 @@ def generate(model_description: str | None = None, *, classname: str | None = No
     if API_key is None:
         API_key = _provider_key(llm["provider"])
     if not API_key and interactive and _responder is None:
-        API_key = ask(f"{llm['provider']} API key (blank -> offline PROMPT.txt; input is echoed)",
-                      default="")
+        API_key = ask(f"{llm['provider']} API key (Enter to skip -> writes offline PROMPT.txt; "
+                      f"or set once via AI4BayesCode.set_key(); input is echoed)", default="")
     # The CLI (claude -p) is OPT-IN only, via use_cli=True. A blank key no longer
     # silently routes to the local CLI -- it lands on the predictable offline
     # PROMPT.txt path. Use set_key() or API_key= to generate online.
