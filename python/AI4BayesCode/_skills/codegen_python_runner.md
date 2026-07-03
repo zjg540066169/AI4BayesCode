@@ -4,7 +4,7 @@ description: |
   Python runner template for AI4BayesCode samplers — AI4BayesCode.sourceCpp
   setup, constructor-argument reference block, run_chain_<ClassName>()
   helper with keep_history=True, Layer 3 validator wiring (R1 smoke
-  check, R2 rank-normalized R-hat + ESS via arviz, R3 Bayesian p-values
+  check, R2 rank-normalized R-hat + ESS (AI4BayesCode numpy helpers), R3 Bayesian p-values
   + PSIS-LOO via arviz), AI4BayesCode.perf_hint call, joint-NUTS threshold
   tightening, and the reference-template catalogue (examples/*.cpp).
   Mirror of codegen_r_runner.md for the Python (pybind11) backend.
@@ -419,7 +419,6 @@ print("R1 smoke OK")
 # Dirac spike-and-slab §R2.s exclusion rule for per-coordinate slab
 # DISTRIBUTION parameters (e.g. per-j slab variance tau2_beta /
 # tau2_theta) — NOT the slab-modelled beta_j / theta_jk themselves.
-import arviz as az
 
 def _worker(args):
     seed, n_burn, n_keep = args
@@ -455,7 +454,7 @@ c1, c2, total_wall_sec = _run_two_chains(n_burn, n_keep)
 # Matches validator.md §R2 and codegen_r_runner.md r2_diag(): rank-normalized
 # R-hat is a HARD gate (< 1.05); ESS is a SOFT criterion via
 # ess_ratio = min(ESS_bulk, ESS_tail) / n_keep — >= 0.01 silent,
-# [0.005, 0.01) WARN and proceed, < 0.005 escalate. az.rhat / az.ess use the
+# [0.005, 0.01) WARN and proceed, < 0.005 escalate. AI4BayesCode.rhat / ess_* use the
 # rank-normalized split-R-hat and bulk/tail ESS of Vehtari et al. (2021),
 # the same estimators posterior::rhat / ess_bulk / ess_tail compute R-side.
 #
@@ -463,7 +462,7 @@ c1, c2, total_wall_sec = _run_two_chains(n_burn, n_keep)
 # slab DISTRIBUTION parameters (per-coordinate slab variance tau2_beta /
 # tau2_theta and similar — NOT the slab-modelled beta_j / theta_jk
 # themselves), mask draws by inclusion indicator I_j == 1, truncate the two
-# chains to the common min retained count, then feed to az.rhat. See
+# chains to the common min retained count, then feed to AI4BayesCode.rhat. See
 # validator.md §R2.s for the precise rule and the I_j ∈ {0, 1} convention.
 
 def _stack_param(c1, c2, key):
@@ -486,10 +485,11 @@ def r2_diag(c1, c2, n_keep_used):
         comp_rhat = 0.0
         comp_min_ess = np.inf
         for arr in _stack_param(c1, c2, nm):           # arr: (chains=2, draws)
-            idata = az.convert_to_dataset(arr[np.newaxis, ...].reshape(2, -1))
-            rh = float(az.rhat(idata))
-            eb = float(az.ess(idata, method="bulk"))
-            et = float(az.ess(idata, method="tail"))
+            x = np.asarray(arr).T                       # -> (draws, chains)
+            rh = float(AI4BayesCode.rhat(x))            # rank-normalized split-R-hat,
+            eb = float(AI4BayesCode.ess_bulk(x))        # numpy (matches posterior::rhat /
+            et = float(AI4BayesCode.ess_tail(x))        # arviz) -> no arviz dep, no
+            #                                             az.rhat()->Dataset scalar footgun
             comp_rhat = max(comp_rhat, rh)
             comp_min_ess = min(comp_min_ess, eb, et)
         ess_ratio = comp_min_ess / n_keep_used
@@ -577,6 +577,9 @@ if _bpv_extreme:
 # codegen_cpp.md §6a per-family templates). Build an InferenceData with a
 # log_likelihood group of shape (chain, draw, obs) and call az.loo.
 try:
+    import arviz as az                          # lazy: PSIS-LOO is the ONLY arviz user
+    #                                             and is diagnostic-only, so a missing /
+    #                                             broken arviz never gates validation.
     def pointwise_loglik(hist, y):
         # ...replace with the model's per-observation log density,
         #    shape (n_keep, N); see codegen_cpp.md §6a templates...
@@ -602,8 +605,8 @@ try:
             f"LOO importance-weight reliability, NOT sampler correctness; GP and "
             f"hierarchical-latent models routinely fail this diagnostic with "
             f"correctly sampled posteriors. See Vehtari et al. (JMLR 2024).")
-except NotImplementedError:
-    print("  [R3.b] PSIS-LOO skipped (no pointwise_loglik emitted) — "
+except Exception as _loo_err:               # no loglik, no arviz, arviz API change, ...
+    print(f"  [R3.b] PSIS-LOO skipped ({type(_loo_err).__name__}) — "
           "diagnostic only, does not gate.")
 
 # === Performance hint ===
