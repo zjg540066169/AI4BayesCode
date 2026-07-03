@@ -206,7 +206,7 @@ f"{runner}"
 # ---------------------------------------------------------------------------
 # prompt()
 # ---------------------------------------------------------------------------
-def prompt(model_description: str, *, backend: str = "R", output_path: str = "./generated",
+def prompt(model_description: str, *, backend: str = "Python", output_path: str = "./generated",
            classname: str | None = None, priors="noninformative",
            max_attempts: int = 5,
            include_skills: bool = False, skills: Iterable[str] | None = None,
@@ -1162,7 +1162,16 @@ def generate(model_description: str | None = None, *, classname: str | None = No
     validation}``.
     """
     if interactive is None:
+        # Match R's interactive(): ask questions in a REPL. sys.stdin.isatty() is
+        # False under IPython/Jupyter even though input() works there, so also
+        # treat a running IPython shell as interactive.
         interactive = sys.stdin.isatty()
+        if not interactive:
+            try:
+                from IPython import get_ipython
+                interactive = get_ipython() is not None
+            except Exception:
+                pass
     ask = _ask or _console_ask
     llm = _resolve_llm(LLM)
 
@@ -1185,7 +1194,7 @@ def generate(model_description: str | None = None, *, classname: str | None = No
             dflt = effort if (effort and effort in lv) else ("high" if "high" in lv else lv[-1])
             effort = ask("Thinking / effort level?", options=lv, default=dflt)
         if backend is None:
-            backend = ask("Backend?", options=["R", "Python", "both"], default="R")
+            backend = ask("Backend?", options=["Python", "R", "both"], default="Python")
         if not output_path:
             output_path = ask("Output folder", default="./generated")
         if not classname:
@@ -1193,7 +1202,7 @@ def generate(model_description: str | None = None, *, classname: str | None = No
     else:
         if not model_description:
             raise ValueError("model_description is required when interactive=False")
-        backend = backend or "R"
+        backend = backend or "Python"   # Python package -> default to a Python runner
         output_path = output_path or "./generated"
         classname = classname or _derive_class_name(model_description)
     backend = {"r": "R", "python": "Python", "both": "both"}.get(str(backend).strip().lower(), backend)
