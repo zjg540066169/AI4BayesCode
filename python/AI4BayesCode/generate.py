@@ -426,7 +426,8 @@ def models() -> list[dict]:
         {"name": "claude-opus-4-7", "provider": "anthropic", "model_id": "claude-opus-4-7", "implemented": True, "effort_levels": ["low", "medium", "high", "xhigh", "max"]},
         {"name": "claude-sonnet-4-6", "provider": "anthropic", "model_id": "claude-sonnet-4-6", "implemented": True, "effort_levels": ["low", "medium", "high", "max"]},
         {"name": "claude-haiku-4-5", "provider": "anthropic", "model_id": "claude-haiku-4-5", "implemented": True, "effort_levels": []},
-        {"name": "gpt-5.5", "provider": "openai", "model_id": "gpt-5.5", "implemented": True, "effort_levels": ["minimal", "low", "medium", "high"]},
+        # OpenAI: only the code-specialized model -- generate() is a pure codegen
+        # task, so the general gpt-5.5 is never the right pick and is omitted.
         {"name": "gpt-5.5-codex", "provider": "openai", "model_id": "gpt-5.5-codex", "implemented": True, "effort_levels": ["minimal", "low", "medium", "high"]},
     ]
 

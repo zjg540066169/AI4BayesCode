@@ -484,18 +484,20 @@ ai4bayescode_prompt <- function(model_description,
 #' @export
 ai4bayescode_models <- function() {
     data.frame(
+        # OpenAI: only the code-specialized model -- generate() is a pure codegen
+        # task, so the general gpt-5.5 is never the right pick and is omitted.
         name = c("claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-4-6",
-                 "claude-haiku-4-5", "gpt-5.5", "gpt-5.5-codex"),
+                 "claude-haiku-4-5", "gpt-5.5-codex"),
         provider = c("anthropic", "anthropic", "anthropic", "anthropic",
-                     "openai", "openai"),
+                     "openai"),
         model_id = c("claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-4-6",
-                     "claude-haiku-4-5", "gpt-5.5", "gpt-5.5-codex"),
-        implemented = c(TRUE, TRUE, TRUE, TRUE, TRUE, TRUE),
+                     "claude-haiku-4-5", "gpt-5.5-codex"),
+        implemented = c(TRUE, TRUE, TRUE, TRUE, TRUE),
         # Valid effort levels differ PER MODEL: xhigh is Opus 4.7+; max not on
         # Sonnet 4.5/Haiku; Haiku 4.5 has no effort knob; OpenAI uses minimal..high.
         effort_levels = c("low,medium,high,xhigh,max", "low,medium,high,xhigh,max",
                           "low,medium,high,max", "",
-                          "minimal,low,medium,high", "minimal,low,medium,high"),
+                          "minimal,low,medium,high"),
         stringsAsFactors = FALSE)
 }
 
