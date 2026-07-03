@@ -563,6 +563,30 @@ ai4bayescode_models <- function() {
     paste0(substr(key, 1L, 6L), "...", substr(key, n - 3L, n))
 }
 
+# Human-readable guidance appended to a 429 / rate-limit error ("" for any other
+# error). A Claude *subscription* OAuth token (sk-ant-oat...) gets a specific note,
+# because Anthropic restricts those for direct API use.
+#' @keywords internal
+#' @noRd
+.ai4b_rate_limit_hint <- function(api_key, err_msg) {
+    m <- tolower(err_msg %||% "")
+    if (!grepl("429|rate_limit|too many requests", m)) return("")
+    if (grepl("^sk-ant-oat", api_key %||% "")) {
+        paste0(
+            "\n  NOTE: this key is a Claude SUBSCRIPTION OAuth token (sk-ant-oat..., from ",
+            "`claude setup-token`). Anthropic restricts these for direct / third-party API ",
+            "use: they get rate-limited or LOCKED OUT for several HOURS regardless of how ",
+            "much plan quota remains, and retrying can PROLONG the lockout. Do NOT keep ",
+            "retrying. Either wait a few hours (untouched), or use a pay-per-token API key ",
+            "(sk-ant-api03..., https://console.anthropic.com/settings/keys) for reliable ",
+            "programmatic use -- generate() makes many requests and is not suited to a ",
+            "subscription token.")
+    } else {
+        paste0("\n  NOTE: HTTP 429 rate limit -- wait for your rate-limit window to reset ",
+               "before retrying, and avoid rapid repeated calls.")
+    }
+}
+
 #' Set an LLM provider API key for this session
 #'
 #' Stores `key` in the provider's environment variable for the CURRENT R
@@ -573,9 +597,11 @@ ai4bayescode_models <- function() {
 #' call (you still can, to override per call).
 #'
 #' @param key Non-empty API-key string (e.g. `"sk-ant-api..."`, `"sk-YOUR-KEY-HERE"`).
-#'   An Anthropic subscription token (`"sk-ant-oat..."` from
-#'   `claude setup-token`) works too -- the Bearer header is detected from the
-#'   `sk-ant-oat` prefix.
+#'   A Claude subscription token (`"sk-ant-oat..."` from `claude setup-token`)
+#'   is detected from the `sk-ant-oat` prefix, BUT Anthropic now restricts
+#'   subscription / OAuth tokens for direct API use (they return 429 / rate_limit
+#'   and can lock out for hours); for reliable programmatic use pass a
+#'   pay-per-token API key (`"sk-ant-api03..."`).
 #' @param provider One of `"anthropic"`, `"openai"`, `"google"`.
 #' @param check If `TRUE` (default), verify the key with a minimal API call
 #'   (Anthropic only) and warn if it is rejected; `FALSE` stores it unchecked.
@@ -609,7 +635,8 @@ ai4bayescode_set_key <- function(key, provider = "anthropic", check = TRUE) {
     if (isTRUE(check) && identical(provider, "anthropic"))
         tryCatch(ai4bayescode_stream_check(API_key = key),
                  error = function(e)
-                     message("[warning] streaming self-check failed: ", conditionMessage(e)))
+                     message("[warning] streaming self-check failed: ", conditionMessage(e),
+                             .ai4b_rate_limit_hint(key, conditionMessage(e))))
     invisible(provider)
 }
 
@@ -1598,9 +1625,9 @@ ai4bayescode_generate <- function(model_description = NULL,
                 # path (R's httr2 SSE), NOT a bad key -- aborting would needlessly block a
                 # generation that would otherwise succeed non-streamed. Warn and continue.
                 message("[warning] streaming pre-flight check failed (", conditionMessage(e),
-                        "); continuing -- the generation will fall back to non-streaming. ",
-                        "(429 = rate-limit on the streaming path, not a bad key; pass ",
-                        "verify_stream = FALSE to skip this check entirely.)"))
+                        "); continuing -- the generation will fall back to non-streaming ",
+                        "(pass verify_stream = FALSE to skip this check entirely).",
+                        .ai4b_rate_limit_hint(API_key, conditionMessage(e))))
     }
 
     # ---- validate -> repair-to-convergence loop ----
@@ -1613,8 +1640,13 @@ ai4bayescode_generate <- function(model_description = NULL,
     msgs <- list(list(role = "user", content = prompt$user))
     em <- NULL; txt <- ""; result <- NULL; attempt <- 0L; code_retries <- 0L
     repeat {
-        turn <- .ai4b_anthropic_turn(prompt$system, msgs, llm$model, effort, API_key,
-                                     max_tokens, timeout, ask, verbose, call = call)
+        turn <- tryCatch(
+            .ai4b_anthropic_turn(prompt$system, msgs, llm$model, effort, API_key,
+                                 max_tokens, timeout, ask, verbose, call = call),
+            error = function(e) {
+                h <- .ai4b_rate_limit_hint(API_key, conditionMessage(e))   # clear 429/OAuth hint
+                if (nzchar(h)) stop(conditionMessage(e), h, call. = FALSE) else stop(e)
+            })
         txt  <- turn$text
         msgs <- turn$msgs
         em   <- .ai4b_write_emitted(txt, output_path, classname)

@@ -519,6 +519,27 @@ def stream_check(LLM: str = "claude-opus-4-8", API_key: str | None = None,
     return parsed
 
 
+def _rate_limit_hint(api_key, err) -> str:
+    """Human-readable guidance appended to a 429 / rate-limit error (empty string
+    for any other error). A Claude *subscription* OAuth token (sk-ant-oat...) gets
+    a specific note, because Anthropic restricts those for direct API use."""
+    m = str(err).lower()
+    if not ("429" in m or "rate_limit" in m or "too many requests" in m):
+        return ""
+    if str(api_key or "").startswith("sk-ant-oat"):
+        return (
+            "\n  NOTE: this key is a Claude SUBSCRIPTION OAuth token (sk-ant-oat..., from "
+            "`claude setup-token`). Anthropic restricts these for direct / third-party API "
+            "use: they get rate-limited or LOCKED OUT for several HOURS regardless of how "
+            "much plan quota remains, and retrying can PROLONG the lockout. Do NOT keep "
+            "retrying. Either wait a few hours (untouched), or use a pay-per-token API key "
+            "(sk-ant-api03..., https://console.anthropic.com/settings/keys) for reliable "
+            "programmatic use -- generate() makes many requests and is not suited to a "
+            "subscription token.")
+    return ("\n  NOTE: HTTP 429 rate limit -- wait for your rate-limit window to reset "
+            "before retrying, and avoid rapid repeated calls.")
+
+
 def set_key(key: str, provider: str = "anthropic", check: bool = True) -> str:
     """Set an LLM provider API key for this session.
 
@@ -531,9 +552,12 @@ def set_key(key: str, provider: str = "anthropic", check: bool = True) -> str:
 
     Args:
         key: Non-empty API-key string (e.g. ``"sk-ant-api..."``, ``"sk-YOUR-KEY-HERE"``).
-            An Anthropic subscription token (``"sk-ant-oat..."`` from
-            ``claude setup-token``) works too -- the Bearer header is detected
-            from the ``sk-ant-oat`` prefix.
+            A Claude subscription token (``"sk-ant-oat..."`` from
+            ``claude setup-token``) is detected from the ``sk-ant-oat`` prefix,
+            BUT Anthropic now restricts subscription / OAuth tokens for direct
+            API use (they return 429 / rate_limit and can lock out for hours);
+            for reliable programmatic use pass a pay-per-token API key
+            (``"sk-ant-api03..."``).
         provider: One of ``"anthropic"``, ``"openai"``, ``"google"``.
 
     Returns:
@@ -566,7 +590,8 @@ def set_key(key: str, provider: str = "anthropic", check: bool = True) -> str:
             try:
                 stream_check(API_key=key, progress=True)
             except Exception as e:  # noqa: BLE001
-                print(f"[warning] streaming self-check failed: {e}")
+                print(f"[warning] streaming self-check failed: {e}"
+                      + _rate_limit_hint(key, e))
     return provider
 
 
@@ -1346,8 +1371,8 @@ def generate(model_description: str | None = None, *, classname: str | None = No
             # non-streamed. Warn and continue.
             warnings.warn(
                 f"streaming pre-flight check failed ({e}); continuing -- the generation "
-                f"will fall back to non-streaming. (429 = rate-limit on the streaming path, "
-                f"not a bad key; pass verify_stream=False to skip this check entirely.)")
+                f"will fall back to non-streaming (pass verify_stream=False to skip this "
+                f"check entirely)." + _rate_limit_hint(API_key, e))
 
     # ---- validate -> repair-to-convergence loop ----
     # `attempt` counts ONLY replies that produced code and went to the validator;
@@ -1365,8 +1390,14 @@ def generate(model_description: str | None = None, *, classname: str | None = No
     attempt = 0
     code_retries = 0
     while True:
-        txt, msgs, truncated = _anthropic_turn(p["system"], msgs, call=call, ask=ask,
-                                               verbose=verbose)
+        try:
+            txt, msgs, truncated = _anthropic_turn(p["system"], msgs, call=call, ask=ask,
+                                                   verbose=verbose)
+        except Exception as e:  # noqa: BLE001  -- surface a clear hint on rate-limit / 429
+            hint = _rate_limit_hint(API_key, e)
+            if hint:
+                raise RuntimeError(f"{e}{hint}") from e
+            raise
         files, cpp_path, runner_path = _write_emitted(txt, output_path, classname)
         (out / f"{classname}_transcript.md").write_text(txt)
 
