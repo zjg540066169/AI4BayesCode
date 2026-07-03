@@ -610,9 +610,9 @@ public:
 
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
 
-    void readapt_NUTS(int n, bool reset = false) {
+    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
         if (n < 0) ai4b::stop("readapt_NUTS: n must be non-negative");
-        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_);
+        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
     }
 
 private:
@@ -675,7 +675,7 @@ PYBIND11_MODULE(HierarchicalLM_joint, m) {
              pybind11::arg("new_data"))
         .def("get_dag",      &HierarchicalLM_joint::get_dag)
         .def("readapt_NUTS", &HierarchicalLM_joint::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
 }
 #endif
 

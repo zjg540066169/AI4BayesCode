@@ -546,9 +546,9 @@ public:
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag();     }
     AI4BayesCode::history_map  get_history() const { return impl_->get_history(); }
 
-    void readapt_NUTS(int n, bool reset) {
+    void readapt_NUTS(int n, bool reset, int max_tree_depth = -1) {
         if (n < 0) ai4b::stop("n must be >= 0");
-        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_);
+        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
     }
 
 private:
@@ -618,7 +618,7 @@ PYBIND11_MODULE(ICARSpatialGMRF, m) {
         .def("get_dag",      &ICARSpatialGMRF::get_dag)
         .def("get_history",  &ICARSpatialGMRF::get_history)
         .def("readapt_NUTS", &ICARSpatialGMRF::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
 }
 #endif
 

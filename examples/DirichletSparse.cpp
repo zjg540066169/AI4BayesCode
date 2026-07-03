@@ -284,9 +284,9 @@ public:
     AI4BayesCode::dag_info      get_dag()     const { return impl_->get_dag(); }
     AI4BayesCode::history_map   get_history() const { return impl_->get_history(); }
 
-    void readapt_NUTS(int n, bool reset = false) {
+    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
         if (n < 0) throw std::runtime_error("readapt_NUTS: n must be non-negative");
-        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_);
+        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
     }
 
 private:

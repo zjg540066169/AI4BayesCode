@@ -93,7 +93,7 @@
 //   cur = m.get_current()
 //   print("elbo", float(np.asarray(cur["elbo"]).ravel()[0]),
 //         "converged", float(np.asarray(cur["converged"]).ravel()[0]))
-// (Pure VI: NO chains / R-hat — check ELBO finite + converged.)
+//   # (Pure VI: NO chains / R-hat -- check ELBO finite + converged.)
 // @example:end
 
 // [[Rcpp::depends(RcppArmadillo)]]

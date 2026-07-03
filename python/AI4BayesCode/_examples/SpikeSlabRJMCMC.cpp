@@ -969,12 +969,12 @@ public:
     /// dual averaging) without advancing chain state. Available because
     /// the composite contains NUTS-family children. See system_design.md
     /// §13 NUTS-family + validator.md §24.
-    void readapt_NUTS(int n, bool reset = false) {
+    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
         if (n < 0) {
             ai4b::stop("readapt_NUTS: n must be non-negative");
         }
         impl_->readapt_NUTS(static_cast<std::size_t>(n),
-                            reset, readapt_rng_);
+                            reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
     }
 
 
@@ -1039,6 +1039,6 @@ PYBIND11_MODULE(SpikeSlabRJMCMC, m) {
         .def("get_dag",      &SpikeSlabRJMCMC::get_dag)
         .def("get_history",  &SpikeSlabRJMCMC::get_history)
         .def("readapt_NUTS", &SpikeSlabRJMCMC::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
 }
 #endif
