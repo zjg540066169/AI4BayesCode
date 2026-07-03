@@ -573,17 +573,12 @@ ai4bayescode_models <- function() {
     if (!grepl("429|rate_limit|too many requests", m)) return("")
     if (grepl("^sk-ant-oat", api_key %||% "")) {
         paste0(
-            "\n  NOTE: this key is a Claude SUBSCRIPTION OAuth token (sk-ant-oat..., from ",
-            "`claude setup-token`). Anthropic restricts these for direct / third-party API ",
-            "use: they get rate-limited or LOCKED OUT for several HOURS regardless of how ",
-            "much plan quota remains, and retrying can PROLONG the lockout. Do NOT keep ",
-            "retrying. Either wait a few hours (untouched), or use a pay-per-token API key ",
-            "(sk-ant-api03..., https://console.anthropic.com/settings/keys) for reliable ",
-            "programmatic use -- generate() makes many requests and is not suited to a ",
-            "subscription token.")
+            "\n  NOTE: this looks like a Claude SUBSCRIPTION key (from `claude setup-token`). ",
+            "This 429 may be because subscription keys can be rate-limited for API use -- ",
+            "if it keeps happening, try a regular API key instead ",
+            "(sk-ant-api03...; see https://console.anthropic.com/settings/keys).")
     } else {
-        paste0("\n  NOTE: HTTP 429 rate limit -- wait for your rate-limit window to reset ",
-               "before retrying, and avoid rapid repeated calls.")
+        paste0("\n  NOTE: rate limit hit -- wait a bit before retrying.")
     }
 }
 
@@ -597,11 +592,10 @@ ai4bayescode_models <- function() {
 #' call (you still can, to override per call).
 #'
 #' @param key Non-empty API-key string (e.g. `"sk-ant-api..."`, `"sk-YOUR-KEY-HERE"`).
-#'   A Claude subscription token (`"sk-ant-oat..."` from `claude setup-token`)
-#'   is detected from the `sk-ant-oat` prefix, BUT Anthropic now restricts
-#'   subscription / OAuth tokens for direct API use (they return 429 / rate_limit
-#'   and can lock out for hours); for reliable programmatic use pass a
-#'   pay-per-token API key (`"sk-ant-api03..."`).
+#'   A Claude subscription key (`"sk-ant-oat..."` from `claude setup-token`) is
+#'   detected from the `sk-ant-oat` prefix, but subscription keys may be
+#'   rate-limited for API use (a 429) -- if that happens, try a regular API key
+#'   (`"sk-ant-api03..."` from https://console.anthropic.com/settings/keys).
 #' @param provider One of `"anthropic"`, `"openai"`, `"google"`.
 #' @param check If `TRUE` (default), verify the key with a minimal API call
 #'   (Anthropic only) and warn if it is rejected; `FALSE` stores it unchecked.
