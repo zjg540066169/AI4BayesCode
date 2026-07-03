@@ -119,9 +119,22 @@ def _resolve_code(code: str | os.PathLike) -> tuple[Path, str]:
         ch in code for ch in "{};"
     )
     if not looks_like_source:
+        # If it looks like a SHIPPED example name (e.g. "GBartMultinomial" or
+        # "GBartMultinomial.cpp"), point the user at example() -- source() takes a
+        # file PATH, example() takes a NAME (the R-side ai4bayescode_example() split).
+        stem = os.path.basename(code)
+        stem = stem[:-4] if stem.endswith(".cpp") else stem
+        hint = ""
+        try:
+            from ._blocks import _example_names
+            if stem in _example_names():
+                hint = (f"\nThat is a SHIPPED example -- load it BY NAME with "
+                        f"AI4BayesCode.example(\"{stem}\")  (source() takes a file path).")
+        except Exception:  # noqa: BLE001
+            pass
         raise FileNotFoundError(
             "`code` is neither an existing file nor recognizable C++ source.\n"
-            f"If you meant a file path, it does not exist: {code}"
+            f"If you meant a file path, it does not exist: {code}" + hint
         )
     fd, tmp_name = tempfile.mkstemp(prefix="ai4bayes_", suffix=".cpp")
     os.close(fd)

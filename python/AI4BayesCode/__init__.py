@@ -26,6 +26,7 @@ block. See `examples/ODE_SIR.cpp` for a dual-module reference.
 """
 
 from .source import source, vendored_include_path
+from .example import example, list_examples, examples_path
 from .doc import doc
 from .generate import prompt, generate, models, skills_path, set_key, key_status, stream_check
 from .sourceCpp import sourceCpp
@@ -35,12 +36,21 @@ from .plot_dag import plot_dag
 from .run_chains import run_chains
 from .perf_hint import perf_hint
 from .diagnose import diagnose
+from .rhat_summary import rhat_summary
 from .utils import rhat, ess_bulk, ess_tail, posterior_summary
+from .meta import version, include_path, list_skills
 from ._blocks import blocks
 
 __version__ = "1.0.0"
 __all__ = [
     "source",
+    "example",
+    "list_examples",
+    "examples_path",
+    "list_skills",
+    "include_path",
+    "version",
+    "rhat_summary",
     "doc",
     "blocks",
     "prompt",
