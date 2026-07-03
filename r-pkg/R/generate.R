@@ -102,18 +102,12 @@
         return("  - Priors: weakly-informative defaults are acceptable where the model\n    description does not specify a prior.")
     }
     paste0(
-"  - Priors: where the model description specifies a prior, use it EXACTLY.\n",
-"    For any parameter whose prior is NOT specified, use a strictly\n",
-"    NON-INFORMATIVE prior (do NOT substitute a weakly-informative default):\n",
-"      * Real location / regression coef (mu, alpha, beta): FLAT IMPROPER p(.)\u221d1\n",
-"        (omit the prior term in the log-density; likelihood only).\n",
-"      * Positive scale (sigma, tau): Jeffreys p(sigma)\u221d1/sigma.\n",
-"      * Probability on [0,1] (p): Beta(1,1) = uniform.\n",
-"      * Simplex (theta_1..theta_K): Dirichlet(1,...,1) = uniform simplex.\n",
-"      * Correlation matrix R: LKJ(eta=1) = uniform over correlation matrices.\n",
-"      * Count rate (lambda): Jeffreys p(lambda)\u221d1/sqrt(lambda) via log+Jacobian.\n",
-"      * Concentration (kappa): Jeffreys p(kappa)\u221d1/kappa.\n",
-"    Apply the non-informative default SILENTLY; do not stop to ask.")
+"  - Priors: where the model description specifies a prior, use it EXACTLY; for any\n",
+"    parameter whose prior is NOT specified, use a strictly NON-INFORMATIVE prior\n",
+"    (per-support defaults -- flat improper on real coefs, Jeffreys 1/sigma on\n",
+"    positive scales, Beta(1,1) / Dirichlet(1..1) / LKJ(1) on probability / simplex /\n",
+"    correlation, Jeffreys on count-rate & concentration -- with the full rationale\n",
+"    in codegen_priors.md). Apply them SILENTLY; do not stop to ask.")
 }
 
 # Case-insensitive backend: a user may write "python"/"r"/"BOTH"; map to the
@@ -186,29 +180,17 @@ if (identical(backend, "both"))
 "  (Compile pitfalls -- set_current takes a concatenated arma::vec not a map;\n",
 "   Rcpp/pybind11 do not fill C++ default args -- and every other API detail are in\n",
 "   codegen_cpp.md + the reference examples; READ them, do not guess.)\n",
-"\nMANDATORY VALIDATION (this is how the generator detects convergence):\n",
-"  - You MUST emit a self-contained runner (the R runner shown above) that:\n",
-"      1. simulates data from the model at known parameter values,\n",
-"      2. compiles the sampler so the class is callable by name (compile at TOP\n",
-"         LEVEL; see codegen_r_runner.md for where the compiled class binds),\n",
-"      3. runs TWO independent chains from over-dispersed inits. For a NUTS /\n",
-"         joint_nuts model, each chain MUST do:\n",
-"           m$step(n_burnin); m$readapt_NUTS(N, FALSE, -1L); m$step(n_keep)\n",
-"         The first-call warmup adapts the metric from the over-dispersed init,\n",
-"         so WITHOUT re-adapting at the mode R-hat commonly stays > 1.01. Pass\n",
-"         ALL 3 args to readapt_NUTS (Rcpp modules ignore C++ default arguments;\n",
-"         calling with fewer errors 'could not find valid method'). Keep the\n",
-"         LAST n_keep draws (readapt does not add history rows).\n",
-"      4. computes the rank-normalized R-hat (`posterior::rhat`, Vehtari 2021)\n",
-"         for EVERY model parameter across the two chains, and\n",
-"      5. prints, as its VERY LAST line, EXACTLY one of:\n",
-"           AI4BAYES_VALIDATE: PASS                    (if max rank-R-hat < 1.01)\n",
+"\nVALIDATION PROTOCOL (how the generator detects success -- keep this EXACT):\n",
+"  - Emit a self-contained runner whose FULL structure is in codegen_r_runner.md /\n",
+"    codegen_python_runner.md (FOLLOW it): simulate data at known values; run TWO\n",
+"    over-dispersed chains, each doing step -> readapt_NUTS -> step for a\n",
+"    NUTS/joint_nuts model; rank-normalized R-hat across the chains. Its VERY LAST\n",
+"    printed line MUST be EXACTLY one of:\n",
+"           AI4BAYES_VALIDATE: PASS                    (max rank-R-hat < 1.01)\n",
 "           AI4BAYES_VALIDATE: FAIL maxRhat=<value>    (otherwise)\n",
-"  - The generator runs this runner with Rscript and greps for\n",
-"    `AI4BAYES_VALIDATE: PASS`. If it does not see PASS (compile error, runner\n",
-"    error, or non-convergence) it will feed the compile / run output back to you\n",
-"    and ask you to FIX and RE-EMIT the FULL .cpp and runner. Make the runner\n",
-"    print that final line unconditionally on every successful run.\n",
+"  - The generator greps stdout for `AI4BAYES_VALIDATE: PASS`; on ANY miss (compile\n",
+"    error, runner error, or non-convergence) it feeds the output back and asks you\n",
+"    to FIX and RE-EMIT the FULL .cpp and runner.\n",
 "\n---\nModel description:\n", description, "\n")
 }
 
