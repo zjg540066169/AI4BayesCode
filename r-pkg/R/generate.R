@@ -271,18 +271,26 @@ if (identical(backend, "both"))
                           " and produced no output (could not launch the runner).")
 
     # ---- 4. convergence sentinel ----
+    all_lines <- strsplit(out_txt, "\n", fixed = TRUE)[[1]]
+    # Anchor the shown detail on the LAST AI4BAYES_VALIDATE line so trailing stderr
+    # noise -- e.g. an arviz / xarray / bottleneck import warning under numpy 2.x,
+    # emitted AFTER the verdict -- does not bury the R-hat / verdict summary.
+    tail_at_sentinel <- function(n) {
+        hit <- which(grepl("AI4BAYES_VALIDATE", all_lines))
+        if (!length(hit)) return(paste(tail(all_lines, n), collapse = "\n"))
+        idx <- hit[length(hit)]
+        paste(all_lines[max(1L, idx - n + 1L):idx], collapse = "\n")
+    }
     if (grepl("AI4BAYES_VALIDATE:\\s*PASS", out_txt)) {
         if (verbose) message("  [validate] converged")
-        tail_lines <- tail(strsplit(out_txt, "\n", fixed = TRUE)[[1]], 15L)
-        return(list(ok = TRUE, stage = "converged",
-                    detail = paste(tail_lines, collapse = "\n")))
+        return(list(ok = TRUE, stage = "converged", detail = tail_at_sentinel(15L)))
     }
     # No PASS sentinel -> distinguish WHY, rather than always blaming "convergence".
-    tail_lines <- tail(strsplit(out_txt, "\n", fixed = TRUE)[[1]], 40L)
+    tail_lines <- tail(all_lines, 40L)
     detail <- paste(tail_lines, collapse = "\n")
     if (grepl("AI4BAYES_VALIDATE:\\s*FAIL", out_txt)) {       # ran to the end; R-hat too high
         if (verbose) message("  [validate] ran but did not converge")
-        return(list(ok = FALSE, stage = "convergence", detail = detail))
+        return(list(ok = FALSE, stage = "convergence", detail = tail_at_sentinel(40L)))
     }
     if (grepl("Execution halted|Error in |Error:|Segmentation fault|terminate called|Abort trap|Traceback \\(most recent|runner error",
               out_txt)) {                                     # compiled but crashed at RUNTIME
@@ -1499,6 +1507,12 @@ ai4bayescode_generate <- function(model_description = NULL,
         if (is.null(classname)) classname <- .ai4b_derive_class_name(model_description)
         if (is.null(max_attempts)) max_attempts <- 5L
     }
+    # Coerce max_attempts to a positive integer NOW -- the interactive ask returns a
+    # STRING ("5"), and it is used in sprintf("%d", ...) at prompt-build time below,
+    # which errors ("invalid format '%d'; use format %s for character objects").
+    max_attempts <- suppressWarnings(as.integer(max_attempts))
+    if (length(max_attempts) != 1L || is.na(max_attempts) || max_attempts < 1L)
+        max_attempts <- 5L
     backend <- match.arg(.ai4b_norm_backend(backend), c("R", "Python", "both"))
     if (is.null(priors)) priors <- if (interactive) "interactive" else "noninformative"
     if (is.null(confirm_model)) confirm_model <- isTRUE(interactive)
@@ -1626,9 +1640,7 @@ ai4bayescode_generate <- function(model_description = NULL,
     # a reply with no code block (the model deferred, or was truncated) is re-asked
     # on a SEPARATE budget (`max_code_retries`) so it never burns a validation
     # attempt -- max_attempts is reserved for real compile/convergence failures.
-    max_attempts     <- suppressWarnings(as.integer(max_attempts))
-    if (length(max_attempts) != 1L || is.na(max_attempts) || max_attempts < 1L)
-        max_attempts <- 5L
+    max_attempts     <- as.integer(max_attempts)   # already coerced above; kept defensive
     max_code_retries <- 6L
     msgs <- list(list(role = "user", content = prompt$user))
     em <- NULL; txt <- ""; result <- NULL; attempt <- 0L; code_retries <- 0L

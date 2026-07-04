@@ -71,6 +71,30 @@ def test_validate_surfaces_launch_failure_exit_status(tmp_path, monkeypatch):
     assert "status 3" in res["detail"]
 
 
+def test_validate_detail_anchors_on_sentinel_not_stderr_noise(tmp_path, monkeypatch):
+    # Regression: arviz -> xarray -> bottleneck (numpy 2.x) prints a long import
+    # warning to STDERR, concatenated AFTER stdout. The returned `detail` must still
+    # show the R-hat / PASS summary (anchored on the sentinel line), not the trailing
+    # stderr noise -- the confusing `_ARRAY_API not found` detail on a PASS result.
+    _src_mod = importlib.import_module("AI4BayesCode.source")
+    monkeypatch.setattr(_src_mod, "source", lambda *a, **k: None)
+    gen_dir = tmp_path / "generated"
+    gen_dir.mkdir()
+    (gen_dir / "X.cpp").write_text("// dummy\n")
+    (gen_dir / "X_runner.py").write_text(
+        "import sys\n"
+        "print('R1 smoke OK')\n"
+        "print('  beta   max Rhat=1.000')\n"
+        "print('AI4BAYES_VALIDATE: PASS')\n"
+        "sys.stderr.write('\\n'.join('bottleneck _ARRAY_API not found %d' % i for i in range(30)))\n")
+    monkeypatch.chdir(tmp_path)
+    res = gen._validate("generated/X.cpp", "generated/X_runner.py", "X", verbose=False)
+    assert res["ok"] and res["stage"] == "converged", res
+    assert "AI4BAYES_VALIDATE: PASS" in res["detail"]     # the verdict is shown
+    assert "R1 smoke OK" in res["detail"]                 # ...with the R-hat summary
+    assert "_ARRAY_API" not in res["detail"]              # ...and NOT the stderr import noise
+
+
 # ---------------------------------------------------------------------------
 # prompt() — pure builder
 # ---------------------------------------------------------------------------

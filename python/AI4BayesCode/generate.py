@@ -352,16 +352,26 @@ def _validate(cpp_path, runner_path, classname, verbose: bool = False) -> dict:
 
     # ---- 4. convergence sentinel ----
     lines = out_txt.splitlines()
+
+    def _tail_at_sentinel(n):
+        # Anchor the shown detail on the LAST AI4BAYES_VALIDATE line so trailing
+        # stderr noise -- e.g. an arviz -> xarray -> bottleneck import warning under
+        # numpy 2.x, concatenated AFTER stdout -- does not bury the R-hat / verdict
+        # summary. No sentinel -> plain tail.
+        idx = next((i for i in range(len(lines) - 1, -1, -1)
+                    if "AI4BAYES_VALIDATE" in lines[i]), None)
+        return "\n".join(lines[-n:] if idx is None else lines[max(0, idx - n + 1): idx + 1])
+
     if re.search(r"AI4BAYES_VALIDATE:\s*PASS", out_txt):
         if verbose:
             print("  [validate] converged")
-        return {"ok": True, "stage": "converged", "detail": "\n".join(lines[-15:])}
+        return {"ok": True, "stage": "converged", "detail": _tail_at_sentinel(15)}
     # No PASS sentinel -> distinguish WHY, rather than always blaming "convergence".
     detail = "\n".join(lines[-40:])
     if re.search(r"AI4BAYES_VALIDATE:\s*FAIL", out_txt):       # ran to the end; R-hat too high
         if verbose:
             print("  [validate] ran but did not converge")
-        return {"ok": False, "stage": "convergence", "detail": detail}
+        return {"ok": False, "stage": "convergence", "detail": _tail_at_sentinel(40)}
     if re.search(r"Traceback \(most recent|^Error:|Segmentation fault|terminate called|Abort|runner error",
                  out_txt, re.M):                               # compiled but crashed at RUNTIME
         if verbose:

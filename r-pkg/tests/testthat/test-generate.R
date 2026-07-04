@@ -221,8 +221,9 @@ test_that("non-interactive missing model_description errors", {
         regexp = "model_description.*required")
 })
 
-test_that("default LLM is a valid bare model id", {
-    expect_identical(formals(ai4bayescode_generate)$LLM, "claude-opus-4-8")
+test_that("default LLM is NULL (asked interactively; resolves to opus non-interactively)", {
+    expect_null(formals(ai4bayescode_generate)$LLM)                       # ask-if-missing
+    expect_error(AI4BayesCode:::.ai4b_resolve_llm("claude-opus-4-8"), NA)  # bare id resolves OK
 })
 
 test_that("effort levels are per-model", {
@@ -233,7 +234,7 @@ test_that("effort levels are per-model", {
     expect_null(AI4BayesCode:::.ai4b_model_effort_levels("totally-unknown-model"))
 })
 
-test_that("interactive: model + effort menus shown; effort offered from the model's levels", {
+test_that("interactive: effort re-offered from the model's levels (LLM passed -> model menu skipped)", {
     asked <- character(0); eff_opts <- NULL
     ask <- function(prompt, options = NULL, default = NULL) {
         asked <<- c(asked, prompt)
@@ -250,11 +251,37 @@ test_that("interactive: model + effort menus shown; effort offered from the mode
                              interactive = TRUE, verbose = FALSE,
                              .responder = responder, .ask = ask,
                              .validate = function(...) list(ok = TRUE))
-    expect_true(any(grepl("LLM model", asked)))                   # model menu shown
-    expect_true(any(grepl("effort", asked, ignore.case = TRUE)))  # effort menu shown
+    expect_false(any(grepl("LLM model", asked)))                  # LLM passed -> model menu SKIPPED
+    expect_true(any(grepl("effort", asked, ignore.case = TRUE)))  # effort re-asked (xhigh invalid for sonnet)
     expect_false("xhigh" %in% eff_opts)                           # sonnet's levels exclude xhigh
     expect_true("high" %in% eff_opts)
     expect_true(res$called_api)
+})
+
+test_that("interactive: max_attempts menu returns a STRING but is coerced (no sprintf %d error)", {
+    # Regression: the "Max generate->validate attempts?" menu returns a STRING ("5"),
+    # which is used in sprintf("%d", max_attempts) at prompt-build time. It must be
+    # coerced to an integer BEFORE the prompt is built, else:
+    #   Error ... invalid format '%d'; use format %s for character objects
+    ask <- function(prompt, options = NULL, default = NULL) {
+        if (grepl("^Max", prompt))                                 return("5")   # the trigger
+        if (grepl("LLM model", prompt))                            return("claude-opus-4-8")
+        if (grepl("effort|Thinking", prompt, ignore.case = TRUE))  return("high")
+        if (grepl("^Backend", prompt))                             return("both")
+        if (!is.null(default)) return(default)
+        if (!is.null(options)) return(options[[1]])
+        ""
+    }
+    responder <- function(messages) list(stop_reason = "end_turn", content = list(
+        list(type = "text", text = "```cpp\n// path: LR.cpp\n#include <x>\nclass LR{};\n```")))
+    td <- file.path(tempdir(), "ai4b_maxatt"); unlink(td, recursive = TRUE)
+    expect_error(
+        res <- ai4bayescode_generate("linear regression y ~ N(Xb, s^2)", classname = "LR",
+                                 output_path = td, interactive = TRUE, verbose = FALSE,
+                                 .responder = responder, .ask = ask,
+                                 .validate = function(...) list(ok = TRUE)),
+        NA)                                       # no error -> the coercion worked
+    expect_true(res$called_api)                   # got past prompt-build to the API call
 })
 
 test_that("auth: OAuth subscription token -> Bearer; API key -> x-api-key", {
@@ -394,7 +421,7 @@ test_that("truncated reply (stop_reason=max_tokens) is flagged as truncated no_c
 # ---------------------------------------------------------------------------
 test_that("confirm_model toggles a pre-code confirmation step in the prompt", {
     p_yes <- ai4bayescode_prompt("Linear regression.", confirm_model = TRUE)
-    expect_match(p_yes$user, "PRE-GENERATION MODEL CONFIRMATION")
+    expect_match(p_yes$user, "MODEL CONFIRMATION")
     expect_match(p_yes$user, "ask_user")
     expect_match(p_yes$user, "display-math")            # REQUIRED: full LaTeX formulas
     expect_match(p_yes$user, "parameter summary table") # REQUIRED: parameter table
@@ -414,7 +441,7 @@ test_that("generate(): confirm_model follows `interactive`, and can be forced on
     r2 <- ai4bayescode_generate("LR.", classname = "LR", API_key = "sk-x", output_path = td,
                             backend = "R", interactive = FALSE, confirm_model = TRUE, verbose = FALSE,
                             .responder = resp, .validate = ok)
-    expect_match(r2$prompt$user, "PRE-GENERATION MODEL CONFIRMATION")   # forced on
+    expect_match(r2$prompt$user, "MODEL CONFIRMATION")   # forced on
 })
 
 test_that("confirm_model: model confirms via ask_user, then emits code", {
@@ -519,7 +546,7 @@ test_that("LaTeX console renderer turns display math into readable Unicode", {
 test_that("no-prior description -> prompt carries the strict non-informative defaults", {
     p <- ai4bayescode_prompt("Linear regression y ~ N(X beta, sigma^2).")   # names NO priors
     expect_match(p$user, "NON-INFORMATIVE")
-    expect_match(p$user, "FLAT IMPROPER")            # real coefs -> flat improper
+    expect_match(p$user, "flat improper")            # real coefs -> flat improper
     expect_match(p$user, "Jeffreys")                 # positive scale -> 1/sigma
 })
 
