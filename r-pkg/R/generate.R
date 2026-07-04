@@ -190,9 +190,11 @@ if (identical(backend, "both"))
 "  - The generator runs this runner and greps stdout for `AI4BAYES_VALIDATE: PASS`; on\n",
 "    ANY miss (compile error, runner error, or non-convergence) it feeds the output\n",
 "    back and asks you to FIX and RE-EMIT the FULL .cpp and runner. This validating\n",
-"    runner is ALWAYS emitted+run regardless of the harness-deliverable choice above\n",
-"    (that choice only ADDS a clean usage-example file per codegen.md -- it never\n",
-"    removes the AI4BAYES_VALIDATE runner).\n",
+"    runner ALWAYS runs for validation, regardless of the harness-deliverable choice.\n",
+"    That codegen.md choice governs only what is SHIPPED, and its DEFAULT is to ALSO\n",
+"    deliver a CLEAN usage-example script (the validation harness is NOT shipped by\n",
+"    default) -- so UNLESS the user opts to ship the full harness, emit a clean\n",
+"    usage-example script as the deliverable too. Never drop the AI4BAYES_VALIDATE runner.\n",
 "\n---\nModel description:\n", description, "\n")
 }
 
