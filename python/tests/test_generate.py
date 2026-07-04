@@ -33,6 +33,27 @@ def test_validate_launches_runner_without_doubling_folder(tmp_path, monkeypatch)
     assert res["ok"] and res["stage"] == "converged", res
 
 
+def test_validate_retries_parent_cwd_for_root_relative_cpp(tmp_path, monkeypatch):
+    # Regression: the runner-skill convention compiles via source("<out>/<Class>.cpp")
+    # (relative to the PROJECT ROOT). The harness runs from the runner's OWN dir first
+    # (where that path would double + crash), so it must RETRY from the parent -- else
+    # the model wastes attempts rewriting the compile path (the live-test's 3 attempts).
+    _src_mod = importlib.import_module("AI4BayesCode.source")
+    monkeypatch.setattr(_src_mod, "source", lambda *a, **k: None)
+    gen_dir = tmp_path / "generated"
+    gen_dir.mkdir()
+    (gen_dir / "X.cpp").write_text("// dummy\n")
+    # Runner opens a ROOT-relative path "generated/X.cpp": resolves ONLY when cwd is the
+    # project root, NOT when cwd is generated/ (there it would be generated/generated/X.cpp).
+    (gen_dir / "X_runner.py").write_text(
+        "import os\n"
+        "open(os.path.join('generated', 'X.cpp')).close()\n"
+        "print('AI4BAYES_VALIDATE: PASS')\n")
+    monkeypatch.chdir(tmp_path)
+    res = gen._validate("generated/X.cpp", "generated/X_runner.py", "X", verbose=False)
+    assert res["ok"] and res["stage"] == "converged", res
+
+
 # ---------------------------------------------------------------------------
 # prompt() — pure builder
 # ---------------------------------------------------------------------------
