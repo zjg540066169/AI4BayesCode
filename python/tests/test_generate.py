@@ -95,6 +95,25 @@ def test_validate_detail_anchors_on_sentinel_not_stderr_noise(tmp_path, monkeypa
     assert "_ARRAY_API" not in res["detail"]              # ...and NOT the stderr import noise
 
 
+def test_generate_result_repr_is_compact_but_keeps_data():
+    # generate() returns a GenerateResult: a dict with a COMPACT repr so an IPython/
+    # Spyder `Out[..]` echo does not dump the whole transcript + prompt (start.md) +
+    # every file. The full data must still be reachable by key.
+    res = gen.GenerateResult({
+        "files": ["generated/LR.cpp", "generated/LR_runner.py"],
+        "prompt": {"system": "S" * 30000, "user": "U" * 3000},
+        "transcript": "Z" * 40000, "called_api": True,
+        "validated": True, "attempts": 1, "validation": {"stage": "converged"},
+    })
+    r = repr(res)
+    assert len(r) < 600                                   # compact, not the ~75k dict dump
+    assert "validated" in r and "generated/LR.cpp" in r   # verdict + files shown
+    assert "S" * 200 not in r and "Z" * 200 not in r      # prompt/transcript NOT dumped
+    assert res["transcript"] == "Z" * 40000               # ...but still accessible by key
+    assert res["prompt"]["user"] == "U" * 3000
+    assert isinstance(res, dict)                           # still a plain dict for callers
+
+
 # ---------------------------------------------------------------------------
 # prompt() — pure builder
 # ---------------------------------------------------------------------------

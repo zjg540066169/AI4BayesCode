@@ -1202,6 +1202,36 @@ def _write_emitted(txt, output_path, classname):
 # ---------------------------------------------------------------------------
 # generate()
 # ---------------------------------------------------------------------------
+class GenerateResult(dict):
+    """Result of :func:`generate`. It IS a plain ``dict`` -- ``res["transcript"]``,
+    ``res["prompt"]``, ``res["files"]``, ``res["validation"]`` all work as before --
+    but its console repr is COMPACT: an IPython / Spyder ``Out[..]`` echo would
+    otherwise dump the entire transcript, the full prompt (the whole start.md system
+    message), and every generated file. The compact summary shows only the verdict +
+    the written file paths; the full data stays accessible by key.
+    """
+
+    def __repr__(self):
+        files = self.get("files") or []
+        if self.get("called_api") is False and "prompt_path" in self:   # offline emit
+            head = f"offline -- prompt written to {self.get('prompt_path')}"
+        else:
+            val = self.get("validation") or {}
+            head = ("validated" if self.get("validated")
+                    else f"NOT validated (stage={val.get('stage')})")
+            head += f", attempts={self.get('attempts')}"
+        lines = [f"<AI4BayesCode.generate: {head}; {len(files)} file(s)>"]
+        lines += [f"    {f}" for f in files]
+        lines.append("    (transcript / prompt / code omitted here -- read "
+                     "res['transcript'], res['prompt'], or the written files)")
+        return "\n".join(lines)
+
+    # IPython / Spyder pretty-print a dict subclass by EXPANDING its contents, which
+    # ignores __repr__; force the compact form for the `Out[..]` echo.
+    def _repr_pretty_(self, p, cycle):
+        p.text(repr(self))
+
+
 def generate(model_description: str | None = None, *, classname: str | None = None,
              LLM: str | None = None, effort: str | None = None,
              output_path: str | None = None, backend: str | None = None,
@@ -1345,7 +1375,7 @@ def generate(model_description: str | None = None, *, classname: str | None = No
                confirm_model=confirm_model)
 
     if not online:
-        return _offline_emit(p, output_path, verbose)
+        return GenerateResult(_offline_emit(p, output_path, verbose))
 
     # provider dispatch (LLM-agnostic: anthropic + openai implemented)
     if llm["provider"] not in ("anthropic", "openai"):
@@ -1374,7 +1404,7 @@ def generate(model_description: str | None = None, *, classname: str | None = No
             if verbose:
                 print("'anthropic' SDK not importable (pip install anthropic); "
                       "emitting prompt offline instead.")
-            return _offline_emit(p, output_path, verbose)
+            return GenerateResult(_offline_emit(p, output_path, verbose))
         tools = _agent_tools()
         call = lambda messages: _anthropic_request(  # noqa: E731
             p["system"], messages, llm["model"], effort, tools, API_key, max_tokens, timeout)
@@ -1477,4 +1507,5 @@ def generate(model_description: str | None = None, *, classname: str | None = No
     result = {"cpp_path": cpp_path, "files": files, "prompt": p, "called_api": True,
               "transcript": txt, "validated": bool(result_v and result_v.get("ok")),
               "attempts": attempt, "validation": result_v}
+    result = GenerateResult(result)
     return result
