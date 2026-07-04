@@ -426,7 +426,37 @@ ai4bayescode_prompt <- function(model_description,
         sprintf("Target class: %s   backend: %s", prompt$classname, prompt$backend)
     ), rf)
     if (verbose) message("No API key -- wrote prompt to:\n  ", pf, "\n  ", rf)
-    invisible(list(prompt_path = pf, readme_path = rf, prompt = prompt, called_api = FALSE))
+    invisible(structure(
+        list(prompt_path = pf, readme_path = rf, prompt = prompt, called_api = FALSE),
+        class = c("ai4bayescode_generate", "list")))
+}
+
+#' Compact print for an ai4bayescode_generate result
+#'
+#' Shows only the verdict + written file paths. Printing the raw list would dump
+#' the entire transcript, the full prompt (the whole start.md system message), and
+#' every generated file into the console; the heavy fields stay accessible by name
+#' (`x$transcript`, `x$prompt`, `x$files`, `x$validation`).
+#'
+#' @param x An `ai4bayescode_generate` result (from [ai4bayescode_generate]).
+#' @param ... Unused.
+#' @return `x`, invisibly.
+#' @exportS3Method base::print
+print.ai4bayescode_generate <- function(x, ...) {
+    files <- if (is.null(x$files)) character(0) else x$files
+    if (isFALSE(x$called_api) && !is.null(x$prompt_path)) {
+        head <- sprintf("offline -- prompt written to %s", x$prompt_path)
+    } else {
+        stage <- x$validation$stage %||% NA_character_
+        head  <- if (isTRUE(x$validated)) "validated"
+                 else sprintf("NOT validated (stage=%s)", stage)
+        head  <- sprintf("%s, attempts=%s", head, x$attempts %||% NA)
+    }
+    cat(sprintf("<ai4bayescode_generate: %s; %d file(s)>\n", head, length(files)))
+    for (f in files) cat("    ", f, "\n", sep = "")
+    cat("    (transcript / prompt / code omitted here -- read x$transcript, ",
+        "x$prompt, or the written files)\n", sep = "")
+    invisible(x)
 }
 
 #' @keywords internal
@@ -1712,14 +1742,16 @@ ai4bayescode_generate <- function(model_description = NULL,
                              list(role = "user", content = .ai4b_repair_msg(result))))
     }
 
-    invisible(list(cpp_path   = em$cpp_path,
-                   files      = em$files,
-                   prompt     = prompt,
-                   called_api = TRUE,
-                   transcript = txt,
-                   validated  = isTRUE(result$ok),
-                   attempts   = attempt,
-                   validation = result))
+    invisible(structure(
+        list(cpp_path   = em$cpp_path,
+             files      = em$files,
+             prompt     = prompt,
+             called_api = TRUE,
+             transcript = txt,
+             validated  = isTRUE(result$ok),
+             attempts   = attempt,
+             validation = result),
+        class = c("ai4bayescode_generate", "list")))
 }
 
 #' @keywords internal

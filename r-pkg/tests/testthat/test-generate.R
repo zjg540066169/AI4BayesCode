@@ -284,6 +284,22 @@ test_that("interactive: max_attempts menu returns a STRING but is coerced (no sp
     expect_true(res$called_api)                   # got past prompt-build to the API call
 })
 
+test_that("ai4bayescode_generate result prints compactly (transcript / prompt not dumped)", {
+    res <- structure(list(
+        files      = c("generated/LR.cpp", "generated/LR_runner.R"),
+        prompt     = list(system = strrep("S", 30000)),
+        transcript = strrep("Z", 40000),
+        called_api = TRUE, validated = TRUE, attempts = 1L,
+        validation = list(stage = "converged")),
+        class = c("ai4bayescode_generate", "list"))
+    out <- paste(utils::capture.output(print(res)), collapse = "\n")
+    expect_lt(nchar(out), 600)                                # compact, not the ~70k dump
+    expect_match(out, "validated")
+    expect_match(out, "generated/LR.cpp", fixed = TRUE)
+    expect_false(grepl(strrep("Z", 200), out, fixed = TRUE)) # transcript NOT dumped
+    expect_identical(res$transcript, strrep("Z", 40000))     # ...still accessible by name
+})
+
 test_that("auth: OAuth subscription token -> Bearer; API key -> x-api-key", {
     h_oauth <- AI4BayesCode:::.ai4b_anthropic_headers("sk-ant-oat01-abc")
     expect_true(grepl("^Bearer ", h_oauth[["Authorization"]]))
