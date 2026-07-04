@@ -6,7 +6,7 @@
 \usage{
 ai4bayescode_prompt(
   model_description,
-  backend = c("R", "Python", "both"),
+  backend = c("both", "R", "Python"),
   output_path = "./generated",
   classname = NULL,
   priors = "noninformative",

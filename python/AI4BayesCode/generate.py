@@ -145,63 +145,65 @@ def _build_user(description, backend, output_path, classname, priors, max_attemp
                    "    / `#ifdef AI4BAYESCODE_PYBIND_MODULE` guard, so the single file compiles\n"
                    "    from R AND Python (dual-module -- see codegen_cpp.md / examples/ODE_SIR.cpp).\n")
     if confirm_model:
-        confirm_block = (
-"  - PRE-GENERATION MODEL CONFIRMATION -- do NOT skip it (codegen.md §3). After\n"
-"    eliciting the priors and BEFORE writing ANY code, present the model AS YOU\n"
-"    UNDERSTOOD IT for the user to verify, via the `ask_user` tool. ALWAYS include both:\n"
-"      (a) the FULL model as display-math formulas (codegen.md §0b: `$$ ... $$`, never\n"
-"          inline `$...$`) -- the likelihood AND every prior; and\n"
-"      (b) a parameter summary table -- name / role / support / prior.\n"
-"    Do NOT render a DAG.\n"
-"    Ask the user to sign off, offering exactly: 'Correct -- generate the sampler' /\n"
-"    'Not quite -- I will correct it'. If they do NOT confirm, ask what to change, apply\n"
-"    it, and re-confirm. Only AFTER sign-off do you write any code; then emit the\n"
-"    COMPLETE files in that next message (do not defer).\n")
+        confirm_line = (
+"  - Interactive: DO run start.md's pre-generation MODEL CONFIRMATION (codegen.md §3)\n"
+"    before writing any code -- but do NOT render a DAG (the user does not want one);\n"
+"    keep the display-math model + the parameter summary table.\n")
     else:
-        confirm_block = (
-"  - SKIP the model-confirmation step (no LaTeX summary / DAG image). After any prior\n"
-"    elicitation, emit the COMPLETE files immediately -- do not pause to summarize.\n")
+        confirm_line = (
+"  - Non-interactive: SKIP the model-confirmation pause; do NOT render a DAG. After any\n"
+"    prior resolution, emit the COMPLETE files immediately.\n")
     return (
 "You are deploying the AI4BayesCode library to GENERATE A SAMPLER for the model\n"
 "described at the end of this message.\n\n"
+"FOLLOW start.md (in the system prompt) EXACTLY -- including its FULL interactive\n"
+"design flow. Pop EVERY design question start.md and the codegen skills specify, via\n"
+"the `ask_user` tool -- including (not limited to): prior elicitation, sampler /\n"
+"block preference (start.md upfront batch / codegen.md §1.6), MCMC vs VI\n"
+"(codegen.md §6), the runtime-validation-harness deliverable choice (codegen.md\n"
+"'Delivered-code validation harness'), the pre-generation model confirmation, any\n"
+"methodology fork, and the R-hat gray-zone question. Do NOT decide any of them\n"
+"silently and do NOT skip the design batch. The ONLY items ALREADY decided are the\n"
+"runtime/harness settings below (the user set them on the function call) -- do NOT\n"
+"re-ask THOSE.\n\n"
 "TOOLS -- you have `read_file`, `grep`, and `glob` over the INSTALLED AI4BayesCode\n"
-"package (examples/, skills/, include/). The skills reference worked reference\n"
-"implementations ('see examples/GaussianLocationScale.cpp') and headers: READ the\n"
-"relevant example with `read_file` BEFORE writing the .cpp (its class shape,\n"
-"set_current, predict_at, get_current, the block config are all there), and read\n"
-"the on-demand skills (skills/system_design.md, skills/joint_nuts_failure.md,\n"
-"skills/hierarchical_re.md, skills/label_switching.md) when the model calls for\n"
-"them. Do NOT invent an API you can read -- `grep` the headers/examples first.\n\n"
-"Settings:\n"
+"package (examples/, skills/, include/). READ the relevant reference example with\n"
+"`read_file` BEFORE writing the .cpp (its class shape, set_current, predict_at,\n"
+"get_current, block config are all there); `grep` the headers/examples rather than\n"
+"inventing an API; load on-demand skills (system_design.md, joint_nuts_failure.md,\n"
+"hierarchical_re.md, label_switching.md) when the model calls for them.\n\n"
+"ALREADY DECIDED (runtime/harness config -- do NOT re-ask these):\n"
 f"  - Runtime backend: {backend}\n"
 f"  - Output folder:   {output_path}/\n"
 f"  - Class name:      {classname} (valid C++ identifier). Use this name; but if it is\n"
 "    generic (e.g. GeneratedModel) or does not describe the model, REPLACE it with a\n"
 "    short descriptive PascalCase name (e.g. BayesianLinearRegression, PoissonGLMM). Use\n"
 "    the SAME name in the class, the module (RCPP_MODULE / PYBIND), and the `// path:` files.\n"
+f"  - Up to {max_attempts} total generate->validate attempts; iterate on failures.\n"
 f"{_prior_block(priors)}\n"
-f"{confirm_block}"
-f"  - Up to {max_attempts} total generation attempts; iterate on failures.\n"
+f"{confirm_line}"
 "\nDeliverables (emit as fenced code blocks labelled `// path: <out>/<file>`):\n"
 f"  - {output_path}/{classname}.cpp                  (the sampler)\n"
 f"{runner}"
 "  - Register a y_rep stochastic refresher for the observation likelihood\n"
 "    (MANDATORY -- Layer-3 R3 Bayesian p-values need posterior-predictive draws).\n"
 "  - Code comments in English only.\n"
-"  (Compile pitfalls -- set_current takes a concatenated arma::vec not a map;\n"
-"   Rcpp/pybind11 do not fill C++ default args -- and every other API detail are in\n"
-"   codegen_cpp.md + the reference examples; READ them, do not guess.)\n"
+"  (Compile-pitfall + full API details are in codegen_cpp.md + the reference\n"
+"   examples; READ them, do not guess.)\n"
 "\nVALIDATION PROTOCOL (how the generator detects success -- keep this EXACT):\n"
-"  - Emit a self-contained runner whose FULL structure is in codegen_python_runner.md\n"
-"    / codegen_r_runner.md (FOLLOW it): simulate data at known values; run TWO\n"
-"    over-dispersed chains, each doing step -> readapt_NUTS -> step for a\n"
-"    NUTS/joint_nuts model; rank-normalized R-hat across the chains. Its VERY LAST\n"
-"    printed line MUST be EXACTLY one of:\n"
+"  - You MUST emit a validation runner (the *_runner file above) whose FULL structure\n"
+"    is in codegen_python_runner.md / codegen_r_runner.md (FOLLOW it): simulate data at\n"
+"    known values; run TWO over-dispersed chains, each doing step -> readapt_NUTS ->\n"
+"    step for a NUTS/joint_nuts model; rank-normalized R-hat across the chains. Its VERY\n"
+"    LAST printed line MUST be EXACTLY one of:\n"
 "        AI4BAYES_VALIDATE: PASS                    (max rank-R-hat < 1.01)\n"
 "        AI4BAYES_VALIDATE: FAIL maxRhat=<value>    (otherwise)\n"
-"  - The generator greps stdout for `AI4BAYES_VALIDATE: PASS`; on ANY miss (compile\n"
-"    error, runner error, or non-convergence) it feeds the output back and asks you\n"
-"    to FIX and RE-EMIT the FULL .cpp and runner.\n"
+"  - The generator runs this runner and greps stdout for `AI4BAYES_VALIDATE: PASS`; on\n"
+"    ANY miss (compile error, runner error, or non-convergence) it feeds the output\n"
+"    back and asks you to FIX and RE-EMIT the FULL .cpp and runner. This validating\n"
+"    runner is ALWAYS emitted+run regardless of the harness-deliverable choice above\n"
+"    (that choice only ADDS a clean usage-example file per codegen.md -- it never\n"
+"    removes the AI4BAYES_VALIDATE runner).\n"
 "\n---\nModel description:\n" + description + "\n")
 
 
@@ -320,8 +322,15 @@ def _validate(cpp_path, runner_path, classname, verbose: bool = False) -> dict:
     # the .cpp in its working dir or it errors "no such file" (which the sentinel
     # logic below would otherwise mislabel a "runtime crash").
     try:
-        proc = subprocess.run([sys.executable, str(runner_path)],
-                              cwd=str(Path(runner_path).parent),
+        # Use the ABSOLUTE runner path for both the script arg and cwd. If we
+        # passed the (possibly relative) runner_path as the script arg WHILE
+        # setting cwd to its parent, Python would resolve it against that cwd and
+        # DOUBLE the folder -- e.g. runner_path "./generated/X_runner.py" + cwd
+        # "./generated" -> "generated/generated/X_runner.py: No such file". That
+        # bit every run with the default relative output_path "./generated".
+        _rp = Path(runner_path).resolve()
+        proc = subprocess.run([sys.executable, str(_rp)],
+                              cwd=str(_rp.parent),
                               capture_output=True, text=True)
         out_txt = (proc.stdout or "") + (proc.stderr or "")
     except Exception as e:  # noqa: BLE001
@@ -1171,11 +1180,11 @@ def _write_emitted(txt, output_path, classname):
 # ---------------------------------------------------------------------------
 def generate(model_description: str | None = None, *, classname: str | None = None,
              LLM: str | None = None, effort: str | None = None,
-             output_path: str = "./generated", backend: str | None = None,
+             output_path: str | None = None, backend: str | None = None,
              API_key: str | None = None, interactive: bool | None = None,
              use_cli: bool = False, priors=None, confirm_model: bool | None = None,
              max_tokens: int | None = None,
-             timeout: float = 600.0, max_attempts: int = 5, verbose: bool = True,
+             timeout: float = 600.0, max_attempts: int | None = None, verbose: bool = True,
              verify_stream: bool = True,
              _responder=None, _ask=None, _validate=None) -> dict:
     """Console-interactive, LLM-agnostic NL -> validated sampler code.
@@ -1251,12 +1260,16 @@ def generate(model_description: str | None = None, *, classname: str | None = No
             output_path = ask("Output folder", default="./generated")
         if not classname:
             classname = ask("Class name", default=_derive_class_name(model_description or "GeneratedModel"))
+        if max_attempts is None:      # ask the retry budget ONLY if not provided
+            max_attempts = ask("Max generate->validate attempts?",
+                               options=["5", "10", "20"], default="5")
     else:
         if not model_description:
             raise ValueError("model_description is required when interactive=False")
         backend = backend or "both"   # default: ONE .cpp usable from BOTH R and Python
         output_path = output_path or "./generated"
         classname = classname or _derive_class_name(model_description)
+    max_attempts = int(max_attempts) if str(max_attempts).strip().isdigit() else 5
     backend = {"r": "R", "python": "Python", "both": "both"}.get(str(backend).strip().lower(), backend)
     if backend not in ("R", "Python", "both"):
         raise ValueError("backend must be 'R', 'Python', or 'both'")

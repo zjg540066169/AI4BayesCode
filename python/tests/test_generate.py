@@ -13,6 +13,26 @@ import pytest
 gen = importlib.import_module("AI4BayesCode.generate")
 
 
+def test_validate_launches_runner_without_doubling_folder(tmp_path, monkeypatch):
+    # Regression: with a RELATIVE output_path (the default "./generated"), _validate
+    # must launch the runner by its ABSOLUTE path. The old code passed the relative
+    # runner_path as the script arg WHILE setting cwd to its parent, so Python
+    # resolved it against that cwd -> "generated/generated/X_runner.py: can't open
+    # file" and EVERY attempt failed as `incomplete` (the bug the user hit).
+    # Patch the compile step. `AI4BayesCode.source` the ATTR is the re-exported
+    # function (shadows the submodule), so reach the real submodule via importlib
+    # and patch its `source` -- what `_validate`'s `from .source import source` binds.
+    _src_mod = importlib.import_module("AI4BayesCode.source")
+    monkeypatch.setattr(_src_mod, "source", lambda *a, **k: None)
+    gen_dir = tmp_path / "generated"
+    gen_dir.mkdir()
+    (gen_dir / "X.cpp").write_text("// dummy\n")
+    (gen_dir / "X_runner.py").write_text("print('AI4BAYES_VALIDATE: PASS')\n")
+    monkeypatch.chdir(tmp_path)                                  # cwd has ./generated as a subdir
+    res = gen._validate("generated/X.cpp", "generated/X_runner.py", "X", verbose=False)
+    assert res["ok"] and res["stage"] == "converged", res
+
+
 # ---------------------------------------------------------------------------
 # prompt() — pure builder
 # ---------------------------------------------------------------------------
@@ -52,16 +72,30 @@ def test_prompt_has_no_gate_param():
 def test_prompt_confirm_model_true_instructs_ask_user_confirmation():
     p = gen.prompt("Linear regression.", confirm_model=True)
     user = p["user"]
-    assert "PRE-GENERATION MODEL CONFIRMATION" in user
+    assert "MODEL CONFIRMATION" in user
     assert "ask_user" in user
     assert "display-math" in user
     assert "parameter summary table" in user
 
 
+def test_prompt_defers_design_flow_to_start_md():
+    # The thin _build_user must NOT script its own narrow flow -- it defers the
+    # design questions (block / MCMC-vs-VI / harness deliverable) to start.md so
+    # editing the skills auto-syncs R + Python. It only pins harness settings +
+    # the AI4BAYES_VALIDATE grep contract.
+    user = gen.prompt("Linear regression.", confirm_model=True)["user"]
+    assert "FOLLOW start.md" in user
+    assert "Pop EVERY design question" in user
+    assert "block preference" in user and "MCMC vs VI" in user
+    assert "validation-harness deliverable" in user
+    assert "AI4BAYES_VALIDATE: PASS" in user            # grep contract kept
+    assert "do NOT render a DAG" in user                # user does not want a DAG
+
+
 def test_prompt_confirm_model_false_skips_confirmation():
     p = gen.prompt("Linear regression.", confirm_model=False)
     assert "SKIP the model-confirmation" in p["user"]
-    assert "PRE-GENERATION MODEL CONFIRMATION" not in p["user"]
+    assert "MODEL CONFIRMATION" not in p["user"]
 
 
 def test_generate_confirm_model_defaults_off_when_non_interactive(tmp_path):
@@ -76,7 +110,7 @@ def test_generate_confirm_model_defaults_off_when_non_interactive(tmp_path):
                        verbose=False, max_attempts=1, _responder=responder,
                        _ask=lambda *a, **k: "", _validate=lambda *a, **k: {"ok": True})
     assert "SKIP the model-confirmation" in res["prompt"]["user"]
-    assert "PRE-GENERATION MODEL CONFIRMATION" not in res["prompt"]["user"]
+    assert "MODEL CONFIRMATION" not in res["prompt"]["user"]
 
 
 def test_generate_confirm_model_true_forces_confirmation_block(tmp_path):
@@ -91,7 +125,7 @@ def test_generate_confirm_model_true_forces_confirmation_block(tmp_path):
                        confirm_model=True, verbose=False, max_attempts=1,
                        _responder=responder, _ask=lambda *a, **k: "",
                        _validate=lambda *a, **k: {"ok": True})
-    assert "PRE-GENERATION MODEL CONFIRMATION" in res["prompt"]["user"]
+    assert "MODEL CONFIRMATION" in res["prompt"]["user"]
     assert "ask_user" in res["prompt"]["user"]
 
 

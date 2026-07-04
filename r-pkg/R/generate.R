@@ -126,32 +126,32 @@
 .ai4b_build_user <- function(description, backend, output_path, classname,
                              priors, max_attempts, confirm_model = FALSE) {
     confirm_block <- if (isTRUE(confirm_model)) paste0(
-"  - PRE-GENERATION MODEL CONFIRMATION -- do NOT skip it (codegen.md \u00a73). After\n",
-"    eliciting the priors and BEFORE writing ANY code, present the model AS YOU\n",
-"    UNDERSTOOD IT for the user to verify, via the `ask_user` tool. ALWAYS include both:\n",
-"      (a) the FULL model as display-math formulas (codegen.md \u00a70b: `$$ ... $$`, never\n",
-"          inline `$...$`) -- the likelihood AND every prior; and\n",
-"      (b) a parameter summary table -- name / role / support / prior.\n",
-"    Do NOT render a DAG.\n",
-"    Ask the user to sign off, offering exactly: 'Correct -- generate the sampler' /\n",
-"    'Not quite -- I will correct it'. If they do NOT confirm, ask what to change, apply\n",
-"    it, and re-confirm. Only AFTER sign-off do you write any code; then emit the\n",
-"    COMPLETE files in that next message (do not defer).\n")
+"  - Interactive: DO run start.md's pre-generation MODEL CONFIRMATION (codegen.md \u00a73)\n",
+"    before writing any code -- but do NOT render a DAG (the user does not want one);\n",
+"    keep the display-math model + the parameter summary table.\n")
     else paste0(
-"  - SKIP the model-confirmation step (no LaTeX summary / DAG image). After any prior\n",
-"    elicitation, emit the COMPLETE files immediately -- do not pause to summarize.\n")
+"  - Non-interactive: SKIP the model-confirmation pause; do NOT render a DAG. After any\n",
+"    prior resolution, emit the COMPLETE files immediately.\n")
     paste0(
 "You are deploying the AI4BayesCode library to GENERATE A SAMPLER for the model\n",
 "described at the end of this message.\n\n",
+"FOLLOW start.md (in the system prompt) EXACTLY -- including its FULL interactive\n",
+"design flow. Pop EVERY design question start.md and the codegen skills specify, via\n",
+"the `ask_user` tool -- including (not limited to): prior elicitation, sampler /\n",
+"block preference (start.md upfront batch / codegen.md \u00a71.6), MCMC vs VI\n",
+"(codegen.md \u00a76), the runtime-validation-harness deliverable choice (codegen.md\n",
+"'Delivered-code validation harness'), the pre-generation model confirmation, any\n",
+"methodology fork, and the R-hat gray-zone question. Do NOT decide any of them\n",
+"silently and do NOT skip the design batch. The ONLY items ALREADY decided are the\n",
+"runtime/harness settings below (the user set them on the function call) -- do NOT\n",
+"re-ask THOSE.\n\n",
 "TOOLS -- you have `read_file`, `grep`, and `glob` over the INSTALLED AI4BayesCode\n",
-"package (examples/, skills/, include/). The skills reference worked reference\n",
-"implementations ('see examples/GaussianLocationScale.cpp') and headers: READ the\n",
-"relevant example with `read_file` BEFORE writing the .cpp (its class shape,\n",
-"set_current, predict_at, get_current, the block config are all there), and read\n",
-"the on-demand skills (skills/system_design.md, skills/joint_nuts_failure.md,\n",
-"skills/hierarchical_re.md, skills/label_switching.md) when the model calls for\n",
-"them. Do NOT invent an API you can read -- `grep` the headers/examples first.\n\n",
-"Settings:\n",
+"package (examples/, skills/, include/). READ the relevant reference example with\n",
+"`read_file` BEFORE writing the .cpp (its class shape, set_current, predict_at,\n",
+"get_current, block config are all there); `grep` the headers/examples rather than\n",
+"inventing an API; load on-demand skills (system_design.md, joint_nuts_failure.md,\n",
+"hierarchical_re.md, label_switching.md) when the model calls for them.\n\n",
+"ALREADY DECIDED (runtime/harness config -- do NOT re-ask these):\n",
 sprintf("  - Runtime backend: %s\n", backend),
 sprintf("  - Output folder:   %s/\n", output_path),
 sprintf(paste0(
@@ -160,15 +160,15 @@ sprintf(paste0(
 "    descriptive PascalCase name (e.g. BayesianLinearRegression, PoissonGLMM). Use the\n",
 "    SAME name in the class declaration, the RCPP_MODULE, and the `// path:` file names.\n"),
         classname),
+sprintf("  - Up to %d total generate->validate attempts; iterate on failures.\n", max_attempts),
 .ai4b_prior_block(priors), "\n",
 confirm_block,
-sprintf("  - Up to %d total generation attempts; iterate on failures.\n", max_attempts),
 "\nDeliverables (emit as fenced code blocks labelled `// path: <out>/<file>`):\n",
 sprintf("  - %s/%s.cpp                  (the sampler)\n", output_path, classname),
 if (backend %in% c("R","both"))
-  sprintf("  - %s/%s_runner.R             (R runner / Layer-3 harness)\n", output_path, classname) else "",
+  sprintf("  - %s/%s_runner.R             (R runner / Layer-3 validation harness)\n", output_path, classname) else "",
 if (backend %in% c("Python","both"))
-  sprintf("  - %s/%s_runner.py            (Python runner)\n", output_path, classname) else "",
+  sprintf("  - %s/%s_runner.py            (Python runner / Layer-3 validation harness)\n", output_path, classname) else "",
 if (identical(backend, "both"))
   paste0("  - backend=both -> the ONE .cpp above must contain BOTH an RCPP_MODULE\n",
          "    AND a PYBIND11_MODULE, each under its `#ifdef AI4BAYESCODE_RCPP_MODULE`\n",
@@ -177,20 +177,22 @@ if (identical(backend, "both"))
 "  - Register a y_rep stochastic refresher for the observation likelihood\n",
 "    (MANDATORY -- Layer-3 R3 Bayesian p-values need posterior-predictive draws).\n",
 "  - Code comments in English only.\n",
-"  (Compile pitfalls -- set_current takes a concatenated arma::vec not a map;\n",
-"   Rcpp/pybind11 do not fill C++ default args -- and every other API detail are in\n",
-"   codegen_cpp.md + the reference examples; READ them, do not guess.)\n",
+"  (Compile-pitfall + full API details are in codegen_cpp.md + the reference\n",
+"   examples; READ them, do not guess.)\n",
 "\nVALIDATION PROTOCOL (how the generator detects success -- keep this EXACT):\n",
-"  - Emit a self-contained runner whose FULL structure is in codegen_r_runner.md /\n",
-"    codegen_python_runner.md (FOLLOW it): simulate data at known values; run TWO\n",
-"    over-dispersed chains, each doing step -> readapt_NUTS -> step for a\n",
-"    NUTS/joint_nuts model; rank-normalized R-hat across the chains. Its VERY LAST\n",
-"    printed line MUST be EXACTLY one of:\n",
+"  - You MUST emit a validation runner (the *_runner file above) whose FULL structure\n",
+"    is in codegen_r_runner.md / codegen_python_runner.md (FOLLOW it): simulate data at\n",
+"    known values; run TWO over-dispersed chains, each doing step -> readapt_NUTS ->\n",
+"    step for a NUTS/joint_nuts model; rank-normalized R-hat across the chains. Its VERY\n",
+"    LAST printed line MUST be EXACTLY one of:\n",
 "           AI4BAYES_VALIDATE: PASS                    (max rank-R-hat < 1.01)\n",
 "           AI4BAYES_VALIDATE: FAIL maxRhat=<value>    (otherwise)\n",
-"  - The generator greps stdout for `AI4BAYES_VALIDATE: PASS`; on ANY miss (compile\n",
-"    error, runner error, or non-convergence) it feeds the output back and asks you\n",
-"    to FIX and RE-EMIT the FULL .cpp and runner.\n",
+"  - The generator runs this runner and greps stdout for `AI4BAYES_VALIDATE: PASS`; on\n",
+"    ANY miss (compile error, runner error, or non-convergence) it feeds the output\n",
+"    back and asks you to FIX and RE-EMIT the FULL .cpp and runner. This validating\n",
+"    runner is ALWAYS emitted+run regardless of the harness-deliverable choice above\n",
+"    (that choice only ADDS a clean usage-example file per codegen.md -- it never\n",
+"    removes the AI4BAYES_VALIDATE runner).\n",
 "\n---\nModel description:\n", description, "\n")
 }
 
@@ -1433,12 +1435,12 @@ ai4bayescode_generate <- function(model_description = NULL,
                               classname    = NULL,
                               LLM          = NULL,
                               effort       = NULL,
-                              output_path  = "./generated",
+                              output_path  = NULL,
                               backend      = NULL,
                               API_key      = NULL,
                               interactive  = base::interactive(),
                               use_cli      = FALSE,
-                              max_attempts = 5L,
+                              max_attempts = NULL,
                               priors       = NULL,
                               confirm_model = NULL,
                               max_tokens   = NULL,
@@ -1486,12 +1488,16 @@ ai4bayescode_generate <- function(model_description = NULL,
             dflt <- .ai4b_derive_class_name(model_description %||% "GeneratedModel")
             classname <- ask("Class name", default = dflt)
         }
+        if (is.null(max_attempts))                 # ask the retry budget ONLY if not provided
+            max_attempts <- ask("Max generate->validate attempts?",
+                                options = c("5", "10", "20"), default = "5")
     } else {
         if (is.null(model_description) || !nzchar(model_description))
             stop("`model_description` is required when interactive = FALSE.", call. = FALSE)
         if (is.null(backend)) backend <- "both"   # ONE .cpp usable from BOTH R and Python
         if (is.null(output_path)) output_path <- "./generated"
         if (is.null(classname)) classname <- .ai4b_derive_class_name(model_description)
+        if (is.null(max_attempts)) max_attempts <- 5L
     }
     backend <- match.arg(.ai4b_norm_backend(backend), c("R", "Python", "both"))
     if (is.null(priors)) priors <- if (interactive) "interactive" else "noninformative"
@@ -1620,7 +1626,9 @@ ai4bayescode_generate <- function(model_description = NULL,
     # a reply with no code block (the model deferred, or was truncated) is re-asked
     # on a SEPARATE budget (`max_code_retries`) so it never burns a validation
     # attempt -- max_attempts is reserved for real compile/convergence failures.
-    max_attempts     <- as.integer(max(1L, max_attempts))
+    max_attempts     <- suppressWarnings(as.integer(max_attempts))
+    if (length(max_attempts) != 1L || is.na(max_attempts) || max_attempts < 1L)
+        max_attempts <- 5L
     max_code_retries <- 6L
     msgs <- list(list(role = "user", content = prompt$user))
     em <- NULL; txt <- ""; result <- NULL; attempt <- 0L; code_retries <- 0L

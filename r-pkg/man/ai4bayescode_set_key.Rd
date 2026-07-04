@@ -8,9 +8,10 @@ ai4bayescode_set_key(key, provider = "anthropic", check = TRUE)
 }
 \arguments{
 \item{key}{Non-empty API-key string (e.g. `"sk-ant-api..."`, `"sk-YOUR-KEY-HERE"`).
-An Anthropic subscription token (`"sk-ant-oat..."` from
-`claude setup-token`) works too -- the Bearer header is detected from the
-`sk-ant-oat` prefix.}
+A Claude subscription key (`"sk-ant-oat..."` from `claude setup-token`) is
+detected from the `sk-ant-oat` prefix, but subscription keys may be
+rate-limited for API use (a 429) -- if that happens, try a regular API key
+(`"sk-ant-api03..."` from https://console.anthropic.com/settings/keys).}
 
 \item{provider}{One of `"anthropic"`, `"openai"`, `"google"`.}
 
