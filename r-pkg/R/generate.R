@@ -605,6 +605,7 @@ ai4bayescode_set_key <- function(key, provider = "anthropic", check = TRUE) {
                   openai = "OPENAI_API_KEY", google = "GOOGLE_API_KEY")
     args <- list(key); names(args) <- env
     do.call(Sys.setenv, args)
+    options(ai4bayescode.session_provider = provider)   # menu shows only this provider's models
     message(sprintf("Set %s key for this session (%s). Not saved to disk.",
                     provider, .ai4b_mask_key(key)))
     if (isTRUE(check) && identical(provider, "anthropic"))
@@ -686,6 +687,17 @@ ai4bayescode_key_status <- function() {
 # Render the model's LaTeX (display math) as plain text a bare console can show.
 # Not a LaTeX engine -- just the stats notation the elicitation prompts use.
 # Non-LaTeX text passes through unchanged.
+#' @keywords internal
+#' @noRd
+.ai4b_strip_code_fences <- function(text) {
+    # Replace fenced ```...``` code blocks with a one-line placeholder so the
+    # model's PROSE shows in the console but long C++/R source does not flood it
+    # (the full code is in the output files + transcript).
+    gsub("(?s)```.*?```",
+         "\n  [... code omitted -- written to the output files ...]\n",
+         text, perl = TRUE)
+}
+
 #' @keywords internal
 #' @noRd
 .ai4b_latex_to_console <- function(s) {
@@ -915,18 +927,12 @@ ai4bayescode_key_status <- function() {
     state$blocks[[i]]$flushed <- TRUE
     txt <- b$text %||% ""
     if (progress && nzchar(trimws(txt))) {
-        # Keep the console readable: do NOT echo the model's text reply. Both the
-        # generated CODE and its prose explanation / summary can run to hundreds of
-        # lines (e.g. a Bayesian network), and everything is written to the output
-        # files (.cpp / runner) and the `_transcript.md`. Just note a reply arrived.
-        # (Progress -- thinking, tool use, attempt / validate status -- and the
-        #  ask_user questions come from other paths and are unaffected.)
-        if (grepl("```", txt, fixed = TRUE))
-            cat("\n  [... model wrote the sampler files",
-                "(code + explanation omitted from the console -- see the output files + transcript) ...]\n",
-                sep = " ")
-        else
-            cat("\n  [... model reply omitted from the console (see the transcript) ...]\n")
+        # Show the model's PROSE (reasoning, model confirmation -- $$..$$ math
+        # rendered readably); replace ONLY the fenced CODE blocks with a short
+        # placeholder (the full .cpp / runner is written to the output files +
+        # transcript). Progress / ask_user come from other paths.
+        shown <- trimws(.ai4b_latex_to_console(.ai4b_strip_code_fences(txt)))
+        if (nzchar(shown)) cat("\n", shown, "\n", sep = "")
     }
     state
 }
@@ -1456,12 +1462,13 @@ ai4bayescode_generate <- function(model_description = NULL,
             model_description <- ask("Model description (text, or path to a .txt)")
         # Pick the LLM model, then its thinking/effort level -- kept consistent
         # with the per-model effort check below (only that model's levels offered).
-        # Offer the FULL registry, defaulting to the flagship Claude model: the menu
-        # is about CHOOSING a model, not about which key happens to be set. (Filtering
-        # by env key used to HIDE every Claude model when a stray OPENAI_API_KEY was
-        # present.) The chosen provider's key is requested downstream.
+        # If the user picked a provider via set_key(), show only its models (so an
+        # Anthropic key does not surface gpt-5.5-codex, and vice versa). No set_key
+        # choice -> show all (a stray env key does NOT filter -- that hid Claude before).
         if (is.null(LLM)) {                        # ask the model ONLY if not provided
             .mdl     <- ai4bayescode_models()
+            .sp      <- getOption("ai4bayescode.session_provider", NULL)
+            if (!is.null(.sp) && .sp %in% .mdl$provider) .mdl <- .mdl[.mdl$provider == .sp, ]
             .choices <- .mdl$name
             LLM <- ask("LLM model?", options = .choices, default = .choices[1])
         }

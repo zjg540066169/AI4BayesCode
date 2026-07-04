@@ -456,6 +456,12 @@ def _provider_key(provider: str) -> str:
 _PROVIDER_ENV = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY",
                  "google": "GOOGLE_API_KEY"}
 
+# The provider the user last chose via set_key(). When set, the interactive model
+# menu shows ONLY that provider's models -- so after set_key(..., "anthropic") the
+# menu drops the OpenAI models (a stray OPENAI_API_KEY in the env no longer
+# surfaces them). None -> show all (no explicit choice made).
+_SESSION_PROVIDER: str | None = None
+
 
 def _mask_key(key: str) -> str:
     """Mask a key for display: a short prefix + the last 4 chars, never the full
@@ -552,6 +558,8 @@ def set_key(key: str, provider: str = "anthropic", check: bool = True) -> str:
             f"'{key}' is a PLACEHOLDER from the examples, not a real key.\n"
             f"  Replace it with YOUR {provider} key{where}.")
     os.environ[_PROVIDER_ENV[provider]] = key
+    global _SESSION_PROVIDER
+    _SESSION_PROVIDER = provider     # the menu will then show only this provider's models
     print(f"Set {provider} key for this session ({_mask_key(key)}). Not saved to disk.")
     if check and provider == "anthropic":
         try:
@@ -618,6 +626,16 @@ _LATEX_MAP = {
 _LATEX_SUP = {"^{\\top}": "ᵀ", "^\\top": "ᵀ", "^{-1}": "⁻¹",
               "^{2}": "²", "^{3}": "³", "^{T}": "ᵀ",
               "^2": "²", "^3": "³", "^T": "ᵀ"}
+
+
+def _strip_code_fences(text: str) -> str:
+    """Replace fenced ```...``` code blocks with a one-line placeholder so the
+    model's PROSE (reasoning, model confirmation) shows in the console while long
+    C++/R source doesn't flood it -- the full code is in the output files +
+    transcript."""
+    return re.sub(r"```.*?```",
+                  "\n  [... code omitted -- written to the output files ...]\n",
+                  text, flags=re.S)
 
 
 def _latex_to_console(s: str) -> str:
@@ -884,18 +902,13 @@ def _anthropic_request(system, messages, model, effort, tools, api_key, max_toke
             # blocks print verbatim so C++/R source is never mangled. No-op when
             # live (already streamed raw). Idempotent (resets `cur`).
             if progress and not live and cur["type"] == "text" and cur["text"].strip():
-                txt = cur["text"]
-                # Keep the console readable: do NOT echo the model's text reply. Both
-                # the generated CODE and its prose explanation / summary can run to
-                # hundreds of lines (e.g. a Bayesian network); everything is written to
-                # the output files (.cpp / runner) and the _transcript.md. Just note a
-                # reply arrived. Progress (thinking / tool use / attempt / validate) and
-                # ask_user questions come from other paths and are unaffected.
-                if "```" in txt:
-                    print("\n  [... model wrote the sampler files (code + explanation "
-                          "omitted from the console -- see the output files + transcript) ...]")
-                else:
-                    print("\n  [... model reply omitted from the console (see the transcript) ...]")
+                # Show the model's PROSE (reasoning, model confirmation -- $$..$$ math
+                # rendered readably); replace ONLY the fenced CODE blocks with a short
+                # placeholder (the full .cpp / runner is written to the output files +
+                # transcript). Progress / ask_user come from other paths.
+                shown = _latex_to_console(_strip_code_fences(cur["text"])).rstrip()
+                if shown.strip():
+                    print("\n" + shown)
             cur["type"], cur["text"] = None, ""
 
         with client.messages.stream(**kwargs) as s:
@@ -1221,7 +1234,10 @@ def generate(model_description: str | None = None, *, classname: str | None = No
         # stray OPENAI_API_KEY was present -- confusing. If the chosen provider has
         # no key, the request fails later with a clear set_key() message.)
         if LLM is None:                       # ask the model ONLY if not provided
-            _choices = [m["name"] for m in models()]
+            # If the user picked a provider via set_key(), show only its models
+            # (so an Anthropic key does not surface gpt-5.5-codex, and vice versa).
+            _m = [m for m in models() if _SESSION_PROVIDER in (None, m["provider"])]
+            _choices = [m["name"] for m in (_m or models())]
             LLM = ask("LLM model?", options=_choices, default=_choices[0])
         llm = _resolve_llm(LLM)
         lv = _model_effort_levels(llm["model"])
