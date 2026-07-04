@@ -54,6 +54,23 @@ def test_validate_retries_parent_cwd_for_root_relative_cpp(tmp_path, monkeypatch
     assert res["ok"] and res["stage"] == "converged", res
 
 
+def test_validate_surfaces_launch_failure_exit_status(tmp_path, monkeypatch):
+    # Parity with R: a runner that exits NON-ZERO with NO output must surface the
+    # exit status (a real cause), not fall through to a blank `incomplete` detail
+    # (the empty-detail case that confused the model in the original bug report).
+    _src_mod = importlib.import_module("AI4BayesCode.source")
+    monkeypatch.setattr(_src_mod, "source", lambda *a, **k: None)
+    gen_dir = tmp_path / "generated"
+    gen_dir.mkdir()
+    (gen_dir / "X.cpp").write_text("// dummy\n")
+    (gen_dir / "X_runner.py").write_text("import sys\nsys.exit(3)\n")   # no output, nonzero exit
+    monkeypatch.chdir(tmp_path)
+    res = gen._validate("generated/X.cpp", "generated/X_runner.py", "X", verbose=False)
+    assert not res["ok"]
+    assert res["stage"] == "runtime"                # NOT a blank 'incomplete'
+    assert "status 3" in res["detail"]
+
+
 # ---------------------------------------------------------------------------
 # prompt() — pure builder
 # ---------------------------------------------------------------------------

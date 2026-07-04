@@ -317,35 +317,38 @@ def _validate(cpp_path, runner_path, classname, verbose: bool = False) -> dict:
         return {"ok": False, "stage": "no_runner", "detail": "no runner emitted"}
 
     # ---- 3. run the runner; capture stdout+stderr ----
-    # Run it FROM the output dir: the runner compiles its .cpp via a RELATIVE
-    # `source("<Class>.cpp")` (the start.md convention), so it must execute with
-    # the .cpp in its working dir or it errors "no such file" (which the sentinel
-    # logic below would otherwise mislabel a "runtime crash").
-    # Launch the runner by its ABSOLUTE path (so it is found from ANY cwd -- passing
-    # the relative runner_path as the script arg while setting cwd to its parent used
-    # to DOUBLE the folder: "./generated/X_runner.py" + cwd "./generated" ->
+    # Launch the runner by its ABSOLUTE path (found from ANY cwd -- passing the
+    # relative runner_path as the script arg while setting cwd to its parent used to
+    # DOUBLE the folder: "./generated/X_runner.py" + cwd "./generated" ->
     # "generated/generated/X_runner.py: No such file"). The runner then compiles its
     # .cpp via a RELATIVE path whose convention VARIES: some emit source("<Class>.cpp")
     # (relative to the runner's OWN dir), others source("<out>/<Class>.cpp") (relative
-    # to the PROJECT ROOT). So run from the runner's own dir FIRST; if it crashed
-    # before printing the sentinel (e.g. a root-relative .cpp path), retry from the
+    # to the PROJECT ROOT). So run from the runner's own dir FIRST; if it did NOT print
+    # the sentinel (e.g. a root-relative .cpp path doubled + crashed), RETRY from the
     # PARENT -- both conventions then work regardless of the caller's cwd. Mirrors the
-    # R validator's two-cwd `run_from` logic.
+    # R validator's two-cwd `run_from` + exit-status handling.
     _rp = Path(runner_path).resolve()
 
     def _run_from(wd):
         try:
             p = subprocess.run([sys.executable, str(_rp)], cwd=str(wd),
                                capture_output=True, text=True)
-            return (p.stdout or "") + (p.stderr or "")
+            return (p.stdout or "") + (p.stderr or ""), p.returncode
         except Exception as e:  # noqa: BLE001
-            return f"runner error: {e}"
+            return f"runner error: {e}", -1
 
-    out_txt = _run_from(_rp.parent)
+    out_txt, rc = _run_from(_rp.parent)
     if "AI4BAYES_VALIDATE" not in out_txt:          # crashed before the verdict --
-        out2 = _run_from(_rp.parent.parent)         # maybe a root-relative .cpp path
+        out2, rc2 = _run_from(_rp.parent.parent)    # maybe a root-relative .cpp path
         if ("AI4BAYES_VALIDATE" in out2) or (len(out2.strip()) >= len(out_txt.strip())):
-            out_txt = out2
+            out_txt, rc = out2, rc2
+
+    # A failed LAUNCH (no output + non-zero exit) is NOT a convergence "incomplete";
+    # surface it with the exit status so the repair loop / user see the real cause
+    # (mirrors the R validator's `attr(out, "status")` check).
+    if not out_txt.strip() and rc not in (0, None):
+        out_txt = (f"runner error: the runner exited with status {rc} and produced no "
+                   "output (the subprocess could not start in this environment).")
 
     # ---- 4. convergence sentinel ----
     lines = out_txt.splitlines()
