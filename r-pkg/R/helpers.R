@@ -585,7 +585,20 @@ ai4bayescode_diagnose <- function(hist, n_burn = 0, plot = TRUE, order_component
     plt <- NULL
     if (isTRUE(plot)) {
         if (requireNamespace("bayesplot", quietly = TRUE)) {
-            plt <- bayesplot::mcmc_combo(drw, combo = c("trace", "acf", "dens"))
+            # bayesplot's ACF panel can ABORT the whole plot (e.g. "Too few
+            # iterations for lags=20") on degenerate / near-constant columns --
+            # empty mixture components in DP/PY/HDP models, constant params. The
+            # diagnostic plot is secondary; never let it crash the diagnose (the
+            # summary + R-hat/ESS are the point). Fall back to trace+dens, then none.
+            plt <- tryCatch(
+                bayesplot::mcmc_combo(drw, combo = c("trace", "acf", "dens")),
+                error = function(e) tryCatch(
+                    bayesplot::mcmc_combo(drw, combo = c("trace", "dens")),
+                    error = function(e2) {
+                        warning("ai4bayescode_diagnose: diagnostic plot skipped (",
+                                conditionMessage(e2), ").", call. = FALSE)
+                        NULL
+                    }))
         } else {
             message("Install 'bayesplot' for a ready-to-print diagnostic plot; ",
                     "returning a base-R plotting function instead.")
