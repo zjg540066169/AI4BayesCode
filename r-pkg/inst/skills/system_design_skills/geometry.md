@@ -144,8 +144,11 @@ Each needs a specialized block.
 - `ising_cluster_block` (SHIPPED 2026-05-31) covers Ising / Potts /
   general discrete MRFs on user-supplied undirected graphs via
   Swendsen-Wang 1987 cluster moves; see `examples/IsingPrior.cpp`.
-  v0 scope: $h = 0$ (no external field), scalar $\beta$, no partial
-  decoupling — each is on the v1.2.1 roadmap.
+  As of v1.2.1 the block also supports an external field $h \ne 0$
+  (per-site $\alpha_i(k)$), per-edge $\beta_{ij}$, and partial decoupling
+  $\delta_{ij}$ (Higdon 1998 §2.3) — all OPTIONAL (defaults reproduce the
+  pure-prior Swendsen-Wang sampler). $\delta < 1$ is the mixing remedy for
+  a strong external field.
 
   **Note: hidden Ising / hidden MRF ($h \ne 0$ from data likelihood).**
   The "per-site Gibbs is catastrophic" claim above applies to **pure**

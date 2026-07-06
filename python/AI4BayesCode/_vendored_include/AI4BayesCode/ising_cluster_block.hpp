@@ -8,18 +8,22 @@
  *  ising_cluster_block.hpp -- Swendsen-Wang cluster sampler for the Ising /
  *                              Potts model on a general undirected graph.
  *
- *  TARGET DISTRIBUTION (Higdon 1998 Eq. 5, h = 0 case)
- *  ===================================================
- *      pi(x) ∝ exp{ β · Σ_{(i,j) in E} I[x_i = x_j] },   x ∈ {0, 1, ..., Q-1}^n
+ *  TARGET DISTRIBUTION (Higdon 1998 Eq. 5; Moores et al. hidden Potts)
+ *  ==================================================================
+ *      pi(x) ∝ exp{ Σ_i α_i(x_i) + Σ_{(i,j) in E} β_ij · I[x_i = x_j] },
+ *                                                   x ∈ {0, 1, ..., Q-1}^n
  *
- *  with β > 0 (ferromagnetic). The block samples x from one full
- *  Swendsen-Wang sweep on the augmented (x, u) joint:
- *      (1) bond augmentation:    u_e ~ Bernoulli(1 - exp(-β))
- *                                only on edges with x_i == x_j; 0 otherwise
- *      (2) cluster identification via union-find on activated edges
- *      (3) cluster recolor:      each cluster gets a fresh uniform draw
- *                                from {0, ..., Q-1}, ALL Q states
- *                                (stay-prob = 1/Q; Higdon §2.2.1)
+ *  with β_ij ≥ 0 (ferromagnetic) and an OPTIONAL external field α_i(k)
+ *  (log-potentials). One Swendsen-Wang sweep on the augmented (x, u) joint
+ *  with OPTIONAL partial decoupling δ_ij ∈ [0,1] (Higdon §2.3):
+ *      (1) bond augmentation:    u_e = 1 w.p. 1 - exp(-δ_e·β_e),
+ *                                only on edges with x_i == x_j
+ *      (2) cluster identification via union-find on activated bonds
+ *      (3) cluster recolor, one of three EXACT paths:
+ *          A. no field, δ=1 -> fresh uniform {0..Q-1} per cluster (standard SW)
+ *          B. field,    δ=1 -> per cluster ∝ exp{Σ_{i∈C} α_i(k)}
+ *          C. δ<1           -> cluster-conditional Gibbs sweep carrying the
+ *                              residual (1-δ)β coupling + field (Higdon §2.3)
  *
  *  This is a specialised non-conjugate Gibbs sweep on (x, u); u is
  *  re-drawn from scratch every sweep, so only x persists between calls.
@@ -29,13 +33,14 @@
  *  Discrete target with strong local dependence. Per-site Gibbs is
  *  irreducible but mixes catastrophically (long correlation lengths
  *  near the critical β). SW cluster moves are the standard fix and
- *  what this block implements. v0 scope covers:
- *    * h = 0 (no external field) — i.e., α_i(.) ≡ 0
- *    * scalar β (no per-edge β_ij)
- *    * no partial decoupling (Higdon 1998 §2.3)
- *  Each of these is on the v1.2.1 roadmap (see
- *  V1_2_SPECIALIZED_BLOCKS_PLAN_2026-05-27.md
- *  §4 Block 1 "Deferred to v1.2.1").
+ *  what this block implements. Full scope (v1.2.1 shipped):
+ *    * external field h ≠ 0 (per-site α_i(k)) via `field` / `field_key`
+ *    * per-edge β_ij via `beta_edge` / `beta_edge_key`
+ *    * partial decoupling δ_ij (Higdon §2.3) via `delta_*` — the mixing
+ *      remedy for strong fields / strong-likelihood coupling; δ affects
+ *      MIXING ONLY, the stationary target is unchanged
+ *  All extensions are OPTIONAL; the defaults (scalar β, δ=1, no field)
+ *  reproduce the standard Swendsen-Wang sampler byte-for-byte.
  *
  *  WHAT THE USER SUPPLIES
  *  ======================
@@ -211,6 +216,46 @@ struct ising_cluster_block_config {
     /// reducing to iid Uniform{0..Q-1} recolouring per site.)
     double beta_default = 0.44;
 
+    // ---- v1.2.1 extensions (ALL OPTIONAL; empty ⇒ exact v1.2 behaviour) ----
+
+    /// Per-edge coupling β_ij (anisotropic / random-field interactions).
+    /// If non-empty, length MUST equal n_edges and every entry ≥ 0; it then
+    /// overrides the scalar β on a per-edge basis. Empty ⇒ scalar β.
+    arma::vec beta_edge;
+
+    /// shared_data key for a length-n_edges per-edge β vector. If present in
+    /// ctx at step() time it overrides both `beta_edge` and the scalar β.
+    std::string beta_edge_key = "";
+
+    /// External field (hidden Potts / MRF, Higdon 1998 Eq. 5 h ≠ 0 case).
+    /// `field(i, k)` is the LOG-potential α_i(k) for site i in state k
+    /// (exp{α_{i,k}} ∝ p(y_i | θ_k) in a hidden-Potts likelihood). If
+    /// non-empty, dims MUST be (n_vertices × n_states); cluster recolour is
+    /// then weighted by exp{Σ_{i∈C} α_i(k)}. Empty ⇒ α ≡ 0 (uniform recolour).
+    arma::mat field;
+
+    /// shared_data key for the external field, flattened column-major
+    /// (`arma::vectorise(field)`, length n_vertices·n_states). If present in
+    /// ctx it overrides `field`. Lets a sibling emission block publish the
+    /// per-site likelihood as the field each sweep.
+    std::string field_key = "";
+
+    /// Partial-decoupling δ (Higdon 1998 §2.3). Scalar default in [0, 1].
+    /// Bond prob becomes 1 − exp(−δ·β) and the residual (1−δ)·β stays in the
+    /// recolour conditional (cluster-conditional Gibbs sweep). δ = 1 (default)
+    /// is standard Swendsen-Wang; δ < 1 forms smaller clusters and is the
+    /// remedy for strong external fields / strong-likelihood coupling
+    /// (Higdon §2.3.2; Moores et al. hidden-Potts). δ only affects MIXING —
+    /// the stationary target is unchanged.
+    double delta_default = 1.0;
+
+    /// Per-edge δ_ij (length n_edges, each in [0, 1]) — overrides delta_default.
+    arma::vec delta_edge;
+
+    /// shared_data key for a length-n_edges per-edge δ vector (if present in
+    /// ctx it overrides `delta_edge` and `delta_default`).
+    std::string delta_key = "";
+
     /// Initial state vector (length n_vertices, entries in {0..Q-1}
     /// stored as doubles). If length 0, x is initialised
     /// deterministically as x[i] = i % Q.
@@ -257,6 +302,45 @@ public:
                 "ising_cluster_block: beta_default must be >= 0");
         }
 
+        // ---- v1.2.1 extension validation -----------------------------------
+        const std::size_t n_edges = cfg_.edges.n_cols;
+        if (!cfg_.beta_edge.empty()) {
+            if (cfg_.beta_edge.n_elem != n_edges) {
+                throw std::invalid_argument(
+                    "ising_cluster_block '" + cfg_.name +
+                    "': beta_edge length must equal n_edges");
+            }
+            if (cfg_.beta_edge.min() < 0.0) {
+                throw std::invalid_argument(
+                    "ising_cluster_block '" + cfg_.name +
+                    "': beta_edge entries must be >= 0");
+            }
+        }
+        if (cfg_.delta_default < 0.0 || cfg_.delta_default > 1.0) {
+            throw std::invalid_argument(
+                "ising_cluster_block '" + cfg_.name +
+                "': delta_default must be in [0, 1]");
+        }
+        if (!cfg_.delta_edge.empty()) {
+            if (cfg_.delta_edge.n_elem != n_edges) {
+                throw std::invalid_argument(
+                    "ising_cluster_block '" + cfg_.name +
+                    "': delta_edge length must equal n_edges");
+            }
+            if (cfg_.delta_edge.min() < 0.0 || cfg_.delta_edge.max() > 1.0) {
+                throw std::invalid_argument(
+                    "ising_cluster_block '" + cfg_.name +
+                    "': delta_edge entries must be in [0, 1]");
+            }
+        }
+        if (!cfg_.field.empty() &&
+            (cfg_.field.n_rows != cfg_.n_vertices ||
+             cfg_.field.n_cols != cfg_.n_states)) {
+            throw std::invalid_argument(
+                "ising_cluster_block '" + cfg_.name +
+                "': field must be an (n_vertices x n_states) matrix");
+        }
+
         // ---- state initialisation ------------------------------------------
         x_.set_size(cfg_.n_vertices);
         if (cfg_.initial_state.n_elem == cfg_.n_vertices) {
@@ -284,6 +368,9 @@ public:
         uf_parent_.resize(cfg_.n_vertices);
         uf_rank_.assign(cfg_.n_vertices, 0);
         scratch_color_.resize(cfg_.n_vertices);
+        field_sum_.set_size(cfg_.n_vertices, cfg_.n_states);
+        cluster_adj_.resize(cfg_.n_vertices);
+        logw_scratch_.resize(cfg_.n_states);
     }
 
     // ---- block_sampler interface ------------------------------------------
@@ -293,67 +380,73 @@ public:
     }
 
     void step(std::mt19937_64& rng) override {
-        // (1) Fetch β.
-        double beta = cfg_.beta_default;
-        if (!cfg_.beta_key.empty()) {
-            auto it = context_.find(cfg_.beta_key);
-            if (it != context_.end()) {
-                if (it->second.n_elem != 1) {
-                    throw std::runtime_error(
-                        "ising_cluster_block '" + cfg_.name +
-                        "': beta_key '" + cfg_.beta_key +
-                        "' must be a length-1 vector");
-                }
-                beta = it->second[0];
-            }
-        }
-        if (beta < 0.0) {
-            throw std::runtime_error(
-                "ising_cluster_block '" + cfg_.name +
-                "': beta must be >= 0");
-        }
-
-        // p_bond = 1 - exp(-β). Use expm1 for numerical stability at small β.
-        const double p_bond = -std::expm1(-beta);
-        const std::size_t n = cfg_.n_vertices;
+        const std::size_t n       = cfg_.n_vertices;
         const std::size_t n_edges = cfg_.edges.n_cols;
+        const std::size_t Q       = cfg_.n_states;
+
+        // (1) Resolve the effective couplings + field for this sweep. Every
+        //     extension defaults to the exact v1.2 behaviour: scalar β,
+        //     δ = 1 (standard SW), no external field.
+        const double beta_scalar = resolve_beta_scalar_();
+        const arma::vec* beta_edge = resolve_edge_vec_(
+            cfg_.beta_edge, cfg_.beta_edge_key, n_edges, "beta_edge_key");
+        const arma::vec* delta_edge = resolve_edge_vec_(
+            cfg_.delta_edge, cfg_.delta_key, n_edges, "delta_key");
+        const arma::mat* field = resolve_field_(n, Q);
+        const bool has_field = (field != nullptr);
+
+        auto beta_e = [&](std::size_t e) -> double {
+            return beta_edge ? (*beta_edge)[e] : beta_scalar;
+        };
+        auto delta_e = [&](std::size_t e) -> double {
+            return delta_edge ? (*delta_edge)[e] : cfg_.delta_default;
+        };
 
         // (2) Reset union-find.
-        for (std::size_t i = 0; i < n; ++i) {
-            uf_parent_[i] = i;
-            uf_rank_[i] = 0;
-        }
+        for (std::size_t i = 0; i < n; ++i) { uf_parent_[i] = i; uf_rank_[i] = 0; }
 
-        // (3) Bond augmentation + union pass.
+        // (3) Bond augmentation + union pass. Bond prob = 1 - exp(-δ_e·β_e).
+        //     Residual coupling w_e = (1-δ_e)·β_e stays for the recolour; if
+        //     any survives we must recolour clusters conditionally (Case C).
         std::uniform_real_distribution<double> uniform01(0.0, 1.0);
+        bool has_residual = false;
         for (std::size_t e = 0; e < n_edges; ++e) {
             const std::size_t i = static_cast<std::size_t>(cfg_.edges(0, e));
             const std::size_t j = static_cast<std::size_t>(cfg_.edges(1, e));
+            const double be = beta_e(e);
+            const double de = delta_e(e);
+            if ((1.0 - de) * be > 0.0) has_residual = true;
             if (x_[i] == x_[j]) {
-                if (uniform01(rng) < p_bond) {
-                    union_sets_(i, j);
-                }
+                const double p_bond = -std::expm1(-de * be);
+                if (uniform01(rng) < p_bond) union_sets_(i, j);
             }
         }
 
         // (4) Flatten union-find so uf_parent_[i] == root(i) for all i.
-        for (std::size_t i = 0; i < n; ++i) {
-            uf_parent_[i] = find_root_(i);
-        }
+        for (std::size_t i = 0; i < n; ++i) uf_parent_[i] = find_root_(i);
 
-        // (5) Sample new colour for each cluster root.
-        std::uniform_int_distribution<std::size_t> uni_q(
-            0, cfg_.n_states - 1);
-        for (std::size_t i = 0; i < n; ++i) {
-            if (uf_parent_[i] == i) {
-                scratch_color_[i] = static_cast<double>(uni_q(rng));
-            }
+        // (5) Recolour clusters.
+        if (!has_field && !has_residual) {
+            // Case A — standard SW: independent Uniform{0..Q-1} per cluster
+            //          (byte-identical to the v1.2 recolour).
+            std::uniform_int_distribution<std::size_t> uni_q(0, Q - 1);
+            for (std::size_t i = 0; i < n; ++i)
+                if (uf_parent_[i] == i)
+                    scratch_color_[i] = static_cast<double>(uni_q(rng));
+        } else if (!has_residual) {
+            // Case B — external field, full decoupling (δ = 1): clusters are
+            //          conditionally independent; draw each ∝ exp{Σ_{i∈C} α_i(k)}.
+            recolour_field_independent_(*field, Q, rng);
+        } else {
+            // Case C — partial decoupling (δ < 1): residual (1-δ)β couples
+            //          neighbouring clusters. One systematic-scan Gibbs sweep
+            //          over clusters conditional on neighbour colours (Higdon §2.3).
+            recolour_cluster_gibbs_(field, beta_e, delta_e, n_edges, Q, rng);
         }
 
         // (6) Assign new colour to every vertex via its root.
-        for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t i = 0; i < n; ++i)
             x_[i] = scratch_color_[uf_parent_[i]];
-        }
 
         if (keep_history_) history_buf_.push_back(x_);
     }
@@ -421,6 +514,142 @@ private:
         }
     }
 
+    // ---- v1.2.1 coupling / field resolution ------------------------------
+
+    // Scalar β from beta_key (ctx) else beta_default; validated >= 0.
+    double resolve_beta_scalar_() {
+        double beta = cfg_.beta_default;
+        if (!cfg_.beta_key.empty()) {
+            auto it = context_.find(cfg_.beta_key);
+            if (it != context_.end()) {
+                if (it->second.n_elem != 1) {
+                    throw std::runtime_error(
+                        "ising_cluster_block '" + cfg_.name + "': beta_key '" +
+                        cfg_.beta_key + "' must be a length-1 vector");
+                }
+                beta = it->second[0];
+            }
+        }
+        if (beta < 0.0) {
+            throw std::runtime_error(
+                "ising_cluster_block '" + cfg_.name + "': beta must be >= 0");
+        }
+        return beta;
+    }
+
+    // Per-edge vector: ctx `key` (len n_edges) overrides `fixed`; else nullptr.
+    const arma::vec* resolve_edge_vec_(const arma::vec& fixed,
+                                       const std::string& key,
+                                       std::size_t n_edges,
+                                       const char* keyname) {
+        if (!key.empty()) {
+            auto it = context_.find(key);
+            if (it != context_.end()) {
+                if (it->second.n_elem != n_edges) {
+                    throw std::runtime_error(
+                        "ising_cluster_block '" + cfg_.name + "': " + keyname +
+                        " '" + key + "' must have length n_edges");
+                }
+                return &it->second;
+            }
+        }
+        return fixed.empty() ? nullptr : &fixed;
+    }
+
+    // External field (n x Q): ctx `field_key` (flattened) overrides cfg field.
+    const arma::mat* resolve_field_(std::size_t n, std::size_t Q) {
+        if (!cfg_.field_key.empty()) {
+            auto it = context_.find(cfg_.field_key);
+            if (it != context_.end()) {
+                if (it->second.n_elem != n * Q) {
+                    throw std::runtime_error(
+                        "ising_cluster_block '" + cfg_.name + "': field_key '" +
+                        cfg_.field_key +
+                        "' must have length n_vertices*n_states");
+                }
+                field_scratch_ = arma::reshape(it->second, n, Q);
+                return &field_scratch_;
+            }
+        }
+        return cfg_.field.empty() ? nullptr : &cfg_.field;
+    }
+
+    // Accumulate per-cluster field sums into field_sum_(root, k).
+    void accumulate_field_sums_(const arma::mat& field, std::size_t Q) {
+        field_sum_.zeros();
+        for (std::size_t i = 0; i < cfg_.n_vertices; ++i)
+            for (std::size_t k = 0; k < Q; ++k)
+                field_sum_(uf_parent_[i], k) += field(i, k);
+    }
+
+    // Sample category k ~ softmax(logw_scratch_[0..Q-1]). Overwrites scratch.
+    std::size_t draw_cat_logw_(std::size_t Q, std::mt19937_64& rng) {
+        double mx = logw_scratch_[0];
+        for (std::size_t k = 1; k < Q; ++k)
+            if (logw_scratch_[k] > mx) mx = logw_scratch_[k];
+        double total = 0.0;
+        for (std::size_t k = 0; k < Q; ++k) {
+            logw_scratch_[k] = std::exp(logw_scratch_[k] - mx);
+            total += logw_scratch_[k];
+        }
+        std::uniform_real_distribution<double> u(0.0, 1.0);
+        double t = u(rng) * total;
+        double cum = 0.0;
+        for (std::size_t k = 0; k < Q; ++k) {
+            cum += logw_scratch_[k];
+            if (t <= cum) return k;
+        }
+        return Q - 1;
+    }
+
+    // Case B: field, full decoupling — independent cluster draw ∝ exp{Σ α}.
+    void recolour_field_independent_(const arma::mat& field, std::size_t Q,
+                                     std::mt19937_64& rng) {
+        accumulate_field_sums_(field, Q);
+        for (std::size_t r = 0; r < cfg_.n_vertices; ++r) {
+            if (uf_parent_[r] != r) continue;
+            for (std::size_t k = 0; k < Q; ++k) logw_scratch_[k] = field_sum_(r, k);
+            scratch_color_[r] = static_cast<double>(draw_cat_logw_(Q, rng));
+        }
+    }
+
+    // Case C: partial decoupling — one systematic Gibbs sweep over clusters,
+    // conditional on current neighbour-cluster colours (Higdon §2.3).
+    template <class BetaFn, class DeltaFn>
+    void recolour_cluster_gibbs_(const arma::mat* field, BetaFn beta_e,
+                                 DeltaFn delta_e, std::size_t n_edges,
+                                 std::size_t Q, std::mt19937_64& rng) {
+        const std::size_t n = cfg_.n_vertices;
+        if (field) accumulate_field_sums_(*field, Q);
+        else       field_sum_.zeros();
+
+        // Residual inter-cluster adjacency (weight w_e = (1-δ_e)·β_e).
+        for (std::size_t i = 0; i < n; ++i) cluster_adj_[i].clear();
+        for (std::size_t e = 0; e < n_edges; ++e) {
+            const std::size_t ri = uf_parent_[cfg_.edges(0, e)];
+            const std::size_t rj = uf_parent_[cfg_.edges(1, e)];
+            if (ri == rj) continue;
+            const double w = (1.0 - delta_e(e)) * beta_e(e);
+            if (w <= 0.0) continue;
+            cluster_adj_[ri].emplace_back(rj, w);
+            cluster_adj_[rj].emplace_back(ri, w);
+        }
+
+        // Init cluster colours from current state, then one Gibbs sweep.
+        for (std::size_t r = 0; r < n; ++r)
+            if (uf_parent_[r] == r) scratch_color_[r] = x_[r];
+        for (std::size_t r = 0; r < n; ++r) {
+            if (uf_parent_[r] != r) continue;
+            for (std::size_t k = 0; k < Q; ++k) logw_scratch_[k] = field_sum_(r, k);
+            for (const auto& nb : cluster_adj_[r]) {
+                const std::size_t k_nb =
+                    static_cast<std::size_t>(scratch_color_[nb.first]);
+                logw_scratch_[k_nb] += nb.second;
+            }
+            scratch_color_[r] = static_cast<double>(draw_cat_logw_(Q, rng));
+        }
+    }
+
     ising_cluster_block_config cfg_;
     arma::vec                  x_;          // length n_vertices, doubles 0..Q-1
     block_context              context_;
@@ -428,6 +657,11 @@ private:
     std::vector<std::size_t>   uf_parent_;
     std::vector<std::size_t>   uf_rank_;
     std::vector<double>        scratch_color_;
+    // v1.2.1 recolour scratch.
+    arma::mat                  field_sum_;     // (n x Q) cluster field sums
+    arma::mat                  field_scratch_; // (n x Q) reshaped ctx field
+    std::vector<std::vector<std::pair<std::size_t, double>>> cluster_adj_;
+    std::vector<double>        logw_scratch_;  // (Q) categorical-draw scratch
 };
 
 } // namespace AI4BayesCode

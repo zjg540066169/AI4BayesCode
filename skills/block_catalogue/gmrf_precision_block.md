@@ -51,7 +51,11 @@ dependency.
 - Arbitrary linear constraints A x = b (Rue §3.1.3 exact kriging)
 - METIS reordering for very large graphs
 - Conditional sampling x_A | x_B (Rue §3.1.1)
-- Knorr-Held & Rue (2002) joint block update of hyperparam + x
+- ✅ **Knorr-Held & Rue (2002) joint block update of hyperparam + x —
+  SHIPPED 2026-07-06** as the companion block `gmrf_gaussian_joint_block`
+  (Gaussian-data case: jointly samples `(x, kappa)` via kappa's collapsed
+  marginal to fix the slow (x,kappa) Gibbs mixing). Non-Gaussian/Poisson
+  Taylor-GMRF variant remains deferred. See its catalogue entry.
 - Divide-and-conquer for very large GMRFs (Rue §4)
 
 ```cpp

@@ -90,6 +90,7 @@ can switch. (Full design: `block_design_skills/contrib.md`.)
 | **HMM state sequence z_1:T in {0..K-1}** | **`hmm_block` (FFBS)** | **(none)** |
 | **discrete MRF / Ising / Potts on a graph** (`pi(x) ∝ exp{β Σ_{i~j} I[x_i = x_j]}`, x ∈ {0..Q-1}^n) | **`ising_cluster_block`** (Swendsen-Wang 1987 cluster moves) | **(none — bond augmentation + per-cluster recolor)** |
 | **sparse-precision Gaussian MRF** (`pi(x) ∝ exp{-½ x^T Q x + b^T x}`, Q sparse PSD, optional sum-to-zero) | **`gmrf_precision_block`** (Rue 2001 sparse Cholesky + AMD) | **(none — direct conjugate draw via Eigen SimplicialLLT)** |
+| **Gaussian-data GMRF with UNKNOWN smoothing precision** (`y ~ N(x, σ²I)`, `x ~ N(0,(κR)⁻¹)`, `κ ~ Gamma`; slow (x,κ) Gibbs mixing) | **`gmrf_gaussian_joint_block`** (Knorr-Held & Rue 2002 collapsed joint (x,κ) update) | **(none — κ from its marginal via sparse-Cholesky log-det, then x\|κ,y)** |
 | **sparse-precision GMRF + non-Gaussian likelihood** (`pi(x) ∝ exp{-½ x^T Q x}` · `log_lik(x)`; Poisson / Bernoulli / Student-t / NB / log-Gaussian Cox observation) | **`gmrf_whitened_ess_block`** (Murray 2010 ESS on implicit GMRF prior; Rue 2001 backsolve for prior draws) | **(none — Eigen SimplicialLLT + permuted backsolve + likelihood-free ESS shrink)** |
 | **Bayesian-network structure learning** (discrete data, n ≤ 64, BDeu score; output = total order ≺ + Bayesian-model-averaged DAG over Pa(i) ⊂ Pred(i, ≺)) | **`order_mcmc_block`** (Friedman-Koller 2003 order MCMC + Heckerman-Geiger-Chickering 1995 BDeu + FK §4.2 three-tier cache) | **(none — combinatorial MH on permutations)** |
 | **LDA token topic assignment z_n in {1..K} + theta_d (M-doc simplex) + phi_k (V-vocab simplex), Dirichlet hyperpriors** | **`lda_collapsed_gibbs_block`** (Griffiths-Steyvers 2004 collapsed Gibbs) | **(none — joint output of z, theta, phi)** |
@@ -164,6 +165,7 @@ for its full configuration / discipline (do NOT read them all):
 - **`hmm_block`** -> `block_catalogue/hmm_block.md`
 - **`ising_cluster_block`** -> `block_catalogue/ising_cluster_block.md`
 - **`gmrf_precision_block`** -> `block_catalogue/gmrf_precision_block.md`
+- **`gmrf_gaussian_joint_block`** -> `block_catalogue/gmrf_gaussian_joint_block.md`
 - **`gmrf_whitened_ess_block`** -> `block_catalogue/gmrf_whitened_ess_block.md`
 - **`order_mcmc_block`** -> `block_catalogue/order_mcmc_block.md`
 - **`rjmcmc_block`** -> `block_catalogue/rjmcmc_block.md`
