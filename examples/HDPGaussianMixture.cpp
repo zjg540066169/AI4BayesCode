@@ -45,20 +45,10 @@
 //
 //  BLOCK DECOMPOSITION (Gibbs sweep order)
 //  ---------------------------------------
-//      child(0)             relabel        hdp_label_canonicalizer_block
-//                           FALLBACK in-sampler canonicaliser (NOT RECOMMENDED;
-//                           the default is POST-MCMC relabeling, see LABEL
-//                           SWITCHING below and skills/label_switching.md).
-//                           Permutes the T global atoms into a canonical order
-//                           each sweep (OCCUPIED atoms first, sorted by atom
-//                           location mu) so the REPORTED per-slot atoms
-//                           (beta[t], mu[t], Sigma_t, pi_{g,t}) converge.
-//                           Posterior-preserving; runs FIRST so downstream
-//                           children read/record on one canonical labelling.
-//      child(1)             z              categorical_gibbs_block
-//      child(2)             cluster_params niw_cluster_gibbs_block
-//      child(3)             β              stick_breaking_block (heuristic)
-//      child(4..3+G)        π_j (j = 1..G) dirichlet_gibbs_block (one per group)
+//      child(0)             z              categorical_gibbs_block
+//      child(1)             cluster_params niw_cluster_gibbs_block
+//      child(2)             β              stick_breaking_block (heuristic)
+//      child(3..2+G)        π_j (j = 1..G) dirichlet_gibbs_block (one per group)
 //
 //  LABEL SWITCHING
 //  ---------------
@@ -72,17 +62,16 @@
 //  label-invariant — there is NO concentration-mixing problem to fix (unlike the
 //  DP example where alpha is sampled by NUTS on the Antoniak (k,n) marginal).
 //
-//  FALLBACK USED HERE (child(0) hdp_label_canonicalizer_block — NOT RECOMMENDED):
-//  the RAW per-slot beta[t] do NOT converge under post-MCMC sorting of the empty
-//  truncation tail (measured 2-chain rank-R-hat ~1.83), though the cluster
-//  PROPORTIONS and sorted order statistics DO (~1.0). To make the REPORTED per-
-//  slot atoms converge on their raw recorded values this example carries an in-
-//  sampler canonicaliser (OCCUPIED-first, sort-by-atom-location-mu permutation
-//  each sweep) as a last resort. We sort by the well-separated atom location, not
-//  the near-equal global weight beta, so the per-slot atoms converge to ONE atom
-//  (a beta sort only fixes order statistics). Prefer post-MCMC relabeling for new
-//  models; this in-sampler path is the exception, not the template. See the class
-//  comment for the full rationale.
+//  THIS SAMPLER STAYS RAW — no in-sampler canonicalizer. The raw per-slot
+//  beta[t] / mu[t] / pi_{g,t} are exchangeable across the T atoms and not
+//  identified, so their raw R-hat looks high (measured ~1.83 on raw beta[t]) —
+//  that is benign label switching, not a mixing failure. The label-invariant
+//  summaries (K_active, sorted occupied-atom proportions / mu / beta order
+//  statistics) converge as-is (~1.0). Resolve labelling POST-MCMC via
+//  ai4bayescode_diagnose(..., order_components = TRUE), which reports
+//  order-statistic R-hat on the sorted components. An in-sampler ordering /
+//  canonicalizer is a discouraged fallback (skills/label_switching.md) and is
+//  deliberately NOT used here.
 //
 //  REFRESHERS
 //  ----------
@@ -108,11 +97,6 @@
 //  - counts_t  length T
 //
 //  JUSTIFICATION (Check #16):
-//  - relabel   hdp_label_canonicalizer_block. FALLBACK in-sampler canonicaliser
-//              (NOT recommended; prefer post-MCMC relabeling). Posterior-
-//              preserving descending-beta atom permutation; used only because
-//              the raw per-slot beta[t] won't converge under post-MCMC sorting
-//              though the proportions / order statistics do. See LABEL SWITCHING.
 //  - z         categorical_gibbs_block. Class-1 conditional independence
 //              given (π_j, μ, Σ).
 //  - π_g       dirichlet_gibbs_block. Conjugate on the simplex.
@@ -120,8 +104,8 @@
 //              approximation.
 //  - cluster_params  niw_cluster_gibbs_block. Conjugate.
 //
-//  No hand-written log-density (no NUTS); the canonicaliser is deterministic
-//  and all 4 + G sampling children are conjugate Gibbs / MH-deterministic.
+//  No hand-written log-density (no NUTS); all 3 + G sampling children are
+//  conjugate Gibbs / MH-deterministic.
 //  Check #12 vacuous.
 //
 // @example:R
@@ -252,156 +236,6 @@ inline double full_normal_log_density(const double* y, const double* mu,
          - 0.5 * log_det - 0.5 * arma::dot(u, u);
 }
 
-// ----------------------------------------------------------------------------
-//  hdp_label_canonicalizer_block  (FALLBACK — NOT THE RECOMMENDED APPROACH)
-//
-//  HDP analogue of DPGaussianMixture's dp_label_canonicalizer_block. Label
-//  switching should normally be resolved POST-MCMC on the recorded draws (see
-//  skills/label_switching.md): the sampler stays a clean raw exchangeable-
-//  component sampler and the validation/comparison layer relabels before
-//  computing R-hat.
-//
-//  It is used here ONLY as a fallback. The exchangeable objects of a truncated
-//  HDP are the GLOBAL atoms t = 0..T-1: the shared (mu_t, Sigma_t), the global
-//  stick weight beta_t, and EVERY group's mixing weight pi_{g,t}. The model is
-//  invariant under a joint permutation of the atom labels. The label-INVARIANT
-//  summaries (K_active, the sorted occupied-atom proportions / mu / beta order
-//  statistics) converge across chains (2-chain rank-R-hat ~1.0), but the RAW
-//  per-slot beta[t] do NOT (rank-R-hat ~1.83 measured), because the truncated
-//  stick representation is slot-position-dependent and the empty-tail atoms are
-//  prior draws that never settle on one labelling. As in the DP case, this is a
-//  representation/labeling artifact, NOT a masked mixing failure. (The two
-//  concentrations gamma_0 and alpha are FIXED constants in this v0 model, not
-//  sampled, so they are trivially label-invariant — there is no concentration-
-//  mixing problem to fix here, unlike the DP example where alpha is sampled.)
-//
-//  To make the REPORTED per-slot atoms converge on their raw recorded values
-//  this block permutes the T global atoms into a canonical order each sweep:
-//  OCCUPIED atoms first, sorted by ATOM LOCATION (mu first coordinate); empty
-//  atoms last. It then writes the relabelled (beta, mu, sigma, z, pi_0..
-//  pi_{G-1}) back. The well-separated, stable atom location pins each occupied
-//  atom to a fixed slot, so mu[t] / Sigma_t / beta_t / pi_{g,t} all converge to
-//  ONE atom across chains (skills/label_switching.md "simple sort by
-//  mu_first_dim"). NOTE we deliberately do NOT sort by the global weight beta:
-//  the populated atoms carry near-equal beta (~1/K_active), so a beta sort is
-//  unstable and only fixes ORDER STATISTICS (beta[0] = largest), leaving mu[slot]
-//  jumping between atoms — which both fails per-atom R-hat and breaks per-slot
-//  posterior summaries. It runs FIRST so the downstream children (z,
-//  cluster_params, beta, pi_g) read/record on one canonical labelling, which
-//  they then preserve because each re-samples deterministically from that
-//  canonical state. Posterior-preserving. Prefer post-MCMC relabeling for new
-//  models; reach for this only when an otherwise-sound HDP example cannot show
-//  full convergence on its raw recorded parameters.
-//
-//  Reads/Writes: beta (T), mu (T*d), sigma (T*d*d), z (N), pi_g (T) for each
-//  group g = 0..G-1.  (stick_V_beta is left untouched: it is re-derived from
-//  the canonical beta by the stick block next sweep and nothing else reads it,
-//  matching the DP canonicaliser which leaves stick_V untouched.)
-// ----------------------------------------------------------------------------
-class hdp_label_canonicalizer_block : public AI4BayesCode::block_sampler {
-public:
-    hdp_label_canonicalizer_block(std::string name, std::size_t T,
-                                  std::size_t d, std::size_t N, std::size_t G)
-        : name_(std::move(name)), T_(T), d_(d), N_(N), G_(G),
-          dummy_(arma::vec(1, arma::fill::zeros)) {
-        if (name_.empty())
-            throw std::invalid_argument("hdp_label_canonicalizer_block: name must be non-empty");
-        if (T_ < 2 || d_ < 1 || N_ < 1 || G_ < 1)
-            throw std::invalid_argument("hdp_label_canonicalizer_block: bad T/d/N/G");
-        // Pre-size pi_out_ so current_named_outputs() is safe BEFORE the first
-        // step() (composite_block::add_child calls it to seed shared_data; the
-        // empty seeds are harmless because every key this block outputs is re-
-        // seeded by a later real child, then overwritten on each real sweep).
-        pi_out_.assign(G_, arma::vec());
-    }
-    void set_context(const block_context& ctx) override { context_ = ctx; }
-    void step(std::mt19937_64& /*rng*/) override {
-        const arma::vec& beta = context_.at("beta");
-        const arma::vec& mu   = context_.at("mu");
-        const arma::vec& sig  = context_.at("sigma");
-        const arma::vec& z    = context_.at("z");
-
-        // Canonical permutation of the T global atoms by ATOM LOCATION
-        // (mu first coordinate), OCCUPIED atoms first. Sorting by the well-
-        // separated, stable atom location (skills/label_switching.md "simple
-        // sort by mu_first_dim") pins each occupied atom to a fixed slot, so
-        // the per-slot atoms (mu[t], Sigma_t, beta_t, pi_{g,t}) all converge to
-        // ONE atom across chains. Sorting instead by the near-equal global
-        // weight beta only fixes ORDER STATISTICS (beta[0] = largest beta),
-        // leaving mu[slot] jumping between atoms — so beta is NOT used as the
-        // key. Empty atoms (drawn from the NIW prior, clustered near mu_0) are
-        // pushed to the high slots so they never interleave with — and so never
-        // destabilise — the occupied atoms.
-        arma::vec occ = bnp::counts_from_z(z, T_);   // occupancy per atom
-        std::vector<std::size_t> idx(T_);
-        for (std::size_t t = 0; t < T_; ++t) idx[t] = t;
-        std::stable_sort(idx.begin(), idx.end(),
-            [&](std::size_t a, std::size_t b) {
-                const bool oa = occ[a] > 0.0, ob = occ[b] > 0.0;
-                if (oa != ob) return oa;                 // occupied atoms first
-                return mu[a * d_] < mu[b * d_];          // then by mu first dim
-            });
-        arma::uvec perm(T_);
-        for (std::size_t r = 0; r < T_; ++r) perm[r] = idx[r];
-        arma::uvec inv(T_);
-        for (std::size_t r = 0; r < T_; ++r) inv[perm[r]] = r;
-
-        beta_out_.set_size(T_);
-        mu_out_.set_size(T_ * d_);
-        sig_out_.set_size(T_ * d_ * d_);
-        for (std::size_t r = 0; r < T_; ++r) {
-            const std::size_t o = perm[r];
-            beta_out_[r] = beta[o];
-            for (std::size_t j = 0; j < d_; ++j)
-                mu_out_[r * d_ + j] = mu[o * d_ + j];
-            for (std::size_t a = 0; a < d_; ++a)
-                for (std::size_t b = 0; b < d_; ++b)
-                    sig_out_[r * d_ * d_ + a * d_ + b] =
-                        sig[o * d_ * d_ + a * d_ + b];
-        }
-
-        // Permute every group's mixing weights over the atoms.
-        pi_out_.assign(G_, arma::vec());
-        for (std::size_t g = 0; g < G_; ++g) {
-            const arma::vec& pi_g = context_.at(pi_key_for_group(g));
-            arma::vec out(T_);
-            for (std::size_t r = 0; r < T_; ++r) out[r] = pi_g[perm[r]];
-            pi_out_[g] = std::move(out);
-        }
-
-        // Relabel assignments: z stores 1-indexed atom labels.
-        z_out_.set_size(N_);
-        for (std::size_t i = 0; i < N_; ++i) {
-            long L = static_cast<long>(std::llround(z[i]));
-            if (L < 1) L = 1;
-            if (static_cast<std::size_t>(L) > T_) L = static_cast<long>(T_);
-            z_out_[i] = static_cast<double>(inv[static_cast<std::size_t>(L) - 1] + 1);
-        }
-    }
-    AI4BayesCode::state_map current_named_outputs() const override {
-        AI4BayesCode::state_map out;
-        out.emplace("beta", beta_out_);
-        out.emplace("mu", mu_out_);
-        out.emplace("sigma", sig_out_);
-        out.emplace("z", z_out_);
-        for (std::size_t g = 0; g < G_; ++g)
-            out.emplace(pi_key_for_group(g), pi_out_[g]);
-        return out;
-    }
-    AI4BayesCode::state_map current_named_outputs(std::mt19937_64& /*rng*/) const override { return current_named_outputs(); }
-    const arma::vec& current() const override { return dummy_; }
-    void set_current(const arma::vec&) override {}
-    const std::string& name() const noexcept override { return name_; }
-    std::size_t dim() const noexcept override { return 0; }
-    AI4BayesCode::history_map get_history() const override { return {}; }
-    std::size_t history_size() const noexcept override { return 0; }
-    void clear_history() override {}
-private:
-    std::string name_; std::size_t T_, d_, N_, G_; arma::vec dummy_;
-    block_context context_;
-    arma::vec beta_out_, mu_out_, sig_out_, z_out_;
-    std::vector<arma::vec> pi_out_;
-};
 
 }  // anonymous namespace
 
@@ -565,16 +399,6 @@ public:
             });
 
         // ---- Gibbs DAG dependencies / invalidations ----------------
-        // relabel (FALLBACK canonicaliser — NOT recommended; prefer post-MCMC).
-        // Reads the full global-atom state so it can permute it into a canonical
-        // descending-beta order; writes the permuted (beta, mu, sigma, z, pi_g).
-        {
-            std::vector<std::string> relabel_reads = {"beta", "mu", "sigma", "z"};
-            for (std::size_t g = 0; g < G_; ++g)
-                relabel_reads.push_back(pi_key_for_group(g));
-            impl_->data().declare_dependencies("relabel", relabel_reads);
-        }
-
         std::vector<std::string> z_reads = {"y", "group_idx", "mu", "sigma"};
         for (std::size_t g = 0; g < G_; ++g)
             z_reads.push_back(pi_key_for_group(g));
@@ -670,13 +494,7 @@ public:
         impl_->data().refresh_all();
 
         // ---- Children ---------------------------------------------
-        // child(0) relabel (FALLBACK canonicaliser — see class comment; NOT
-        // recommended, prefer post-MCMC). Added FIRST so downstream children
-        // read/record on one canonical descending-beta atom labelling.
-        impl_->add_child(std::make_unique<hdp_label_canonicalizer_block>(
-            "relabel", T_, d_, N_, G_));
-
-        // child(1) z (categorical_gibbs_block)
+        // child(0) z (categorical_gibbs_block)
         {
             categorical_gibbs_block_config cfg;
             cfg.name = "z";
@@ -731,7 +549,7 @@ public:
                 std::make_unique<categorical_gibbs_block>(std::move(cfg)));
         }
 
-        // child(2) cluster_params (niw_cluster_gibbs_block)
+        // child(1) cluster_params (niw_cluster_gibbs_block)
         {
             niw_cluster_gibbs_block_config cfg;
             cfg.name = "cluster_params";
@@ -750,7 +568,7 @@ public:
                 std::make_unique<niw_cluster_gibbs_block>(std::move(cfg)));
         }
 
-        // child(3) β (stick_breaking_block, heuristic update on counts_t)
+        // child(2) β (stick_breaking_block, heuristic update on counts_t)
         {
             stick_breaking_block_config cfg;
             cfg.name = "beta";
@@ -774,7 +592,7 @@ public:
                 std::make_unique<stick_breaking_block>(std::move(cfg)));
         }
 
-        // child(4..4+G-1) π_g (one dirichlet_gibbs_block per group)
+        // child(3..3+G-1) π_g (one dirichlet_gibbs_block per group)
         for (std::size_t g = 0; g < G_; ++g) {
             dirichlet_gibbs_block_config cfg;
             cfg.name = pi_key_for_group(g);
@@ -879,10 +697,9 @@ public:
                 if (lab < 1 || static_cast<std::size_t>(lab) > T_)
                     ai4b::stop("set_current: z[i] out of {1, ..., T}");
             }
-            // child(1) is the categorical z block (child(0) is the relabel
-            // canonicaliser, inserted first).
+            // child(0) is the categorical z block (first child).
             dynamic_cast<categorical_gibbs_block&>(
-                impl_->child(1)).set_current(znew);
+                impl_->child(0)).set_current(znew);
             impl_->data().set("z", znew);
             impl_->data().refresh_derived_for("z");
         }

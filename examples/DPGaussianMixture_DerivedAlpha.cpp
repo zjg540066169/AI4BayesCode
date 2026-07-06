@@ -32,19 +32,10 @@
 //
 //  Block decomposition (Gibbs sweep order)
 //  ---------------------------------------
-//      child(0) relabel        dp_label_canonicalizer_block
-//                              FALLBACK in-sampler canonicaliser (NOT
-//                              RECOMMENDED; the default is POST-MCMC relabeling,
-//                              see LABEL SWITCHING below and
-//                              skills/label_switching.md). Permutes the K_trunc
-//                              slots into descending-pi order each sweep so the
-//                              REPORTED pi[slot] converges. Posterior-preserving;
-//                              runs FIRST so downstream children read/record on
-//                              one canonical labelling. See the class comment.
-//      child(1) z              categorical_gibbs_block
-//      child(2) cluster_params normal_gamma_cluster_gibbs_block
-//      child(3) pi             stick_breaking_block (DP a_fn / b_fn)
-//      child(4) phi            nuts_block (REAL constraint)
+//      child(0) z              categorical_gibbs_block
+//      child(1) cluster_params normal_gamma_cluster_gibbs_block
+//      child(2) pi             stick_breaking_block (DP a_fn / b_fn)
+//      child(3) phi            nuts_block (REAL constraint)
 //
 //  LABEL SWITCHING
 //  ---------------
@@ -56,15 +47,15 @@
 //  is the preferred design and per-slot rank-R-hat is computed AFTER relabeling.
 //  alpha (= exp(phi)) and the likelihood are label-invariant and converge as-is.
 //
-//  FALLBACK USED HERE (child(0) dp_label_canonicalizer_block — NOT RECOMMENDED):
-//  the truncated-DP stick weights pi[slot] are SLOT-POSITION-dependent and do
-//  NOT converge under per-draw post-MCMC sorting of the empty truncation tail.
-//  The cluster PROPORTIONS (count/N) DO converge (2-chain rank-R-hat ~1.001), so
-//  this is a representation/labeling artifact, NOT a masked mixing failure. To
-//  make the REPORTED pi[slot] converge on its raw recorded values, this example
-//  carries an in-sampler canonicaliser (descending-pi slot permutation each
-//  sweep) as a last resort. Prefer post-MCMC relabeling for new models; this
-//  in-sampler path is the exception, not the template. See the class comment.
+//  THIS SAMPLER STAYS RAW — no in-sampler canonicalizer. The raw per-slot
+//  pi[slot]/mu[slot] are exchangeable and not identified, so their raw R-hat
+//  looks high (benign label switching); the label-invariant summaries (cluster
+//  proportions, sorted occupied centres, occupied-cluster count) converge
+//  as-is. Resolve labelling POST-MCMC via
+//  ai4bayescode_diagnose(..., order_components = TRUE), which reports
+//  order-statistic R-hat on the sorted components. An in-sampler ordering /
+//  canonicalizer is a discouraged fallback (skills/label_switching.md) and is
+//  deliberately NOT used here.
 //
 //  Note alpha has NO sampler block — it is a derived key. The alpha
 //  log-density is rewritten as a phi log-density via change of variables;
@@ -274,84 +265,6 @@ double phi_natural_log_density(const arma::vec& phi_nat,
     return lp;
 }
 
-// ----------------------------------------------------------------------------
-//  dp_label_canonicalizer_block  (FALLBACK — NOT THE RECOMMENDED APPROACH)
-//
-//  Label switching should normally be resolved POST-MCMC on the recorded draws
-//  (see skills/label_switching.md): the sampler stays a clean raw exchangeable-
-//  component sampler and the validation/comparison layer relabels (simple-sort
-//  or Stephens 2000 + Hungarian) before computing R-hat.
-//
-//  It is used here ONLY as a fallback: the truncated-DP stick weights pi[slot]
-//  are slot-position-dependent and do NOT converge under per-draw post-MCMC
-//  sorting of the empty truncation tail. The cluster PROPORTIONS (count/N) DO
-//  converge (2-chain rank-R-hat ~1.001), so this is a representation/labeling
-//  fix that lets the REPORTED pi[slot] converge too — it does NOT mask a mixing
-//  failure. Prefer post-MCMC relabeling for new models; reach for this only
-//  when an otherwise-sound DP/mixture example cannot show full convergence on
-//  its raw recorded parameters.
-//
-//  Posterior-preserving: permutes the K_trunc slots into descending-pi order
-//  each sweep and writes the relabelled (pi, mu, lambda, z) back. Runs FIRST so
-//  downstream children read/record on one canonical labelling.
-//  Reads: pi (K), mu (K*d), lambda (K*d), z (N).  Writes: pi, mu, lambda, z.
-// ----------------------------------------------------------------------------
-class dp_label_canonicalizer_block : public AI4BayesCode::block_sampler {
-public:
-    dp_label_canonicalizer_block(std::string name, std::size_t K_trunc,
-                                 std::size_t d, std::size_t N)
-        : name_(std::move(name)), K_(K_trunc), d_(d), N_(N),
-          dummy_(arma::vec(1, arma::fill::zeros)) {
-        if (name_.empty())
-            throw std::invalid_argument("dp_label_canonicalizer_block: name must be non-empty");
-        if (K_ < 2 || d_ < 1 || N_ < 1)
-            throw std::invalid_argument("dp_label_canonicalizer_block: bad K/d/N");
-    }
-    void set_context(const block_context& ctx) override { context_ = ctx; }
-    void step(std::mt19937_64& /*rng*/) override {
-        const arma::vec& pi  = context_.at("pi");
-        const arma::vec& mu  = context_.at("mu");
-        const arma::vec& lam = context_.at("lambda");
-        const arma::vec& z   = context_.at("z");
-        const arma::uvec perm = arma::sort_index(pi, "descend");
-        arma::uvec inv(K_);
-        for (std::size_t r = 0; r < K_; ++r) inv[perm[r]] = r;
-        pi_out_.set_size(K_); mu_out_.set_size(K_ * d_); lam_out_.set_size(K_ * d_);
-        for (std::size_t r = 0; r < K_; ++r) {
-            const std::size_t o = perm[r];
-            pi_out_[r] = pi[o];
-            for (std::size_t j = 0; j < d_; ++j) {
-                mu_out_[r * d_ + j]  = mu[o * d_ + j];
-                lam_out_[r * d_ + j] = lam[o * d_ + j];
-            }
-        }
-        z_out_.set_size(N_);
-        for (std::size_t i = 0; i < N_; ++i) {
-            long L = static_cast<long>(std::llround(z[i]));
-            if (L < 1) L = 1;
-            if (static_cast<std::size_t>(L) > K_) L = static_cast<long>(K_);
-            z_out_[i] = static_cast<double>(inv[static_cast<std::size_t>(L) - 1] + 1);
-        }
-    }
-    AI4BayesCode::state_map current_named_outputs() const override {
-        AI4BayesCode::state_map out;
-        out.emplace("pi", pi_out_); out.emplace("mu", mu_out_);
-        out.emplace("lambda", lam_out_); out.emplace("z", z_out_);
-        return out;
-    }
-    AI4BayesCode::state_map current_named_outputs(std::mt19937_64& /*rng*/) const override { return current_named_outputs(); }
-    const arma::vec& current() const override { return dummy_; }
-    void set_current(const arma::vec&) override {}
-    const std::string& name() const noexcept override { return name_; }
-    std::size_t dim() const noexcept override { return 0; }
-    AI4BayesCode::history_map get_history() const override { return {}; }
-    std::size_t history_size() const noexcept override { return 0; }
-    void clear_history() override {}
-private:
-    std::string name_; std::size_t K_, d_, N_; arma::vec dummy_;
-    block_context context_; arma::vec pi_out_, mu_out_, lam_out_, z_out_;
-};
-
 }  // anonymous namespace
 
 class DPGaussianMixture_DerivedAlpha {
@@ -503,9 +416,6 @@ public:
             });
 
         // ---- DAG ---------------------------------------------------
-        // relabel (FALLBACK canonicaliser — NOT recommended; prefer post-MCMC).
-        impl_->data().declare_dependencies("relabel",
-            {"pi", "mu", "lambda", "z"});
         impl_->data().declare_dependencies("z",
             {"y", "pi", "mu", "lambda"});
         impl_->data().declare_dependencies("cluster_params",
@@ -572,13 +482,7 @@ public:
         impl_->data().refresh_all();
 
         // ---- children ---------------------------------------------------
-        // child(0) relabel (FALLBACK canonicaliser — see class comment; NOT
-        // recommended, prefer post-MCMC). Added FIRST so downstream children
-        // read/record on one canonical descending-pi labelling.
-        impl_->add_child(std::make_unique<dp_label_canonicalizer_block>(
-            "relabel", K_, d_, N_));
-
-        // child(1) z
+        // child(0) z
         {
             categorical_gibbs_block_config cfg;
             cfg.name           = "z";
@@ -612,7 +516,7 @@ public:
                 std::make_unique<categorical_gibbs_block>(std::move(cfg)));
         }
 
-        // child(2) cluster_params
+        // child(1) cluster_params
         {
             normal_gamma_cluster_gibbs_block_config cfg;
             cfg.name        = "cluster_params";
@@ -634,7 +538,7 @@ public:
                     std::move(cfg)));
         }
 
-        // child(3) pi (DP weights, reads alpha from refresher)
+        // child(2) pi (DP weights, reads alpha from refresher)
         {
             stick_breaking_block_config cfg;
             cfg.name        = "pi";
@@ -659,7 +563,7 @@ public:
                 std::make_unique<stick_breaking_block>(std::move(cfg)));
         }
 
-        // child(4) phi (NUTS on REAL)
+        // child(3) phi (NUTS on REAL)
         {
             nuts_block_config cfg;
             cfg.name        = "phi";
@@ -730,7 +634,7 @@ public:
                     ai4b::stop("z[i] out of {1, ..., K_trunc}");
             }
             dynamic_cast<categorical_gibbs_block&>(
-                impl_->child(1)).set_current(znew);
+                impl_->child(0)).set_current(znew);
             impl_->data().set("z", znew);
             impl_->data().refresh_derived_for("z");
         }
@@ -740,14 +644,14 @@ public:
             if (pinew.n_elem != K_)
                 ai4b::stop("pi length must equal K_trunc");
             dynamic_cast<stick_breaking_block&>(
-                impl_->child(3)).set_current(pinew);
+                impl_->child(2)).set_current(pinew);
             impl_->data().set("pi", pinew);
         }
         auto it_phi = params.find("phi");
         if (it_phi != params.end()) {
             const double p_new = it_phi->second[0];
             if (!std::isfinite(p_new)) ai4b::stop("phi must be finite");
-            dynamic_cast<nuts_block&>(impl_->child(4))
+            dynamic_cast<nuts_block&>(impl_->child(3))
                 .set_current(arma::vec{p_new});
             impl_->data().set("phi", arma::vec{p_new});
             impl_->data().refresh_derived_for("phi");  // updates alpha
