@@ -14,8 +14,16 @@ predecessor set. We sample orders via Metropolis-Hastings with a
 mixture of any-pair swaps and adjacent swaps, and at each step
 sample a DAG by drawing each variable's parent set from its
 posterior conditional on the current order. Discrete data + BDeu
-score (Heckerman-Geiger-Chickering 1995, Eq 28) is the only
-likelihood family in v1.2.
+score (Heckerman-Geiger-Chickering 1995, Eq 28) is the v1.2 default.
+
+**v1.2.1 (shipped) — opt-in, defaults preserve v1 exactly:**
+- `cfg.method = partition` → **Kuipers-Moffa 2017 partition MCMC**: samples
+  labelled node partitions (split/join + swap + single-node + Sec.5
+  edge-reversal moves), removing the order-MCMC structure-prior bias inside
+  Markov equivalence classes — an **unbiased** DAG posterior (verified vs exact
+  enumeration of all DAGs at n = 3/4/5). Adds a `<name>_party` named output.
+- `cfg.continuous_data` (non-empty) → **BGe** Gaussian score (Geiger-Heckerman
+  2002) for continuous variables instead of BDeu; works with either method.
 
 **JUSTIFICATION (Check #16):** discrete DAG-structure learning — a
 combinatorial state space that's intractable with NUTS / Gibbs (no

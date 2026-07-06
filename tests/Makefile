@@ -33,7 +33,7 @@ LDFLAGS  ?=
 # On macOS, link directly against Accelerate for BLAS/LAPACK.
 LDLIBS   ?= -framework Accelerate
 
-TARGETS  := test_constraints test_binary_gibbs test_dirichlet_gibbs test_categorical_gibbs test_gaussian_linear test_simplex_dirichlet test_nuts_variance test_nuts_block_stress test_vi_mean_field_gaussian test_vi_correlated_gaussian test_vi_hybrid_composition test_vi_glmm_logistic test_vi_bnn_regression test_vi_full_rank_correlated test_vi_bnn_full_rank test_readapt_NUTS test_ising_cluster_block test_ising_cluster_block_diagnostics test_ising_sw_vs_single_site test_ising_cluster_block_stress test_gmrf_precision_block test_gmrf_precision_block_diagnostics test_gmrf_precision_block_stress test_hmm_block_stress test_pg_logistic_block_stress test_joint_nuts_block_stress test_joint_nuts_block_mixed_stress test_rjmcmc_block_stress test_bde_scorer test_score_cache test_order_mcmc_block test_order_mcmc_block_stress test_order_mcmc_block_diagnostics test_categorical_meanfield_vi_block test_categorical_meanfield_vi_chain test_categorical_meanfield_vi_cavi_cross test_categorical_meanfield_vi_stress test_structured_meanfield_vi_block test_structured_meanfield_vi_chain test_structured_meanfield_vi_cavi_cross test_structured_meanfield_vi_stress
+TARGETS  := test_constraints test_binary_gibbs test_dirichlet_gibbs test_categorical_gibbs test_gaussian_linear test_simplex_dirichlet test_nuts_variance test_nuts_block_stress test_vi_mean_field_gaussian test_vi_correlated_gaussian test_vi_hybrid_composition test_vi_glmm_logistic test_vi_bnn_regression test_vi_full_rank_correlated test_vi_bnn_full_rank test_readapt_NUTS test_ising_cluster_block test_ising_cluster_block_diagnostics test_ising_sw_vs_single_site test_ising_cluster_block_stress test_gmrf_precision_block test_gmrf_precision_block_diagnostics test_gmrf_precision_block_stress test_hmm_block_stress test_pg_logistic_block_stress test_joint_nuts_block_stress test_joint_nuts_block_mixed_stress test_rjmcmc_block_stress test_bde_scorer test_score_cache test_order_mcmc_block test_order_mcmc_block_stress test_order_mcmc_block_diagnostics test_bge_scorer test_partition_geometry test_partition_mcmc_diagnostics test_partition_mcmc_rhat test_order_mcmc_block_partition test_categorical_meanfield_vi_block test_categorical_meanfield_vi_chain test_categorical_meanfield_vi_cavi_cross test_categorical_meanfield_vi_stress test_structured_meanfield_vi_block test_structured_meanfield_vi_chain test_structured_meanfield_vi_cavi_cross test_structured_meanfield_vi_stress
 
 .PHONY: all build run clean
 
@@ -202,8 +202,11 @@ test_nuts_block_stress: test_nuts_block_stress.cpp $(AI4BAYESCODE_HEADERS)
 # Block 3: order_mcmc_block (Friedman-Koller 2003)
 AI4BAYESCODE_ORDER_MCMC_HEADERS := \
   $(INC_DIR)/AI4BayesCode/block_sampler.hpp \
+  $(INC_DIR)/AI4BayesCode/i_scorer.hpp \
   $(INC_DIR)/AI4BayesCode/bde_scorer.hpp \
+  $(INC_DIR)/AI4BayesCode/bge_scorer.hpp \
   $(INC_DIR)/AI4BayesCode/score_cache.hpp \
+  $(INC_DIR)/AI4BayesCode/partition_state.hpp \
   $(INC_DIR)/AI4BayesCode/order_mcmc_block.hpp
 
 test_bde_scorer: test_bde_scorer.cpp $(INC_DIR)/AI4BayesCode/bde_scorer.hpp
@@ -219,6 +222,22 @@ test_order_mcmc_block_stress: test_order_mcmc_block_stress.cpp $(AI4BAYESCODE_OR
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 
 test_order_mcmc_block_diagnostics: test_order_mcmc_block_diagnostics.cpp $(AI4BAYESCODE_ORDER_MCMC_HEADERS)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
+
+# Block 3 v1.2.1: BGe score + partition MCMC
+test_bge_scorer: test_bge_scorer.cpp $(INC_DIR)/AI4BayesCode/bge_scorer.hpp $(INC_DIR)/AI4BayesCode/i_scorer.hpp
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
+
+test_partition_geometry: test_partition_geometry.cpp $(AI4BAYESCODE_ORDER_MCMC_HEADERS)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
+
+test_partition_mcmc_diagnostics: test_partition_mcmc_diagnostics.cpp $(AI4BAYESCODE_ORDER_MCMC_HEADERS)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
+
+test_partition_mcmc_rhat: test_partition_mcmc_rhat.cpp $(AI4BAYESCODE_ORDER_MCMC_HEADERS)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
+
+test_order_mcmc_block_partition: test_order_mcmc_block_partition.cpp $(AI4BAYESCODE_ORDER_MCMC_HEADERS)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 
 # VI-family headers (Phase 2 / 3 / 4 of the VI track)

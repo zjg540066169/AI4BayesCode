@@ -66,6 +66,8 @@
 #ifndef AI4BAYESCODE_BDE_SCORER_HPP
 #define AI4BAYESCODE_BDE_SCORER_HPP
 
+#include "i_scorer.hpp"
+
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -112,7 +114,7 @@ struct bde_scorer_config {
  * Parent sets are encoded as 64-bit bitmasks: bit `j` set ⇔ node `j`
  * is a parent. n ≤ 64 is enforced at construction.
  */
-class bde_scorer {
+class bde_scorer : public i_scorer {
 public:
     explicit bde_scorer(bde_scorer_config cfg)
         : cfg_(std::move(cfg))
@@ -175,7 +177,7 @@ public:
     }
 
     /// Number of variables (columns of data).
-    std::size_t n() const noexcept { return n_; }
+    std::size_t n() const noexcept override { return n_; }
     /// Number of observations (rows of data).
     std::size_t N() const noexcept { return N_; }
     /// Variable cardinality.
@@ -190,7 +192,7 @@ public:
      *                      ignored (a node is not its own parent).
      * @return Log family score (natural log).
      */
-    double family_score(std::size_t i, std::uint64_t parent_mask) const {
+    double family_score(std::size_t i, std::uint64_t parent_mask) const override {
         if (i >= n_) {
             throw std::invalid_argument(
                 "bde_scorer::family_score: node index out of range");
@@ -279,7 +281,7 @@ public:
      *           by single-edge score).
      */
     std::vector<std::size_t> top_candidate_parents(std::size_t i,
-                                                       std::size_t C) const {
+                                                       std::size_t C) const override {
         std::vector<std::pair<double, std::size_t>> ranked;
         ranked.reserve(n_ - 1);
         for (std::size_t j = 0; j < n_; ++j) {

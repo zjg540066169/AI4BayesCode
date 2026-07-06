@@ -56,16 +56,18 @@
  *      THE TWO PRIORS PRODUCE DIFFERENT POSTERIORS. Codegen agents
  *      MUST `AskUserQuestion` when the spec doesn't disambiguate
  *      (see codegen_priors.md §3a Class 5a).
- *  Each of the following is on the v1.2.1 roadmap (see
- *  V1_2_SPECIALIZED_BLOCKS_PLAN_2026-05-27.md
- *  §4 Block 3 "Deferred to v1.2.1"):
- *    * Kuipers-Moffa 2017 partition_mcmc_block (removes the FK §4.1
- *      induced-structure-prior bias inside Markov equivalence
- *      classes — see KNOWN BIAS below).
- *    * BGe Gaussian score (continuous data; Geiger-Heckerman 1994).
- *    * Mixed conditional-Gaussian BN (Lauritzen 1992).
- *    * Edge-specific structural prior.
- *    * Tempered / parallel-tempered chains.
+ *  v1.2.1 (SHIPPED) — opt-in via config, defaults preserve v1 exactly:
+ *    * cfg.method = partition — Kuipers-Moffa 2017 partition MCMC. Samples
+ *      labelled node partitions (split/join + swap + single-node +
+ *      Sec.5 edge-reversal moves), removing the order-prior bias inside
+ *      Markov equivalence classes (KNOWN BIAS below). UNBIASED: verified vs
+ *      exact enumeration of all DAGs at n=3/4/5. See partition_state.hpp.
+ *    * cfg.continuous_data (BGe) — Geiger-Heckerman 2002 Gaussian score for
+ *      continuous data (bge_scorer.hpp); selected automatically when
+ *      continuous_data is non-empty. Works with either method.
+ *  Still deferred (v1.2.2+): mixed conditional-Gaussian BN (Lauritzen 1992);
+ *  per-edge (weight-matrix) structural prior; tempering (target-changing,
+ *  deliberately excluded).
  *
  *  STATE REPRESENTATION
  *  ====================
@@ -80,11 +82,11 @@
  *
  *  KNOWN BIAS (per spec §1.6, FK §4.1 last 3 paragraphs)
  *  ====================================================
- *  Order prior is uniform over orders; the INDUCED structure prior is
- *  NOT hypothesis-equivalent (different Markov-equivalent DAGs receive
- *  different prior weight in proportion to how many orders they are
- *  consistent with). Fix is Kuipers-Moffa 2017 partition MCMC,
- *  deferred to v1.2.1 partition_mcmc_block.
+ *  In method=order the order prior is uniform over orders; the INDUCED
+ *  structure prior is NOT hypothesis-equivalent (different Markov-equivalent
+ *  DAGs receive different prior weight in proportion to how many orders they
+ *  are consistent with). **Set cfg.method = partition to remove this bias**
+ *  (Kuipers-Moffa 2017; SHIPPED in v1.2.1, this block).
  *
  *  ENGINE FAMILY
  *  =============
@@ -192,7 +194,9 @@
 
 #include "block_sampler.hpp"
 #include "bde_scorer.hpp"
+#include "bge_scorer.hpp"
 #include "score_cache.hpp"
+#include "partition_state.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -254,6 +258,26 @@ struct order_mcmc_block_config {
 
     /// Seed for the initial order's RNG (independent of step()'s rng).
     std::uint64_t init_rng_seed = 0;
+
+    // ---- v1.2.1: partition MCMC + BGe (opt-in; defaults preserve v1) --------
+
+    /// Sampler method. `order` = Friedman-Koller 2003 order MCMC (v1 default).
+    /// `partition` = Kuipers-Moffa 2017 partition MCMC — samples over labelled
+    /// partitions of the nodes, removing the order-prior bias inside Markov
+    /// equivalence classes (unbiased DAG posterior; see partition_state.hpp).
+    enum class method_t { order, partition };
+    method_t method = method_t::order;
+
+    /// Continuous (Gaussian) data, N x n. If NON-EMPTY, the block scores with
+    /// the BGe score (Geiger-Heckerman 2002) over this data INSTEAD of BDeu over
+    /// `data`, and `cardinalities` is ignored. Leave empty for discrete BDeu.
+    arma::mat continuous_data;
+
+    /// BGe prior hyperparameters (used only when continuous_data is non-empty).
+    /// bge_am = prior-mean effective sample size (default 1); bge_aw = Wishart
+    /// degrees of freedom (0 = the default n + am + 1; must be > n + 1).
+    double bge_am = 1.0;
+    double bge_aw = 0.0;
 };
 
 /**
@@ -269,40 +293,58 @@ public:
     explicit order_mcmc_block(order_mcmc_block_config cfg)
         : cfg_(std::move(cfg))
     {
-        if (cfg_.data.n_rows == 0 || cfg_.data.n_cols == 0) {
-            throw std::invalid_argument(
-                "order_mcmc_block: data must be non-empty");
+        const bool use_bge = (cfg_.continuous_data.n_cols > 0);
+        if (use_bge) {
+            if (cfg_.continuous_data.n_rows < 2) {
+                throw std::invalid_argument(
+                    "order_mcmc_block: continuous_data must have >= 2 rows");
+            }
+            n_ = cfg_.continuous_data.n_cols;
+        } else {
+            if (cfg_.data.n_rows == 0 || cfg_.data.n_cols == 0) {
+                throw std::invalid_argument(
+                    "order_mcmc_block: data must be non-empty "
+                    "(or supply continuous_data for the BGe score)");
+            }
+            n_ = cfg_.data.n_cols;
+            if (cfg_.cardinalities.n_elem != n_) {
+                throw std::invalid_argument(
+                    "order_mcmc_block: cardinalities length must equal n");
+            }
         }
-        n_ = cfg_.data.n_cols;
         if (n_ > 64u) {
             throw std::invalid_argument(
                 "order_mcmc_block: n > 64 not supported (bitmask encoding)");
-        }
-        if (cfg_.cardinalities.n_elem != n_) {
-            throw std::invalid_argument(
-                "order_mcmc_block: cardinalities length must equal n");
         }
         if (cfg_.prob_adjacent_swap < 0.0 || cfg_.prob_adjacent_swap > 1.0) {
             throw std::invalid_argument(
                 "order_mcmc_block: prob_adjacent_swap must be in [0, 1]");
         }
 
-        // Build bde_scorer.
-        bde_scorer_config bcfg;
-        bcfg.data = cfg_.data;
-        bcfg.cardinalities = cfg_.cardinalities;
-        bcfg.alpha = cfg_.bdeu_alpha;
-        bcfg.use_structure_prior = cfg_.use_structure_prior;
-        bcfg.max_parents = cfg_.max_parents;
-        bde_scorer scorer(bcfg);
-
-        // Build score_cache.
+        // Build the scorer (BDeu discrete or BGe continuous) + the cache.
         score_cache_config sc;
         sc.max_parents = cfg_.max_parents;
         sc.candidate_top_C = cfg_.candidate_top_C;
         sc.family_top_F = cfg_.family_cache_F;
         sc.gamma_prune_nats = cfg_.gamma_prune_nats;
-        cache_ = std::make_unique<score_cache>(std::move(scorer), sc);
+        if (use_bge) {
+            bge_scorer_config gcfg;
+            gcfg.data = cfg_.continuous_data;
+            gcfg.am = cfg_.bge_am;
+            gcfg.aw = cfg_.bge_aw;
+            gcfg.use_structure_prior = cfg_.use_structure_prior;
+            cache_ = std::make_unique<score_cache>(
+                std::make_unique<bge_scorer>(std::move(gcfg)), sc);
+        } else {
+            bde_scorer_config bcfg;
+            bcfg.data = cfg_.data;
+            bcfg.cardinalities = cfg_.cardinalities;
+            bcfg.alpha = cfg_.bdeu_alpha;
+            bcfg.use_structure_prior = cfg_.use_structure_prior;
+            bcfg.max_parents = cfg_.max_parents;
+            cache_ = std::make_unique<score_cache>(
+                std::make_unique<bde_scorer>(std::move(bcfg)), sc);
+        }
 
         // Initialise order.
         if (cfg_.initial_order.n_elem > 0) {
@@ -335,16 +377,24 @@ public:
             }
         }
 
-        // Compute initial log score.
-        current_log_score_ = cache_->order_log_score(order_as_vec_());
-
         // Pre-allocate current arma::vec for current().
         current_natural_ = arma::conv_to<arma::vec>::from(order_state_);
 
-        // Sampled DAG (one per step), initially sample from current order.
         std::mt19937_64 dag_init_rng(
             cfg_.init_rng_seed ^ 0xA7F38E15CD49B22BULL);
-        sampled_dag_ = cache_->sample_dag(dag_init_rng, order_as_vec_());
+        if (cfg_.method == order_mcmc_block_config::method_t::partition) {
+            // Partition mode: seed from the trivial single-element partition
+            // (empty DAG); the chain quickly builds up structure.
+            pchain_ = partition_chain_init(*cache_, trivial_partition(n_));
+            current_log_score_ = pchain_.log_score;
+            current_natural_.set_size(n_);
+            for (std::size_t p = 0; p < n_; ++p)
+                current_natural_[p] = static_cast<double>(pchain_.state.permy[p]);
+            sampled_dag_ = partition_sample_dag(*cache_, dag_init_rng, pchain_.state);
+        } else {
+            current_log_score_ = cache_->order_log_score(order_as_vec_());
+            sampled_dag_ = cache_->sample_dag(dag_init_rng, order_as_vec_());
+        }
     }
 
     // ---- block_sampler interface ----------------------------------------
@@ -354,7 +404,25 @@ public:
     }
 
     void step(std::mt19937_64& rng) override {
-        // ----- Propose -----
+        if (cfg_.method == order_mcmc_block_config::method_t::partition) {
+            // Kuipers-Moffa partition MCMC: one mixture step (split/join + swap
+            // + single-node + edge-reversal), then draw a DAG from the partition.
+            partition_mcmc_step(pchain_, *cache_, rng);
+            current_log_score_ = pchain_.log_score;
+            current_natural_.set_size(n_);
+            for (std::size_t p = 0; p < n_; ++p)
+                current_natural_[p] = static_cast<double>(pchain_.state.permy[p]);
+            sampled_dag_ = partition_sample_dag(*cache_, rng, pchain_.state);
+            if (keep_history()) {
+                arma::uvec pv(n_);
+                for (std::size_t p = 0; p < n_; ++p) pv[p] = pchain_.state.permy[p];
+                history_order_.push_back(std::move(pv));
+                history_log_score_.push_back(current_log_score_);
+            }
+            return;
+        }
+
+        // ----- Propose (order mode) -----
         std::uniform_real_distribution<double> U01(0.0, 1.0);
         std::size_t a = 0, b = 0;
         if (U01(rng) < cfg_.prob_adjacent_swap) {
@@ -438,6 +506,28 @@ public:
 
     state_map current_named_outputs(std::mt19937_64& rng) const override {
         state_map out;
+        if (cfg_.method == order_mcmc_block_config::method_t::partition) {
+            // "<name>"           = the partition's node permutation (permy)
+            // "<name>_party"     = the element sizes (partition composition)
+            // "<name>_sampled_DAG" = a DAG drawn from the current partition
+            // "<name>_log_score" = the partition log-score
+            arma::vec order_vec(n_);
+            for (std::size_t p = 0; p < n_; ++p)
+                order_vec[p] = static_cast<double>(pchain_.state.permy[p]);
+            out.emplace(cfg_.name, std::move(order_vec));
+            arma::vec party_vec(pchain_.state.party.size());
+            for (std::size_t t = 0; t < pchain_.state.party.size(); ++t)
+                party_vec[t] = static_cast<double>(pchain_.state.party[t]);
+            out.emplace(cfg_.name + "_party", std::move(party_vec));
+            auto pdag = partition_sample_dag(*cache_, rng, pchain_.state);
+            arma::vec pdag_flat(n_ * n_, arma::fill::zeros);
+            for (std::size_t i = 0; i < n_; ++i)
+                for (std::size_t j = 0; j < n_; ++j)
+                    if (pdag[i] & (1ULL << j)) pdag_flat[i * n_ + j] = 1.0;
+            out.emplace(cfg_.name + "_sampled_DAG", std::move(pdag_flat));
+            out.emplace(cfg_.name + "_log_score", arma::vec({current_log_score_}));
+            return out;
+        }
         // "order" key (length n).
         arma::vec order_vec = arma::conv_to<arma::vec>::from(order_state_);
         out.emplace(cfg_.name, std::move(order_vec));
@@ -516,6 +606,7 @@ private:
     double                            current_log_score_ = 0.0;
     arma::vec                         current_natural_;
     std::vector<std::uint64_t>        sampled_dag_;
+    partition_chain                   pchain_;   // used only when method=partition
 
     // History (when keep_history true).
     std::vector<arma::uvec> history_order_;

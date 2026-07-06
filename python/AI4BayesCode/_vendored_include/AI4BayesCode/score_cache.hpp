@@ -52,10 +52,13 @@
 #define AI4BAYESCODE_SCORE_CACHE_HPP
 
 #include "bde_scorer.hpp"
+#include "i_scorer.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <random>
 #include <stdexcept>
 #include <vector>
@@ -93,10 +96,17 @@ struct cached_family {
  */
 class score_cache {
 public:
+    /// Convenience ctor: wrap a bde_scorer by value (backward-compatible with
+    /// the original by-value API). Delegates to the general i_scorer ctor.
     score_cache(bde_scorer scorer, score_cache_config cfg)
+        : score_cache(std::make_unique<bde_scorer>(std::move(scorer)), cfg) {}
+
+    /// General ctor: take ownership of any i_scorer implementation
+    /// (bde_scorer, bge_scorer, ...).
+    score_cache(std::unique_ptr<i_scorer> scorer, score_cache_config cfg)
         : scorer_(std::move(scorer)), cfg_(cfg)
     {
-        n_ = scorer_.n();
+        n_ = scorer_->n();
         if (cfg_.max_parents > 64u) {
             throw std::invalid_argument(
                 "score_cache: max_parents > 64 not supported");
@@ -108,7 +118,7 @@ public:
 
         // Phase 1: candidate parents top-C (per node).
         for (std::size_t i = 0; i < n_; ++i) {
-            candidate_parents_[i] = scorer_.top_candidate_parents(
+            candidate_parents_[i] = scorer_->top_candidate_parents(
                 i, cfg_.candidate_top_C);
         }
 
@@ -163,7 +173,7 @@ public:
             // No candidate family (shouldn't normally happen since empty
             // parent set is always valid). Return scorer's empty-parent
             // score as fallback.
-            return scorer_.family_score(i, 0ULL);
+            return scorer_->family_score(i, 0ULL);
         }
         double sum = 0.0;
         for (const auto& f : cache_[i]) {
@@ -234,8 +244,85 @@ public:
         return dag;
     }
 
-    /// Get the bde_scorer (for callers needing direct family_score access).
-    const bde_scorer& scorer() const noexcept { return scorer_; }
+    // ======================================================================
+    //  Partition MCMC (Kuipers-Moffa 2017) support.
+    //
+    //  A node i in partition element t has permissible parent sets restricted
+    //  to: (a) parents ⊆ `allowed_mask` (the nodes in elements STRICTLY to the
+    //  right of t, i.e. later elements), AND (b) parents ∩ `required_mask` ≠ ∅
+    //  where `required_mask` = the immediately-adjacent right element (t+1).
+    //  For the last element there is no right neighbour: required_mask == 0,
+    //  the node is a pure source, and its only permissible set is the empty
+    //  parent set. These masks are computed by the caller from the partition
+    //  state (a node's own + left elements are banned; elements to the right
+    //  are allowed; the adjacent right element is required).
+    // ======================================================================
+
+    /// Kuipers-Moffa Eq. 3 per-node partition score:
+    /// log Σ_{U ⊆ allowed, U ∩ required ≠ ∅} score(X_i, U | D), over the cached
+    /// families. required_mask == 0 (last element) ⇒ empty-parent score only.
+    double partition_node_score(std::size_t i,
+                                std::uint64_t allowed_mask,
+                                std::uint64_t required_mask) const {
+        if (required_mask == 0ULL) {
+            return scorer_->family_score(i, 0ULL);   // last element: no parents
+        }
+        double m = -std::numeric_limits<double>::infinity();
+        for (const auto& f : cache_[i]) {
+            if ((f.parents_mask & ~allowed_mask) == 0ULL &&
+                (f.parents_mask & required_mask) != 0ULL) {
+                if (f.log_score > m) m = f.log_score;
+            }
+        }
+        if (m == -std::numeric_limits<double>::infinity()) {
+            return -std::numeric_limits<double>::infinity();  // no permissible family
+        }
+        double sum = 0.0;
+        for (const auto& f : cache_[i]) {
+            if ((f.parents_mask & ~allowed_mask) == 0ULL &&
+                (f.parents_mask & required_mask) != 0ULL) {
+                sum += std::exp(f.log_score - m);
+            }
+        }
+        return m + std::log(sum);
+    }
+
+    /// Sample a parent set for node i under the partition constraint,
+    /// proportional to exp(score) over permissible cached families.
+    std::uint64_t partition_sample_parent_set(std::mt19937_64& rng,
+                                              std::size_t i,
+                                              std::uint64_t allowed_mask,
+                                              std::uint64_t required_mask) const {
+        if (required_mask == 0ULL) return 0ULL;   // last element: empty parents
+        std::vector<const cached_family*> feasible;
+        feasible.reserve(cache_[i].size());
+        double m = -std::numeric_limits<double>::infinity();
+        for (const auto& f : cache_[i]) {
+            if ((f.parents_mask & ~allowed_mask) == 0ULL &&
+                (f.parents_mask & required_mask) != 0ULL) {
+                feasible.push_back(&f);
+                if (f.log_score > m) m = f.log_score;
+            }
+        }
+        if (feasible.empty()) return 0ULL;
+        std::vector<double> w(feasible.size());
+        double Z = 0.0;
+        for (std::size_t k = 0; k < feasible.size(); ++k) {
+            w[k] = std::exp(feasible[k]->log_score - m);
+            Z += w[k];
+        }
+        std::uniform_real_distribution<double> U01(0.0, 1.0);
+        const double u = U01(rng) * Z;
+        double acc = 0.0;
+        for (std::size_t k = 0; k < feasible.size(); ++k) {
+            acc += w[k];
+            if (u <= acc) return feasible[k]->parents_mask;
+        }
+        return feasible.back()->parents_mask;
+    }
+
+    /// Get the scorer (for callers needing direct family_score access).
+    const i_scorer& scorer() const noexcept { return *scorer_; }
 
     /// Diagnostic: number of cached families per node.
     std::vector<std::size_t> cache_sizes() const {
@@ -260,7 +347,7 @@ private:
             // Score current chosen set.
             std::uint64_t mask = 0ULL;
             for (auto j : chosen) mask |= (1ULL << cands[j]);
-            const double sc = scorer_.family_score(i, mask);
+            const double sc = scorer_->family_score(i, mask);
             cached_family f;
             f.parents_mask = mask;
             f.n_parents    = chosen.size();
@@ -304,7 +391,7 @@ private:
     }
 
 private:
-    bde_scorer                                       scorer_;
+    std::unique_ptr<i_scorer>                        scorer_;
     score_cache_config                               cfg_;
     std::size_t                                      n_ = 0;
     std::vector<std::vector<std::size_t>>            candidate_parents_;  // n × C
