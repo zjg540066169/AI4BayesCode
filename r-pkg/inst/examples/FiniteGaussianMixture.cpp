@@ -190,8 +190,7 @@ inline double diag_normal_log_density(const double* y, const double* mu,
 //  Tier A wrapper class
 //  (backend-neutral: arma-typed ctor + state_map / history_map interface, so
 //   the SAME class compiles for BOTH the Rcpp module and the pybind module.
-//   The standalone demo at the end of this file drives the composite_block
-//   directly.)
+//   The standalone demo at the end of this file drives the class directly.)
 // ============================================================================
 
 class FiniteGaussianMixture {
@@ -708,55 +707,27 @@ PYBIND11_MODULE(FiniteGaussianMixture, m) {
 
 // ============================================================================
 //  Frontend-independent standalone demo (active ONLY as a standalone binary,
-//  not when compiled as an Rcpp / pybind module). Verbatim int main() from the
-//  design tree, with the arma data-driven hyper helpers and <cstdio> it needs.
+//  not when compiled as an Rcpp / pybind module).
+//
+//  Simulate a 2-cluster, 2-D Gaussian mixture from a known truth, fit the
+//  finite-K (K=2) Gibbs sampler via the Tier-A FiniteGaussianMixture class,
+//  read posterior state through the FULL contract (get_current()), and check
+//  that the posterior-mean cluster centers recover the two truth centers
+//  (matched up to label switching) and that the fitted mixture beats a
+//  single-Gaussian (K=1) baseline in mean log-likelihood on the training data.
+//
+//  NOTE: get_current() returns mu/lambda as COLUMN-MAJOR (K x d) vectorised
+//  arma::vec, i.e. element (k, j) lives at index [k + j * K] — NOT the internal
+//  row-major [k * d + j]. The recovery checks below index accordingly.
 // ============================================================================
 #if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 
 #include <cstdio>
 
-namespace {
-
-// Data-driven weakly-informative Normal-Gamma hypers (matches the class
-// constructor's dd_mu0_ / dd_blambda_): mu_0 = column means, b_lambda_0 =
-// mean column variance.
-arma::vec dd_mu0(const arma::mat& y) {
-    const std::size_t d = y.n_cols;
-    arma::vec m(d, arma::fill::zeros);
-    for (std::size_t j = 0; j < d; ++j) m[j] = arma::mean(y.col(j));
-    return m;
-}
-double dd_blambda(const arma::mat& y) {
-    const std::size_t n = y.n_rows, d = y.n_cols;
-    double acc = 0.0; std::size_t used = 0;
-    for (std::size_t j = 0; j < d; ++j) {
-        const double mean = arma::mean(y.col(j));
-        double ss = 0.0;
-        for (std::size_t i = 0; i < n; ++i) {
-            const double dv = y(i, j) - mean; ss += dv * dv;
-        }
-        const double v = (n > 1) ? ss / (n - 1) : 1.0;
-        if (std::isfinite(v) && v > 0.0) { acc += v; ++used; }
-    }
-    const double b = (used > 0) ? acc / used : 1.0;
-    return (std::isfinite(b) && b > 0.0) ? b : 1.0;
-}
-
-}  // anonymous namespace
-
-// ============================================================================
-//  Standalone demo
-//
-//  Simulate a 2-cluster, 2-D Gaussian mixture from a known truth, fit the
-//  finite-K (K=2) Gibbs sampler, and check that the posterior-mean cluster
-//  centers recover the two truth centers (matched up to label switching) and
-//  that the fitted mixture beats a single-Gaussian (K=1) baseline in
-//  held-out-style mean log-likelihood on the training data.
-// ============================================================================
-
 int main() {
     // ---- 1. Known truth -----------------------------------------------------
     const std::size_t d = 2;
+    const int         K_int = 2;
     const std::size_t K = 2;
     const std::size_t n_per = 150;
     const std::size_t N = K * n_per;
@@ -770,176 +741,50 @@ int main() {
     std::normal_distribution<double> snorm(0.0, 1.0);
 
     arma::mat y(N, d);
-    std::vector<std::size_t> true_z(N);
     {
         std::size_t i = 0;
         for (std::size_t k = 0; k < K; ++k) {
             for (std::size_t r = 0; r < n_per; ++r, ++i) {
-                true_z[i] = k;
                 for (std::size_t j = 0; j < d; ++j)
                     y(i, j) = true_mu[k][j] + true_sd * snorm(sim_rng);
             }
         }
     }
 
-    // ---- 2. Data-driven hyperparameters (match original ctor) ---------------
-    const arma::vec mu0_arma   = dd_mu0(y);
-    const double    kappa_0    = 0.01;
-    const double    a_lambda_0 = 2.0;
-    const double    b_lambda_0 = dd_blambda(y);
-    const double    alpha_dir  = 1.0;
+    // ---- 2. Fit via the FULL-contract Tier-A class (data-driven ctor) -------
+    // Same seed (12345) and data-driven hypers as the original wiring.
+    FiniteGaussianMixture model(y, K_int, 12345, /*keep_history=*/false);
 
-    // ---- 3. Build composite block directly (replicates the ctor wiring) -----
-    std::mt19937_64 rng(12345ULL);
-    auto comp = std::make_unique<composite_block>("FiniteGaussianMixture");
-
-    // Data + priors.
-    arma::vec y_flat(N * d);
-    for (std::size_t i = 0; i < N; ++i)
-        for (std::size_t j = 0; j < d; ++j)
-            y_flat[i * d + j] = y(i, j);
-    comp->data().set("y", y_flat);
-
-    comp->data().set("mu_0", mu0_arma);
-    comp->data().set("kappa_0",    arma::vec{kappa_0});
-    comp->data().set("a_lambda_0", arma::vec{a_lambda_0});
-    comp->data().set("b_lambda_0", arma::vec{b_lambda_0});
-    comp->data().set("alpha_dir",  arma::vec{alpha_dir});
-
-    // Initial sampler state: z spread (i mod K) + 1.
-    arma::vec z_init(N);
-    for (std::size_t i = 0; i < N; ++i)
-        z_init[i] = static_cast<double>((i % K) + 1);
-    comp->data().set("z", z_init);
-
-    // π: uniform 1/K.
-    arma::vec pi_init(K, arma::fill::value(1.0 / static_cast<double>(K)));
-    comp->data().set("pi", pi_init);
-
-    // μ: data-driven anchor spread; λ: prior mean.
-    arma::vec mu_init(K * d, arma::fill::zeros);
-    arma::vec lambda_init(K * d, arma::fill::value(a_lambda_0 / b_lambda_0));
-    for (std::size_t k = 0; k < K; ++k) {
-        const std::size_t i_anchor = (k * N) / K;
-        for (std::size_t j = 0; j < d; ++j)
-            mu_init[k * d + j] = y(i_anchor, j);
-    }
-    comp->data().set("mu", mu_init);
-    comp->data().set("lambda", lambda_init);
-
-    // cluster_counts: derived (refresher).
-    comp->data().set("cluster_counts", arma::vec(K, arma::fill::zeros));
-    comp->data().register_refresher("cluster_counts",
-        [K](const AI4BayesCode::shared_data_t& dat) -> arma::vec {
-            const arma::vec& z = dat.get("z");
-            return bnp::counts_from_z(z, K);
-        });
-
-    // Gibbs DAG dependencies / invalidations.
-    comp->data().declare_dependencies("z",  {"y", "pi", "mu", "lambda"});
-    comp->data().declare_dependencies("cluster_params", {"z", "y"});
-    comp->data().declare_dependencies("pi", {"cluster_counts", "alpha_dir"});
-    comp->data().declare_invalidates("z", {"cluster_counts"});
-
-    comp->data().refresh_all();
-
-    // child(0) z (categorical_gibbs_block)
-    {
-        categorical_gibbs_block_config cfg;
-        cfg.name           = "z";
-        cfg.n_obs          = N;
-        cfg.n_categories   = K;
-        cfg.initial_labels = z_init;
-        const std::size_t d_capture = d;
-        const std::size_t N_capture = N;
-        const std::size_t K_capture = K;
-        cfg.log_probs_fn = [d_capture, N_capture, K_capture]
-            (const block_context& ctx) -> arma::mat {
-            const arma::vec& y_flat_c = ctx.at("y");
-            const arma::vec& pi       = ctx.at("pi");
-            const arma::vec& mu       = ctx.at("mu");
-            const arma::vec& lam      = ctx.at("lambda");
-            arma::mat lp(N_capture, K_capture);
-            for (std::size_t i = 0; i < N_capture; ++i) {
-                for (std::size_t k = 0; k < K_capture; ++k) {
-                    const double log_pi_k = std::log(pi[k] + 1e-300);
-                    lp(i, k) = log_pi_k
-                             + diag_normal_log_density(
-                                 y_flat_c.memptr() + i * d_capture,
-                                 mu.memptr()       + k * d_capture,
-                                 lam.memptr()      + k * d_capture,
-                                 d_capture);
-                }
-            }
-            return lp;
-        };
-        comp->add_child(
-            std::make_unique<categorical_gibbs_block>(std::move(cfg)));
-    }
-
-    // child(1) cluster_params (normal_gamma_cluster_gibbs_block)
-    {
-        normal_gamma_cluster_gibbs_block_config cfg;
-        cfg.name        = "cluster_params";
-        cfg.K_trunc     = K;
-        cfg.d           = d;
-        cfg.N           = N;
-        cfg.z_key       = "z";
-        cfg.y_key       = "y";
-        cfg.mu_name     = "mu";
-        cfg.lambda_name = "lambda";
-        cfg.mu_0        = mu0_arma;
-        cfg.kappa_0     = kappa_0;
-        cfg.a_lambda_0  = a_lambda_0;
-        cfg.b_lambda_0  = b_lambda_0;
-        cfg.initial_mu     = mu_init;
-        cfg.initial_lambda = lambda_init;
-        comp->add_child(
-            std::make_unique<normal_gamma_cluster_gibbs_block>(
-                std::move(cfg)));
-    }
-
-    // child(2) pi (dirichlet_gibbs_block)
-    {
-        dirichlet_gibbs_block_config cfg;
-        cfg.name           = "pi";
-        cfg.n_categories   = K;
-        cfg.initial_values = pi_init;
-        const std::size_t K_capture = K;
-        cfg.alpha_post_fn = [K_capture]
-            (const block_context& ctx) -> arma::vec {
-            const arma::vec& counts = ctx.at("cluster_counts");
-            const double alpha      = ctx.at("alpha_dir")[0];
-            const double per_k = alpha / static_cast<double>(K_capture);
-            arma::vec out(K_capture);
-            for (std::size_t k = 0; k < K_capture; ++k)
-                out[k] = per_k + counts[k];
-            return out;
-        };
-        comp->add_child(
-            std::make_unique<dirichlet_gibbs_block>(std::move(cfg)));
-    }
-
-    // ---- 4. Warmup + sampling, accumulate posterior means -------------------
+    // ---- 3. Warmup + sampling, accumulate posterior means -------------------
+    // Read state via the FULL contract get_current(). mu/lambda come back
+    // COLUMN-MAJOR (K x d): element (k, j) at index [k + j * K].
     const int n_warmup = 500;
     const int n_keep   = 1500;
 
-    for (int s = 0; s < n_warmup; ++s) comp->step(rng);
+    model.step(n_warmup);
 
-    arma::vec mu_sum(K * d, arma::fill::zeros);
-    arma::vec lam_sum(K * d, arma::fill::zeros);
+    arma::vec mu_sum(K * d, arma::fill::zeros);   // column-major layout
+    arma::vec lam_sum(K * d, arma::fill::zeros);  // column-major layout
     arma::vec pi_sum(K, arma::fill::zeros);
     for (int s = 0; s < n_keep; ++s) {
-        comp->step(rng);
-        mu_sum  += comp->data().get("mu");
-        lam_sum += comp->data().get("lambda");
-        pi_sum  += comp->data().get("pi");
+        model.step(1);
+        const auto gc = model.get_current();
+        const arma::vec& mu_cur  = gc.at("mu");      // K*d column-major
+        const arma::vec& lam_cur = gc.at("lambda");  // K*d column-major
+        const arma::vec& pi_cur  = gc.at("pi");
+        mu_sum  += mu_cur;
+        lam_sum += lam_cur;
+        pi_sum  += pi_cur;
     }
     const arma::vec mu_hat  = mu_sum  / static_cast<double>(n_keep);
     const arma::vec lam_hat = lam_sum / static_cast<double>(n_keep);
     const arma::vec pi_hat  = pi_sum  / static_cast<double>(n_keep);
 
-    // ---- 5. Match recovered clusters to truth (label-switch invariant) ------
+    // Column-major (K x d) accessor: element (k, j) at [k + j * K].
+    auto MU  = [&](std::size_t k, std::size_t j) { return mu_hat [k + j * K]; };
+    auto LAM = [&](std::size_t k, std::size_t j) { return lam_hat[k + j * K]; };
+
+    // ---- 4. Match recovered clusters to truth (label-switch invariant) ------
     // For K=2: try both label assignments, pick the one with smaller total
     // center error, then report that error.
     auto center_err = [&](int map0, int map1) {
@@ -947,7 +792,7 @@ int main() {
         double e = 0.0;
         for (std::size_t k = 0; k < K; ++k) {
             for (std::size_t j = 0; j < d; ++j) {
-                const double dv = mu_hat[k * d + j] - true_mu[map[k]][j];
+                const double dv = MU(k, j) - true_mu[map[k]][j];
                 e += dv * dv;
             }
         }
@@ -957,17 +802,26 @@ int main() {
     const double err_swapped  = center_err(1, 0);
     const double rmse_centers = std::min(err_identity, err_swapped);
 
-    // ---- 6. Mixture vs single-Gaussian baseline mean log-likelihood ---------
+    // ---- 5. Mixture vs single-Gaussian baseline mean log-likelihood ---------
     // Mixture log p(y_i) = logsumexp_k [ log pi_k + N(y_i | mu_k, 1/lam_k) ].
+    // Pack per-cluster mu/lambda contiguously (row-major k*d+j) for the
+    // diag_normal_log_density helper.
+    double mu_row[2 * 2], lam_row[2 * 2];
+    for (std::size_t k = 0; k < K; ++k)
+        for (std::size_t j = 0; j < d; ++j) {
+            mu_row [k * d + j] = MU(k, j);
+            lam_row[k * d + j] = LAM(k, j);
+        }
     double mix_ll = 0.0;
     for (std::size_t i = 0; i < N; ++i) {
         double comps[2];
         double maxc = -std::numeric_limits<double>::infinity();
+        double yi[2];
+        for (std::size_t j = 0; j < d; ++j) yi[j] = y(i, j);
         for (std::size_t k = 0; k < K; ++k) {
             const double c = std::log(pi_hat[k] + 1e-300)
-                + diag_normal_log_density(y_flat.memptr() + i * d,
-                                          mu_hat.memptr() + k * d,
-                                          lam_hat.memptr() + k * d, d);
+                + diag_normal_log_density(yi, mu_row + k * d,
+                                          lam_row + k * d, d);
             comps[k] = c;
             if (c > maxc) maxc = c;
         }
@@ -978,7 +832,7 @@ int main() {
     mix_ll /= static_cast<double>(N);
 
     // Single-Gaussian baseline: MLE mean + per-dim precision.
-    arma::vec base_mu(d, arma::fill::zeros), base_lam(d);
+    double base_mu[2], base_lam[2];
     for (std::size_t j = 0; j < d; ++j) base_mu[j] = arma::mean(y.col(j));
     for (std::size_t j = 0; j < d; ++j) {
         double ss = 0.0;
@@ -989,22 +843,24 @@ int main() {
         base_lam[j] = 1.0 / (var > 0.0 ? var : 1.0);
     }
     double base_ll = 0.0;
-    for (std::size_t i = 0; i < N; ++i)
-        base_ll += diag_normal_log_density(y_flat.memptr() + i * d,
-                                           base_mu.memptr(),
-                                           base_lam.memptr(), d);
+    for (std::size_t i = 0; i < N; ++i) {
+        double yi[2];
+        for (std::size_t j = 0; j < d; ++j) yi[j] = y(i, j);
+        base_ll += diag_normal_log_density(yi, base_mu, base_lam, d);
+    }
     base_ll /= static_cast<double>(N);
 
-    // ---- 7. Report ----------------------------------------------------------
+    // ---- 6. Report ----------------------------------------------------------
     std::printf("FiniteGaussianMixture standalone demo\n");
     std::printf("  N=%zu  d=%zu  K=%zu  (warmup=%d, keep=%d)\n",
                 N, d, K, n_warmup, n_keep);
     std::printf("  true centers : (%.2f,%.2f) (%.2f,%.2f)\n",
                 true_mu[0][0], true_mu[0][1], true_mu[1][0], true_mu[1][1]);
-    const int s = (err_swapped < err_identity) ? 1 : 0;  // matched labels
+    const int sw = (err_swapped < err_identity) ? 1 : 0;  // matched labels
+    const std::size_t k0 = (sw == 0) ? 0 : 1;
+    const std::size_t k1 = (sw == 0) ? 1 : 0;
     std::printf("  fit centers  : (%.2f,%.2f) (%.2f,%.2f)  [matched to truth]\n",
-                mu_hat[(s == 0 ? 0 : 1) * d + 0], mu_hat[(s == 0 ? 0 : 1) * d + 1],
-                mu_hat[(s == 0 ? 1 : 0) * d + 0], mu_hat[(s == 0 ? 1 : 0) * d + 1]);
+                MU(k0, 0), MU(k0, 1), MU(k1, 0), MU(k1, 1));
     std::printf("  pi_hat       : %.3f %.3f   (true %.3f %.3f)\n",
                 pi_hat[0], pi_hat[1], true_pi[0], true_pi[1]);
     std::printf("  RMSE(centers vs truth) = %.4f\n", rmse_centers);

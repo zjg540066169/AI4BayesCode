@@ -190,7 +190,6 @@ public:
     // ---- Canonical backend-neutral interface ---------------------------
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -304,5 +303,58 @@ PYBIND11_MODULE(IsingPrior, m) {
         .def("predict_at",  &IsingPrior::predict_at, pybind11::arg("new_data"))
         .def("get_dag",     &IsingPrior::get_dag)
         .def("get_history", &IsingPrior::get_history);
+}
+#endif
+
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+// ===========================================================================
+//  Standalone frontend-independent demo (active ONLY as a plain binary).
+//  IsingPrior is prior-only, so validate against closed-form prior moments:
+//   (A) label symmetry at ferromagnetic beta: E[x_i] = 0.5;
+//   (B) beta=0 independence: per-sweep magnetisation var = 1/(4N).
+// ===========================================================================
+#include <cstdio>
+int main() {
+    const int L = 16, Q = 2;
+    const double beta_c = 0.44;
+    const std::size_t N = static_cast<std::size_t>(L) * L;
+
+    IsingPrior model(L, L, Q, beta_c, /*periodic=*/true, /*eight_nn=*/false, 12345);
+    model.step(200);
+    double sum_state = 0.0; long long count = 0;
+    for (int s = 0; s < 4000; ++s) {
+        model.step(1);
+        const auto gc = model.get_current();
+        const arma::vec& x = gc.at("x");
+        for (std::size_t i = 0; i < N; ++i) sum_state += x[i];
+        count += static_cast<long long>(N);
+    }
+    const double mean_state = sum_state / static_cast<double>(count);
+    const bool ok_sym = std::abs(mean_state - 0.5) < 0.03;
+
+    IsingPrior m0(L, L, Q, 0.0, true, false, 999);
+    m0.step(20);
+    double sm = 0.0, sm2 = 0.0;
+    for (int s = 0; s < 4000; ++s) {
+        m0.step(1);
+        const auto gc = m0.get_current();
+        const arma::vec& x = gc.at("x");
+        double mag = 0.0; for (std::size_t i = 0; i < N; ++i) mag += x[i];
+        mag /= static_cast<double>(N); sm += mag; sm2 += mag * mag;
+    }
+    const double m_bar = sm / 4000.0, m_var = sm2 / 4000.0 - m_bar * m_bar;
+    const double var_th = 0.25 / static_cast<double>(N);
+    const bool ok_indep = std::abs(m_bar - 0.5) < 0.02 &&
+                          std::abs(m_var - var_th) < 0.25 * var_th;
+
+    std::printf("IsingPrior demo (L=%d, Q=%d):\n", L, Q);
+    std::printf("  (A) beta=%.2f  site-state mean = %.4f (prior 0.5)  -> %s\n",
+                beta_c, mean_state, ok_sym ? "ok" : "FAIL");
+    std::printf("  (B) beta=0.00  mag var = %.6f (theory 1/(4N)=%.6f)  -> %s\n",
+                m_var, var_th, ok_indep ? "ok" : "FAIL");
+    const bool ok = ok_sym && ok_indep;
+    std::printf("%s\n", ok ? "[demo PASS] IsingPrior matches closed-form prior moments"
+                           : "[demo FAIL]");
+    return ok ? 0 : 1;
 }
 #endif

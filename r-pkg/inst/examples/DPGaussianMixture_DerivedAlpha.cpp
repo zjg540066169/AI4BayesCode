@@ -919,3 +919,171 @@ PYBIND11_MODULE(DPGaussianMixture_DerivedAlpha, m) {
              pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
 }
 #endif
+
+// ============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
+//  Active only when NEITHER binding macro is defined. Reads state via the
+//  full contract get_current() (keys: pi, mu, lambda, alpha) rather than
+//  minimal accessors. Same simulation / seeds / tolerances / checks as the
+//  core version.
+//
+//  Simulates a 1-D, 3-component Gaussian mixture from a KNOWN truth, fits the
+//  DP mixture (alpha = exp(phi) derived, phi ~ N(0,1), sampled by NUTS), and
+//  checks recovery via two label-invariant checks:
+//   (1) posterior-mean mixture density beats a single-Gaussian baseline;
+//   (2) each true component mean is matched by an occupied fitted cluster.
+// ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+
+namespace {
+
+// True 1-D 3-component mixture density at point x.
+double true_density(double x,
+                    const double* w, const double* m, const double* s,
+                    int K) {
+    constexpr double kInvSqrt2Pi = 0.39894228040143267794;
+    double dens = 0.0;
+    for (int k = 0; k < K; ++k) {
+        const double z = (x - m[k]) / s[k];
+        dens += w[k] * (kInvSqrt2Pi / s[k]) * std::exp(-0.5 * z * z);
+    }
+    return dens;
+}
+
+}  // anonymous namespace
+
+int main() {
+    // ---- 1. Simulate from a KNOWN 3-component 1-D Gaussian mixture --------
+    constexpr int   Kt        = 3;
+    const double    w_true[Kt] = {0.4, 0.35, 0.25};
+    const double    m_true[Kt] = {-4.0, 0.0, 5.0};
+    const double    s_true[Kt] = {0.7, 0.7, 0.7};
+
+    const std::size_t N = 600;
+    const std::size_t d = 1;
+
+    std::mt19937_64 sim_rng(123);
+    std::uniform_real_distribution<double> unif(0.0, 1.0);
+    std::normal_distribution<double>       snorm(0.0, 1.0);
+
+    arma::mat y(N, d);
+    for (std::size_t i = 0; i < N; ++i) {
+        const double u = unif(sim_rng);
+        double cum = 0.0; int comp = Kt - 1;
+        for (int k = 0; k < Kt; ++k) { cum += w_true[k]; if (u < cum) { comp = k; break; } }
+        y(i, 0) = m_true[comp] + s_true[comp] * snorm(sim_rng);
+    }
+
+    // Single-Gaussian baseline (the "naive" model the mixture must beat).
+    double base_mu = 0.0, base_var = 0.0;
+    for (std::size_t i = 0; i < N; ++i) base_mu += y(i, 0);
+    base_mu /= static_cast<double>(N);
+    for (std::size_t i = 0; i < N; ++i) {
+        const double dv = y(i, 0) - base_mu; base_var += dv * dv;
+    }
+    base_var /= static_cast<double>(N - 1);
+    const double base_sd = std::sqrt(base_var);
+
+    // ---- 2. Fit the DP mixture (alpha = exp(phi) derived) -----------------
+    const int K_trunc = 10;
+    DPGaussianMixture_DerivedAlpha model(
+        y, K_trunc, /*rng_seed=*/7, /*keep_history=*/false);
+
+    model.step(2000);  // warmup
+
+    // ---- 3. Accumulate posterior-mean mixture density on a grid -----------
+    const int    G    = 121;
+    const double xlo  = -8.0, xhi = 8.0;
+    std::vector<double> grid(G), post_dens(G, 0.0);
+    for (int g = 0; g < G; ++g)
+        grid[g] = xlo + (xhi - xlo) * g / (G - 1);
+
+    const int    M = 1500;
+    constexpr double kInvSqrt2Pi = 0.39894228040143267794;
+    double alpha_bar = 0.0;
+
+    std::vector<int> matched_count(Kt, 0);
+    const double loc_tol  = 0.6;   // cluster-mean match tolerance
+    const double pi_floor = 0.03;  // "occupied" threshold
+
+    for (int sdraw = 0; sdraw < M; ++sdraw) {
+        model.step(1);
+
+        // Read state via the FULL contract get_current() (copy; avoid dangling).
+        const auto gc = model.get_current();
+        const arma::vec& pi  = gc.at("pi");
+        const arma::vec& mu  = gc.at("mu");
+        const arma::vec& lam = gc.at("lambda");
+        alpha_bar += gc.at("alpha")[0];
+
+        // accumulate predictive density: sum_k pi_k Normal(x; mu_k, 1/lam_k)
+        for (int g = 0; g < G; ++g) {
+            double dval = 0.0;
+            for (int k = 0; k < K_trunc; ++k) {
+                const double sd_k = 1.0 / std::sqrt(lam[k]);  // d == 1
+                const double z = (grid[g] - mu[k]) * std::sqrt(lam[k]);
+                dval += pi[k] * (kInvSqrt2Pi / sd_k) * std::exp(-0.5 * z * z);
+            }
+            post_dens[g] += dval;
+        }
+
+        // per-true-mean recovery (occupied clusters only)
+        for (int t = 0; t < Kt; ++t) {
+            for (int k = 0; k < K_trunc; ++k) {
+                if (pi[k] >= pi_floor &&
+                    std::abs(mu[k] - m_true[t]) <= loc_tol) {
+                    matched_count[t]++;
+                    break;
+                }
+            }
+        }
+    }
+    alpha_bar /= static_cast<double>(M);
+    for (int g = 0; g < G; ++g) post_dens[g] /= static_cast<double>(M);
+
+    // ---- 4. Honest comparisons --------------------------------------------
+    double err_mix = 0.0, err_base = 0.0;
+    for (int g = 0; g < G; ++g) {
+        const double td = true_density(grid[g], w_true, m_true, s_true, Kt);
+        err_mix  += std::abs(post_dens[g] - td);
+        const double bz = (grid[g] - base_mu) / base_sd;
+        const double bd = (kInvSqrt2Pi / base_sd) * std::exp(-0.5 * bz * bz);
+        err_base += std::abs(bd - td);
+    }
+    err_mix  /= static_cast<double>(G);
+    err_base /= static_cast<double>(G);
+
+    double min_match_frac = 1.0;
+    for (int t = 0; t < Kt; ++t) {
+        const double f = static_cast<double>(matched_count[t])
+                       / static_cast<double>(M);
+        if (f < min_match_frac) min_match_frac = f;
+    }
+
+    std::printf("DPGaussianMixture_DerivedAlpha demo\n");
+    std::printf("  N=%zu  K_trunc=%d  true components=%d\n",
+                N, K_trunc, Kt);
+    std::printf("  posterior-mean alpha = exp(phi) : %.3f\n", alpha_bar);
+    std::printf("  mean|density err|  mixture=%.5f   single-Gaussian baseline=%.5f\n",
+                err_mix, err_base);
+    std::printf("  true-mean recovery fraction (occupied cluster within %.2f):\n",
+                loc_tol);
+    for (int t = 0; t < Kt; ++t) {
+        std::printf("     mu_true=%+.1f : %.3f\n",
+                    m_true[t],
+                    static_cast<double>(matched_count[t]) / static_cast<double>(M));
+    }
+
+    const bool beats_baseline = err_mix < 0.5 * err_base;
+    const bool all_recovered  = min_match_frac > 0.8;
+    const bool alpha_ok       = std::isfinite(alpha_bar) && alpha_bar > 0.0;
+    const bool ok = beats_baseline && all_recovered && alpha_ok;
+
+    std::printf("%s\n",
+        ok ? "[demo PASS] DP mixture recovers 3-component structure; "
+             "derived alpha=exp(phi) drives stick-breaking correctly"
+           : "[demo FAIL] see numbers above");
+    return ok ? 0 : 1;
+}
+#endif

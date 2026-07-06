@@ -4,14 +4,13 @@
 // ============================================================================
 //  GaussianLocationScale.cpp
 //
-//  (mu, sigma) Gaussian location-scale reference example. mu and sigma are
-//  sampled by ONE joint_nuts_block (sub-params [{ "mu", 1, REAL },
-//  { "sigma", 1, POSITIVE }]) rather than two separate single nuts_blocks
-//  updated Gibbs-style — a compact demonstration of the
-//  "collapse several single nuts_blocks into one joint_nuts_block" pattern.
+//  JOINT-NUTS rewrite of GaussianLocationScale.cpp. Same model, same priors,
+//  same posterior — but mu and sigma are sampled by ONE joint_nuts_block
+//  instead of two separate single nuts_blocks updated Gibbs-style. This is the
+//  "collapse a bunch of single nuts_blocks into one joint_nuts_block" refactor.
 //
-//  Model
-//  -----
+//  Model (identical to GaussianLocationScale.cpp)
+//  ---------------------------------------------
 //      y_i | mu, sigma  ~ Normal(mu, sigma^2),      i = 1..N
 //      mu               ~ Normal(0, 100^2)
 //      sigma            ~ Jeffreys, p(sigma) ∝ 1/sigma
@@ -23,8 +22,8 @@
 //      The joint log-density is the FULL joint log p(mu, sigma | y) on the
 //      NATURAL scale (the sum of every model term, each appearing exactly
 //      once); joint_nuts_block adds the POSITIVE-slice Jacobian (+log sigma)
-//      internally. This matches the per-conditional Gibbs decomposition
-//      exactly:
+//      internally. This matches GaussianLocationScale.cpp's per-conditional
+//      decomposition exactly:
 //        - mu conditional:    -0.5 sum_sq/sigma^2 - 0.5 mu^2/prior_var
 //        - sigma conditional: -(N+1) log sigma   - 0.5 sum_sq/sigma^2
 //        joint = likelihood (-N log sigma - sum_sq/(2 sigma^2))
@@ -32,12 +31,40 @@
 //              + Jeffreys   (-log sigma)
 //              = -(N+1) log sigma - 0.5 sum_sq/sigma^2 - 0.5 mu^2/prior_var.
 //
-//  This is the canonical GaussianLocationScale reference example.
+//  This file is for cross-validation against GaussianLocationScale.cpp (it uses
+//  a distinct class/module name so both can be loaded in one R session). Once
+//  the two posteriors are confirmed equal (R-hat + means/sd/ESS), this becomes
+//  the canonical GaussianLocationScale.
+//
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("GaussianLocationScale")
+//   set.seed(42); N <- 200
+//   y <- rnorm(N, mean = 3, sd = 2)                # DGP: true mu=3, sigma=2
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(GaussianLocationScale, y, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(GaussianLocationScale, y, 7L, TRUE)   # (y, rng_seed, keep_history)
+//   m$step(2500); str(m$get_current())             # mu_hat ~ 3, sigma_hat ~ 2
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(42); N = 200
+//   y = rng.normal(3.0, 2.0, N)                    # DGP: true mu=3, sigma=2
+//   Mod = AI4BayesCode.example("GaussianLocationScale")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.GaussianLocationScale(y, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.GaussianLocationScale(y, 7, True); m.step(2500); print(m.get_current())
+// @example:end
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates data, fits the
-// block, and checks recovery. No R / Python binding is built or required.
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -46,13 +73,19 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -266,7 +299,7 @@ public:
     AI4BayesCode::history_map   get_history() const { return impl_->get_history(); }
 
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
-        if (n < 0) throw std::runtime_error("readapt_NUTS: n must be non-negative");
+        if (n < 0) ai4b::stop("readapt_NUTS: n must be non-negative");
         impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
     }
 
@@ -278,11 +311,54 @@ private:
     bool                             keep_history_ = false;
 };
 
-//==============================================================================
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(GaussianLocationScale_module) {
+    Rcpp::class_<GaussianLocationScale>("GaussianLocationScale")
+        .constructor<arma::vec, int>(
+            "Legacy constructor; keep_history defaults to FALSE.")
+        .constructor<arma::vec, int, bool>(
+            "Construct with data vector y, RNG seed (0 = random), and "
+            "keep_history (record every draw; default FALSE).")
+        .method("step", (void (GaussianLocationScale::*)())    &GaussianLocationScale::step, "Run one sweep.")
+        .method("step", (void (GaussianLocationScale::*)(int)) &GaussianLocationScale::step, "Run n sweeps.")
+        .method("get_current",  &GaussianLocationScale::get_current)
+        .method("set_current",  &GaussianLocationScale::set_current)
+        .method("predict_at",   &GaussianLocationScale::predict_at)
+        .method("get_dag",      &GaussianLocationScale::get_dag)
+        .method("get_history",  &GaussianLocationScale::get_history)
+        .method("readapt_NUTS", &GaussianLocationScale::readapt_NUTS);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(GaussianLocationScale, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<GaussianLocationScale>(m, "GaussianLocationScale")
+        .def(pybind11::init<arma::vec, int, bool>(),
+             pybind11::arg("y"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false)
+        .def("step", (void (GaussianLocationScale::*)())    &GaussianLocationScale::step, "Run one sweep.")
+        .def("step", (void (GaussianLocationScale::*)(int)) &GaussianLocationScale::step,  pybind11::arg("n_steps"))
+        .def("get_current",  &GaussianLocationScale::get_current)
+        .def("set_current",  &GaussianLocationScale::set_current, pybind11::arg("params"))
+        .def("predict_at",   &GaussianLocationScale::predict_at,  pybind11::arg("new_data"))
+        .def("get_dag",      &GaussianLocationScale::get_dag)
+        .def("get_history",  &GaussianLocationScale::get_history)
+        .def("readapt_NUTS", &GaussianLocationScale::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
+// ============================================================================
 //  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
+//  Active ONLY when built as a plain binary (neither module macro defined).
 //  Simulates Gaussian data from a known (mu, sigma), fits via the joint-NUTS
-//  block, and checks posterior-mean recovery. Compile + run as a plain binary.
-//==============================================================================
+//  block, and checks posterior-mean recovery. This is the SAME DGP mirrored
+//  into the @example:R / @example:python header blocks above.
+// ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 #include <cstdio>
 int main() {
     const std::size_t N          = 200;
@@ -317,3 +393,4 @@ int main() {
                            : "[demo FAIL]");
     return ok ? 0 : 1;
 }
+#endif

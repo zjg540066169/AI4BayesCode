@@ -2,15 +2,16 @@
 // Licensed under the GNU General Public License v2.0 or later
 // (GPL-2.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
-//  DirichletSimplex.cpp
+//  DirichletSimplex_v2.cpp
 //
-//  Dirichlet-on-the-simplex example. theta is sampled by ONE joint_nuts_block
-//  with a single SIMPLEX sub-param (rather than a single nuts_block with
-//  constraints::simplex::wrap) — the trivial single-sub-param case: only one
+//  JOINT-NUTS rewrite of DirichletSimplex.cpp. Same model, same priors,
+//  same posterior — but theta is sampled by ONE joint_nuts_block with a
+//  single SIMPLEX sub-param instead of a single nuts_block with
+//  constraints::simplex::wrap. This is the trivial conversion case: only one
 //  continuous parameter block, so the joint block holds exactly one sub-param.
 //
-//  Model
-//  -----
+//  Model (identical to DirichletSimplex.cpp)
+//  -----------------------------------------
 //      theta       ~ Dirichlet(alpha)                  (on the K-simplex)
 //      y_i | theta ~ Categorical(theta),   i = 1..N
 //
@@ -28,14 +29,48 @@
 //  this function operates on the NATURAL simplex scale. Do NOT include
 //  Jacobians here.
 //
-//  This is the canonical DirichletSimplex reference example.
+//  Cross-validated against DirichletSimplex.cpp: posteriors must match
+//  (means, sd, R-hat). Both files can be loaded in one R session because
+//  they use distinct class and module names.
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates categorical
-// data from a known theta, fits the joint_nuts_block on the simplex, and
-// checks recovery of the conjugate Dirichlet posterior mean. No R / Python
-// binding is built or required.
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("DirichletSimplex")
+//   set.seed(2026)
+//   K <- 4L; N <- 500L                          # 4 categories, 500 obs
+//   theta_true <- c(0.50, 0.25, 0.15, 0.10)     # known simplex point
+//   cats  <- sample.int(K, N, replace = TRUE, prob = theta_true)
+//   y     <- tabulate(cats, nbins = K)          # category counts (length K)
+//   alpha <- rep(1, K)                          # flat Dirichlet prior
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(DirichletSimplex, y, alpha, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(DirichletSimplex, y, alpha, 7L, TRUE)  # y_counts, alpha, seed, keep_history
+//   m$step(2500); str(m$get_current())
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(2026)
+//   K, N = 4, 500
+//   theta_true = np.array([0.50, 0.25, 0.15, 0.10])
+//   cats = rng.choice(K, size=N, p=theta_true)
+//   y = np.bincount(cats, minlength=K).astype(float)   # category counts
+//   alpha = np.ones(K)                                  # flat Dirichlet prior
+//   Mod = AI4BayesCode.example("DirichletSimplex")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.DirichletSimplex(y, alpha, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.DirichletSimplex(y, alpha, 7, True)         # y_counts, alpha, seed, keep_history
+//   m.step(2500); print(m.get_current())
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -44,20 +79,25 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <random>
-#include <stdexcept>
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -282,7 +322,7 @@ public:
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
 
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
-        if (n < 0) throw std::runtime_error("readapt_NUTS: n must be non-negative");
+        if (n < 0) ai4b::stop("readapt_NUTS: n must be non-negative");
         impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
     }
 
@@ -293,6 +333,54 @@ private:
     std::unique_ptr<composite_block> impl_;
     bool                             keep_history_ = false;
 };
+
+// ============================================================================
+//  Host-language modules (R + Python)
+// ============================================================================
+
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(DirichletSimplex_module) {
+    Rcpp::class_<DirichletSimplex>("DirichletSimplex")
+        .constructor<arma::vec, arma::vec, int>(
+            "Legacy constructor; keep_history defaults to FALSE.")
+        .constructor<arma::vec, arma::vec, int, bool>(
+            "Joint-NUTS DirichletSimplex: theta on K-simplex in one "
+            "joint_nuts_block. Construct with category counts y_counts (length K), "
+            "Dirichlet prior alpha (length K), RNG seed (0 = random), "
+            "and keep_history (record every draw; default FALSE).")
+        .method("step", (void (DirichletSimplex::*)())    &DirichletSimplex::step, "Run one sweep.")
+        .method("step", (void (DirichletSimplex::*)(int)) &DirichletSimplex::step, "Run n sweeps.")
+        .method("get_current",  &DirichletSimplex::get_current)
+        .method("set_current",  &DirichletSimplex::set_current)
+        .method("predict_at",   &DirichletSimplex::predict_at)
+        .method("get_dag",      &DirichletSimplex::get_dag)
+        .method("get_history",  &DirichletSimplex::get_history)
+        .method("readapt_NUTS", &DirichletSimplex::readapt_NUTS);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(DirichletSimplex, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<DirichletSimplex>(m, "DirichletSimplex")
+        .def(pybind11::init<arma::vec, arma::vec, int, bool>(),
+             pybind11::arg("y_counts"), pybind11::arg("alpha"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false,
+             "Joint-NUTS Dirichlet(alpha) prior on the simplex with multinomial "
+             "likelihood. Uses joint_nuts_block on stick-breaking unconstraining.")
+        .def("step", (void (DirichletSimplex::*)())    &DirichletSimplex::step, "Run one sweep.")
+        .def("step", (void (DirichletSimplex::*)(int)) &DirichletSimplex::step,        pybind11::arg("n_steps"))
+        .def("get_current",  &DirichletSimplex::get_current)
+        .def("set_current",  &DirichletSimplex::set_current, pybind11::arg("params"))
+        .def("predict_at",   &DirichletSimplex::predict_at,  pybind11::arg("new_data"))
+        .def("get_dag",      &DirichletSimplex::get_dag)
+        .def("get_history",  &DirichletSimplex::get_history)
+        .def("readapt_NUTS", &DirichletSimplex::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
 
 // ============================================================================
 //  Standalone demo (frontend-independent)
@@ -307,6 +395,7 @@ private:
 //  We compare the sampled posterior mean against this closed form (the exact
 //  truth for this model) and, as a sanity floor, against theta_true.
 // ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 #include <cstdio>
 int main() {
     const std::size_t K = 4;
@@ -367,3 +456,4 @@ int main() {
                    : "[demo FAIL] posterior mean off");
     return ok ? 0 : 1;
 }
+#endif

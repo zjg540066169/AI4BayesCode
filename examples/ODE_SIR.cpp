@@ -50,10 +50,54 @@
 //  Cross-validated against ODE_SIR.cpp (same posterior, R-hat).
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates SIR data from a
-// known (beta, gamma, sigma), fits the joint-NUTS block, and checks recovery.
-// No R / Python binding is built or required.
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("ODE_SIR")
+//   set.seed(1)
+//   beta_t <- 0.6; gamma_t <- 0.2; sigma_t <- 0.05         # ground truth
+//   S0 <- 990; I0 <- 10; R0 <- 0                            # initial compartments at t=0
+//   t_obs <- 0:14                                           # 15 obs times (t_obs[0]=0)
+//   sir <- function(y, p) { N <- sum(y)
+//     c(-p[1]*y[1]*y[2]/N, p[1]*y[1]*y[2]/N - p[2]*y[2], p[2]*y[2]) }
+//   y <- c(S0, I0, R0); I_true <- numeric(15); I_true[1] <- I0   # RK4 ODE solve
+//   for (k in 2:15) { h <- 1
+//     k1<-sir(y,c(beta_t,gamma_t)); k2<-sir(y+h/2*k1,c(beta_t,gamma_t))
+//     k3<-sir(y+h/2*k2,c(beta_t,gamma_t)); k4<-sir(y+h*k3,c(beta_t,gamma_t))
+//     y <- y + h/6*(k1+2*k2+2*k3+k4); I_true[k] <- y[2] }
+//   I_obs <- I_true * exp(sigma_t * rnorm(15))              # LogNormal noise
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(ODE_SIR, S0, I0, R0, t_obs, I_obs, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(ODE_SIR, S0, I0, R0, t_obs, I_obs, 7L, TRUE)   # S0,I0,R0,t_obs,I_obs,seed,keep_history
+//   m$step(2500); str(m$get_current())
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   beta_t, gamma_t, sigma_t = 0.6, 0.2, 0.05              # ground truth
+//   S0, I0, R0 = 990.0, 10.0, 0.0                          # initial compartments at t=0
+//   t_obs = np.arange(15.0)                                # 15 obs times (t_obs[0]=0)
+//   def sir(y, p):
+//       N = y.sum()
+//       return np.array([-p[0]*y[0]*y[1]/N, p[0]*y[0]*y[1]/N - p[1]*y[1], p[1]*y[1]])
+//   y = np.array([S0, I0, R0]); I_true = np.empty(15); I_true[0] = I0  # RK4 ODE solve
+//   for k in range(1, 15):
+//       k1=sir(y,[beta_t,gamma_t]); k2=sir(y+0.5*k1,[beta_t,gamma_t])
+//       k3=sir(y+0.5*k2,[beta_t,gamma_t]); k4=sir(y+k3,[beta_t,gamma_t])
+//       y = y + (k1+2*k2+2*k3+k4)/6.0; I_true[k] = y[1]
+//   rng = np.random.default_rng(1); I_obs = I_true * np.exp(sigma_t * rng.standard_normal(15))
+//   Mod = AI4BayesCode.example("ODE_SIR")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.ODE_SIR(S0, I0, R0, t_obs, I_obs, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.ODE_SIR(S0, I0, R0, t_obs, I_obs, 7, True); m.step(2500); print(m.get_current())
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -62,13 +106,19 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/ode_rk45.hpp"
 
 #include <cmath>
@@ -493,7 +543,7 @@ public:
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
 
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
-        if (n < 0) throw std::runtime_error("readapt_NUTS: n must be non-negative");
+        if (n < 0) ai4b::stop("readapt_NUTS: n must be non-negative");
         impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
     }
 
@@ -505,6 +555,66 @@ private:
     bool                             keep_history_ = false;
 };
 
+// ============================================================================
+//  Host-language module declarations.
+// ============================================================================
+
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(ODE_SIR_module) {
+    Rcpp::class_<ODE_SIR>("ODE_SIR")
+        .constructor<double, double, double, arma::vec, arma::vec, int>(
+            "Legacy constructor; keep_history defaults to FALSE.")
+        .constructor<double, double, double, arma::vec, arma::vec, int, bool>(
+            "Joint-NUTS SIR ODE model. Args: S0, I0, R0 (initial compartments "
+            "at t=0), t_obs (strictly increasing, t_obs[0]=0), I_obs (observed "
+            "infected counts > 0 at each t_obs), rng_seed, keep_history. "
+            "Infers (beta, gamma, sigma) jointly via one joint_nuts_block. "
+            "Priors: beta,gamma ~ half-Normal(0,1); sigma ~ Jeffreys. "
+            "Gradient w.r.t. beta/gamma via central FD; w.r.t. sigma analytic.")
+        .method("step", (void (ODE_SIR::*)())    &ODE_SIR::step, "Run one sweep.")
+        .method("step", (void (ODE_SIR::*)(int)) &ODE_SIR::step, "Run n sweeps.")
+        .method("get_current",  &ODE_SIR::get_current)
+        .method("set_current",  &ODE_SIR::set_current)
+        .method("predict_at",   &ODE_SIR::predict_at)
+        .method("get_dag",      &ODE_SIR::get_dag)
+        .method("get_history",  &ODE_SIR::get_history)
+        .method("readapt_NUTS", &ODE_SIR::readapt_NUTS);
+}
+#endif  // AI4BAYESCODE_RCPP_MODULE
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+
+PYBIND11_MODULE(ODE_SIR, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+
+    pybind11::class_<ODE_SIR>(m, "ODE_SIR")
+        .def(pybind11::init<double, double, double, arma::vec, arma::vec,
+                            int, bool>(),
+             pybind11::arg("S0"), pybind11::arg("I0"), pybind11::arg("R0"),
+             pybind11::arg("t_obs"), pybind11::arg("I_obs"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false,
+             "Joint-NUTS SIR ODE model. Infers (beta, gamma, sigma) in one "
+             "joint_nuts_block. Priors: beta,gamma ~ half-Normal(0,1); "
+             "sigma ~ Jeffreys. Gradient w.r.t. beta/gamma via central FD; "
+             "w.r.t. sigma analytic.")
+        .def("step", (void (ODE_SIR::*)())    &ODE_SIR::step, "Run one sweep.")
+        .def("step", (void (ODE_SIR::*)(int)) &ODE_SIR::step, pybind11::arg("n_steps"))
+        .def("get_current",  &ODE_SIR::get_current)
+        .def("set_current",  &ODE_SIR::set_current, pybind11::arg("params"))
+        .def("predict_at",   &ODE_SIR::predict_at, pybind11::arg("new_data"))
+        .def("get_dag",      &ODE_SIR::get_dag)
+        .def("get_history",  &ODE_SIR::get_history)
+        .def("readapt_NUTS", &ODE_SIR::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif  // AI4BAYESCODE_PYBIND_MODULE
+
+// ============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (compiled only when NOT a host module).
+// ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 //==============================================================================
 //  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
 //
@@ -613,3 +723,4 @@ int main() {
                    : "[demo FAIL] posterior did not recover within tolerance");
     return ok ? 0 : 1;
 }
+#endif  // standalone demo guard

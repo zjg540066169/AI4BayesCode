@@ -51,21 +51,26 @@ matters here:
 
 For all label-switching-affected models in this benchmark:
 
-- **AI4BayesCode** enforces an ascending ordering constraint (e.g. `mu[1] <
-  mu[2] < ... < mu[K]`) to resolve label switching structurally. The Gibbs
-  sampler samples within the ordered support.
-- **Reference** (Stan or R-package) typically has no such constraint by
+- **AI4BayesCode** PREFERS not to structurally constrain the sampler. By
+  default the generated sampler explores the unconstrained, exchangeable target
+  and is free to visit all K! symmetric modes (correct and maximally mixing);
+  label switching is resolved **POST-HOC** — draws are relabeled in the
+  analysis / diagnostics layer (simple-sort / Stephens 2000 / Hungarian,
+  §3-§5) and convergence is judged on **label-invariant** (order-statistic)
+  R-hat. An in-sampler ordering constraint / canonicalizer is a
+  NOT-RECOMMENDED fallback (discouraged, not forbidden — it mixes badly and can
+  bias the natural-scale posterior, `codegen_cpp.md` §205); some models
+  legitimately need it, so reach for it only when post-hoc resolution won't do.
+- **Reference** (Stan or R-package) typically also has no constraint by
   default. Each reference draw can use any permutation.
 
-This asymmetry means:
+Because neither side is pre-canonicalised, **both** AI and reference draws must
+be relabeled to a common canonical labeling before computing cross-impl R-hat
+and coverage.
 
-- AI draws: already in the canonical ("component 1 = smallest mean") label.
-- Reference draws: must be relabeled before computing cross-impl R-hat and
-  coverage.
-
-If the reference also has an ordering constraint (Stan's `ordered[K] mu`,
-or an R package that internally orders components after the Gibbs sweep),
-label switching is already resolved and you can skip all relabeling.
+If a side DOES carry an ordering constraint (Stan's `ordered[K] mu`, or an R
+package that internally orders components after the Gibbs sweep), that side is
+already canonical and only the other side needs relabeling.
 
 The recipes in §3-§5 below show Stan-reference syntax (most existing
 benchmark models use Stan); the **same logic applies to R-package

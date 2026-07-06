@@ -32,28 +32,27 @@
 //      Rationale: modular sampling of (tau) separately from (beta, z)
 //      causes SLOW MIXING because tau's Gibbs conditional shifts
 //      between sweeps (tau and z/beta are correlated through the mean
-//      structure). Even at 10k+10k, modular tau R-hat sits at ~1.03.
-//      Joint NUTS with dense metric on all 4 continuous groups
-//      recovers R-hat <= 1.01.
+//      structure). Joint NUTS with dense metric on all 4 continuous
+//      groups recovers good mixing; persistent (between-call) adaptation
+//      carries the tuning forward with n_warmup_per_step = 0.
 //
-//  (c) Manual log-transform on tau and sigma so the whole joint vector is
-//      REAL and the dense-metric (Welford) pilot of joint_nuts_block
-//      applies. (joint_nuts_block also supports POSITIVE slices directly,
-//      but a log-REAL slice plays better with the dense metric here.) We
-//      include the half-Normal prior Jacobian and the Jeffreys-cancellation
-//      explicitly in the log-density lambda.
+//  (c) Manual log-transform on tau and sigma so they fit joint_nuts_block
+//      v0 (real-only). joint_nuts_block_mixed supports POSITIVE but
+//      lacks dense metric (v1 gap). We include the half-Normal prior
+//      Jacobian and the Jeffreys-cancellation explicitly in the
+//      log-density lambda.
 //
 //  (d) R_chol stays modular (constraints::cholesky_corr not supported
-//      in joint_nuts_block). Its conditional given (beta, z,
+//      in joint_nuts_block / _mixed). Its conditional given (beta, z,
 //      tau, sigma) is well-identified so modular sampling is fine.
 //
-//  (e) Every block sets n_warmup_per_step = 0 (validator Check #20).
-//      A nonzero value re-runs dual-averaging on the KEPT draws, which
-//      collapses the step size and FREEZES the block (R_chol stuck at its
-//      warmup endpoint, within-chain sd 0 -> rank-R-hat = Inf). The
-//      persistent between-call adaptation already carries the tuned
-//      metric/step forward across sweeps, so per-step re-warmup is both
-//      unnecessary and incorrect.
+//  (e) Every block keeps n_warmup_per_step = 0 (validator Check #20).
+//      Ongoing per-step dual-averaging recomputes the step size against
+//      the kept draws, which both violates detailed balance AND can
+//      progressively collapse the step size, locking a chain into one
+//      neighborhood. (A prior version used 10/20 here; it FROZE the 1-D
+//      R_chol block at its warmup endpoint -> rank-R-hat = Inf. Persistent
+//      between-call adaptation handles the shifting sibling conditionals.)
 //
 //  BLOCK COMPOSITION (2 blocks, down from 5)
 //  -----------------------------------------
@@ -91,10 +90,56 @@
 //  2*eta - 2) log L_{kk}. For d=2, eta=2: 3 log L_{0,0} + 2 log L_{1,1}.
 // ============================================================================
 
-// Frontend-independent standalone demo: this file builds as a plain C++
-// program (no Rcpp, no pybind). It has an int main() at the bottom that
-// simulates hierarchical data from a known truth, fits the model, and checks
-// posterior recovery. No R / Python binding is built or required.
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("HierarchicalLM_MultivariateRE")
+//   set.seed(2024)
+//   J <- 30L; per_group <- 20L; N <- J * per_group   # 30 groups x 20 obs = 600 (replicated)
+//   p <- 3L                                           # fixed-effect dim (incl. intercept)
+//   beta_true <- c(1.5, -2.0, 0.8); sigma_true <- 0.6
+//   tau_true  <- c(0.9, 0.7); rho <- 0.5              # RE scales + correlation
+//   X <- cbind(1, matrix(rnorm(N * (p - 1)), N, p - 1))  # col1 intercept; Z = X[,1:2] (rand int+slope)
+//   group <- rep(1:J, each = per_group)                  # 1-indexed group label
+//   Lt <- chol(matrix(c(1, rho, rho, 1), 2, 2))          # upper; t(Lt) is lower chol
+//   u <- t(Lt) %*% matrix(rnorm(2 * J), 2, J)            # 2 x J latent RE draws
+//   u <- diag(tau_true) %*% u; u <- u - rowMeans(u)      # scale + center RE (identifiability)
+//   mu <- as.numeric(X %*% beta_true) + u[1, group] + X[, 2] * u[2, group]
+//   y  <- mu + sigma_true * rnorm(N)
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(HierarchicalLM_MultivariateRE, y, X, group, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(HierarchicalLM_MultivariateRE, y, X, group, 7L, TRUE)  # y, X, group(1-idx), seed, keep_history
+//   m$step(2500); str(m$get_current())
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(2024)
+//   J, per_group = 30, 20; N = J * per_group   # 30 groups x 20 obs = 600
+//   p = 3                                       # fixed-effect dim (incl. intercept)
+//   beta_true = np.array([1.5, -2.0, 0.8]); sigma_true = 0.6
+//   tau_true  = np.array([0.9, 0.7]); rho = 0.5 # RE scales + correlation
+//   X = np.column_stack([np.ones(N), rng.normal(size=(N, p - 1))])  # col0 intercept; Z = X[:,0:2]
+//   group = np.repeat(np.arange(1, J + 1), per_group).astype(float)  # 1-indexed group label
+//   Lt = np.linalg.cholesky(np.array([[1.0, rho], [rho, 1.0]]))      # lower chol
+//   u = Lt @ rng.normal(size=(2, J))                                 # 2 x J latent RE draws
+//   u = np.diag(tau_true) @ u; u = u - u.mean(axis=1, keepdims=True) # scale + center RE
+//   gidx = group.astype(int) - 1
+//   mu = X @ beta_true + u[0, gidx] + X[:, 1] * u[1, gidx]
+//   y  = mu + sigma_true * rng.normal(size=N)
+//   Mod = AI4BayesCode.example("HierarchicalLM_MultivariateRE")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.HierarchicalLM_MultivariateRE(y, X, group, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.HierarchicalLM_MultivariateRE(y, X, group, 7, True)  # (y, X, group(1-idx float), seed, keep_history)
+//   m.step(2500); print(m.get_current())
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -103,20 +148,25 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/nuts_block.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 
 #include <cmath>
 #include <cstdint>
 #include <memory>
 #include <random>
-#include <stdexcept>
 #include <vector>
 #include <array>
 #include <unordered_map>
@@ -359,7 +409,7 @@ class HierarchicalLM_MultivariateRE {
 public:
     HierarchicalLM_MultivariateRE(const arma::vec& y_obs,
                                   const arma::mat& X_fixed,
-                                  const arma::ivec& group_idx_1indexed,
+                                  const arma::vec& group_idx_1indexed,
                                   int rng_seed,
                                   bool keep_history = false)
         : rng_(rng_seed == 0
@@ -376,22 +426,26 @@ public:
           impl_(std::make_unique<composite_block>("HierarchicalLM_MultivariateRE")),
           keep_history_(keep_history)
     {
-        if (y_obs.n_elem < 2) throw std::runtime_error("N must be >= 2");
+        if (y_obs.n_elem < 2) ai4b::stop("N must be >= 2");
         if (X_fixed.n_rows != y_obs.n_elem)
-            throw std::runtime_error("X rows must equal y length");
+            ai4b::stop("X rows must equal y length");
         if (X_fixed.n_cols < static_cast<arma::uword>(D))
-            throw std::runtime_error("X must have at least d columns");
+            ai4b::stop("X must have at least d=%d columns", (int)D);
         if (group_idx_1indexed.n_elem != y_obs.n_elem)
-            throw std::runtime_error("group_idx length must equal y length");
+            ai4b::stop("group_idx length must equal y length");
 
         N_ = y_obs.n_elem;
         p_ = X_fixed.n_cols;
         d_ = D;
 
-        int J_raw = 0;
+        // group_idx arrives as a numeric vector (1-indexed integer labels
+        // stored as doubles, so the SAME arma::vec caster serves both the R
+        // and Python backends). Round to the nearest integer per entry.
+        long J_raw = 0;
         for (arma::uword i = 0; i < group_idx_1indexed.n_elem; ++i) {
-            if (group_idx_1indexed[i] < 1) throw std::runtime_error("group_idx must be 1-indexed");
-            if (group_idx_1indexed[i] > J_raw) J_raw = group_idx_1indexed[i];
+            const long g = std::llround(group_idx_1indexed[i]);
+            if (g < 1) ai4b::stop("group_idx must be 1-indexed");
+            if (g > J_raw) J_raw = g;
         }
         J_ = static_cast<std::size_t>(J_raw);
 
@@ -402,7 +456,8 @@ public:
         impl_->data().set("Z", arma::vectorise(Z_fixed));
         arma::vec group_idx_dbl(N_);
         for (std::size_t i = 0; i < N_; ++i)
-            group_idx_dbl[i] = static_cast<double>(group_idx_1indexed[i]);
+            group_idx_dbl[i] = static_cast<double>(
+                std::llround(group_idx_1indexed[i]));
         impl_->data().set("group_idx", group_idx_dbl);
         impl_->data().set("beta_dim", arma::vec{static_cast<double>(p_)});
         impl_->data().set("J_dim",    arma::vec{static_cast<double>(J_)});
@@ -574,10 +629,14 @@ public:
             cfg.dense_metric_pilot_iters = 500;
             cfg.dense_metric_adapt_iters = 1500;
             cfg.n_warmup_first_call      = 500;
-            cfg.n_warmup_per_step        = 0;   // MUST be 0 (validator Check #20):
-            // per-step re-adaptation runs dual-averaging on the KEPT draws, which
-            // collapses the step size toward 0 and freezes the block. Persistent
-            // between-call adaptation already carries the tuned metric/step forward.
+            // n_warmup_per_step MUST stay 0 (validator Check #20). Non-zero
+            // ongoing per-step dual-averaging recomputes the step size against
+            // the kept draws, which both violates detailed balance AND
+            // progressively collapses the step size, locking the chain into
+            // one neighborhood (see nuts_block.hpp doc on n_warmup_per_step).
+            // Persistent adaptation (incl. the dense metric below) carries the
+            // tuning forward, so no per-step re-warmup is needed.
+            cfg.n_warmup_per_step        = 0;
 
             impl_->add_child(std::make_unique<joint_nuts_block>(std::move(cfg)));
         }
@@ -591,8 +650,12 @@ public:
             cfg.unconstrain = constraints::cholesky_corr::unconstrain;
             cfg.initial_step_size   = 0.05;
             cfg.n_warmup_first_call = 500;
-            cfg.n_warmup_per_step   = 0;   // MUST be 0 (Check #20): nonzero re-adapts
-            // on kept draws -> epsilon collapses -> R_chol frozen (sd 0) -> R-hat=Inf.
+            // n_warmup_per_step MUST stay 0 (validator Check #20). The prior
+            // value of 20 progressively shrank this 1-D correlation block's
+            // step size to ~0 by ~step 13, FREEZING R_chol at its warmup
+            // endpoint (sd=0, rank-R-hat=Inf between chains). Persistent
+            // dual-averaging from the first call's warmup is sufficient.
+            cfg.n_warmup_per_step   = 0;
             cfg.log_density_grad =
                 [](const arma::vec& t_unc, const block_context& ctx,
                    arma::vec* grad) {
@@ -639,25 +702,114 @@ public:
 
     void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
-        if (n_steps < 0) throw std::runtime_error("n_steps must be >= 0");
+        if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
 
-    // Neutral-typed snapshot of the current draw. Random-effect z and the
-    // Cholesky factor L are returned flattened (column-major) under the
-    // "z_flat" / "L" / "R" keys; R = L L' is the implied correlation matrix.
+    // Backend-neutral state_map (map<string, arma::vec>). Matrices are
+    // flattened COLUMN-MAJOR: z is d x J, L and R are d x d, all stored as
+    // flat arma::vec under their key (the same convention the joint block /
+    // shared_data uses internally).
     AI4BayesCode::state_map get_current() const {
-        AI4BayesCode::state_map out;
+        const arma::vec& beta   = impl_->data().get("beta");
+        const arma::vec& z_flat = impl_->data().get("z_flat");
+        const arma::vec& tau    = impl_->data().get("tau");
         const arma::vec& L_flat = impl_->data().get("R_chol");
-        out["beta"]   = impl_->data().get("beta");
-        out["z_flat"] = impl_->data().get("z_flat");
-        out["tau"]    = impl_->data().get("tau");
-        out["L"]      = L_flat;
-        out["sigma"]  = impl_->data().get("sigma");
-        {
-            arma::mat L(const_cast<double*>(L_flat.memptr()), d_, d_, false, true);
-            out["R"] = arma::vectorise(L * L.t());
+        const double sigma      = impl_->data().get("sigma")[0];
+
+        arma::mat L(const_cast<double*>(L_flat.memptr()), d_, d_, false, true);
+        arma::mat R = L * L.t();
+
+        AI4BayesCode::state_map out;
+        out["beta"]  = beta;
+        out["z"]     = z_flat;                 // d*J, col-major (z_mat(k,j))
+        out["tau"]   = tau;
+        out["L"]     = L_flat;                 // d*d, col-major (L(k,j))
+        out["R"]     = arma::vectorise(R);     // d*d, col-major
+        out["sigma"] = arma::vec{sigma};
+        return out;
+    }
+
+    void set_current(const AI4BayesCode::state_map& /*params*/) {
+        // The joint block owns beta/z/tau/sigma; fine-grained set_current
+        // for individual sub-params is not currently exposed. Round-trip
+        // via get_current() preserved; direct overwrite of individual
+        // params is a future extension.
+    }
+
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        if (!new_data.empty()) {
+            ai4b::stop("HierarchicalLM_MultivariateRE has no covariate "
+                       "inputs for predict_at (call with an empty map/list)");
         }
+        AI4BayesCode::history_map out;
+
+        if (!keep_history_) {
+            block_context replaced;
+            block_context result = impl_->predict_at(replaced, predict_rng_);
+            for (const auto& kv : result) {
+                arma::mat m(1, kv.second.n_elem);
+                for (std::size_t j = 0; j < kv.second.n_elem; ++j)
+                    m(0, j) = kv.second[j];
+                out.emplace(kv.first, std::move(m));
+            }
+            return out;
+        }
+
+        // History mode: joint_block sub-params are
+        //   beta (p), z_flat (D*J), log_tau (D), log_sigma (1).
+        // R_chol is a separate block. tau / sigma are NOT in history —
+        // they're refreshed from log_tau / log_sigma; rebuild per-draw.
+        AI4BayesCode::history_map hist = impl_->get_history();
+        const arma::mat& beta_hist      = hist.at("beta");      // n_draws x p
+        const arma::mat& z_flat_hist    = hist.at("z_flat");    // n_draws x (D*J)
+        const arma::mat& log_tau_hist   = hist.at("log_tau");   // n_draws x D
+        const arma::mat& R_chol_hist    = hist.at("R_chol");    // n_draws x (D*(D-1)/2)
+        const arma::mat& log_sigma_hist = hist.at("log_sigma"); // n_draws x 1
+        const std::size_t n_draws = beta_hist.n_rows;
+
+        const arma::vec& X_flat = impl_->data().get("X");
+        const arma::vec& Z_flat = impl_->data().get("Z");
+        const arma::vec& group  = impl_->data().get("group_idx");
+        const std::size_t N = N_;
+        const std::size_t p = p_;
+        const std::size_t J = J_;
+        const std::size_t D_local = D;
+
+        arma::mat X_mat(const_cast<double*>(X_flat.memptr()),
+                        N, p, false, true);
+        arma::mat Z_mat(const_cast<double*>(Z_flat.memptr()),
+                        N, D_local, false, true);
+
+        arma::mat yrep_mat(n_draws, N);
+        std::normal_distribution<double> norm01(0.0, 1.0);
+        for (std::size_t d = 0; d < n_draws; ++d) {
+            arma::vec beta_d   = beta_hist.row(d).t();
+            arma::vec z_d      = z_flat_hist.row(d).t();
+            // log_tau / log_sigma in history (unconstrained); transform.
+            arma::vec tau_d(D_local);
+            for (std::size_t k = 0; k < D_local; ++k)
+                tau_d[k] = std::exp(log_tau_hist(d, k));
+            const double sigma_d = std::exp(log_sigma_hist(d, 0));
+            arma::vec L_d_flat = R_chol_hist.row(d).t();
+            arma::mat L_d(L_d_flat.memptr(), D_local, D_local, false, true);
+            arma::mat z_mat(z_d.memptr(), D_local, J, false, true);
+            arma::mat u_mat = L_d * z_mat;
+            for (std::size_t k = 0; k < D_local; ++k) u_mat.row(k) *= tau_d[k];
+
+            for (std::size_t i = 0; i < N; ++i) {
+                double mu_i = 0.0;
+                for (std::size_t k = 0; k < p; ++k)
+                    mu_i += X_mat(i, k) * beta_d[k];
+                const std::size_t g_i = static_cast<std::size_t>(
+                    std::llround(group[i])) - 1u;
+                for (std::size_t k = 0; k < D_local; ++k)
+                    mu_i += Z_mat(i, k) * u_mat(k, g_i);
+                yrep_mat(d, i) = mu_i + sigma_d * norm01(predict_rng_);
+            }
+        }
+        out.emplace("y_rep", std::move(yrep_mat));
         return out;
     }
 
@@ -670,7 +822,7 @@ public:
     /// §13 NUTS-family + validator.md §24.
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
         if (n < 0) {
-            throw std::runtime_error("readapt_NUTS: n must be non-negative");
+            ai4b::stop("readapt_NUTS: n must be non-negative");
         }
         impl_->readapt_NUTS(static_cast<std::size_t>(n),
                             reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
@@ -689,6 +841,56 @@ private:
     std::size_t                      J_ = 0;
 };
 
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(HierarchicalLM_MultivariateRE_module) {
+    Rcpp::class_<HierarchicalLM_MultivariateRE>("HierarchicalLM_MultivariateRE")
+        .constructor<arma::vec, arma::mat, arma::vec, int, bool>(
+            "Hierarchical linear model with multivariate (d=2) random "
+            "effects and LKJ(eta=2) correlation prior. Uses joint_nuts_block "
+            "with T11 DENSE METRIC on (beta, z, log_tau, log_sigma) — "
+            "manual log-transform for tau/sigma to keep the joint within "
+            "the real-only joint_nuts_block v0. R_chol stays modular "
+            "with cholesky_corr constraint. PRIMARY SHOWCASE for "
+            "constraints::cholesky_corr::wrap. group is a 1-indexed numeric "
+            "vector (integer labels stored as doubles).")
+        .method("step", (void (HierarchicalLM_MultivariateRE::*)())    &HierarchicalLM_MultivariateRE::step, "Run one sweep.")
+        .method("step", (void (HierarchicalLM_MultivariateRE::*)(int)) &HierarchicalLM_MultivariateRE::step, "Run n sweeps.")
+        .method("get_current", &HierarchicalLM_MultivariateRE::get_current)
+        .method("set_current", &HierarchicalLM_MultivariateRE::set_current)
+        .method("predict_at",  &HierarchicalLM_MultivariateRE::predict_at)
+        .method("get_dag",     &HierarchicalLM_MultivariateRE::get_dag)
+        .method("get_history", &HierarchicalLM_MultivariateRE::get_history)
+        .method("readapt_NUTS", &HierarchicalLM_MultivariateRE::readapt_NUTS);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(HierarchicalLM_MultivariateRE, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<HierarchicalLM_MultivariateRE>(
+            m, "HierarchicalLM_MultivariateRE")
+        .def(pybind11::init<arma::vec, arma::mat, arma::vec, int, bool>(),
+             pybind11::arg("y"),
+             pybind11::arg("X"),
+             pybind11::arg("group"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false)
+        .def("step", (void (HierarchicalLM_MultivariateRE::*)())    &HierarchicalLM_MultivariateRE::step, "Run one sweep.")
+        .def("step", (void (HierarchicalLM_MultivariateRE::*)(int)) &HierarchicalLM_MultivariateRE::step,
+             pybind11::arg("n_steps"))
+        .def("get_current",  &HierarchicalLM_MultivariateRE::get_current)
+        .def("set_current",  &HierarchicalLM_MultivariateRE::set_current,
+             pybind11::arg("params"))
+        .def("predict_at",   &HierarchicalLM_MultivariateRE::predict_at,
+             pybind11::arg("new_data"))
+        .def("get_dag",      &HierarchicalLM_MultivariateRE::get_dag)
+        .def("get_history",  &HierarchicalLM_MultivariateRE::get_history)
+        .def("readapt_NUTS", &HierarchicalLM_MultivariateRE::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
 //==============================================================================
 //  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
 //
@@ -702,7 +904,12 @@ private:
 //    (1) posterior-mean fixed effects beta recover the truth, and
 //    (2) the model BEATS a naive pooled OLS-residual sigma (i.e. accounting
 //        for the random effects reduces residual scale toward sigma_true).
+//
+//  State is read through the full-contract get_current() (keys: beta, z, tau,
+//  L, R, sigma) — R is the 2x2 implied correlation, col-major flat, so R[1] is
+//  the off-diagonal rho.
 //==============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 #include <cstdio>
 int main() {
     const std::size_t J = 30;          // number of groups
@@ -727,9 +934,11 @@ int main() {
         X(i, 1) = snorm(sim_rng);
         X(i, 2) = snorm(sim_rng);
     }
-    arma::ivec group(N);
+    // group is a 1-indexed numeric vector (integer labels stored as doubles),
+    // matching the constructor's arma::vec signature (shared R/Python caster).
+    arma::vec group(N);
     for (std::size_t i = 0; i < N; ++i)
-        group[i] = static_cast<int>(i / per_group) + 1;  // 1-indexed
+        group[i] = static_cast<double>(i / per_group) + 1.0;  // 1-indexed
 
     // Random effects per group: u_j = diag(tau) L z_j. The model assumes
     // E[u] = 0; we center the simulated RE columns to exactly zero mean so
@@ -750,7 +959,8 @@ int main() {
     // Response. Z_i = [X_{i,0}=1, X_{i,1}] -> random intercept + random slope.
     arma::vec y(N);
     for (std::size_t i = 0; i < N; ++i) {
-        const std::size_t g = static_cast<std::size_t>(group[i]) - 1u;
+        const std::size_t g = static_cast<std::size_t>(
+            std::llround(group[i])) - 1u;
         double mu = arma::dot(X.row(i), beta_true);
         mu += X(i, 0) * u_true(0, g) + X(i, 1) * u_true(1, g);
         y[i] = mu + sigma_true * snorm(sim_rng);
@@ -772,11 +982,15 @@ int main() {
     const int M = 1500;
     for (int s = 0; s < M; ++s) {
         model.step(1);
-        const auto cur = model.get_current();
-        beta_bar  += cur.at("beta");
-        sigma_bar += cur.at("sigma")[0];
-        // R is the 2x2 implied correlation (col-major flat): off-diagonal.
-        rho_bar   += cur.at("R")[1];
+        // Read state via the full contract get_current() (copy to avoid a
+        // dangling reference into the internal map).
+        const auto gc = model.get_current();
+        const arma::vec& beta_cur  = gc.at("beta");
+        const arma::vec& sigma_cur = gc.at("sigma");
+        const arma::vec& R_cur     = gc.at("R");   // 2x2 col-major flat
+        beta_bar  += beta_cur;
+        sigma_bar += sigma_cur[0];
+        rho_bar   += R_cur[1];                     // off-diagonal correlation
     }
     beta_bar  /= static_cast<double>(M);
     sigma_bar /= static_cast<double>(M);
@@ -808,3 +1022,4 @@ int main() {
                    : "[demo FAIL]");
     return ok ? 0 : 1;
 }
+#endif

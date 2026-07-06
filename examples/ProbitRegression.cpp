@@ -50,11 +50,42 @@
 //    derived in this file (see beta_log_density).
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates data from a
-// known beta, fits the Albert-Chib probit block, and checks recovery against
-// truth and a naive (always-predict-majority) baseline. No R / Python binding
-// is built or required.
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("ProbitRegression")
+//   set.seed(20260621)
+//   N <- 800L; p <- 3L                       # N >> p: beta well-identified
+//   beta_true <- c(-0.4, 1.2, -0.8)
+//   X <- cbind(1, matrix(rnorm(N * (p - 1)), N, p - 1))   # intercept + 2 covars
+//   eta <- as.numeric(X %*% beta_true)
+//   y <- as.numeric(runif(N) < pnorm(eta))   # y ~ Bernoulli(Phi(X beta))
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(ProbitRegression, X, y, 10, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(ProbitRegression, X, y, 10, 7L, TRUE)  # X, y, prior_sd, seed, keep_history
+//   m$step(2500); str(m$get_current())
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(20260621)
+//   N, p = 800, 3                            # N >> p: beta well-identified
+//   beta_true = np.array([-0.4, 1.2, -0.8])
+//   X = np.column_stack([np.ones(N), rng.standard_normal((N, p - 1))])
+//   y = (X @ beta_true + rng.standard_normal(N) > 0).astype(float)  # probit latent DGP = Bernoulli(Phi(Xb))
+//   Mod = AI4BayesCode.example("ProbitRegression")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.ProbitRegression(X, y, 10, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.ProbitRegression(X, y, 10, 7, True)  # X, y, prior_sd, seed, keep_history
+//   m.step(2500); print(m.get_current())
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -63,19 +94,27 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/types.hpp"
+
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include "AI4BayesCode/rcpp_wrap.hpp"
+#endif
 
 #include "AI4BayesCode/probit_aug_block.hpp"
 #include "AI4BayesCode/nuts_block.hpp"
 
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <limits>
 #include <memory>
 #include <random>
@@ -460,7 +499,7 @@ public:
     /// §13 NUTS-family + validator.md §24.
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
         if (n < 0) {
-            throw std::runtime_error("readapt_NUTS: n must be non-negative");
+            ai4b::stop("readapt_NUTS: n must be non-negative");
         }
         impl_->readapt_NUTS(static_cast<std::size_t>(n),
                             reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
@@ -477,11 +516,58 @@ private:
     std::size_t                      p_ = 0;
 };
 
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(ProbitRegression_module) {
+    Rcpp::class_<ProbitRegression>("ProbitRegression")
+        .constructor<arma::mat, arma::vec, double, int, bool>(
+            "Construct ProbitRegression(X, y, prior_sd, seed, keep_history). "
+            "X is N x p, y is length N (0/1). beta ~ N(0, prior_sd^2 I). "
+            "Albert-Chib data augmentation with NUTS on beta.")
+        .method("step", (void (ProbitRegression::*)())    &ProbitRegression::step, "Run one sweep.")
+        .method("step", (void (ProbitRegression::*)(int)) &ProbitRegression::step, "Run n sweeps.")
+        .method("get_current", &ProbitRegression::get_current)
+        .method("set_current", &ProbitRegression::set_current)
+        .method("predict_at",  &ProbitRegression::predict_at)
+        .method("get_dag",     &ProbitRegression::get_dag)
+        .method("get_history", &ProbitRegression::get_history)
+        .method("readapt_NUTS", &ProbitRegression::readapt_NUTS);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(ProbitRegression, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<ProbitRegression>(m, "ProbitRegression")
+        .def(pybind11::init<arma::mat, arma::vec, double, int, bool>(),
+             pybind11::arg("X"), pybind11::arg("y"),
+             pybind11::arg("prior_sd") = 10.0,
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false,
+             "Bayesian probit regression via Albert-Chib data augmentation. "
+             "y_i ~ Bernoulli(Phi(X_i' beta)), beta ~ N(0, prior_sd^2).")
+        .def("step", (void (ProbitRegression::*)())    &ProbitRegression::step, "Run one sweep.")
+        .def("step", (void (ProbitRegression::*)(int)) &ProbitRegression::step,
+             pybind11::arg("n_steps"))
+        .def("get_current", &ProbitRegression::get_current)
+        .def("set_current", &ProbitRegression::set_current,
+             pybind11::arg("params"))
+        .def("predict_at",  &ProbitRegression::predict_at,
+             pybind11::arg("new_data"))
+        .def("get_dag",     &ProbitRegression::get_dag)
+        .def("get_history", &ProbitRegression::get_history)
+        .def("readapt_NUTS", &ProbitRegression::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 // ============================================================================
 //  Standalone demo: simulate probit data from a known beta, fit, and check
 //  posterior recovery of beta + in-sample classification accuracy vs a naive
 //  majority-class baseline. Derives PASS/FAIL from actual computed numbers.
 // ============================================================================
+#include <cstdio>
 int main() {
     const std::size_t N = 800;
     const std::size_t p = 3;             // intercept + 2 covariates
@@ -524,8 +610,9 @@ int main() {
     arma::vec beta_sum(p, arma::fill::zeros);
     for (int s = 0; s < n_keep; ++s) {
         model.step(1);
-        AI4BayesCode::state_map cur = model.get_current();
-        beta_sum += cur.at("beta");
+        const auto gc = model.get_current();      // copy (avoids dangling ref)
+        const arma::vec& beta_cur = gc.at("beta"); // key from package get_current()
+        beta_sum += beta_cur;
     }
     arma::vec beta_hat = beta_sum / static_cast<double>(n_keep);
 
@@ -565,3 +652,4 @@ int main() {
     else    std::printf("[demo FAIL]\n");
     return ok ? 0 : 1;
 }
+#endif

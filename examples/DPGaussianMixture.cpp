@@ -31,7 +31,7 @@
 //                         skills/label_switching.md). Permutes the K_trunc slots
 //                         into descending-pi order each sweep so the REPORTED
 //                         pi[slot] converges. Posterior-preserving; runs FIRST
-//                         so the downstream children read/record on one canonical
+//                         so downstream children read/record on one canonical
 //                         labelling. See the class comment for the full rationale.
 //
 //      child(1) z         categorical_gibbs_block
@@ -54,15 +54,13 @@
 //                         and alpha from ctx. Writes "pi" and "stick_V".
 //
 //      child(4) alpha     nuts_block on the Antoniak (k, n) marginal
-//                         (PRIOR-AGNOSTIC; NOT conjugate Gibbs). Natural-scale
-//                         log p(alpha | k, n) = log prior(alpha) + k log alpha
-//                                             + lgamma(alpha) - lgamma(alpha + n),
-//                         k = #occupied clusters, n = #obs. Conditions ONLY on
-//                         the data-identified sufficient statistic (k, n); does
-//                         NOT read the empty-tail sticks stick_V (whose Beta(1,
-//                         alpha) prior draws are chain-specific and broke mixing
-//                         under the old full-stick update). Staying on NUTS keeps
-//                         the prior swappable (Gamma here). See block comment.
+//                         (PRIOR-AGNOSTIC; positive constraint, log scale).
+//                         log p(alpha | k, n) = log prior(alpha)
+//                              + k*log(alpha) + lgamma(alpha) - lgamma(alpha + n),
+//                         k = #occupied clusters, n = #obs. Conditions on the
+//                         data-identified (k, n) sufficient statistic, NOT the
+//                         empty-tail sticks. Hand-written log-density + analytic
+//                         gradient; staying on NUTS keeps the prior swappable.
 //
 //  Refreshers
 //  ----------
@@ -77,12 +75,14 @@
 //  LABEL SWITCHING
 //  ---------------
 //  DEFAULT / RECOMMENDED: resolve label switching POST-MCMC on the recorded
-//  draws (skills/label_switching.md) — simple descending-pi / mu sort for
-//  well-separated components, or Stephens 2000 + Hungarian for overlapping
-//  ones. The truncated-DP mixture likelihood is invariant under permutation of
-//  the K_trunc component labels, so a clean raw exchangeable-component sampler
-//  is the preferred design and per-slot rank-R-hat is computed AFTER relabeling.
-//  alpha and the likelihood are label-invariant and converge as-is.
+//  draws. Per `skills/label_switching.md` §3, post-MCMC relabeling is the
+//  standard route for per-component posterior summaries:
+//
+//      - Audit / cross-implementation R-hat: apply Stephens 2000 with
+//        per-draw allocation probabilities pulled from the chain.
+//      - Quick visualization: simple sort by mu_first_dim of OCCUPIED
+//        clusters (ignore tail K_active+1..K_trunc whose params are
+//        prior draws).
 //
 //  FALLBACK USED HERE (child(0) dp_label_canonicalizer_block — NOT RECOMMENDED):
 //  the truncated-DP stick weights pi[slot] are SLOT-POSITION-dependent and do
@@ -90,7 +90,7 @@
 //  The cluster PROPORTIONS (count/N) DO converge (2-chain rank-R-hat ~1.001), so
 //  this is a representation/labeling artifact, NOT a masked mixing failure. To
 //  make the REPORTED pi[slot] converge on its raw recorded values, this example
-//  reaches for an in-sampler canonicaliser (descending-pi slot permutation each
+//  carries an in-sampler canonicaliser (descending-pi slot permutation each
 //  sweep) as a last resort. Prefer post-MCMC relabeling for new models; this
 //  in-sampler path is the exception, not the template. See the class comment.
 //
@@ -110,43 +110,67 @@
 //        Bishop-PRML / Murphy-2007 textbook update.
 //      - pi: NEW Tier-B block stick_breaking_block. Per-stick Beta
 //        gamma-trick is the standard mechanism.
-//      - alpha: nuts_block on the Antoniak (1974) (k, n) marginal
-//        (PRIOR-AGNOSTIC, NOT conjugate Gibbs). Conditioning on the
-//        data-identified sufficient statistic (k, n) — NOT on the empty-tail
-//        sticks — is what makes alpha mix; the earlier full-stick NUTS update
-//        summed log(1 - V_k) over chain-specific prior draws and failed
-//        rank-R-hat (~1.42). NUTS (not Gibbs) keeps the prior swappable.
-//      - label switching: the DEFAULT/RECOMMENDED resolution is POST-MCMC on the
-//        recorded draws (skills/label_switching.md), keeping the sampler a clean
-//        raw exchangeable-component sampler; alpha + likelihood are label-
-//        invariant and converge as-is. This example additionally carries an
-//        in-sampler dp_label_canonicalizer_block as child(0) — a NOT-RECOMMENDED
-//        FALLBACK used ONLY because the truncation-tail stick-pi[slot] won't
-//        converge under post-MCMC sorting though the cluster proportions do
-//        (rank-R-hat ~1.001). See the class comment; prefer post-MCMC relabeling.
-// ============================================================================
-
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates a 2-component
-// Gaussian mixture from a KNOWN truth, fits the truncated-DP block stack, and
-// checks cluster-mean recovery. No R / Python binding is built or required.
-// The original Rcpp/pybind Tier-A wrapper class has been removed; main() drives
-// the composite_block directly with the SAME model (priors, log-density, block
-// configs, hyperparameters) — only the frontend binding is gone.
-
+//      - alpha: nuts_block per Q9 lean (NUTS preferred over Escobar-West
+//        1995 auxiliary trick to keep the example free of new
+//        block types).
+//
+//  Check #15 (library parity tests):
+//      - tests_autodiff/block_tests/test_bnp_utils.cpp
+//      - tests_autodiff/block_tests/test_stick_breaking_block.cpp
+//      - tests_autodiff/block_tests/test_normal_gamma_cluster_gibbs_block.cpp
+//      - tests_autodiff/block_tests/test_beta_gibbs_block.cpp (covers the
+//        gamma-normalization mechanism shared by stick_breaking_block).
+//
+//  Check #12 (autodiff verify): the alpha log-density gradient is
+//  analytic and verified by tests_autodiff/verify_DPGaussianMixture.cpp
+//  at gen-time; verify file is DELETED on PASS per the codegen.md hard
+//  rule (production .cpp stays scaffolding-free).
+//
 // @example:R
 //   library(AI4BayesCode)
 //   ai4bayescode_example("DPGaussianMixture")
-//   set.seed(42); n_per <- 150L; d <- 2L                  # well-identified DGP (= int main)
+//   set.seed(42); n_per <- 150L; d <- 2L                  # well-identified DGP
 //   mu_true <- rbind(c(-3, -3), c(3, 3))                  # 2 well-separated clusters, sd 0.7
 //   y <- rbind(matrix(rnorm(n_per * d, 0, 0.7), n_per, d) + rep(mu_true[1, ], each = n_per),
 //              matrix(rnorm(n_per * d, 0, 0.7), n_per, d) + rep(mu_true[2, ], each = n_per))
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(DPGaussianMixture, y, 60L, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(DPGaussianMixture, y, 60L, 42L, TRUE)        # y (N x d), K_trunc=60, seed=42, keep_history
 //   m$step(2000L); cur <- m$get_current()                # $z $pi $mu $lambda $alpha $K_trunc
-//   occ <- which(tabulate(cur$z, cur$K_trunc) > 0)        # occupied slots (~2)
-//   cur$mu[occ, , drop = FALSE]                           # recovered centres ~ (-3,-3),(3,3)
+//   K <- as.integer(cur$K_trunc); d <- ncol(y)
+//   mu_mat <- matrix(cur$mu, nrow = K, ncol = d)          # mu flat (col-major) -> K x d
+//   occ <- which(tabulate(cur$z, K) > 0)                  # occupied slots (~2)
+//   mu_mat[occ, , drop = FALSE]                           # recovered centres ~ (-3,-3),(3,3)
 //   cur$alpha                                             # DP concentration alpha (NUTS, (k,n) marginal)
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(42); n_per, d = 150, 2     # well-identified DGP
+//   mu_true = np.array([[-3.0, -3.0], [3.0, 3.0]])         # 2 well-separated clusters, sd 0.7
+//   y = np.vstack([rng.normal(0.0, 0.7, (n_per, d)) + mu_true[0],
+//                  rng.normal(0.0, 0.7, (n_per, d)) + mu_true[1]])
+//   Mod = AI4BayesCode.example("DPGaussianMixture")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.DPGaussianMixture(y, 60, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.DPGaussianMixture(y, 60, 42, True)             # (y N x d, K_trunc, seed, keep_history)
+//   m.step(2000); cur = m.get_current()                   # 'z' 'pi' 'mu' 'lambda' 'alpha' 'K_trunc'
+//   K = int(np.asarray(cur["K_trunc"]).ravel()[0])
+//   mu_mat = np.asarray(cur["mu"]).reshape(K, d, order="F")  # mu flat (col-major) -> K x d
+//   z = np.asarray(cur["z"]).astype(int)
+//   occ = np.flatnonzero(np.bincount(z, minlength=K + 1)[1:] > 0)  # occupied slots (~2)
+//   print(mu_mat[occ])                                     # recovered centres ~ (-3,-3),(3,3)
+//   print(np.asarray(cur["alpha"]).ravel()[0])            # DP concentration alpha
 // @example:end
+// ============================================================================
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -155,18 +179,23 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
+#include "AI4BayesCode/constraints.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 
 #include "AI4BayesCode/categorical_gibbs_block.hpp"
+#include "AI4BayesCode/nuts_block.hpp"
 #include "AI4BayesCode/stick_breaking_block.hpp"
 #include "AI4BayesCode/normal_gamma_cluster_gibbs_block.hpp"
 #include "AI4BayesCode/bnp_utils.hpp"
-#include "AI4BayesCode/nuts_block.hpp"
-#include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/backend_neutral.hpp"   // ai4b::digamma
 
 #include <algorithm>
@@ -175,19 +204,18 @@
 #include <limits>
 #include <memory>
 #include <random>
-#include <stdexcept>
 #include <vector>
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
 using AI4BayesCode::categorical_gibbs_block;
 using AI4BayesCode::categorical_gibbs_block_config;
+using AI4BayesCode::nuts_block;
+using AI4BayesCode::nuts_block_config;
 using AI4BayesCode::stick_breaking_block;
 using AI4BayesCode::stick_breaking_block_config;
 using AI4BayesCode::normal_gamma_cluster_gibbs_block;
 using AI4BayesCode::normal_gamma_cluster_gibbs_block_config;
-using AI4BayesCode::nuts_block;
-using AI4BayesCode::nuts_block_config;
 namespace constraints = AI4BayesCode::constraints;
 namespace bnp = AI4BayesCode::bnp;
 
@@ -212,32 +240,33 @@ inline double diag_normal_log_density(const double* y, const double* mu,
     return lp;
 }
 
-// ----------------------------------------------------------------------------
-//  alpha_kn_log_density  (PRIOR-AGNOSTIC NUTS update for the DP concentration)
-//
-//  Natural-scale log-density of alpha conditioned on the Antoniak (1974)
-//  sufficient statistic (k, n): k = #occupied clusters, n = #observations.
-//  This is the data-identified conditional and does NOT read the empty-tail
-//  sticks (stick_V), so it mixes. (The earlier full-stick NUTS summed
-//  log(1 - V_k) over all K_trunc-1 sticks; the empty sticks are pure prior
-//  draws -> chain-specific -> rank-R-hat(alpha) ~ 1.42, structural non-mixing.)
-//
-//      log p(alpha | k, n) = log prior(alpha)                       [ANY prior]
-//                          + k*log(alpha) + lgamma(alpha) - lgamma(alpha + n)
-//
-//  We keep alpha on NUTS (not the conjugate Escobar-West Gibbs) PRECISELY so
-//  the prior is swappable: the Gamma(a_alpha, b_alpha) prior below is the ONLY
-//  prior-specific line; replace it with a log-normal / half-Cauchy / etc. and
-//  NUTS still applies. Conjugate Gibbs would lock alpha to a Gamma prior.
-//
-//  Reads: cluster_counts, a_alpha, b_alpha.   (NOT stick_V.)
-// ----------------------------------------------------------------------------
-inline double alpha_kn_log_density(const arma::vec& a, const block_context& ctx,
-                                   arma::vec* grad) {
-    const double alpha = a[0];
+/// log p(alpha | k, n) on the NATURAL scale (no Jacobian) -- the Antoniak
+/// (1974) (k, n) marginal. PRIOR-AGNOSTIC NUTS update; NOT conjugate Gibbs.
+///
+///   log p(alpha) [Gamma(a_alpha, rate=b_alpha)]
+///       = (a_alpha - 1) * log(alpha) - b_alpha * alpha + const
+///   Antoniak (k, n) marginal (k = #occupied clusters, n = #obs):
+///       + k * log(alpha) + lgamma(alpha) - lgamma(alpha + n)
+///   Conditions on the data-identified sufficient statistic (k, n), reading
+///   cluster_counts -- NOT the empty-tail sticks stick_V, whose Beta(1, alpha)
+///   prior draws are chain-specific and broke mixing (rank-R-hat ~ 1.42).
+///   Staying on NUTS keeps the prior swappable: the Gamma(a_alpha, b_alpha)
+///   line is the ONLY prior-specific term (conjugate Gibbs would lock Gamma).
+///
+/// Gradient (per-natural-alpha):
+///   d log p / d alpha
+///     = (a_alpha - 1 + k) / alpha - b_alpha + psi(alpha) - psi(alpha + n)
+double alpha_natural_log_density(const arma::vec& alpha_nat,
+                                  const block_context& ctx,
+                                  arma::vec* grad_nat) {
+    const double a = alpha_nat[0];
+    if (!(a > 0.0) || !std::isfinite(a)) {
+        if (grad_nat) { grad_nat->set_size(1); (*grad_nat)[0] = 0.0; }
+        return -std::numeric_limits<double>::infinity();
+    }
+    const double a_prior = ctx.at("a_alpha")[0];
+    const double b_prior = ctx.at("b_alpha")[0];
     const arma::vec& counts = ctx.at("cluster_counts");
-    const double a_pr = ctx.at("a_alpha")[0];
-    const double b_pr = ctx.at("b_alpha")[0];
 
     std::size_t k = 0;
     double n = 0.0;
@@ -247,14 +276,15 @@ inline double alpha_kn_log_density(const arma::vec& a, const block_context& ctx,
     }
     const double kd = static_cast<double>(k);
 
-    // Gamma(a_pr, b_pr) prior  +  Antoniak (k, n) marginal:
-    const double lp = (a_pr - 1.0) * std::log(alpha) - b_pr * alpha          // prior
-                    + kd * std::log(alpha)
-                    + std::lgamma(alpha) - std::lgamma(alpha + n);           // Antoniak
-    if (grad) {
-        grad->set_size(1);
-        (*grad)[0] = (a_pr - 1.0 + kd) / alpha - b_pr                        // d prior
-                   + ai4b::digamma(alpha) - ai4b::digamma(alpha + n);        // d Antoniak
+    const double lp =
+        (a_prior - 1.0) * std::log(a) - b_prior * a            // Gamma prior
+      +  kd * std::log(a)
+      +  std::lgamma(a) - std::lgamma(a + n);                  // Antoniak (k,n)
+
+    if (grad_nat) {
+        grad_nat->set_size(1);
+        (*grad_nat)[0] = (a_prior - 1.0 + kd) / a - b_prior
+                       + ai4b::digamma(a) - ai4b::digamma(a + n);
     }
     return lp;
 }
@@ -337,332 +367,767 @@ private:
     block_context context_; arma::vec pi_out_, mu_out_, lam_out_, z_out_;
 };
 
-// ----------------------------------------------------------------------------
-//  build_dp_mixture
-//
-//  Replicates the (former Rcpp Tier-A) constructor's wiring DIRECTLY on a
-//  composite_block: data + data-driven Normal-Gamma hyperparameters, initial
-//  sampler state, the Gibbs DAG, the cluster_counts refresher, and the four
-//  children in Gibbs sweep order. The MODEL is preserved exactly; only the
-//  frontend binding is gone. The y_rep predict-time machinery is omitted (the
-//  standalone demo does not exercise predict_at).
-//
-//  y_flat is row-major: y_flat[i * d + j] = y(i, j).
-// ----------------------------------------------------------------------------
-std::unique_ptr<composite_block> build_dp_mixture(
-        const arma::vec& y_flat, std::size_t N, std::size_t d,
-        std::size_t K_trunc,
-        const arma::vec& mu_0, double kappa_0,
-        double a_lambda_0, double b_lambda_0,
-        double a_alpha, double b_alpha) {
-
-    if (N < 2)        throw std::runtime_error("DPGaussianMixture: N must be >= 2");
-    if (d < 1)        throw std::runtime_error("DPGaussianMixture: d must be >= 1");
-    if (K_trunc < 2)  throw std::runtime_error("DPGaussianMixture: K_trunc must be >= 2");
-    if (mu_0.n_elem != d)
-        throw std::runtime_error("DPGaussianMixture: mu_0 length must equal d");
-    if (!(kappa_0 > 0.0))    throw std::runtime_error("kappa_0 must be > 0");
-    if (!(a_lambda_0 > 0.0)) throw std::runtime_error("a_lambda_0 must be > 0");
-    if (!(b_lambda_0 > 0.0)) throw std::runtime_error("b_lambda_0 must be > 0");
-    if (!(a_alpha > 0.0))    throw std::runtime_error("a_alpha must be > 0");
-    if (!(b_alpha > 0.0))    throw std::runtime_error("b_alpha must be > 0");
-
-    auto impl = std::make_unique<composite_block>("DPGaussianMixture");
-
-    // ---- Data + priors ---------------------------------------------------
-    impl->data().set("y", y_flat);
-
-    impl->data().set("mu_0", mu_0);
-    impl->data().set("kappa_0",     arma::vec{kappa_0});
-    impl->data().set("a_lambda_0",  arma::vec{a_lambda_0});
-    impl->data().set("b_lambda_0",  arma::vec{b_lambda_0});
-    impl->data().set("a_alpha",     arma::vec{a_alpha});
-    impl->data().set("b_alpha",     arma::vec{b_alpha});
-
-    // ---- Initial sampler state ------------------------------------------
-    // z: spread (i mod K_trunc) + 1.
-    arma::vec z_init(N);
-    for (std::size_t i = 0; i < N; ++i) {
-        z_init[i] = static_cast<double>((i % K_trunc) + 1);
-    }
-    impl->data().set("z", z_init);
-
-    // pi: uniform on K_trunc-simplex.
-    arma::vec pi_init(K_trunc, arma::fill::value(1.0 / static_cast<double>(K_trunc)));
-    impl->data().set("pi", pi_init);
-    // stick_V: derived initial (V_k = pi_k / remainder_{<k}).
-    arma::vec V_init(K_trunc, arma::fill::zeros);
-    {
-        double rem = 1.0;
-        for (std::size_t k = 0; k + 1 < K_trunc; ++k) {
-            V_init[k] = pi_init[k] / rem;
-            if (V_init[k] > 1.0) V_init[k] = 1.0;
-            if (V_init[k] < 0.0) V_init[k] = 0.0;
-            rem *= (1.0 - V_init[k]);
-        }
-        V_init[K_trunc - 1] = 1.0;
-    }
-    impl->data().set("stick_V", V_init);
-
-    // mu, lambda: data-driven init for mu (kmeans-like spread of observed
-    // y-rows over the K_trunc clusters); lambda at prior mean.
-    arma::vec mu_init(K_trunc * d, arma::fill::zeros);
-    arma::vec lambda_init(K_trunc * d,
-                          arma::fill::value(a_lambda_0 / b_lambda_0));
-    for (std::size_t k = 0; k < K_trunc; ++k) {
-        const std::size_t i_anchor = (k * N) / K_trunc;  // spread anchors
-        for (std::size_t j = 0; j < d; ++j) {
-            mu_init[k * d + j] = y_flat[i_anchor * d + j];
-        }
-    }
-    impl->data().set("mu", mu_init);
-    impl->data().set("lambda", lambda_init);
-
-    // alpha: prior mean.
-    const double alpha_init = a_alpha / b_alpha;
-    impl->data().set("alpha", arma::vec{alpha_init});
-
-    // cluster_counts: derived (refresher).
-    impl->data().set("cluster_counts", arma::vec(K_trunc, arma::fill::zeros));
-    impl->data().register_refresher("cluster_counts",
-        [K_trunc](const AI4BayesCode::shared_data_t& dd) -> arma::vec {
-            const arma::vec& z = dd.get("z");
-            return bnp::counts_from_z(z, K_trunc);
-        });
-
-    // ---- Gibbs DAG dependencies / invalidations -------------------------
-    // relabel (FALLBACK canonicaliser — NOT recommended; prefer post-MCMC).
-    impl->data().declare_dependencies("relabel", {"pi", "mu", "lambda", "z"});
-    impl->data().declare_dependencies("z",   {"y", "pi", "mu", "lambda"});
-    impl->data().declare_dependencies("cluster_params", {"z", "y"});
-    impl->data().declare_dependencies("pi",   {"cluster_counts", "alpha"});
-    // alpha (NUTS on the (k, n) Antoniak marginal) reads ONLY the data-identified
-    // sufficient statistic via cluster_counts (k = #occupied, n = sum), its Gamma
-    // prior, and its own current value (the NUTS starting point). It NO LONGER
-    // reads stick_V — the empty-stick coupling that broke mixing is severed
-    // (Antoniak 1974). NOT conjugate Gibbs; the prior stays swappable.
-    impl->data().declare_dependencies("alpha",
-        {"cluster_counts", "a_alpha", "b_alpha", "alpha"});
-
-    // z's update INVALIDATES cluster_counts (its derived child).
-    impl->data().declare_invalidates("z", {"cluster_counts"});
-
-    impl->data().refresh_all();
-
-    // ---- Children in Gibbs sweep order ----------------------------------
-    // child(0) relabel (FALLBACK canonicaliser — see class comment; NOT
-    // recommended, prefer post-MCMC). Added FIRST so downstream children
-    // read/record on one canonical descending-pi labelling.
-    impl->add_child(std::make_unique<dp_label_canonicalizer_block>(
-        "relabel", K_trunc, d, N));
-
-    // child(1) z (categorical_gibbs_block)
-    {
-        categorical_gibbs_block_config cfg;
-        cfg.name           = "z";
-        cfg.n_obs          = N;
-        cfg.n_categories   = K_trunc;
-        cfg.initial_labels = z_init;
-        const std::size_t d_capture = d;
-        const std::size_t N_capture = N;
-        const std::size_t K_capture = K_trunc;
-        cfg.log_probs_fn = [d_capture, N_capture, K_capture]
-            (const block_context& ctx) -> arma::mat {
-            const arma::vec& y_flat_c = ctx.at("y");
-            const arma::vec& pi       = ctx.at("pi");
-            const arma::vec& mu       = ctx.at("mu");
-            const arma::vec& lam      = ctx.at("lambda");
-            arma::mat lp(N_capture, K_capture);
-            for (std::size_t i = 0; i < N_capture; ++i) {
-                for (std::size_t k = 0; k < K_capture; ++k) {
-                    const double log_pi_k = std::log(pi[k] + 1e-300);
-                    lp(i, k) = log_pi_k
-                             + diag_normal_log_density(
-                                 y_flat_c.memptr() + i * d_capture,
-                                 mu.memptr()       + k * d_capture,
-                                 lam.memptr()      + k * d_capture,
-                                 d_capture);
-                }
-            }
-            return lp;
-        };
-        impl->add_child(
-            std::make_unique<categorical_gibbs_block>(std::move(cfg)));
-    }
-
-    // child(2) cluster_params (normal_gamma_cluster_gibbs_block)
-    {
-        normal_gamma_cluster_gibbs_block_config cfg;
-        cfg.name        = "cluster_params";
-        cfg.K_trunc     = K_trunc;
-        cfg.d           = d;
-        cfg.N           = N;
-        cfg.z_key       = "z";
-        cfg.y_key       = "y";
-        cfg.mu_name     = "mu";
-        cfg.lambda_name = "lambda";
-        cfg.mu_0        = mu_0;
-        cfg.kappa_0     = kappa_0;
-        cfg.a_lambda_0  = a_lambda_0;
-        cfg.b_lambda_0  = b_lambda_0;
-        cfg.initial_mu      = mu_init;
-        cfg.initial_lambda  = lambda_init;
-        impl->add_child(
-            std::make_unique<normal_gamma_cluster_gibbs_block>(std::move(cfg)));
-    }
-
-    // child(3) pi (stick_breaking_block, DP weights)
-    {
-        stick_breaking_block_config cfg;
-        cfg.name        = "pi";
-        cfg.K_trunc     = K_trunc;
-        cfg.counts_key  = "cluster_counts";
-        cfg.v_name      = "stick_V";
-        cfg.a_fn = [](std::size_t k, const arma::vec& counts,
-                      const block_context& /*ctx*/) -> double {
-            return 1.0 + counts[k];
-        };
-        cfg.b_fn = [](std::size_t k, const arma::vec& counts,
-                      const block_context& ctx) -> double {
-            const double a = ctx.at("alpha")[0];
-            double tail = 0.0;
-            for (std::size_t j = k + 1; j < counts.n_elem; ++j) {
-                tail += counts[j];
-            }
-            return a + tail;
-        };
-        cfg.initial_pi = pi_init;
-        impl->add_child(
-            std::make_unique<stick_breaking_block>(std::move(cfg)));
-    }
-
-    // child(4) alpha : NUTS on the Antoniak (k, n) marginal (PRIOR-AGNOSTIC).
-    // Conditions on (k = occupied clusters, n), NOT the empty-tail sticks, so
-    // the empty-stick coupling that broke mixing is severed AND any prior on
-    // alpha is supported (see alpha_kn_log_density). NOT conjugate Gibbs.
-    {
-        nuts_block_config acfg;
-        acfg.name        = "alpha";
-        acfg.initial_unc = constraints::positive::unconstrain(arma::vec{alpha_init});
-        acfg.constrain   = [](const arma::vec& u) {
-            return constraints::positive::constrain(u);
-        };
-        acfg.unconstrain = [](const arma::vec& v) {
-            return constraints::positive::unconstrain(v);
-        };
-        acfg.log_density_grad =
-            [](const arma::vec& a_unc, const block_context& ctx, arma::vec* g) {
-                return constraints::positive::wrap(
-                    a_unc, g,
-                    [&](const arma::vec& a_nat, arma::vec* g_nat) {
-                        return alpha_kn_log_density(a_nat, ctx, g_nat);
-                    });
-            };
-        impl->add_child(std::make_unique<nuts_block>(std::move(acfg)));
-    }
-
-    return impl;
-}
-
 }  // anonymous namespace
 
 // ============================================================================
-//  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
-//
-//  Simulate a well-separated 2-component diagonal-Gaussian mixture in d = 2
-//  from a KNOWN truth, fit the truncated-DP block stack (K_trunc large enough
-//  to let the DP shut off unused sticks), then recover the two cluster means
-//  from the OCCUPIED clusters and match them to truth (label-switching-safe:
-//  assign each truth mean to its nearest recovered occupied-cluster mean).
-//  PASS if both recovered means beat a naive global-mean baseline by a wide
-//  margin. 'ok' is derived from the actual computed errors — never hard-coded.
+//  Tier A wrapper class
 // ============================================================================
+
+class DPGaussianMixture {
+public:
+    // ---- Data-driven weakly-informative hyperparameters ---------------
+    //  Computed from y so the conjugate Normal-Gamma cluster prior is
+    //  correctly SCALED to the data regardless of its location/spread.
+    //  This is the convergence-robust path (mis-scaled fixed hypers --
+    //  e.g. b_lambda_0 = 1 on non-unit-variance data -- make the
+    //  single-site categorical Gibbs mix poorly). Matches the
+    //  user-blessed generated DP reference, generalised to d dims:
+    //      mu_0_j   = mean(y[, j])
+    //      kappa_0  = 0.01            (Var[mu_kj] = 100 * E[1/lambda])
+    //      a_lambda = 2.0             (heavy-tailed, weakly informative)
+    //      b_lambda = mean_j var(y[, j])  (E[sigma^2] ~ data scale)
+    //  alpha ~ Gamma(1, 1).
+    static arma::vec dd_mu0_(const arma::mat& y) {
+        const std::size_t n = y.n_rows, d = y.n_cols;
+        arma::vec m(d);
+        for (std::size_t j = 0; j < d; ++j) {
+            double s = 0.0;
+            for (std::size_t i = 0; i < n; ++i) s += y(i, j);
+            m[j] = (n > 0) ? s / static_cast<double>(n) : 0.0;
+        }
+        return m;
+    }
+    static double dd_blambda_(const arma::mat& y) {
+        const std::size_t n = y.n_rows, d = y.n_cols;
+        double acc = 0.0; int used = 0;
+        for (std::size_t j = 0; j < d; ++j) {
+            double s = 0.0;
+            for (std::size_t i = 0; i < n; ++i) s += y(i, j);
+            const double mean = (n > 0) ? s / static_cast<double>(n) : 0.0;
+            double ss = 0.0;
+            for (std::size_t i = 0; i < n; ++i) {
+                const double dv = y(i, j) - mean; ss += dv * dv;
+            }
+            const double v = (n > 1) ? ss / static_cast<double>(n - 1) : 1.0;  // unbiased
+            if (std::isfinite(v) && v > 0.0) { acc += v; ++used; }
+        }
+        const double b = (used > 0) ? acc / used : 1.0;
+        return (std::isfinite(b) && b > 0.0) ? b : 1.0;
+    }
+
+    /// RECOMMENDED constructor: data-driven weakly-informative
+    /// Normal-Gamma hyperparameters computed from y (converges robustly;
+    /// no hyperparameter tuning needed). Delegates to the explicit
+    /// constructor below -- behaviour of that path is unchanged.
+    DPGaussianMixture(const arma::mat& y,
+                      int K_trunc,
+                      int rng_seed,
+                      bool keep_history = false)
+        : DPGaussianMixture(y, K_trunc,
+                            dd_mu0_(y),   // mu_0   = column means
+                            0.01,         // kappa_0
+                            2.0,          // a_lambda_0
+                            dd_blambda_(y),  // b_lambda_0 = mean colVar
+                            1.0, 1.0,     // alpha ~ Gamma(1, 1)
+                            rng_seed, keep_history) {}
+
+    DPGaussianMixture(const arma::mat& y,
+                      int K_trunc,
+                      const arma::vec& mu_0,
+                      double kappa_0,
+                      double a_lambda_0,
+                      double b_lambda_0,
+                      double a_alpha,
+                      double b_alpha,
+                      int rng_seed,
+                      bool keep_history = false)
+        : rng_(rng_seed == 0
+                   ? std::mt19937_64{std::random_device{}()}
+                   : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)}),
+          predict_rng_(rng_seed == 0
+                   ? std::mt19937_64{std::random_device{}()}
+                   : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
+                                     ^ 0x9E3779B97F4A7C15ULL}),
+          readapt_rng_(rng_seed == 0
+                   ? std::mt19937_64{std::random_device{}()}
+                   : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
+                                     ^ 0xBF58476D1CE4E5B9ULL}),
+          impl_(std::make_unique<composite_block>("DPGaussianMixture")),
+          keep_history_(keep_history)
+    {
+        if (y.n_rows < 2)
+            ai4b::stop("DPGaussianMixture: N must be >= 2");
+        if (y.n_cols < 1)
+            ai4b::stop("DPGaussianMixture: d must be >= 1");
+        if (K_trunc < 2)
+            ai4b::stop("DPGaussianMixture: K_trunc must be >= 2");
+        if (mu_0.n_elem != y.n_cols)
+            ai4b::stop("DPGaussianMixture: mu_0 length must equal d");
+        if (!(kappa_0 > 0.0))      ai4b::stop("kappa_0 must be > 0");
+        if (!(a_lambda_0 > 0.0))   ai4b::stop("a_lambda_0 must be > 0");
+        if (!(b_lambda_0 > 0.0))   ai4b::stop("b_lambda_0 must be > 0");
+        if (!(a_alpha > 0.0))      ai4b::stop("a_alpha must be > 0");
+        if (!(b_alpha > 0.0))      ai4b::stop("b_alpha must be > 0");
+
+        N_ = static_cast<std::size_t>(y.n_rows);
+        d_ = static_cast<std::size_t>(y.n_cols);
+        K_ = static_cast<std::size_t>(K_trunc);
+
+        // ---- Data + priors -----------------------------------------
+        // y stored row-major: y_flat[i * d + j] = y(i, j).
+        arma::vec y_flat(N_ * d_);
+        for (std::size_t i = 0; i < N_; ++i) {
+            for (std::size_t j = 0; j < d_; ++j) {
+                y_flat[i * d_ + j] = y(i, j);
+            }
+        }
+        impl_->data().set("y", y_flat);
+
+        arma::vec mu0_arma(d_);
+        for (std::size_t j = 0; j < d_; ++j) mu0_arma[j] = mu_0[j];
+        impl_->data().set("mu_0", mu0_arma);
+        impl_->data().set("kappa_0",     arma::vec{kappa_0});
+        impl_->data().set("a_lambda_0",  arma::vec{a_lambda_0});
+        impl_->data().set("b_lambda_0",  arma::vec{b_lambda_0});
+        impl_->data().set("a_alpha",     arma::vec{a_alpha});
+        impl_->data().set("b_alpha",     arma::vec{b_alpha});
+
+        // ---- Initial sampler state ---------------------------------
+        // z: spread (i mod K_trunc) + 1.
+        arma::vec z_init(N_);
+        for (std::size_t i = 0; i < N_; ++i) {
+            z_init[i] = static_cast<double>((i % K_) + 1);
+        }
+        impl_->data().set("z", z_init);
+
+        // pi: uniform on K_trunc-simplex.
+        arma::vec pi_init(K_, arma::fill::value(1.0 / static_cast<double>(K_)));
+        impl_->data().set("pi", pi_init);
+        // stick_V: derived initial (V_k = pi_k / remainder_{<k}).
+        arma::vec V_init(K_, arma::fill::zeros);
+        {
+            double rem = 1.0;
+            for (std::size_t k = 0; k + 1 < K_; ++k) {
+                V_init[k] = pi_init[k] / rem;
+                if (V_init[k] > 1.0) V_init[k] = 1.0;
+                if (V_init[k] < 0.0) V_init[k] = 0.0;
+                rem *= (1.0 - V_init[k]);
+            }
+            V_init[K_ - 1] = 1.0;
+        }
+        impl_->data().set("stick_V", V_init);
+
+        // mu, lambda: data-driven init for mu (kmeans-like spread of
+        // observed y-rows over the K_trunc clusters); lambda at prior mean.
+        arma::vec mu_init(K_ * d_, arma::fill::zeros);
+        arma::vec lambda_init(K_ * d_,
+                              arma::fill::value(a_lambda_0 / b_lambda_0));
+        for (std::size_t k = 0; k < K_; ++k) {
+            const std::size_t i_anchor = (k * N_) / K_;  // spread anchors
+            for (std::size_t j = 0; j < d_; ++j) {
+                mu_init[k * d_ + j] = y(i_anchor, j);
+            }
+        }
+        impl_->data().set("mu", mu_init);
+        impl_->data().set("lambda", lambda_init);
+
+        // alpha: prior mean.
+        const double alpha_init = a_alpha / b_alpha;
+        impl_->data().set("alpha", arma::vec{alpha_init});
+
+        // cluster_counts: derived (refresher).
+        impl_->data().set("cluster_counts",
+                          arma::vec(K_, arma::fill::zeros));
+        impl_->data().register_refresher("cluster_counts",
+            [K = K_](const AI4BayesCode::shared_data_t& d)
+                -> arma::vec {
+                const arma::vec& z = d.get("z");
+                return bnp::counts_from_z(z, K);
+            });
+
+        // ---- Gibbs DAG dependencies / invalidations ----------------
+        // (Block names match child name() values used in declare_*.)
+        // relabel (FALLBACK canonicaliser — NOT recommended; prefer post-MCMC).
+        impl_->data().declare_dependencies("relabel",
+            {"pi", "mu", "lambda", "z"});
+        impl_->data().declare_dependencies("z",
+            {"y", "pi", "mu", "lambda"});
+        impl_->data().declare_dependencies("cluster_params",
+            {"z", "y"});
+        impl_->data().declare_dependencies("pi",
+            {"cluster_counts", "alpha"});
+        impl_->data().declare_dependencies("alpha",
+            {"cluster_counts", "a_alpha", "b_alpha"});
+
+        // z's update INVALIDATES cluster_counts (its derived child).
+        impl_->data().declare_invalidates("z", {"cluster_counts"});
+        // cluster_params writes mu and lambda; no derived keys.
+        // pi writes pi and stick_V; no derived keys.
+        // alpha writes alpha; no derived keys.
+
+        // ---- Predict DAG + y_rep stochastic refresher --------------
+        // (No declare_data_input here — y is an observed terminal,
+        // not a replaceable covariate. The y_rep refresher reads
+        // pi/mu/lambda, NOT y; N/d/K are captured at construction.)
+        impl_->data().declare_predict_edges("pi",     {"y_rep"});
+        impl_->data().declare_predict_edges("mu",     {"y_rep"});
+        impl_->data().declare_predict_edges("lambda", {"y_rep"});
+
+        // ---- Generative-DAG context (VIZ-ONLY; predict_at BFS never
+        //      reads context_edges_). DP truncated stick-breaking +
+        //      Normal-Gamma cluster prior:
+        //        alpha ~ Gamma(a_alpha, b_alpha);
+        //        V_k ~ Beta(1, alpha) -> stick_V -> pi;
+        //        (mu_k, lambda_k) ~ NormalGamma(mu_0, kappa_0,
+        //                                       a_lambda_0, b_lambda_0).
+        //      Drawn faded by ai4bayescode_plot_dag.
+        impl_->data().declare_context_edges("a_alpha",     {"alpha"});
+        impl_->data().declare_context_edges("b_alpha",     {"alpha"});
+        impl_->data().declare_context_edges("alpha",       {"stick_V"});
+        impl_->data().declare_context_edges("stick_V",     {"pi"});
+        impl_->data().declare_context_edges("mu_0",        {"mu"});
+        impl_->data().declare_context_edges("kappa_0",     {"mu"});
+        impl_->data().declare_context_edges("a_lambda_0",  {"lambda"});
+        impl_->data().declare_context_edges("b_lambda_0",  {"lambda"});
+
+        impl_->data().set("y_rep", arma::vec(N_ * d_, arma::fill::zeros));
+        impl_->data().register_stochastic_refresher("y_rep",
+            [N = N_, d = d_, K = K_](
+                const AI4BayesCode::shared_data_t& dat,
+                std::mt19937_64& rng) -> arma::vec {
+                // Marginal posterior predictive: z_rep_i ~ Cat(pi),
+                // y_rep_i ~ N(mu_{z_rep_i}, diag(1/lambda_{z_rep_i})).
+                const arma::vec& pi  = dat.get("pi");
+                const arma::vec& mu  = dat.get("mu");
+                const arma::vec& lam = dat.get("lambda");
+                std::uniform_real_distribution<double> uniform(0.0, 1.0);
+                std::normal_distribution<double> stdnorm(0.0, 1.0);
+                arma::vec out(N * d);
+                for (std::size_t i = 0; i < N; ++i) {
+                    // sample z_rep_i ~ Categorical(pi)
+                    const double u = uniform(rng);
+                    double cumul = 0.0;
+                    std::size_t z_i = K - 1;
+                    for (std::size_t k = 0; k < K; ++k) {
+                        cumul += pi[k];
+                        if (u < cumul) { z_i = k; break; }
+                    }
+                    // sample y_rep_i ~ N(mu_{z_i}, diag(1/lambda_{z_i}))
+                    for (std::size_t j = 0; j < d; ++j) {
+                        const double mu_kj  = mu[z_i * d + j];
+                        const double lam_kj = lam[z_i * d + j];
+                        const double sd = 1.0 / std::sqrt(lam_kj);
+                        out[i * d + j] = mu_kj + sd * stdnorm(rng);
+                    }
+                }
+                return out;
+            });
+
+        impl_->data().refresh_all();
+
+        // ---- Children in Gibbs sweep order -------------------------
+        // child(0) relabel (FALLBACK canonicaliser — see class comment; NOT
+        // recommended, prefer post-MCMC). Added FIRST so downstream children
+        // read/record on one canonical descending-pi labelling.
+        impl_->add_child(std::make_unique<dp_label_canonicalizer_block>(
+            "relabel", K_, d_, N_));
+
+        // child(1) z (categorical_gibbs_block)
+        {
+            categorical_gibbs_block_config cfg;
+            cfg.name           = "z";
+            cfg.n_obs          = N_;
+            cfg.n_categories   = K_;
+            cfg.initial_labels = z_init;
+            const std::size_t d_capture = d_;
+            const std::size_t N_capture = N_;
+            const std::size_t K_capture = K_;
+            cfg.log_probs_fn = [d_capture, N_capture, K_capture]
+                (const block_context& ctx) -> arma::mat {
+                const arma::vec& y_flat = ctx.at("y");
+                const arma::vec& pi     = ctx.at("pi");
+                const arma::vec& mu     = ctx.at("mu");
+                const arma::vec& lam    = ctx.at("lambda");
+                arma::mat lp(N_capture, K_capture);
+                for (std::size_t i = 0; i < N_capture; ++i) {
+                    for (std::size_t k = 0; k < K_capture; ++k) {
+                        const double log_pi_k = std::log(pi[k] + 1e-300);
+                        lp(i, k) = log_pi_k
+                                 + diag_normal_log_density(
+                                     y_flat.memptr() + i * d_capture,
+                                     mu.memptr()     + k * d_capture,
+                                     lam.memptr()    + k * d_capture,
+                                     d_capture);
+                    }
+                }
+                return lp;
+            };
+            impl_->add_child(
+                std::make_unique<categorical_gibbs_block>(std::move(cfg)));
+        }
+
+        // child(2) cluster_params (normal_gamma_cluster_gibbs_block)
+        {
+            normal_gamma_cluster_gibbs_block_config cfg;
+            cfg.name        = "cluster_params";
+            cfg.K_trunc     = K_;
+            cfg.d           = d_;
+            cfg.N           = N_;
+            cfg.z_key       = "z";
+            cfg.y_key       = "y";
+            cfg.mu_name     = "mu";
+            cfg.lambda_name = "lambda";
+            cfg.mu_0        = mu0_arma;
+            cfg.kappa_0     = kappa_0;
+            cfg.a_lambda_0  = a_lambda_0;
+            cfg.b_lambda_0  = b_lambda_0;
+            cfg.initial_mu      = mu_init;
+            cfg.initial_lambda  = lambda_init;
+            impl_->add_child(
+                std::make_unique<normal_gamma_cluster_gibbs_block>(
+                    std::move(cfg)));
+        }
+
+        // child(3) pi (stick_breaking_block, DP weights)
+        {
+            stick_breaking_block_config cfg;
+            cfg.name        = "pi";
+            cfg.K_trunc     = K_;
+            cfg.counts_key  = "cluster_counts";
+            cfg.v_name      = "stick_V";
+            cfg.a_fn = [](std::size_t k, const arma::vec& counts,
+                          const block_context& /*ctx*/) -> double {
+                return 1.0 + counts[k];
+            };
+            cfg.b_fn = [](std::size_t k, const arma::vec& counts,
+                          const block_context& ctx) -> double {
+                const double a = ctx.at("alpha")[0];
+                double tail = 0.0;
+                for (std::size_t j = k + 1; j < counts.n_elem; ++j) {
+                    tail += counts[j];
+                }
+                return a + tail;
+            };
+            cfg.initial_pi = pi_init;
+            impl_->add_child(
+                std::make_unique<stick_breaking_block>(std::move(cfg)));
+        }
+
+        // child(4) alpha (nuts_block on log scale, positive constraint)
+        {
+            nuts_block_config cfg;
+            cfg.name        = "alpha";
+            cfg.initial_unc = arma::vec{std::log(alpha_init)};
+            cfg.constrain   = constraints::positive::constrain;
+            cfg.unconstrain = constraints::positive::unconstrain;
+            cfg.log_density_grad =
+                [](const arma::vec& t_unc, const block_context& ctx,
+                   arma::vec* grad) -> double {
+                    return constraints::positive::wrap(t_unc, grad,
+                        [&](const arma::vec& t_nat, arma::vec* g_nat) {
+                            return alpha_natural_log_density(t_nat, ctx, g_nat);
+                        });
+                };
+            impl_->add_child(std::make_unique<nuts_block>(std::move(cfg)));
+        }
+
+        if (keep_history_) impl_->set_keep_history(true);
+    }
+
+    // ---- Six-method R interface --------------------------------------------
+
+    void step() { step(1); }              // no-arg convenience: one sweep
+    void step(int n_steps) {
+        if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
+        for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
+    }
+
+    AI4BayesCode::state_map get_current() const {
+        // Backend-neutral: mu and lambda are returned as FLAT column-major
+        // arma::vec of length K_trunc*d (slot-major along columns: element
+        // (k, j) of the K x d matrix lives at j*K + k). Internal storage is
+        // cluster-major mu_flat[k*d + j]; build a K x d arma::mat then
+        // vectorise() to emit the canonical column-major flat vector. The
+        // @example:R / @example:python headers reshape with nrow = K_trunc
+        // (R matrix() / numpy order="F") to recover the K x d centres.
+        const arma::vec& mu_flat  = impl_->data().get("mu");
+        const arma::vec& lam_flat = impl_->data().get("lambda");
+        arma::mat mu_mat(K_, d_);
+        arma::mat lam_mat(K_, d_);
+        for (std::size_t k = 0; k < K_; ++k) {
+            for (std::size_t j = 0; j < d_; ++j) {
+                mu_mat(k, j)  = mu_flat[k * d_ + j];
+                lam_mat(k, j) = lam_flat[k * d_ + j];
+            }
+        }
+        AI4BayesCode::state_map out;
+        out["z"]       = impl_->data().get("z");
+        out["pi"]      = impl_->data().get("pi");
+        out["mu"]      = arma::vectorise(mu_mat);    // flat, column-major
+        out["lambda"]  = arma::vectorise(lam_mat);   // flat, column-major
+        out["alpha"]   = impl_->data().get("alpha");
+        out["K_trunc"] = arma::vec{static_cast<double>(K_)};
+        return out;
+    }
+
+    void set_current(const AI4BayesCode::state_map& params) {
+        // Backend-neutral: any subset of (z, pi, mu, lambda, alpha, y).
+        // Matrix-valued keys (y is N x d; mu, lambda are K_trunc x d) arrive
+        // as a VECTORISED column-major arma::vec under their key — element
+        // (row, col) lives at col*nrow + row. We convert back to the internal
+        // ROW/cluster-major storage (flat[row*ncol + col]).
+        if (params.count("y")) {
+            const arma::vec& y_new = params.at("y");
+            // STRICT-N legitimate use (validator Check #21 / codegen_cpp.md
+            // §7a): DPGaussianMixture's categorical_gibbs_block holds the
+            // allocation vector z of length N, and the cluster_gibbs_block
+            // holds per-cluster sufficient stats sized for N observations.
+            // To change N, reconstruct the wrapper. (y arrives flat col-major;
+            // we can only validate total length here.)
+            if (y_new.n_elem != N_ * d_)
+                ai4b::stop("set_current: DPGaussianMixture fixes (N, d) at "
+                           "construction (z allocation + cluster suffstats "
+                           "are length-N). Supplied y has %zu elements but "
+                           "requires N*d = %zu. To change N, reconstruct.",
+                           static_cast<std::size_t>(y_new.n_elem), N_ * d_);
+            arma::vec yflat(N_ * d_);
+            for (std::size_t i = 0; i < N_; ++i)
+                for (std::size_t j = 0; j < d_; ++j)
+                    yflat[i * d_ + j] = y_new[j * N_ + i];  // col-major -> row-major
+            impl_->data().set("y", yflat);
+        }
+        if (params.count("z")) {
+            arma::vec znew = params.at("z");
+            if (znew.n_elem != N_)
+                ai4b::stop("set_current: z length must equal N");
+            for (std::size_t i = 0; i < N_; ++i) {
+                const long lab = static_cast<long>(std::llround(znew[i]));
+                if (lab < 1 || static_cast<std::size_t>(lab) > K_) {
+                    ai4b::stop("set_current: z[i] out of {1, ..., K_trunc}");
+                }
+            }
+            dynamic_cast<categorical_gibbs_block&>(
+                impl_->child(1)).set_current(znew);
+            impl_->data().set("z", znew);
+            impl_->data().refresh_derived_for("z");
+        }
+        if (params.count("pi")) {
+            arma::vec pinew = params.at("pi");
+            if (pinew.n_elem != K_)
+                ai4b::stop("set_current: pi length must equal K_trunc");
+            dynamic_cast<stick_breaking_block&>(
+                impl_->child(3)).set_current(pinew);
+            impl_->data().set("pi", pinew);
+        }
+        if (params.count("mu")) {
+            // Accept K_trunc x d matrix as a vectorised column-major arma::vec.
+            const arma::vec& mu_new = params.at("mu");
+            if (mu_new.n_elem != K_ * d_) {
+                ai4b::stop("set_current: mu must be K_trunc x d "
+                           "(flat length K_trunc*d)");
+            }
+            arma::vec mu_flat(K_ * d_);
+            for (std::size_t k = 0; k < K_; ++k)
+                for (std::size_t j = 0; j < d_; ++j)
+                    mu_flat[k * d_ + j] = mu_new[j * K_ + k];  // col-major -> row-major
+            impl_->data().set("mu", mu_flat);
+            // Also push to the cluster block's internal state.
+            const arma::vec& cur_lam = impl_->data().get("lambda");
+            arma::vec cluster_concat(2 * K_ * d_);
+            for (std::size_t i = 0; i < K_ * d_; ++i) {
+                cluster_concat[i]            = mu_flat[i];
+                cluster_concat[K_ * d_ + i]  = cur_lam[i];
+            }
+            dynamic_cast<normal_gamma_cluster_gibbs_block&>(
+                impl_->child(2)).set_current(cluster_concat);
+        }
+        if (params.count("lambda")) {
+            const arma::vec& lam_new = params.at("lambda");
+            if (lam_new.n_elem != K_ * d_) {
+                ai4b::stop("set_current: lambda must be K_trunc x d "
+                           "(flat length K_trunc*d)");
+            }
+            arma::vec lam_flat(K_ * d_);
+            for (std::size_t k = 0; k < K_; ++k) {
+                for (std::size_t j = 0; j < d_; ++j) {
+                    const double v = lam_new[j * K_ + k];  // col-major -> row-major
+                    if (!(v > 0.0)) {
+                        ai4b::stop("set_current: lambda must be > 0");
+                    }
+                    lam_flat[k * d_ + j] = v;
+                }
+            }
+            impl_->data().set("lambda", lam_flat);
+            const arma::vec& cur_mu = impl_->data().get("mu");
+            arma::vec cluster_concat(2 * K_ * d_);
+            for (std::size_t i = 0; i < K_ * d_; ++i) {
+                cluster_concat[i]            = cur_mu[i];
+                cluster_concat[K_ * d_ + i]  = lam_flat[i];
+            }
+            dynamic_cast<normal_gamma_cluster_gibbs_block&>(
+                impl_->child(2)).set_current(cluster_concat);
+        }
+        if (params.count("alpha")) {
+            const double a_new = params.at("alpha")[0];
+            if (!(a_new > 0.0))
+                ai4b::stop("set_current: alpha must be > 0");
+            dynamic_cast<nuts_block&>(impl_->child(4))
+                .set_current(arma::vec{a_new});
+            impl_->data().set("alpha", arma::vec{a_new});
+        }
+    }
+
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        if (!new_data.empty())
+            ai4b::stop(
+                "DPGaussianMixture: predict_at(new_data) does NOT support "
+                "covariate-dependent BNP at v0; pass an empty list/map to draw "
+                "y_rep at training X.");
+
+        AI4BayesCode::history_map out;
+
+        if (!keep_history_) {
+            // No-history mode: one posterior-predictive draw. y_rep arrives as
+            // a flat N*d vec (row-major over observations); emit it as a 1 x
+            // (N*d) arma::mat row, mirroring the other dual examples.
+            block_context replaced;
+            block_context result = impl_->predict_at(replaced, predict_rng_);
+            for (const auto& kv : result) {
+                const arma::vec& v = kv.second;
+                arma::mat m(1, v.n_elem);
+                for (std::size_t j = 0; j < v.n_elem; ++j) m(0, j) = v[j];
+                out.emplace(kv.first, std::move(m));
+            }
+            return out;
+        }
+
+        // History mode: mu and lambda are sub-outputs of the
+        // "cluster_params" block; pi is its own block. Manual-compute
+        // y_rep per draw mirrors the refresher lambda. Returned as an
+        // n_draws x (N*d) arma::mat (row-major over observations per draw).
+        AI4BayesCode::history_map hist = impl_->get_history();
+        const arma::mat& pi_hist  = hist.at("pi");      // n_draws x K
+        const arma::mat& mu_hist  = hist.at("mu");      // n_draws x (K*d)
+        const arma::mat& lam_hist = hist.at("lambda");  // n_draws x (K*d)
+        const std::size_t n_draws = pi_hist.n_rows;
+
+        arma::mat yrep_mat(n_draws, N_ * d_);
+        std::uniform_real_distribution<double> unif(0.0, 1.0);
+        std::normal_distribution<double> nd(0.0, 1.0);
+        for (std::size_t draw = 0; draw < n_draws; ++draw) {
+            for (std::size_t i = 0; i < N_; ++i) {
+                const double u = unif(predict_rng_);
+                double cumul = 0.0;
+                std::size_t z_i = K_ - 1;
+                for (std::size_t k = 0; k < K_; ++k) {
+                    cumul += pi_hist(draw, k);
+                    if (u < cumul) { z_i = k; break; }
+                }
+                for (std::size_t j = 0; j < d_; ++j) {
+                    const double mu_kj  = mu_hist (draw, z_i * d_ + j);
+                    const double lam_kj = lam_hist(draw, z_i * d_ + j);
+                    const double sd = 1.0 / std::sqrt(lam_kj);
+                    yrep_mat(draw, i * d_ + j) = mu_kj + sd * nd(predict_rng_);
+                }
+            }
+        }
+        out.emplace("y_rep", std::move(yrep_mat));
+        return out;
+    }
+
+    AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag(); }
+    AI4BayesCode::history_map  get_history() const { return impl_->get_history(); }
+
+    /// 7th R-level method: re-tune NUTS metric (mass matrix + step size +
+    /// dual averaging) without advancing chain state. Available because
+    /// the composite contains NUTS-family children. See system_design.md
+    /// §13 NUTS-family + validator.md §24.
+    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
+        if (n < 0) {
+            ai4b::stop("readapt_NUTS: n must be non-negative");
+        }
+        impl_->readapt_NUTS(static_cast<std::size_t>(n),
+                            reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
+    }
+
+
+private:
+    std::mt19937_64                  rng_;
+    mutable std::mt19937_64          predict_rng_;
+    mutable std::mt19937_64          readapt_rng_; // readapt_NUTS() advances it (7th method)
+    std::unique_ptr<composite_block> impl_;
+    bool                             keep_history_ = false;
+    std::size_t                      N_ = 0;
+    std::size_t                      d_ = 0;
+    std::size_t                      K_ = 0;
+};
+
+// ============================================================================
+//  Rcpp module
+// ============================================================================
+
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(DPGaussianMixture_module) {
+    Rcpp::class_<DPGaussianMixture>("DPGaussianMixture")
+        .constructor<arma::mat, int, int>(
+            "DEFAULT (data-driven) constructor; keep_history = FALSE. "
+            "DPGaussianMixture(y, K_trunc, seed).")
+        .constructor<arma::mat, int, int, bool>(
+            "DEFAULT constructor: DPGaussianMixture(y, K_trunc, seed, "
+            "keep_history). y is N x d. The conjugate Normal-Gamma "
+            "cluster-prior hyperparameters are computed data-driven from "
+            "y (mu_0 = column means, kappa_0 = 0.01, a_lambda = 2, "
+            "b_lambda = mean column variance, alpha ~ Gamma(1,1)) so the "
+            "sampler is correctly scaled to the data and mixes/converges "
+            "robustly with no tuning. Use the explicit-hyperparameter "
+            "constructor below ONLY for advanced manual control.")
+        .constructor<arma::mat, int, arma::vec,
+                     double, double, double, double, double, int>(
+            "Advanced/explicit-hyperparameter constructor; keep_history "
+            "defaults to FALSE. Prefer the data-driven constructor above "
+            "unless you specifically need to set the Normal-Gamma hypers.")
+        .constructor<arma::mat, int, arma::vec,
+                     double, double, double, double, double, int, bool>(
+            "Advanced explicit-hyperparameter constructor: "
+            "DPGaussianMixture(y, K_trunc, mu_0, kappa_0, "
+            "a_lambda_0, b_lambda_0, a_alpha, b_alpha, seed, keep_history). "
+            "y is N x d. Truncated stick-breaking at level K_trunc; "
+            "diagonal-Gaussian likelihood with conjugate Normal-Gamma "
+            "cluster prior; DP concentration alpha sampled by NUTS. "
+            "WARNING: mis-scaled fixed hypers (e.g. b_lambda_0 = 1 on "
+            "non-unit-variance data) mix poorly -- prefer the data-driven "
+            "constructor.")
+        .method("step", (void (DPGaussianMixture::*)())    &DPGaussianMixture::step, "Run one sweep.")
+        .method("step", (void (DPGaussianMixture::*)(int)) &DPGaussianMixture::step, "Run n sweeps.")
+        .method("get_current", &DPGaussianMixture::get_current)
+        .method("set_current", &DPGaussianMixture::set_current,
+                "Overwrite z, pi, mu, lambda, alpha, or y from a named list.")
+        .method("predict_at",  &DPGaussianMixture::predict_at,
+                "Posterior predictive y_rep at training X. Empty list only.")
+        .method("get_dag",     &DPGaussianMixture::get_dag)
+        .method("get_history", &DPGaussianMixture::get_history)
+        .method("readapt_NUTS", &DPGaussianMixture::readapt_NUTS);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(DPGaussianMixture, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<DPGaussianMixture>(m, "DPGaussianMixture")
+        // DEFAULT data-driven constructor: (y N x d, K_trunc, seed, keep_history).
+        .def(pybind11::init<arma::mat, int, int, bool>(),
+             pybind11::arg("y"),
+             pybind11::arg("K_trunc"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false)
+        // Advanced explicit-hyperparameter constructor.
+        .def(pybind11::init<arma::mat, int, arma::vec,
+                            double, double, double, double, double, int, bool>(),
+             pybind11::arg("y"),
+             pybind11::arg("K_trunc"),
+             pybind11::arg("mu_0"),
+             pybind11::arg("kappa_0"),
+             pybind11::arg("a_lambda_0"),
+             pybind11::arg("b_lambda_0"),
+             pybind11::arg("a_alpha"),
+             pybind11::arg("b_alpha"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false)
+        .def("step", (void (DPGaussianMixture::*)())    &DPGaussianMixture::step, "Run one sweep.")
+        .def("step", (void (DPGaussianMixture::*)(int)) &DPGaussianMixture::step, pybind11::arg("n_steps"))
+        .def("get_current",  &DPGaussianMixture::get_current)
+        .def("set_current",  &DPGaussianMixture::set_current, pybind11::arg("params"))
+        .def("predict_at",   &DPGaussianMixture::predict_at,  pybind11::arg("new_data"))
+        .def("get_dag",      &DPGaussianMixture::get_dag)
+        .def("get_history",  &DPGaussianMixture::get_history)
+        .def("readapt_NUTS", &DPGaussianMixture::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
+// ============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (compiled ONLY when NEITHER binding
+//  module macro is defined). Simulates a well-separated 2-component diagonal-
+//  Gaussian mixture in d = 2 from a KNOWN truth, drives the FULL Tier-A
+//  DPGaussianMixture wrapper (data-driven constructor), and recovers the two
+//  cluster means. State is read exclusively through the full 6-method contract
+//  (get_current()); mu arrives as a column-major-vectorised K_trunc x d flat
+//  vector -- element (k, j) lives at j*K_trunc + k. Label-switching-safe: we
+//  average each observation's ASSIGNED cluster mean over draws (per-point,
+//  permutation-invariant). PASS is derived from the actual computed errors.
+// ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 #include <cstdio>
+#include <cmath>
+#include <vector>
 int main() {
     // ---- Known truth: 2 components in d = 2 ------------------------------
-    const std::size_t d   = 2;
+    const std::size_t d     = 2;
     const std::size_t n_per = 150;
-    const std::size_t N   = 2 * n_per;
+    const std::size_t N     = 2 * n_per;
     const double mu_true[2][2] = { { -3.0, -3.0 }, { 3.0, 3.0 } };
     const double sd_true       = 0.7;          // per-dim std (precision 1/sd^2)
-    const double w_true[2]     = { 0.5, 0.5 };
 
     std::mt19937_64 sim_rng(20260621);
     std::normal_distribution<double> noise(0.0, sd_true);
 
-    // y_flat row-major: y_flat[i*d + j].
-    arma::vec y_flat(N * d);
+    // y as an N x d arma::mat (Tier-A constructor takes a matrix).
+    arma::mat y(N, d);
     std::size_t idx = 0;
     for (int comp = 0; comp < 2; ++comp) {
         for (std::size_t r = 0; r < n_per; ++r) {
             for (std::size_t j = 0; j < d; ++j) {
-                y_flat[idx * d + j] = mu_true[comp][j] + noise(sim_rng);
+                y(idx, j) = mu_true[comp][j] + noise(sim_rng);
             }
             ++idx;
         }
     }
 
-    // ---- Data-driven weakly-informative Normal-Gamma hyperparameters -----
-    // (Same recipe as the former Tier-A data-driven constructor:
-    //  mu_0 = column means, kappa_0 = 0.01, a_lambda = 2,
-    //  b_lambda = mean column variance, alpha ~ Gamma(1, 1).)
-    arma::vec mu_0(d, arma::fill::zeros);
+    // Column means (naive-baseline target, matches the data-driven mu_0).
+    double mu0[2] = { 0.0, 0.0 };
     for (std::size_t j = 0; j < d; ++j) {
         double s = 0.0;
-        for (std::size_t i = 0; i < N; ++i) s += y_flat[i * d + j];
-        mu_0[j] = s / static_cast<double>(N);
+        for (std::size_t i = 0; i < N; ++i) s += y(i, j);
+        mu0[j] = s / static_cast<double>(N);
     }
-    double b_lambda_acc = 0.0;
-    for (std::size_t j = 0; j < d; ++j) {
-        double ss = 0.0;
-        for (std::size_t i = 0; i < N; ++i) {
-            const double dv = y_flat[i * d + j] - mu_0[j];
-            ss += dv * dv;
-        }
-        b_lambda_acc += ss / static_cast<double>(N - 1);
-    }
-    const double b_lambda_0 = b_lambda_acc / static_cast<double>(d);
-    const double kappa_0    = 0.01;
-    const double a_lambda_0 = 2.0;
-    const double a_alpha    = 1.0;
-    const double b_alpha    = 1.0;
 
     // K_trunc = max(20, ceil(N/5)); plenty of slack above the true 2.
-    const std::size_t K_trunc =
-        std::max<std::size_t>(20, (N + 4) / 5);
+    const std::size_t K_trunc = std::max<std::size_t>(20, (N + 4) / 5);
 
-    auto model = build_dp_mixture(y_flat, N, d, K_trunc,
-                                  mu_0, kappa_0, a_lambda_0, b_lambda_0,
-                                  a_alpha, b_alpha);
-
-    std::mt19937_64 rng(7);
+    // Full Tier-A wrapper via the data-driven constructor
+    // (y, K_trunc, seed, keep_history).
+    DPGaussianMixture model(y, static_cast<int>(K_trunc), 7, false);
 
     // ---- Warmup ----------------------------------------------------------
     const int n_warmup = 400;
-    for (int s = 0; s < n_warmup; ++s) model->step(rng);
+    model.step(n_warmup);
 
     // ---- Sampling: accumulate per-observation posterior-mean cluster mean.
     //  Label switching makes per-cluster mu averages meaningless, so we
-    //  instead average each observation's ASSIGNED cluster mean over draws
-    //  (a label-switching-invariant per-point quantity). Each point's mean
-    //  should land near its own true component centre.
+    //  average each observation's ASSIGNED cluster mean over draws (a
+    //  label-switching-invariant per-point quantity).
     const int M = 1200;
-    arma::vec point_mu_acc(N * d, arma::fill::zeros);
+    std::vector<double> point_mu_acc(N * d, 0.0);
     for (int s = 0; s < M; ++s) {
-        model->step(rng);
-        const arma::vec& z   = model->data().get("z");
-        const arma::vec& mu  = model->data().get("mu");
+        model.step(1);
+        const auto gc = model.get_current();
+        const arma::vec& z  = gc.at("z");
+        const arma::vec& mu = gc.at("mu");   // column-major flat K x d
         for (std::size_t i = 0; i < N; ++i) {
             const long lab = static_cast<long>(std::llround(z[i])) - 1;  // 0-idx
             const std::size_t k = static_cast<std::size_t>(
                 std::min<long>(std::max<long>(lab, 0),
                                static_cast<long>(K_trunc) - 1));
             for (std::size_t j = 0; j < d; ++j) {
-                point_mu_acc[i * d + j] += mu[k * d + j];
+                // column-major: element (k, j) at j*K_trunc + k.
+                point_mu_acc[i * d + j] += mu[j * K_trunc + k];
             }
         }
     }
-    point_mu_acc /= static_cast<double>(M);
+    for (std::size_t t = 0; t < point_mu_acc.size(); ++t)
+        point_mu_acc[t] /= static_cast<double>(M);
 
     // ---- Recover per-component mean = average of point-means whose TRUE
     //      component is c. Compare to truth; compare to naive global mean.
@@ -684,8 +1149,7 @@ int main() {
         for (std::size_t j = 0; j < d; ++j) {
             const double e = rec_mu[comp][j] - mu_true[comp][j];
             err_sq += e * e;
-            // naive baseline: a single global mean for every point.
-            const double bdev = mu_0[j] - mu_true[comp][j];
+            const double bdev = mu0[j] - mu_true[comp][j];  // naive baseline
             base_sq += bdev * bdev;
         }
     }
@@ -693,14 +1157,23 @@ int main() {
     const double rmse_baseline = std::sqrt(base_sq / 4.0);
 
     // Count occupied clusters in the final draw (sanity: DP should use ~2).
-    const arma::vec& z_final = model->data().get("z");
-    arma::vec counts = bnp::counts_from_z(z_final, K_trunc);
+    const auto gc_final = model.get_current();
+    const arma::vec& z_final = gc_final.at("z");
+    std::vector<int> occ_flag(K_trunc, 0);
+    for (std::size_t i = 0; i < N; ++i) {
+        long lab = static_cast<long>(std::llround(z_final[i])) - 1;
+        if (lab < 0) lab = 0;
+        if (static_cast<std::size_t>(lab) >= K_trunc) lab = static_cast<long>(K_trunc) - 1;
+        occ_flag[static_cast<std::size_t>(lab)] = 1;
+    }
     std::size_t n_occ = 0;
-    for (std::size_t k = 0; k < K_trunc; ++k) if (counts[k] > 0.0) ++n_occ;
+    for (std::size_t k = 0; k < K_trunc; ++k) n_occ += occ_flag[k];
+
+    const double alpha_final = gc_final.at("alpha")[0];
 
     std::printf("DPGaussianMixture demo (truncated-DP Gaussian mixture)\n");
-    std::printf("  N=%zu d=%zu K_trunc=%zu  occupied clusters (final)=%zu\n",
-                N, d, K_trunc, n_occ);
+    std::printf("  N=%zu d=%zu K_trunc=%zu  occupied clusters (final)=%zu  alpha=%.3f\n",
+                N, d, K_trunc, n_occ, alpha_final);
     std::printf("  truth centres : (% .2f,% .2f) (% .2f,% .2f)\n",
                 mu_true[0][0], mu_true[0][1], mu_true[1][0], mu_true[1][1]);
     std::printf("  recovered     : (% .2f,% .2f) (% .2f,% .2f)\n",
@@ -708,8 +1181,6 @@ int main() {
     std::printf("  RMSE model=%.3f   RMSE naive-global-mean baseline=%.3f\n",
                 rmse_model, rmse_baseline);
 
-    // PASS: model recovers both centres tightly AND crushes the naive
-    // global-mean baseline. Both conditions derived from real numbers.
     const bool ok = (rmse_model < 0.4) &&
                     (rmse_model < 0.25 * rmse_baseline);
     std::printf("%s\n", ok
@@ -717,3 +1188,4 @@ int main() {
         : "[demo FAIL] cluster-mean recovery did not meet tolerance");
     return ok ? 0 : 1;
 }
+#endif

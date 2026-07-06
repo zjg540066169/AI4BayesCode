@@ -937,3 +937,128 @@ PYBIND11_MODULE(PYGaussianMixture, m) {
              pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
 }
 #endif
+
+// ============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (pure C++; compiled only when NEITHER
+//  binding module is defined). Simulates a well-separated 3-component Gaussian
+//  mixture in d=2, fits the Pitman-Yor mixture at discount=0 (the identified DP
+//  regime), and checks cluster recovery. Because mixture labels are
+//  permutation-symmetric, the check is LABEL-PERMUTATION TOLERANT: for each true
+//  centre we require SOME fitted component carrying meaningful posterior weight
+//  sits close to it (posterior-mean of mu/pi over kept draws). State is read via
+//  the FULL 6-method contract get_current(); NOTE mu/lambda are returned
+//  COLUMN-MAJOR (index = j * K_trunc + k), NOT the internal row-major layout.
+// ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+int main() {
+    // ---- simulate from a KNOWN 3-cluster truth --------------------------
+    const std::size_t d     = 2;
+    const std::size_t per   = 120;          // points per cluster
+    const std::size_t N     = 3 * per;
+    const double      sd    = 0.6;          // tight, well-separated
+
+    // True centres (well separated relative to sd):
+    const double centres[3][2] = {
+        { -6.0, -6.0 },
+        {  6.0,  0.0 },
+        {  0.0,  6.0 }
+    };
+
+    std::mt19937_64 sim_rng(20240621ULL);
+    std::normal_distribution<double> noise(0.0, sd);
+    arma::mat y(N, d);
+    {
+        std::size_t row = 0;
+        for (std::size_t c = 0; c < 3; ++c)
+            for (std::size_t i = 0; i < per; ++i, ++row)
+                for (std::size_t j = 0; j < d; ++j)
+                    y(row, j) = centres[c][j] + noise(sim_rng);
+    }
+
+    // ---- build + fit the PY mixture (discount = 0 -> identified DP) ------
+    const int    K_trunc  = 10;             // over-truncated; PY/DP prunes
+    const double discount = 0.0;
+    // Data-driven ctor: (y, K_trunc, discount, rng_seed, keep_history).
+    PYGaussianMixture model(y, K_trunc, discount, /*rng_seed=*/7, /*keep_history=*/false);
+
+    // warmup
+    const int n_warm = 1500;
+    model.step(n_warm);
+
+    // sampling: accumulate posterior-mean of pi and mu over kept draws.
+    // get_current() returns pi (length K), mu COLUMN-MAJOR (index j*K + k),
+    // and alpha (length 1).
+    const int M = 2000;
+    const std::size_t Ksz = static_cast<std::size_t>(K_trunc);
+    arma::vec pi_bar(Ksz, arma::fill::zeros);
+    arma::mat mu_bar(Ksz, d, arma::fill::zeros);
+    double alpha_bar = 0.0;
+    for (int s = 0; s < M; ++s) {
+        model.step(1);
+        const auto gc = model.get_current();
+        const arma::vec& pi = gc.at("pi");
+        const arma::vec& mu = gc.at("mu");   // column-major: index = j*K + k
+        for (std::size_t k = 0; k < Ksz; ++k) {
+            pi_bar[k] += pi[k];
+            for (std::size_t j = 0; j < d; ++j)
+                mu_bar(k, j) += mu[j * Ksz + k];
+        }
+        alpha_bar += gc.at("alpha")[0];
+    }
+    pi_bar    /= static_cast<double>(M);
+    mu_bar    /= static_cast<double>(M);
+    alpha_bar /= static_cast<double>(M);
+
+    // ---- recovery check (label-permutation tolerant) -------------------
+    // A component is "active" if its mean posterior weight exceeds a floor.
+    const double weight_floor = 0.05;
+    std::size_t n_active = 0;
+    for (std::size_t k = 0; k < Ksz; ++k)
+        if (pi_bar[k] > weight_floor) ++n_active;
+
+    // For each TRUE centre, find the nearest active fitted component and
+    // record (a) the distance and (b) that it carries meaningful weight.
+    bool all_centres_matched = true;
+    double worst_dist = 0.0;
+    std::printf("PYGaussianMixture demo (PY discount=%.1f, K_trunc=%d, "
+                "N=%zu, d=%zu)\n", discount, K_trunc, N, d);
+    std::printf("  posterior-mean alpha = %.3f, n_active(pi>%.2f) = %zu "
+                "(truth K=3)\n", alpha_bar, weight_floor, n_active);
+    for (std::size_t c = 0; c < 3; ++c) {
+        double best = std::numeric_limits<double>::infinity();
+        std::size_t best_k = 0;
+        for (std::size_t k = 0; k < Ksz; ++k) {
+            if (pi_bar[k] <= weight_floor) continue;
+            double dist2 = 0.0;
+            for (std::size_t j = 0; j < d; ++j) {
+                const double dv = mu_bar(k, j) - centres[c][j];
+                dist2 += dv * dv;
+            }
+            const double dist = std::sqrt(dist2);
+            if (dist < best) { best = dist; best_k = k; }
+        }
+        if (best > worst_dist) worst_dist = best;
+        const bool matched = std::isfinite(best) && best < 0.75;
+        if (!matched) all_centres_matched = false;
+        std::printf("  true centre (%.1f, %.1f): nearest active comp %zu at "
+                    "(%.2f, %.2f), dist=%.3f, weight=%.3f  [%s]\n",
+                    centres[c][0], centres[c][1], best_k,
+                    std::isfinite(best) ? mu_bar(best_k, 0) : 0.0,
+                    std::isfinite(best) ? mu_bar(best_k, 1) : 0.0,
+                    best,
+                    std::isfinite(best) ? pi_bar[best_k] : 0.0,
+                    matched ? "OK" : "MISS");
+    }
+
+    // Pass criterion: all 3 true centres matched by a distinct, meaningful
+    // component, modal active count is 3 (not over/under clustered), and the
+    // worst centre-recovery distance is small relative to sd.
+    const bool ok = all_centres_matched && (n_active == 3) && (worst_dist < 0.75);
+    std::printf("%s\n",
+                ok ? "[demo PASS] PY mixture recovers the 3 true clusters "
+                     "(label-permutation tolerant)"
+                   : "[demo FAIL] cluster recovery did not meet criterion");
+    return ok ? 0 : 1;
+}
+#endif

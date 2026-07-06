@@ -395,7 +395,6 @@ public:
     }
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -538,7 +537,8 @@ RCPP_MODULE(DirichletHierarchical_module) {
             "S_obs (K x P), Beta hyperprior shapes (beta_a, beta_b), RNG seed "
             "(0 = random), and keep_history (default FALSE).")
         .method("step", (void (DirichletHierarchical::*)())    &DirichletHierarchical::step, "Run one sweep.")
-        .method("step", (void (DirichletHierarchical::*)(int)) &DirichletHierarchical::step, "Run n sweeps (each: one JOINT NUTS update of (s, kappa, theta)).")
+        .method("step", (void (DirichletHierarchical::*)(int)) &DirichletHierarchical::step,
+                "Run n sweeps (each: one JOINT NUTS update of (s, kappa, theta)).")
         .method("get_current", &DirichletHierarchical::get_current,
                 "Return current draw as a named list.")
         .method("set_current", &DirichletHierarchical::set_current,
@@ -565,7 +565,7 @@ PYBIND11_MODULE(DirichletHierarchical, m) {
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
         .def("step", (void (DirichletHierarchical::*)())    &DirichletHierarchical::step, "Run one sweep.")
-        .def("step", (void (DirichletHierarchical::*)(int)) &DirichletHierarchical::step, pybind11::arg("n_steps"))
+        .def("step", (void (DirichletHierarchical::*)(int)) &DirichletHierarchical::step,    pybind11::arg("n_steps"))
         .def("get_current",  &DirichletHierarchical::get_current)
         .def("set_current",  &DirichletHierarchical::set_current, pybind11::arg("params"))
         .def("predict_at",   &DirichletHierarchical::predict_at,  pybind11::arg("new_data"))
@@ -573,5 +573,127 @@ PYBIND11_MODULE(DirichletHierarchical, m) {
         .def("get_history",  &DirichletHierarchical::get_history)
         .def("readapt_NUTS", &DirichletHierarchical::readapt_NUTS,
              pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
+// ============================================================================
+//  Standalone demo: simulate -> fit -> recover.
+//
+//  Generative truth:
+//    - Pick a known base simplex s_true (length P) and concentration
+//      kappa_true. Each observed row S_obs(k, :) ~ Dirichlet(kappa_true *
+//      s_true), exactly the per-document model s_k | s, kappa.
+//    - Fit the joint_nuts_block model and recover the posterior mean of s.
+//
+//  PASS criterion (honest recovery check):
+//    (1) the posterior-mean s must beat the uniform simplex (1/P) baseline in
+//        L2 distance to s_true (the data is informative), AND
+//    (2) the posterior-mean kappa must be the right order of magnitude
+//        (within a factor of ~3 of kappa_true).
+//
+//  State is read via the full contract get_current() (keys: s, kappa, theta)
+//  instead of a minimal accessor.
+// ============================================================================
+
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+
+namespace {
+
+// Draw one Dirichlet(alpha) simplex via independent Gammas.
+arma::vec dh_rdirichlet(const arma::vec& alpha, std::mt19937_64& rng) {
+    const std::size_t P = alpha.n_elem;
+    arma::vec out(P);
+    double sum_g = 0.0;
+    for (std::size_t i = 0; i < P; ++i) {
+        std::gamma_distribution<double> gam(std::max(alpha[i], 1e-10), 1.0);
+        double g = gam(rng);
+        if (g < 1e-300) g = 1e-300;
+        out[i] = g;
+        sum_g += g;
+    }
+    out /= sum_g;
+    return out;
+}
+
+}  // namespace
+
+int main() {
+    // ---- Known truth ------------------------------------------------------
+    const std::size_t P = 4;
+    const int         K = 400;          // number of observed simplexes (docs)
+    const double kappa_true = 30.0;     // concentration: rows cluster near s_true
+    arma::vec s_true = {0.50, 0.25, 0.15, 0.10};   // base simplex
+    s_true /= arma::sum(s_true);
+
+    std::mt19937_64 sim_rng(20260621ULL);
+
+    // ---- Simulate K rows ~ Dirichlet(kappa_true * s_true) -----------------
+    arma::mat S_obs(static_cast<arma::uword>(K), static_cast<arma::uword>(P));
+    const arma::vec dir_alpha = kappa_true * s_true;
+    for (int k = 0; k < K; ++k) {
+        arma::vec row = dh_rdirichlet(dir_alpha, sim_rng);
+        // Guard against exact zeros (model requires strictly positive entries).
+        for (std::size_t i = 0; i < P; ++i)
+            row[i] = std::max(row[i], 1e-8);
+        row /= arma::sum(row);
+        S_obs.row(k) = row.t();
+    }
+
+    // ---- Fit --------------------------------------------------------------
+    const double beta_a = 0.5, beta_b = 1.0;
+    const int    seed   = 12345;
+    DirichletHierarchical model(S_obs, beta_a, beta_b, seed);
+
+    const int n_warm = 300;   // warmup sweeps (joint block also self-warms 800 on first call)
+    const int n_keep = 1500;  // kept sweeps
+    model.step(n_warm);       // discard
+
+    arma::vec s_sum(static_cast<arma::uword>(P), arma::fill::zeros);
+    double kappa_sum = 0.0, theta_sum = 0.0;
+    for (int it = 0; it < n_keep; ++it) {
+        model.step(1);
+        const auto gc = model.get_current();          // copy (avoids dangling ref)
+        const arma::vec& s     = gc.at("s");
+        const arma::vec& kappa = gc.at("kappa");
+        const arma::vec& theta = gc.at("theta");
+        s_sum     += s;
+        kappa_sum += kappa[0];
+        theta_sum += theta[0];
+    }
+    const arma::vec s_hat   = s_sum / static_cast<double>(n_keep);
+    const double    kappa_hat = kappa_sum / static_cast<double>(n_keep);
+    const double    theta_hat = theta_sum / static_cast<double>(n_keep);
+
+    // ---- Compare to truth + uniform baseline ------------------------------
+    const arma::vec s_unif(static_cast<arma::uword>(P),
+                           arma::fill::value(1.0 / static_cast<double>(P)));
+    const double err_hat  = arma::norm(s_hat  - s_true, 2);
+    const double err_unif = arma::norm(s_unif - s_true, 2);
+
+    std::printf("=== DirichletHierarchical standalone demo ===\n");
+    std::printf("  P = %zu, K = %d, kappa_true = %.2f\n", P, K, kappa_true);
+    std::printf("  s_true   = [");
+    for (std::size_t i = 0; i < P; ++i) std::printf(" %.4f", s_true[i]);
+    std::printf(" ]\n  s_hat    = [");
+    for (std::size_t i = 0; i < P; ++i) std::printf(" %.4f", s_hat[i]);
+    std::printf(" ]\n  s_unif   = [");
+    for (std::size_t i = 0; i < P; ++i) std::printf(" %.4f", s_unif[i]);
+    std::printf(" ]\n");
+    std::printf("  ||s_hat - s_true||_2  = %.5f\n", err_hat);
+    std::printf("  ||s_unif - s_true||_2 = %.5f   (naive baseline)\n", err_unif);
+    std::printf("  kappa_hat = %.3f   (truth %.3f)\n", kappa_hat, kappa_true);
+    std::printf("  theta_hat = %.4f\n", theta_hat);
+
+    const bool beats_baseline = err_hat < 0.5 * err_unif;   // clearly better than uniform
+    const bool kappa_ok = (kappa_hat > kappa_true / 3.0) &&
+                          (kappa_hat < kappa_true * 3.0);
+    const bool ok = beats_baseline && kappa_ok && std::isfinite(theta_hat);
+
+    std::printf("  recovery beats baseline: %s   kappa order-of-magnitude: %s\n",
+                beats_baseline ? "yes" : "NO",
+                kappa_ok ? "yes" : "NO");
+    std::printf(ok ? "[demo PASS]\n" : "[demo FAIL]\n");
+    return ok ? 0 : 1;
 }
 #endif

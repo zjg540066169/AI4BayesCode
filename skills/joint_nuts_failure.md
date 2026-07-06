@@ -125,13 +125,23 @@ yet each chain looks well-mixed internally; ESS may look fine per-chain.
 - Any exact permutation/sign symmetry in the prompt's parameterization.
 
 ### Fix
-Add an **identifying constraint** that breaks the symmetry, e.g.:
-- `ordered` constraint on component means (μ_1 < μ_2 < …),
-- positivity on the first factor loading,
-- a fixed reference category.
-If an identifying constraint is unnatural, ACCEPT the symmetry and report with
-**label-invariant summaries** (e.g. sorted component parameters) rather than
-per-label R-hat.
+Usually NOT a sampler bug. The **preferred / default** handling is at the
+**R-hat / post-draw** level, not inside the sampler:
+1. **Diagnose** on **label-invariant** quantities — R-hat of the sorted /
+   order-statistic component parameters (or of post-hoc relabeled draws), NOT
+   raw per-label R-hat. If the label-invariant R-hat converges, the sampler is
+   fine and the raw per-label blow-up is the benign symmetry artifact.
+2. **Resolve** POST-HOC — relabel the posterior draws (simple-sort /
+   Stephens 2000 / Hungarian) in the diagnostics / analysis layer, per
+   `label_switching.md`. Let the sampler explore all K! symmetric modes freely.
+
+An in-sampler `ordered` / identifying constraint (`μ_1 < μ_2 < …`), monotone
+reparameterization, or positivity-on-the-first-loading is a **NOT-RECOMMENDED
+fallback — discouraged, not forbidden.** It CAN break the symmetry, but tends
+to interact badly with slow-mixing discrete-allocation companions, is
+error-prone, can hurt mixing, and may bias the natural-scale posterior
+(`codegen_cpp.md` §205). Reach for it only when a model genuinely cannot be
+resolved post-hoc (some models legitimately need it).
 
 ### Empirical evidence (this repo)
 `hmm_drive_0`: φ[1] and φ[2] are exchangeable transition rows → R-hat ≈ 2.23

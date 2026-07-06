@@ -645,8 +645,7 @@ RCPP_MODULE(SoftBartNoise_module) {
             "FALSE), keep_history (record numeric per-step buffers; "
             "cheap; default FALSE).")
         .method("step", (void (SoftBartNoise::*)())    &SoftBartNoise::step, "Run one sweep.")
-        .method("step", (void (SoftBartNoise::*)(int)) &SoftBartNoise::step,
-                "Run n Gibbs sweeps.")
+        .method("step", (void (SoftBartNoise::*)(int)) &SoftBartNoise::step, "Run n Gibbs sweeps.")
         .method("get_current", &SoftBartNoise::get_current,
                 "Return the current draw as a named list with $f_softbart "
                 "and $sigma. The serialized SoftBart forest is available "

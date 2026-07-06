@@ -243,7 +243,6 @@ public:
     // ---- backend-neutral interface ---------------------------------
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -408,5 +407,115 @@ PYBIND11_MODULE(OrderMCMCBN, m) {
         .def("predict_at",  &OrderMCMCBN::predict_at,  pybind11::arg("new_data"))
         .def("get_dag",     &OrderMCMCBN::get_dag)
         .def("get_history", &OrderMCMCBN::get_history);
+}
+#endif
+
+// ============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
+//
+//  Honest recovery check for a STRUCTURE-LEARNING model: there is no scalar
+//  parameter to recover, so we test that the sampler concentrates posterior
+//  mass on the TRUE skeleton.
+//
+//  Truth: a 4-variable binary chain  X0 -> X1 -> X2 -> X3  (a strong Markov
+//  chain). Each child copies its parent w.p. 0.9, flips w.p. 0.1; X0 is a
+//  fair coin. The true skeleton (undirected edges) is exactly the three
+//  chain links {0-1, 1-2, 2-3}; the three non-adjacent pairs {0-2, 0-3,
+//  1-3} are NON-edges.
+//
+//  We run order MCMC, sample one DAG per kept step, accumulate the posterior
+//  SKELETON marginal P(i~j | D) for every unordered pair, and PASS iff every
+//  true-edge marginal clears every non-edge marginal by a clear gap. State is
+//  read via the FULL contract: get_current()["sampled_DAG"] (n*n flattened,
+//  COLUMN-MAJOR, element (i,j) at index i + j*n; A[i,j]=1 ⇔ j is parent of i).
+// ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+#include <cmath>
+#include <vector>
+#include <algorithm>
+
+int main() {
+    const std::size_t n   = 4;       // variables: chain X0->X1->X2->X3
+    const std::size_t N   = 4000;    // samples
+    const double      flip = 0.10;   // child disagrees with parent w.p. flip
+
+    // ---- Simulate the chain BN -------------------------------------------
+    std::mt19937_64 sim(123);
+    std::uniform_real_distribution<double> U(0.0, 1.0);
+    arma::mat data(N, n, arma::fill::zeros);   // integer-valued (0/1) doubles
+    for (std::size_t r = 0; r < N; ++r) {
+        int prev = (U(sim) < 0.5) ? 1 : 0;   // X0 ~ Bernoulli(0.5)
+        data(r, 0) = static_cast<double>(prev);
+        for (std::size_t j = 1; j < n; ++j) {
+            int xj = (U(sim) < flip) ? (1 - prev) : prev;  // copy parent, flip
+            data(r, j) = static_cast<double>(xj);
+            prev = xj;
+        }
+    }
+    arma::vec cards(n);
+    cards.fill(2.0);   // all binary
+
+    // ---- Fit order MCMC --------------------------------------------------
+    OrderMCMCBN model(data, cards,
+                      /*bdeu_alpha=*/1.0,
+                      /*max_parents=*/3,
+                      /*candidate_top_C=*/20,
+                      /*family_cache_F=*/4000,
+                      /*gamma_prune_nats=*/10.0,
+                      /*prob_adjacent_swap=*/0.5,
+                      /*initial_order=*/arma::vec(),   // empty = random init
+                      /*rng_seed=*/7,
+                      /*keep_history=*/false);
+
+    model.step(2000);   // burn-in
+
+    // Accumulate the posterior SKELETON marginal for each unordered pair.
+    const int M = 8000;
+    arma::mat skel(n, n, arma::fill::zeros);
+    for (int s = 0; s < M; ++s) {
+        model.step(1);
+        // Read the sampled DAG via the FULL contract (column-major flatten:
+        // element (i,j) at index i + j*n; A[i,j]=1 ⇔ j is parent of i).
+        const auto gc = model.get_current();
+        const arma::vec& dag_v = gc.at("sampled_DAG");
+        auto A = [&](std::size_t i, std::size_t j) -> double {
+            return dag_v[i + j * n];
+        };
+        for (std::size_t i = 0; i < n; ++i)
+            for (std::size_t j = i + 1; j < n; ++j)
+                if (A(i, j) != 0.0 || A(j, i) != 0.0) skel(i, j) += 1.0;
+    }
+    skel /= static_cast<double>(M);
+
+    // ---- Score against the known skeleton --------------------------------
+    // True skeleton edges of the chain: (0,1), (1,2), (2,3).
+    auto is_true_edge = [](std::size_t i, std::size_t j) {
+        return (j == i + 1);   // adjacent in the chain
+    };
+
+    std::printf("OrderMCMCBN demo: posterior skeleton marginals P(i~j | D)\n");
+    double min_true_edge = 1.0;
+    double max_non_edge  = 0.0;
+    for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t j = i + 1; j < n; ++j) {
+            const double p = skel(i, j);
+            const bool te = is_true_edge(i, j);
+            std::printf("   %zu ~ %zu : %.3f  [%s]\n", i, j, p,
+                        te ? "TRUE edge" : "non-edge");
+            if (te) min_true_edge = std::min(min_true_edge, p);
+            else    max_non_edge  = std::max(max_non_edge,  p);
+        }
+    }
+    std::printf("   min(true-edge marginal) = %.3f\n", min_true_edge);
+    std::printf("   max(non-edge marginal)  = %.3f\n", max_non_edge);
+
+    const bool ok = (min_true_edge > 0.80) &&
+                    (max_non_edge  < 0.50) &&
+                    (min_true_edge - max_non_edge > 0.30);
+    std::printf("%s\n", ok
+        ? "[demo PASS] order MCMC recovers the chain skeleton"
+        : "[demo FAIL] skeleton not separated from non-edges");
+    return ok ? 0 : 1;
 }
 #endif

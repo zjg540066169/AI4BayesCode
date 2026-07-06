@@ -2,16 +2,17 @@
 // Licensed under the GNU General Public License v2.0 or later
 // (GPL-2.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
-//  DirichletHierarchical.cpp
+//  DirichletHierarchical_joint.cpp
 //
-//  Hierarchical Dirichlet example. (s, kappa, theta) are sampled by ONE
-//  joint_nuts_block rather than three separate single nuts_blocks updated
-//  Gibbs-style. This collapses the three tightly-coupled parameters (s and
-//  kappa share a kappa*s_i argument to lgamma, and s and theta share the
-//  Dirichlet prior alpha = theta/P) into a single HMC trajectory.
+//  JOINT-NUTS rewrite of DirichletHierarchical.cpp. Same model, same priors,
+//  same posterior — but (s, kappa, theta) are sampled by ONE joint_nuts_block
+//  instead of three separate single nuts_blocks updated Gibbs-style. This
+//  collapses the three tightly-coupled parameters (s and kappa share a
+//  kappa*s_i argument to lgamma, and s and theta share the Dirichlet prior
+//  alpha = theta/P) into a single HMC trajectory.
 //
-//  Model
-//  -----
+//  Model (identical to DirichletHierarchical.cpp)
+//  -----------------------------------------------
 //      s_k | s, kappa         ~ Dirichlet(kappa * s),   k = 1..K
 //      s                      ~ Dirichlet(theta/P, ..., theta/P)
 //      kappa                  ~ Gamma(shape = 1, rate = 1)    ( == Exp(1) )
@@ -45,10 +46,53 @@
 //  joint_nuts_block adds per-slice Jacobians (stick-breaking for s, log for
 //  kappa and theta) internally; this function stays on the NATURAL scale.
 // ============================================================================
+//
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("DirichletHierarchical")
+//   set.seed(2026)
+//   ## Simulate K=400 simplexes ~ Dirichlet(kappa_true * s_true): well
+//   ## replicated (400 obs to identify a length-4 base simplex + kappa + theta).
+//   P <- 4L; K <- 400L; kappa_true <- 30
+//   s_true <- c(0.50, 0.25, 0.15, 0.10); s_true <- s_true / sum(s_true)
+//   rdir <- function(a) { g <- rgamma(length(a), shape = a, rate = 1); g / sum(g) }
+//   S_obs <- t(replicate(K, pmax(rdir(kappa_true * s_true), 1e-8)))
+//   S_obs <- S_obs / rowSums(S_obs)
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(DirichletHierarchical, S_obs, 0.5, 1.0, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(DirichletHierarchical,
+//            S_obs,   # K x P matrix of observed simplexes
+//            0.5,     # beta_a : Beta hyperprior shape on theta/(theta+P)
+//            1.0,     # beta_b : Beta hyperprior shape on theta/(theta+P)
+//            7L,      # rng_seed (0 = random)
+//            TRUE)    # keep_history
+//   m$step(2500); str(m$get_current())
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(2026)
+//   ## Simulate K=400 simplexes ~ Dirichlet(kappa_true * s_true).
+//   P, K, kappa_true = 4, 400, 30.0
+//   s_true = np.array([0.50, 0.25, 0.15, 0.10]); s_true = s_true / s_true.sum()
+//   def rdir(a):
+//       g = rng.gamma(shape=a, scale=1.0); return g / g.sum()
+//   S_obs = np.vstack([np.maximum(rdir(kappa_true * s_true), 1e-8) for _ in range(K)])
+//   S_obs = S_obs / S_obs.sum(axis=1, keepdims=True)
+//   Mod = AI4BayesCode.example("DirichletHierarchical")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.DirichletHierarchical(S_obs, 0.5, 1.0, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.DirichletHierarchical(S_obs, 0.5, 1.0, 7, True)  # (S_obs, beta_a, beta_b, seed, keep_history)
+//   m.step(2500); print(m.get_current())
+// @example:end
 
-// Frontend-independent standalone build: no Rcpp / no pybind. The model,
-// priors, joint log-density and block wiring are preserved exactly; only the
-// R/Python binding layer is removed and an int main() demo is added.
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -57,47 +101,25 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <limits>
 #include <memory>
 #include <random>
-#include <stdexcept>
-
-// ----------------------------------------------------------------------------
-// Standalone replacements for the backend-neutral math helpers that were
-// previously pulled in from AI4BayesCode/backend_neutral.hpp. These are pure
-// std-math functions with no frontend dependency.
-// ----------------------------------------------------------------------------
-namespace ai4b {
-inline double lgammafn(double x) { return std::lgamma(x); }
-
-// digamma(): psi(x) for x > 0. Recurrence to x >= 6 then the standard
-// asymptotic (Bernoulli) expansion; matches R's digamma() to ~1e-12.
-inline double digamma(double x) {
-    double result = 0.0;
-    while (x < 6.0) {
-        result -= 1.0 / x;
-        x += 1.0;
-    }
-    const double inv  = 1.0 / x;
-    const double inv2 = inv * inv;
-    result += std::log(x) - 0.5 * inv
-            - inv2 * (1.0 / 12.0
-                      - inv2 * (1.0 / 120.0
-                                - inv2 * (1.0 / 252.0)));
-    return result;
-}
-}  // namespace ai4b
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -224,8 +246,7 @@ double s_kappa_theta_joint_log_density(const arma::vec& x,
 } // anonymous namespace
 
 // ============================================================================
-//  Model class (frontend-independent). Drives one joint_nuts_block over
-//  (s SIMPLEX, kappa POSITIVE, theta POSITIVE) inside a composite_block.
+//  User-facing class exposed to R.
 // ============================================================================
 
 class DirichletHierarchical {
@@ -252,13 +273,13 @@ public:
         const int K = static_cast<int>(S_obs.n_rows);
         const int P = static_cast<int>(S_obs.n_cols);
         if (K < 1) {
-            throw std::runtime_error("S_obs must have at least 1 row");
+            ai4b::stop("S_obs must have at least 1 row");
         }
         if (P < 2) {
-            throw std::runtime_error("S_obs must have at least 2 columns");
+            ai4b::stop("S_obs must have at least 2 columns");
         }
         if (beta_a <= 0.0 || beta_b <= 0.0) {
-            throw std::runtime_error("beta_a, beta_b must be > 0");
+            ai4b::stop("beta_a, beta_b must be > 0");
         }
 
         // ---- Pick initial values internally --------------------------------
@@ -271,7 +292,7 @@ public:
             for (int i = 0; i < P; ++i) {
                 const double sk = S_obs(k, i);
                 if (sk <= 0.0) {
-                    throw std::runtime_error("S_obs entries must be strictly positive");
+                    ai4b::stop("S_obs entries must be strictly positive");
                 }
                 L[i] += std::log(sk);
             }
@@ -378,12 +399,120 @@ public:
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
 
-    // Neutral-typed accessor: the composite_block writes each joint sub-param
-    // output ("s", "kappa", "theta") back into data() after every step(), so
-    // the current draw is read directly from the shared_data_t.
-    const AI4BayesCode::shared_data_t& data() const { return impl_->data(); }
+    AI4BayesCode::state_map get_current() const {
+        AI4BayesCode::state_map out;
+        out["s"]     = impl_->data().get("s");        // length-P simplex vector
+        out["kappa"] = impl_->data().get("kappa");    // length-1 arma::vec
+        out["theta"] = impl_->data().get("theta");    // length-1 arma::vec
+        return out;
+    }
+
+    void set_current(const AI4BayesCode::state_map& params) {
+        auto& jblk = dynamic_cast<joint_nuts_block&>(impl_->child(0));
+        const std::size_t P = jblk.sub_param_dim("s");
+        arma::vec cat_new = jblk.current();   // [s(0)...s(P-1), kappa, theta]
+        bool touched = false;
+
+        auto it_s = params.find("s");
+        if (it_s != params.end()) {
+            arma::vec s_new = it_s->second;
+            if (s_new.n_elem != P) ai4b::stop("s has wrong length");
+            if (arma::any(s_new <= 0.0)) ai4b::stop("s entries must be strictly positive");
+            const double ssum = arma::sum(s_new);
+            if (std::abs(ssum - 1.0) > 1e-8) s_new /= ssum;
+            for (std::size_t i = 0; i < P; ++i) cat_new[i] = s_new[i];
+            touched = true;
+        }
+        auto it_kappa = params.find("kappa");
+        if (it_kappa != params.end()) {
+            const double k_new = it_kappa->second[0];
+            if (k_new <= 0.0) ai4b::stop("kappa must be > 0");
+            cat_new[P] = k_new;
+            touched = true;
+        }
+        auto it_theta = params.find("theta");
+        if (it_theta != params.end()) {
+            const double th_new = it_theta->second[0];
+            if (th_new <= 0.0) ai4b::stop("theta must be > 0");
+            cat_new[P + 1] = th_new;
+            touched = true;
+        }
+        if (touched) {
+            jblk.set_current(cat_new);
+            impl_->data().set("s",     cat_new.subvec(0, P - 1));
+            impl_->data().set("kappa", arma::vec{cat_new[P]});
+            impl_->data().set("theta", arma::vec{cat_new[P + 1]});
+        }
+    }
+
+    // Posterior-predictive: y_rep ~ Dirichlet(kappa * s), one new simplex obs.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
+        if (!new_data.empty()) {
+            ai4b::stop("DirichletHierarchical has no covariate inputs. "
+                       "predict_at() takes an empty map/list.");
+        }
+        AI4BayesCode::history_map out;
+
+        if (!keep_history_) {
+            block_context replaced;
+            block_context result = impl_->predict_at(replaced, predict_rng_);
+            for (const auto& kv : result) {
+                arma::mat m(1, kv.second.n_elem);
+                for (std::size_t j = 0; j < kv.second.n_elem; ++j)
+                    m(0, j) = kv.second[j];
+                out.emplace(kv.first, std::move(m));
+            }
+            return out;
+        }
+
+        // History mode: s and kappa are sub-outputs of the joint block (keyed
+        // by sub-param name in get_history()). Compute y_rep manually per
+        // draw (cf. IRT1PL_joint.cpp — composite predict_at rejects sub-param
+        // keys as replaced context for joint sub-outputs).
+        AI4BayesCode::history_map hist = impl_->get_history();
+        const arma::mat& s_hist     = hist.at("s");      // n_draws x P
+        const arma::mat& kappa_hist = hist.at("kappa");  // n_draws x 1
+        const std::size_t n_draws = s_hist.n_rows;
+        const std::size_t P       = s_hist.n_cols;
+
+        // y_rep has length K = P (same simplex dimensionality as the observations)
+        const std::size_t K_rep = P;
+        arma::mat yrep(n_draws, K_rep);
+
+        for (std::size_t d = 0; d < n_draws; ++d) {
+            const double kappa = kappa_hist(d, 0);
+            double sum_g = 0.0;
+            for (std::size_t k = 0; k < K_rep; ++k) {
+                const double alpha_k = std::max(kappa * s_hist(d, k), 1e-10);
+                std::gamma_distribution<double> gam(alpha_k, 1.0);
+                double g = gam(predict_rng_);
+                if (g < 1e-300) g = 1e-300;
+                yrep(d, k) = g;
+                sum_g += g;
+            }
+            if (sum_g > 0.0) {
+                for (std::size_t k = 0; k < K_rep; ++k)
+                    yrep(d, k) /= sum_g;
+            }
+        }
+
+        out.emplace("y_rep", std::move(yrep));
+        return out;
+    }
+
+    AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
 
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
+
+    /// Re-tune NUTS metric (mass matrix + step size + dual averaging) without
+    /// advancing chain state.
+    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
+        if (n < 0) {
+            ai4b::stop("readapt_NUTS: n must be non-negative");
+        }
+        impl_->readapt_NUTS(static_cast<std::size_t>(n),
+                            reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
+    }
 
 private:
     std::mt19937_64                  rng_;
@@ -392,6 +521,60 @@ private:
     std::unique_ptr<composite_block> impl_;
     bool                             keep_history_ = false;
 };
+
+// ============================================================================
+//  Rcpp module
+// ============================================================================
+
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(DirichletHierarchical_module) {
+    Rcpp::class_<DirichletHierarchical>("DirichletHierarchical")
+        .constructor<arma::mat, double, double, int>(
+            "Legacy constructor; keep_history defaults to FALSE.")
+        .constructor<arma::mat, double, double, int, bool>(
+            "Joint-NUTS DirichletHierarchical: (s, kappa, theta) in one "
+            "joint_nuts_block (SIMPLEX + POSITIVE + POSITIVE). Construct with "
+            "S_obs (K x P), Beta hyperprior shapes (beta_a, beta_b), RNG seed "
+            "(0 = random), and keep_history (default FALSE).")
+        .method("step", (void (DirichletHierarchical::*)())    &DirichletHierarchical::step, "Run one sweep.")
+        .method("step", (void (DirichletHierarchical::*)(int)) &DirichletHierarchical::step,
+                "Run n sweeps (each: one JOINT NUTS update of (s, kappa, theta)).")
+        .method("get_current", &DirichletHierarchical::get_current,
+                "Return current draw as a named list.")
+        .method("set_current", &DirichletHierarchical::set_current,
+                "Overwrite s, kappa, or theta from a named list.")
+        .method("predict_at",  &DirichletHierarchical::predict_at,
+                "No covariate inputs; takes empty list, returns y_rep.")
+        .method("get_dag",     &DirichletHierarchical::get_dag,
+                "Return the predict DAG.")
+        .method("get_history", &DirichletHierarchical::get_history,
+                "History of [s, kappa, theta] draws.")
+        .method("readapt_NUTS", &DirichletHierarchical::readapt_NUTS);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(DirichletHierarchical, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<DirichletHierarchical>(m, "DirichletHierarchical")
+        .def(pybind11::init<arma::mat, double, double, int, bool>(),
+             pybind11::arg("S_obs"),
+             pybind11::arg("beta_a") = 0.5,
+             pybind11::arg("beta_b") = 1.0,
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false)
+        .def("step", (void (DirichletHierarchical::*)())    &DirichletHierarchical::step, "Run one sweep.")
+        .def("step", (void (DirichletHierarchical::*)(int)) &DirichletHierarchical::step,    pybind11::arg("n_steps"))
+        .def("get_current",  &DirichletHierarchical::get_current)
+        .def("set_current",  &DirichletHierarchical::set_current, pybind11::arg("params"))
+        .def("predict_at",   &DirichletHierarchical::predict_at,  pybind11::arg("new_data"))
+        .def("get_dag",      &DirichletHierarchical::get_dag)
+        .def("get_history",  &DirichletHierarchical::get_history)
+        .def("readapt_NUTS", &DirichletHierarchical::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
 
 // ============================================================================
 //  Standalone demo: simulate -> fit -> recover.
@@ -406,14 +589,19 @@ private:
 //    (1) the posterior-mean s must beat the uniform simplex (1/P) baseline in
 //        L2 distance to s_true (the data is informative), AND
 //    (2) the posterior-mean kappa must be the right order of magnitude
-//        (within a factor of ~3 of kappa_true) — Exp(1) prior pulls kappa
-//        toward 0, so we only require it not collapse and not blow up.
+//        (within a factor of ~3 of kappa_true).
+//
+//  State is read via the full contract get_current() (keys: s, kappa, theta)
+//  instead of a minimal accessor.
 // ============================================================================
+
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
 
 namespace {
 
 // Draw one Dirichlet(alpha) simplex via independent Gammas.
-arma::vec rdirichlet(const arma::vec& alpha, std::mt19937_64& rng) {
+arma::vec dh_rdirichlet(const arma::vec& alpha, std::mt19937_64& rng) {
     const std::size_t P = alpha.n_elem;
     arma::vec out(P);
     double sum_g = 0.0;
@@ -444,7 +632,7 @@ int main() {
     arma::mat S_obs(static_cast<arma::uword>(K), static_cast<arma::uword>(P));
     const arma::vec dir_alpha = kappa_true * s_true;
     for (int k = 0; k < K; ++k) {
-        arma::vec row = rdirichlet(dir_alpha, sim_rng);
+        arma::vec row = dh_rdirichlet(dir_alpha, sim_rng);
         // Guard against exact zeros (model requires strictly positive entries).
         for (std::size_t i = 0; i < P; ++i)
             row[i] = std::max(row[i], 1e-8);
@@ -465,9 +653,13 @@ int main() {
     double kappa_sum = 0.0, theta_sum = 0.0;
     for (int it = 0; it < n_keep; ++it) {
         model.step(1);
-        s_sum     += model.data().get("s");
-        kappa_sum += model.data().get("kappa")[0];
-        theta_sum += model.data().get("theta")[0];
+        const auto gc = model.get_current();          // copy (avoids dangling ref)
+        const arma::vec& s     = gc.at("s");
+        const arma::vec& kappa = gc.at("kappa");
+        const arma::vec& theta = gc.at("theta");
+        s_sum     += s;
+        kappa_sum += kappa[0];
+        theta_sum += theta[0];
     }
     const arma::vec s_hat   = s_sum / static_cast<double>(n_keep);
     const double    kappa_hat = kappa_sum / static_cast<double>(n_keep);
@@ -504,3 +696,4 @@ int main() {
     std::printf(ok ? "[demo PASS]\n" : "[demo FAIL]\n");
     return ok ? 0 : 1;
 }
+#endif

@@ -2,15 +2,17 @@
 // Licensed under the GNU General Public License v2.0 or later
 // (GPL-2.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
-//  ICARSpatialGMRF.cpp
+//  ICARSpatialGMRF_joint.cpp
 //
-//  ICAR spatial GMRF example. The three scalar hyperparameters (Intercept,
-//  tau, sigma) are sampled by ONE joint_nuts_block rather than three separate
-//  single nuts_blocks updated Gibbs-style. phi is sampled by the
-//  gmrf_precision_block (Rue 2001 direct draw + hard sum-to-zero).
+//  JOINT-NUTS rewrite of ICARSpatialGMRF.cpp. Same model, same priors,
+//  SAME posterior — but the three scalar hyperparameters (Intercept, tau,
+//  sigma) are sampled by ONE joint_nuts_block instead of three separate
+//  single nuts_blocks updated Gibbs-style. phi is still sampled by the
+//  gmrf_precision_block (Rue 2001 direct draw + hard sum-to-zero),
+//  unchanged.
 //
-//  Model
-//  -----
+//  Model (identical to ICARSpatialGMRF.cpp)
+//  ----------------------------------------
 //      y_t       ~ N(Intercept + phi_{node_idx[t]}, sigma)  t = 1..T
 //      phi       ~ ICAR(tau) with sum(phi) = 0
 //      Intercept ~ N(0, 100)                    // sd = 10, var = 100*100? No: N(0, 10^2) so var=100
@@ -45,12 +47,51 @@
 //                        sub_params = [{ "Intercept", 1, REAL },
 //                                      { "tau",       1, POSITIVE },
 //                                      { "sigma",     1, POSITIVE }]
+//
+//  cross-validation target: ICARSpatialGMRF.cpp (same model, same data,
+//  posteriors must match under R-hat + means/sd/ESS comparison).
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates spatial data on
-// a known graph from a known truth, fits the block, and checks recovery.
-// No R / Python binding is built or required.
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("ICARSpatialGMRF")
+//   P<-5; N<-P*P; cc<-(0:(N-1))%%P; rr<-(0:(N-1))%/%P                   # 5x5 lattice, N=25 nodes
+//   ei<-c((1:N)[cc<P-1], (1:N)[rr<P-1]); ej<-c((1:N)[cc<P-1]+1, (1:N)[rr<P-1]+P)  # grid edges (1-based)
+//   x<-cc/(P-1); yy<-rr/(P-1); phi<-2*sin(pi*x)*sin(pi*yy)+(x-0.5); phi<-phi-mean(phi)  # sum-to-zero field
+//   node<-rep(1:N, each=5L)                                             # 5 replicate obs/node -> identifies sigma
+//   set.seed(20260621); y<-4.0+phi[node]+rnorm(N*5L,0,0.5)             # Intercept=4, sigma=0.5
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(ICARSpatialGMRF, y, node, N, ei, ej, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m<-new(ICARSpatialGMRF, y, node, N, ei, ej, 7L, TRUE)             # y,node_idx,N,edge_i,edge_j,seed,keep_hist
+//   m$step(2500); str(m$get_current())
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   P = 5; N = P*P
+//   cc = np.arange(N) % P; rr = np.arange(N) // P                       # 5x5 lattice, N=25 nodes
+//   ei = np.concatenate([np.where(cc < P-1)[0] + 1, np.where(rr < P-1)[0] + 1])           # grid edges (1-based)
+//   ej = np.concatenate([np.where(cc < P-1)[0] + 2, np.where(rr < P-1)[0] + 1 + P])
+//   x = cc/(P-1); yy = rr/(P-1); phi = 2*np.sin(np.pi*x)*np.sin(np.pi*yy) + (x-0.5)
+//   phi = phi - phi.mean()                                              # sum-to-zero field
+//   node = np.repeat(np.arange(1, N+1), 5)                              # 5 replicate obs/node -> identifies sigma
+//   rng = np.random.default_rng(20260621)
+//   y = 4.0 + phi[node-1] + rng.normal(0.0, 0.5, N*5)                   # Intercept=4, sigma=0.5
+//   Mod = AI4BayesCode.example("ICARSpatialGMRF")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.ICARSpatialGMRF(y, node.astype(float), N, ei.astype(float), ej.astype(float), seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.ICARSpatialGMRF(y, node.astype(float), N,                  # indices NUMERIC (no arma::ivec caster)
+//                           ei.astype(float), ej.astype(float), 7, True)
+//   m.step(2500); print(m.get_current())                               # Intercept~4, sigma~0.5
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -59,14 +100,20 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#include <RcppArmadillo.h>
+#else
 #include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/gmrf_precision_block.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -74,7 +121,6 @@
 #include <memory>
 #include <random>
 #include <stdexcept>
-#include <vector>
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -244,10 +290,16 @@ icar_joint_log_density(const arma::vec& theta_cat,
 class ICARSpatialGMRF {
 public:
     ICARSpatialGMRF(const arma::vec& y,
-                         const arma::ivec& node_idx_1based,
+                         const arma::vec& node_idx_1based,   // 1-based node index
+                                                             // per obs; passed as
+                                                             // NUMERIC so both the
+                                                             // R-list and Python-dict
+                                                             // backend casters apply
+                                                             // (no arma::ivec caster
+                                                             // exists in pybind_casters)
                          int N_nodes,
-                         const arma::ivec& edges_i_1based,
-                         const arma::ivec& edges_j_1based,
+                         const arma::vec& edges_i_1based,    // 1-based edge endpoints
+                         const arma::vec& edges_j_1based,    // (numeric; see above)
                          int rng_seed,
                          bool keep_history = false)
         : rng_(rng_seed == 0
@@ -268,30 +320,31 @@ public:
         const std::size_t N = static_cast<std::size_t>(N_nodes);
         const std::size_t E = edges_i_1based.n_elem;
         if (edges_j_1based.n_elem != E) {
-            throw std::runtime_error("edges_i and edges_j must have the same length");
+            ai4b::stop("edges_i and edges_j must have the same length");
         }
-        if (N < 2) throw std::runtime_error("N_nodes must be >= 2");
-        if (E < 1) throw std::runtime_error("E must be >= 1");
+        if (N < 2) ai4b::stop("N_nodes must be >= 2");
+        if (E < 1) ai4b::stop("E must be >= 1");
         if (node_idx_1based.n_elem != T) {
-            throw std::runtime_error("node_idx must have same length as y");
+            ai4b::stop("node_idx must have same length as y");
         }
 
-        // Convert 1-based → 0-based.
+        // Convert 1-based → 0-based. Indices arrive as NUMERIC (double); round
+        // to the nearest integer before subtracting 1 (cf. HierarchicalLM_joint).
         arma::vec node_idx(T);
         for (std::size_t t = 0; t < T; ++t) {
-            const int k = node_idx_1based[t] - 1;
+            const int k = static_cast<int>(std::llround(node_idx_1based[t])) - 1;
             if (k < 0 || k >= static_cast<int>(N)) {
-                throw std::runtime_error("node_idx entries must be in 1..N_nodes");
+                ai4b::stop("node_idx entries must be in 1..N_nodes");
             }
             node_idx[t] = static_cast<double>(k);
         }
         arma::vec edge_i(E), edge_j(E);
         for (std::size_t e = 0; e < E; ++e) {
-            const int i0 = edges_i_1based[e] - 1;
-            const int j0 = edges_j_1based[e] - 1;
+            const int i0 = static_cast<int>(std::llround(edges_i_1based[e])) - 1;
+            const int j0 = static_cast<int>(std::llround(edges_j_1based[e])) - 1;
             if (i0 < 0 || j0 < 0 ||
                 i0 >= static_cast<int>(N) || j0 >= static_cast<int>(N)) {
-                throw std::runtime_error("edge endpoints must be in 1..N_nodes");
+                ai4b::stop("edge endpoints must be in 1..N_nodes");
             }
             edge_i[e] = static_cast<double>(i0);
             edge_j[e] = static_cast<double>(j0);
@@ -413,20 +466,20 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
-    // ---- Canonical neutral-typed interface -----------------------------
+    // ---- Canonical 6-method R interface --------------------------------
 
     void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
-        if (n_steps < 0) throw std::runtime_error("n_steps must be >= 0");
+        if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
 
     AI4BayesCode::state_map get_current() const {
         AI4BayesCode::state_map out;
-        out["Intercept"] = impl_->data().get("Intercept");
-        out["tau"]       = impl_->data().get("tau");
-        out["sigma"]     = impl_->data().get("sigma");
-        out["phi"]       = impl_->data().get("phi");
+        out["Intercept"] = impl_->data().get("Intercept");   // length-1 vec
+        out["tau"]       = impl_->data().get("tau");          // length-1 vec
+        out["sigma"]     = impl_->data().get("sigma");        // length-1 vec
+        out["phi"]       = impl_->data().get("phi");          // length-N vec
         return out;
     }
 
@@ -436,25 +489,24 @@ public:
         arma::vec cat_new = jblk.current();  // [Intercept, tau, sigma]
         bool touched = false;
 
-        auto it_int = params.find("Intercept");
-        if (it_int != params.end()) {
-            if (it_int->second.n_elem != 1)
-                throw std::runtime_error("Intercept must be a length-1 vector");
-            cat_new[0] = it_int->second[0];
+        if (params.count("Intercept")) {
+            const arma::vec& v = params.at("Intercept");
+            if (v.n_elem != 1) ai4b::stop("Intercept must be a length-1 vector");
+            cat_new[0] = v[0];
             touched = true;
         }
-        auto it_tau = params.find("tau");
-        if (it_tau != params.end()) {
-            if (it_tau->second.n_elem != 1 || !(it_tau->second[0] > 0.0))
-                throw std::runtime_error("tau must be a length-1 strictly-positive vector");
-            cat_new[1] = it_tau->second[0];
+        if (params.count("tau")) {
+            const arma::vec& v = params.at("tau");
+            if (v.n_elem != 1 || !(v[0] > 0.0))
+                ai4b::stop("tau must be a length-1 strictly-positive vector");
+            cat_new[1] = v[0];
             touched = true;
         }
-        auto it_sig = params.find("sigma");
-        if (it_sig != params.end()) {
-            if (it_sig->second.n_elem != 1 || !(it_sig->second[0] > 0.0))
-                throw std::runtime_error("sigma must be a length-1 strictly-positive vector");
-            cat_new[2] = it_sig->second[0];
+        if (params.count("sigma")) {
+            const arma::vec& v = params.at("sigma");
+            if (v.n_elem != 1 || !(v[0] > 0.0))
+                ai4b::stop("sigma must be a length-1 strictly-positive vector");
+            cat_new[2] = v[0];
             touched = true;
         }
         if (touched) {
@@ -463,28 +515,38 @@ public:
             impl_->data().set("tau",       arma::vec{cat_new[1]});
             impl_->data().set("sigma",     arma::vec{cat_new[2]});
         }
-        auto it_phi = params.find("phi");
-        if (it_phi != params.end()) {
-            const arma::vec& v = it_phi->second;
+        if (params.count("phi")) {
+            const arma::vec& v = params.at("phi");
             if (v.n_elem != N_)
-                throw std::runtime_error("phi must have length N_nodes");
+                ai4b::stop("phi must have length N_nodes");
             impl_->data().set("phi", v);
             auto* blk = dynamic_cast<gmrf_precision_block*>(&impl_->child(0));
             if (blk) blk->set_current(v);
         }
-        auto it_y = params.find("y");
-        if (it_y != params.end()) {
-            const arma::vec& yn = it_y->second;
-            if (yn.n_elem != T_) throw std::runtime_error("y length must equal T");
+        if (params.count("y")) {
+            const arma::vec& yn = params.at("y");
+            if (yn.n_elem != T_) ai4b::stop("y length must equal T");
             impl_->data().set("y", yn);
         }
+    }
+
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
+        // No y_rep stochastic refresher registered; no covariate inputs.
+        // Matches the original no-op convention: any non-empty input is an
+        // error, and the return is an empty history_map (rcpp_wrap / pybind
+        // glue render this as an empty R list / Python dict).
+        if (!new_data.empty()) {
+            ai4b::stop("ICARSpatialGMRF::predict_at: no registered "
+                       "refreshers (no y_rep in v0 scope).");
+        }
+        return AI4BayesCode::history_map{};
     }
 
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag();     }
     AI4BayesCode::history_map  get_history() const { return impl_->get_history(); }
 
-    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
-        if (n < 0) throw std::runtime_error("n must be >= 0");
+    void readapt_NUTS(int n, bool reset, int max_tree_depth = -1) {
+        if (n < 0) ai4b::stop("n must be >= 0");
         impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
     }
 
@@ -501,6 +563,65 @@ private:
     std::size_t                      T_ = 0;
 };
 
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(ICARSpatialGMRF_module) {
+    Rcpp::class_<ICARSpatialGMRF>("ICARSpatialGMRF")
+        .constructor<arma::vec, arma::vec, int, arma::vec, arma::vec, int>(
+            "Legacy constructor; keep_history defaults to FALSE. Args: "
+            "y, node_idx_1based, N_nodes, edges_i_1based, edges_j_1based, "
+            "rng_seed.")
+        .constructor<arma::vec, arma::vec, int, arma::vec, arma::vec, int, bool>(
+            "JOINT-NUTS ICARSpatialGMRF: y (T-length observation vec), "
+            "node_idx_1based (T-length 1-based node index per obs), N_nodes "
+            "(graph node count), edges_i_1based / edges_j_1based (1-based "
+            "edge endpoints; undirected), rng_seed, keep_history. "
+            "gmrf_precision_block for phi (Rue 2001 direct draw + hard "
+            "sum-to-zero) + ONE joint_nuts_block for (Intercept, tau, sigma).")
+        .method("step", (void (ICARSpatialGMRF::*)())    &ICARSpatialGMRF::step, "Run one sweep.")
+        .method("step", (void (ICARSpatialGMRF::*)(int)) &ICARSpatialGMRF::step, "Run n sweeps.")
+        .method("get_current",  &ICARSpatialGMRF::get_current)
+        .method("set_current",  &ICARSpatialGMRF::set_current,
+                "Overwrite any subset of {Intercept, tau, sigma, phi, y} "
+                "via a named list. Unknown keys silently ignored.")
+        .method("predict_at",   &ICARSpatialGMRF::predict_at,
+                "Returns empty list — no y_rep refresher registered.")
+        .method("get_dag",      &ICARSpatialGMRF::get_dag)
+        .method("get_history",  &ICARSpatialGMRF::get_history)
+        .method("readapt_NUTS", &ICARSpatialGMRF::readapt_NUTS,
+                "Re-tune NUTS dual-averaging state for the joint hyperparam "
+                "block. Chain state preserved. Args: n (internal iters), "
+                "reset (bool; reinit DA state).")
+        ;
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(ICARSpatialGMRF, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<ICARSpatialGMRF>(m, "ICARSpatialGMRF")
+        .def(pybind11::init<arma::vec, arma::vec, int,
+                            arma::vec, arma::vec, int, bool>(),
+             pybind11::arg("y"),
+             pybind11::arg("node_idx_1based"),
+             pybind11::arg("N_nodes"),
+             pybind11::arg("edges_i_1based"),
+             pybind11::arg("edges_j_1based"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false)
+        .def("step", (void (ICARSpatialGMRF::*)())    &ICARSpatialGMRF::step, "Run one sweep.")
+        .def("step", (void (ICARSpatialGMRF::*)(int)) &ICARSpatialGMRF::step,        pybind11::arg("n_steps"))
+        .def("get_current",  &ICARSpatialGMRF::get_current)
+        .def("set_current",  &ICARSpatialGMRF::set_current, pybind11::arg("params"))
+        .def("predict_at",   &ICARSpatialGMRF::predict_at,  pybind11::arg("new_data"))
+        .def("get_dag",      &ICARSpatialGMRF::get_dag)
+        .def("get_history",  &ICARSpatialGMRF::get_history)
+        .def("readapt_NUTS", &ICARSpatialGMRF::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 //==============================================================================
 //  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
 //
@@ -552,10 +673,10 @@ int main() {
     const std::size_t N = static_cast<std::size_t>(N_nodes);
     const std::size_t E = ei_v.size();
 
-    arma::ivec edges_i(E), edges_j(E);
+    arma::vec edges_i(E), edges_j(E);   // numeric 1-based endpoints (see ctor)
     for (std::size_t e = 0; e < E; ++e) {
-        edges_i[e] = ei_v[e];
-        edges_j[e] = ej_v[e];
+        edges_i[e] = static_cast<double>(ei_v[e]);
+        edges_j[e] = static_cast<double>(ej_v[e]);
     }
 
     // ---- True parameters ------------------------------------------------
@@ -578,13 +699,13 @@ int main() {
 
     // ---- Simulate one observation per node ------------------------------
     const std::size_t T = N;  // one obs per node
-    arma::ivec node_idx_1based(T);
+    arma::vec  node_idx_1based(T);   // numeric 1-based node index (see ctor)
     arma::vec  y(T);
     std::mt19937_64 sim_rng(20260621ULL);
     std::normal_distribution<double> noise(0.0, sigma_true);
     for (std::size_t t = 0; t < T; ++t) {
         const std::size_t k = t;  // node k
-        node_idx_1based[t] = static_cast<int>(k) + 1;  // 1-based
+        node_idx_1based[t] = static_cast<double>(k) + 1.0;  // 1-based
         y[t] = Intercept_true + phi_true[k] + noise(sim_rng);
     }
 
@@ -633,3 +754,4 @@ int main() {
     }
     return ok ? 0 : 1;
 }
+#endif

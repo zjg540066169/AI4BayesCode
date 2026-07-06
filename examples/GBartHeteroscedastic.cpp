@@ -57,6 +57,12 @@
 //   r  <- 1.0 + 0.8 * sin(2 * X[,1]) + 0.6 * X[,2]   # smooth log-mean
 //   m  <- exp(r)                                      # mean in ~[1.2, 6.0]
 //   y  <- m + sqrt(0.5 * m) * rnorm(N)               # y~N(m, phi*m), phi=0.5
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(GBartHeteroscedastic, X, y, 50L, 1.0, seed, FALSE, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   mod <- new(GBartHeteroscedastic, X, y, 50L, 1.0, 42L, FALSE)
 //   #          X,  y, ntrees, phi_init, seed, keep_tree
 //   mod$step(2000); str(mod$get_current())           # $r, $mean, $phi
@@ -68,6 +74,12 @@
 //   m = np.exp(r)                                      # mean in ~[1.2, 6.0]
 //   y = m + np.sqrt(0.5 * m) * rng.standard_normal(N) # y~N(m, phi*m), phi=0.5
 //   Mod = AI4BayesCode.example("GBartHeteroscedastic")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.GBartHeteroscedastic(X, y, 50, 1.0, seed, False, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m_ = Mod.GBartHeteroscedastic(X, y, 50, 1.0, 42, False, False)  # X,y,ntrees,phi_init,seed,keep_tree,keep_history
 //   m_.step(2000); print(m_.get_current())            # r, mean, phi
 // @example:end

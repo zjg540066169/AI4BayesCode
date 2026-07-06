@@ -245,7 +245,6 @@ public:
     }
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -474,7 +473,8 @@ RCPP_MODULE(GBartLogistic_module) {
             "(forest snapshots per step; EXPENSIVE; default FALSE), "
             "keep_history (numeric per-step buffers; cheap; default FALSE).")
         .method("step", (void (GBartLogistic::*)())    &GBartLogistic::step, "Run one sweep.")
-        .method("step", (void (GBartLogistic::*)(int)) &GBartLogistic::step, "Run n genBART RJMCMC sweeps.")
+        .method("step", (void (GBartLogistic::*)(int)) &GBartLogistic::step,
+                "Run n genBART RJMCMC sweeps.")
         .method("get_current", &GBartLogistic::get_current,
                 "Return the current draw as a named list with $r (linear "
                 "predictor) and $p (fitted probability). The serialized "

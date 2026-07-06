@@ -267,7 +267,6 @@ public:
     }
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -526,7 +525,8 @@ RCPP_MODULE(GBartHeteroscedastic_module) {
             "EXPENSIVE; default FALSE), keep_history (numeric per-step "
             "buffers for trace analysis; cheap; default FALSE).")
         .method("step", (void (GBartHeteroscedastic::*)())    &GBartHeteroscedastic::step, "Run one sweep.")
-        .method("step", (void (GBartHeteroscedastic::*)(int)) &GBartHeteroscedastic::step, "Run n RJMCMC sweeps.")
+        .method("step", (void (GBartHeteroscedastic::*)(int)) &GBartHeteroscedastic::step,
+                "Run n RJMCMC sweeps.")
         .method("get_current", &GBartHeteroscedastic::get_current,
                 "Return the current draw as a named list with $r, $mean "
                 "(= exp(r)) and $phi (dispersion). The serialized genBART "
@@ -590,7 +590,8 @@ PYBIND11_MODULE(GBartHeteroscedastic, m) {
              pybind11::arg("keep_tree")    = false,
              pybind11::arg("keep_history") = false)
         .def("step", (void (GBartHeteroscedastic::*)())    &GBartHeteroscedastic::step, "Run one sweep.")
-        .def("step", (void (GBartHeteroscedastic::*)(int)) &GBartHeteroscedastic::step, pybind11::arg("n_steps"))
+        .def("step", (void (GBartHeteroscedastic::*)(int)) &GBartHeteroscedastic::step,
+             pybind11::arg("n_steps"))
         .def("get_current",     &GBartHeteroscedastic::get_current)
         .def("get_tree",        &GBartHeteroscedastic::get_tree)
         .def("set_current",     &GBartHeteroscedastic::set_current,

@@ -72,7 +72,7 @@ likelihood and classify:
 | **Penalised B-spline / smoothing spline** -- `f(x) = Bsp(x) . (sds * z)` non-centered | **High** -- (Intercept, basis-coef-mean) ridge + (sds, z) funnel | Same pattern as HSGP: ONE `joint_nuts_block` (real-only) with `use_dense_metric = true` over `(Intercept, log_sds, log_sigma, z[K_s])`. Manual Jacobian for log_sds. See `examples/BSplineRegression.cpp`. |
 | **ICAR / BYM / spatial CAR random effect** + **Gaussian** observation | Improper prior on phi (sum-to-zero needed) + (Intercept, mean phi) ridge | **Hybrid composite**: `gmrf_precision_block` over `phi[N]` (Rue 2001 sparse-Cholesky direct draw + hard sum-to-zero projection) + three separate `nuts_block` for Intercept (real), `log_tau` (positive), `log_sigma` (positive). The GMRF block samples phi via the exact Gaussian full-conditional in canonical form `Q = τ R + (1/σ²) diag(n_i)`; the NUTS blocks each see phi via shared_data. ~60× faster than a NUTS-only joint workaround. Use Half-Normal sigma prior (NOT Jeffreys) -- ICAR can absorb all variance, Half-Normal pushes back at sigma -> 0. See `examples/ICARSpatialGMRF.cpp`. |
 | **ICAR / CAR / RW1 / RW2 sparse-precision random effect** + **non-Gaussian** observation (Poisson / Bernoulli / NB) | Improper prior on the latent (sum-to-zero needed for ICAR-style) + (Intercept, mean latent) ridge + likelihood-induced extra curvature | **Hybrid composite**: **`gmrf_whitened_ess_block`** over the latent (Murray 2010 ESS on the implicit GMRF prior via Rue 2001 sparse-Cholesky backsolve; sum-to-zero preserved by ESS rotation linearity) + separate `nuts_block` for the linear-predictor intercept (real), log-precision (positive), and any non-spatial random effect scales. User supplies `Q_fn(ctx) -> arma::sp_mat` and `log_lik(x, ctx) -> double` (the user's observation log-density evaluated at the proposed latent). See `block_catalogue/index.md` `gmrf_whitened_ess_block` section for the example recipe and verified convergence budgets at N=16 / N=64. |
-| **Hidden discrete latent** (HMM / Ising / Potts / MRF on graph) **+ Normal emission** (Gaussian observation per latent class, possibly with per-class σ_k) | Low for emission params given z (conjugate); High for z under spatial / sequential prior | **Hybrid composite**: specialized prior block for z (`hmm_block` for HMM, `binary_gibbs_block` for binary Ising/MRF, `categorical_gibbs_block` for K-state Potts) + **`normal_gamma_cluster_gibbs_block`** for per-class `(mu_k, lambda_k)` (Normal-Gamma conjugate; treat z as the partition). Label switching handled via post-hoc sort in runner. DO NOT use `joint_nuts_block` with a `delta > 0` ordering constraint — NUTS dual-averaging interacts badly with slow-mixing z, producing biased posterior for (mu_k, sigma_k). |
+| **Hidden discrete latent** (HMM / Ising / Potts / MRF on graph) **+ Normal emission** (Gaussian observation per latent class, possibly with per-class σ_k) | Low for emission params given z (conjugate); High for z under spatial / sequential prior | **Hybrid composite**: specialized prior block for z (`hmm_block` for HMM, `binary_gibbs_block` for binary Ising/MRF, `categorical_gibbs_block` for K-state Potts) + **`normal_gamma_cluster_gibbs_block`** for per-class `(mu_k, lambda_k)` (Normal-Gamma conjugate; treat z as the partition). Label switching handled via post-hoc sort in runner. AVOID (not recommended) a `joint_nuts_block` with a `delta > 0` ordering constraint here — NUTS dual-averaging interacts badly with slow-mixing z and can bias the posterior for (mu_k, sigma_k). |
 | **BNP mixture (Dirichlet Process / Pitman-Yor) — unknown number of components K** | **Allocation z is discrete; pi is a stick-breaking simplex (correlated by construction); (mu, lambda) per cluster are conjugate** | **Truncated SBP (Ishwaran-James 2001)**: `categorical_gibbs_block` (z) + `stick_breaking_block` (pi, with DP or PY a_fn / b_fn) + `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal Normal-Gamma) + `nuts_block` on log(alpha). For α as a derived function of other parameters, register a `register_refresher("alpha", ...)`. CRP-marginal Neal Alg 2/8 and Jain-Neal split-merge NOT shipped. See `examples/DPGaussianMixture.cpp` / `examples/PYGaussianMixture.cpp` / `examples/DPGaussianMixture_DerivedAlpha.cpp`. **Caveat**: DP truncated SBP intrinsically over-clusters on well-separated fixtures (see the DP block notes in `block_catalogue/index.md`). When K is known, prefer the finite-K wrapper below. |
 | **Finite-K Gaussian mixture (K known)** | Allocation z discrete; π Dirichlet conjugate; (μ, λ) Normal-Gamma conjugate | `categorical_gibbs_block` (z) + `dirichlet_gibbs_block` (π, posterior α/K + counts) + `normal_gamma_cluster_gibbs_block` (μ, λ diagonal). K and α are CONSTRUCTOR ARGS. See `examples/FiniteGaussianMixture.cpp`. **Recovers truth μ within 0.21 σ on the same fixture where DP over-clusters** — use this when K is known via domain knowledge or model selection. |
 | **Hierarchical DP (HDP) Gaussian mixture — clustering with G groups sharing atoms** | Multi-level: top-level β + per-group π_j; atoms shared across groups | **Truncated HDP** (Wang-Paisley-Blei 2011 simplified after Teh et al. 2006): `categorical_gibbs_block` (z) + `niw_cluster_gibbs_block` (μ, Σ shared atoms) + `stick_breaking_block` (β top-level, **HEURISTIC** update on combined counts) + G × `dirichlet_gibbs_block` (π_j per group, posterior α·β + counts_j). See `examples/HDPGaussianMixture.cpp`. **V0 caveat**: β update is heuristic, not the rigorous Antoniak-table CRF (BayesMix is the porting reference for full HDP). |
@@ -202,13 +202,14 @@ Document in the header comment:
 - If shipping a standalone modular `nuts_block` (fallback), write:
   `// MODULAR NOTE: <param> is genuinely scalar / separable because <reason>.`
 
-### Label switching: post-hoc only, NEVER via structural constraints
+### Label switching: prefer post-hoc; in-sampler constraints are a discouraged fallback
 
 Label switching (the symmetry between exchangeable component labels in
-mixture / clustering / discrete-allocation models) must be resolved
-**POST-HOC in the runner**, using Stephens 2000 + Hungarian assignment
-alignment per `label_switching.md`. **Never** attempt to break label
-switching inside the C++ sampler via structural constraints such as:
+mixture / clustering / discrete-allocation models) should PREFERABLY be
+resolved **POST-HOC in the runner**, using Stephens 2000 + Hungarian
+assignment alignment per `label_switching.md`, with convergence judged on
+label-invariant (order-statistic) R-hat. Breaking label switching inside the
+C++ sampler via a structural constraint — such as:
 
 - Ordered K-vector constraint on a labeled parameter (e.g.,
   `mu_1 < mu_2 < ... < mu_K`)
@@ -216,17 +217,19 @@ switching inside the C++ sampler via structural constraints such as:
 - Positive-cut (`delta > 0`) reparam intended to enforce a specific
   labeling
 
-These structural constraints interact badly with slow-mixing
-discrete-allocation companion blocks (per `system_design.md` §11.2(b)):
-the chain mixes on the constrained scale and L2 / single-chain
-diagnostics may pass, but the natural-scale posterior is silently
-biased. The bias is invisible to R-hat and ESS but visible in coverage
-and in cross-implementation comparison.
+— is a **NOT-RECOMMENDED fallback (discouraged, not forbidden)**. Such
+constraints interact badly with slow-mixing discrete-allocation companion
+blocks (per `system_design.md` §11.2(b)): the chain mixes on the constrained
+scale and L2 / single-chain diagnostics may pass, but the natural-scale
+posterior can be silently biased (invisible to R-hat / ESS but visible in
+coverage and cross-implementation comparison). So reach for an in-sampler
+constraint ONLY when a model genuinely cannot be resolved post-hoc — some
+models legitimately require it.
 
 Choose your sampler (modular NUTS / joint NUTS / conjugate Gibbs / etc.)
 based on §4a + §4b purely from coupling / conjugacy / efficiency
-considerations — independent of the label-switching question. Always
-handle label switching downstream in the runner.
+considerations — independent of the label-switching question; prefer handling
+label switching downstream in the runner.
 
 ### Warn the user when using joint_nuts_block
 
@@ -2268,7 +2271,16 @@ Mix constant `0xBF58476D1CE4E5B9ULL` (SplitMix64) MUST be the same
 across all NUTS-using examples for consistency. Do not invent
 alternates.
 
-#### R-only (default, `AI4BAYESCODE_RCPP_MODULE` defined by `ai4bayescode_source()`)
+#### Emit BOTH module blocks — the `.cpp` is ALWAYS dual-module
+
+Always emit **both** the `RCPP_MODULE` block AND the `PYBIND11_MODULE` block
+below, each under its own `#ifdef`, regardless of the runtime-backend answer
+(codegen.md §1). The same `.cpp` is then source-able in R
+(`ai4bayescode_source` sets `-DAI4BAYESCODE_RCPP_MODULE`) AND in Python
+(`AI4BayesCode.source` sets `-DAI4BAYESCODE_PYBIND_MODULE`) — the backend
+choice selects only the runner file, never which binding block(s) to write.
+
+**`RCPP_MODULE` block (R — active when `AI4BAYESCODE_RCPP_MODULE` is defined):**
 
 ```cpp
 #ifdef AI4BAYESCODE_RCPP_MODULE
@@ -2294,7 +2306,8 @@ RCPP_MODULE(<ClassName>_module) {
 
 Include `AI4BayesCode/rcpp_wrap.hpp` alongside the other AI4BayesCode headers.
 
-#### Python-only (AI4BAYESCODE_PYBIND_MODULE defined by AI4BayesCode.sourceCpp())
+**`PYBIND11_MODULE` block (Python — active when `AI4BAYESCODE_PYBIND_MODULE` is
+defined). Emit this too, always — right after the RCPP block:**
 
 ```cpp
 #ifdef AI4BAYESCODE_PYBIND_MODULE

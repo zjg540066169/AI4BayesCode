@@ -21,6 +21,11 @@
 //  This file remains here as a reference implementation of the pre-block
 //  ARD Gibbs pattern; modernizing it is tracked in `todo/todo.md`.
 //
+//  DUAL-MODULE: this legacy example is exposed to BOTH R (RCPP_MODULE) and
+//  Python (PYBIND11_MODULE). The class I/O methods use the backend-neutral
+//  AI4BayesCode::state_map / history_map / dag_info API (NOT raw Rcpp::List),
+//  so the same class binds verbatim in both frontends.
+//
 //  Model (Park & Casella 2008, Bayesian LASSO, Eq. 2.3-2.4 with D=1)
 //  ------------------------------------------------------------------
 //      Y | beta, alpha, sigma  ~ Normal(alpha*1 + X*beta, sigma^2 * I)
@@ -34,13 +39,45 @@
 //                                 (SSE+SSE_beta)/2))
 //
 //  Gibbs sweep order: alpha -> sigma2 -> psi2 -> beta
-//
-//  This file is a FRONTEND-INDEPENDENT standalone program: the original
-//  Rcpp module (R/Python bindings for get_current/set_current/get_dag/
-//  predict_at/get_history) has been removed. The core sampler keeps its
-//  pure-armadillo state and step() loop unchanged; an int main() at the
-//  bottom drives a small recovery demo.
 // ============================================================================
+
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("ARDLasso")
+//   set.seed(20260621)
+//   N <- 200L; p <- 6L                              # N >> p: well-identified
+//   beta_true <- c(2.5, 0, -1.5, 0, 0.8, 0)         # 3 active, 3 exactly-zero
+//   alpha_true <- 1.0; sigma_true <- 0.5
+//   X <- matrix(rnorm(N * p), N, p)                 # NO intercept column (alpha is built in)
+//   Y <- as.numeric(alpha_true + X %*% beta_true + sigma_true * rnorm(N))
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(ARDLasso, X, Y, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(ARDLasso, X, Y, 20260621L, TRUE)       # X (Nxp), Y (len N), seed, keep_history
+//   m$step(2500); str(m$get_current())
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(20260621)
+//   N, p = 200, 6                                    # N >> p: well-identified
+//   beta_true = np.array([2.5, 0.0, -1.5, 0.0, 0.8, 0.0])  # 3 active, 3 zero
+//   alpha_true, sigma_true = 1.0, 0.5
+//   X = rng.normal(size=(N, p))                      # NO intercept column (alpha is built in)
+//   Y = alpha_true + X @ beta_true + sigma_true * rng.normal(size=N)
+//   Mod = AI4BayesCode.example("ARDLasso")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.ARDLasso(X, Y, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.ARDLasso(X, Y, 20260621, True)           # (X (Nxp), Y (len N), seed, keep_history)
+//   m.step(2500); print(m.get_current())
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -49,11 +86,20 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
+
+#include "AI4BayesCode/backend_neutral.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"   // also pulls in types.hpp (state_map, ...)
+
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <random>
 #include <vector>
-#include <stdexcept>
 
 class ARDLasso {
 public:
@@ -70,7 +116,7 @@ public:
           N_(X.n_rows), p_(X.n_cols),
           keep_history_(keep_history)
     {
-        if (Y_.n_elem != N_) throw std::runtime_error("X rows must match Y length");
+        if (Y_.n_elem != N_) ai4b::stop("X rows must match Y length");
 
         // Precompute
         XtX_ = X_.t() * X_;
@@ -156,15 +202,178 @@ public:
         }
     }
 
-    // Frontend-independent accessors (pure armadillo / scalar state).
-    const arma::vec& beta()   const { return beta_; }
-    double           alpha()  const { return alpha_; }
-    double           sigma2() const { return sigma2_; }
-    const arma::vec& psi2()   const { return psi2_; }
+    // Backend-neutral snapshot: keys -> arma::vec (scalars are length-1).
+    // Frontend converts state_map -> R named list / Python dict.
+    AI4BayesCode::state_map get_current() const {
+        AI4BayesCode::state_map out;
+        out["beta"]   = beta_;
+        out["alpha"]  = arma::vec{alpha_};
+        out["sigma2"] = arma::vec{sigma2_};
+        out["psi2"]   = psi2_;
+        return out;
+    }
 
-    const std::vector<arma::vec>& beta_history()   const { return beta_hist_; }
-    const std::vector<double>&    alpha_history()  const { return alpha_hist_; }
-    const std::vector<double>&    sigma2_history() const { return sigma2_hist_; }
+    // Backend-neutral overwrite: each value is an arma::vec (frontend already
+    // converted the R list / Python dict). Scalars arrive as length-1 vectors.
+    void set_current(const AI4BayesCode::state_map& params) {
+        auto it_beta = params.find("beta");
+        if (it_beta != params.end()) {
+            if (it_beta->second.n_elem != p_)
+                ai4b::stop("set_current: beta has wrong length");
+            beta_ = it_beta->second;
+        }
+        auto it_alpha = params.find("alpha");
+        if (it_alpha != params.end()) alpha_ = it_alpha->second[0];
+        auto it_sigma2 = params.find("sigma2");
+        if (it_sigma2 != params.end()) {
+            const double s2 = it_sigma2->second[0];
+            if (s2 <= 0.0) ai4b::stop("set_current: sigma2 must be > 0");
+            sigma2_ = s2;
+        }
+        auto it_psi2 = params.find("psi2");
+        if (it_psi2 != params.end()) {
+            if (it_psi2->second.n_elem != p_)
+                ai4b::stop("set_current: psi2 has wrong length");
+            psi2_ = it_psi2->second;
+        }
+    }
+
+    // Full model DAG, hand-coded because ARDLasso is a self-contained
+    // Gibbs sampler (no composite_block). Structure mirrors the Gibbs
+    // sweep order alpha -> sigma2 -> psi2 -> beta and the generative
+    // relationship X -> y_hat used by predict_at.
+    AI4BayesCode::dag_info get_dag() const {
+        AI4BayesCode::dag_info d;
+        d.gibbs_reads["alpha"]  = {"Y", "X", "beta", "sigma2"};
+        d.gibbs_reads["sigma2"] = {"Y", "X", "beta", "alpha", "psi2"};
+        d.gibbs_reads["psi2"]   = {"beta", "sigma2"};
+        d.gibbs_reads["beta"]   = {"Y", "X", "alpha", "sigma2", "psi2"};
+        // no refreshers -> gibbs_invalidates stays empty
+        d.predict_edges["X"]      = {"y_hat"};
+        d.predict_edges["beta"]   = {"y_hat"};
+        d.predict_edges["alpha"]  = {"y_hat"};
+        d.predict_edges["y_hat"]  = {"y_rep"};
+        d.predict_edges["sigma2"] = {"y_rep"};
+        d.data_inputs = {"X"};
+        return d;
+    }
+
+    // predict_at (backend-neutral):
+    //   INPUT  new_data["X"] : vectorised N_new*p arma::vec, COLUMN-MAJOR
+    //          (element (i,j) at index i + j*N_new), matching arma::vectorise
+    //          of an N_new x p design. R/Python callers pass as.vector(X_new) /
+    //          X_new flattened column-major. Empty map -> posterior predictive
+    //          at the TRAINING X.
+    //   OUTPUT every key is an arma::mat. keep_history = FALSE returns 1-row
+    //          matrices (single predict at the current draw); keep_history =
+    //          TRUE returns n_draws-row matrices (over all stored draws).
+    //            $y_hat (only when X is supplied) = X_use * beta + alpha
+    //            $y_rep                           = y_hat + sigma * Normal(0,1)
+    //
+    // Uses predict_rng_ for reproducible posterior-predictive sampling.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        // ---- Parse optional X (vectorised N_new*p, column-major) ----------
+        for (const auto& kv : new_data) {
+            if (kv.first != "X")
+                ai4b::stop("predict_at: unknown key '%s' (only 'X' is accepted)",
+                           kv.first.c_str());
+        }
+        const bool has_X = new_data.count("X") > 0;
+        arma::mat X_use;
+        if (has_X) {
+            const arma::vec& x_flat = new_data.at("X");
+            if (p_ == 0 || x_flat.n_elem % p_ != 0)
+                ai4b::stop("predict_at: X must be a vectorised N_new*p column-"
+                           "major vector (n_elem must be a multiple of p=%d)",
+                           static_cast<int>(p_));
+            const std::size_t N_new = x_flat.n_elem / p_;
+            X_use.set_size(N_new, p_);
+            for (std::size_t i = 0; i < N_new; ++i)
+                for (std::size_t j = 0; j < p_; ++j)
+                    X_use(i, j) = x_flat[i + j * N_new];
+        } else {
+            X_use = X_;   // training X
+        }
+
+        std::normal_distribution<double> norm01(0.0, 1.0);
+        AI4BayesCode::history_map out;
+
+        if (keep_history_ && !beta_hist_.empty()) {
+            const std::size_t n = beta_hist_.size();
+            const std::size_t m = X_use.n_rows;
+            arma::mat Y_hat(n, m);
+            arma::mat Y_rep(n, m);
+            for (std::size_t i = 0; i < n; ++i) {
+                arma::vec yh = X_use * beta_hist_[i] + alpha_hist_[i];
+                const double sig_d = std::sqrt(sigma2_hist_[i]);
+                for (std::size_t j = 0; j < m; ++j) {
+                    Y_hat(i, j) = yh[j];
+                    Y_rep(i, j) = yh[j] + sig_d * norm01(predict_rng_);
+                }
+            }
+            if (has_X) out.emplace("y_hat", std::move(Y_hat));  // mean only meaningful at X_new
+            out.emplace("y_rep", std::move(Y_rep));
+            return out;
+        }
+
+        // Stateful mode (single current draw -> 1-row matrices)
+        arma::vec y_hat = X_use * beta_ + alpha_;
+        const double sig_cur = std::sqrt(sigma2_);
+        const std::size_t m = y_hat.n_elem;
+        arma::mat y_hat_out(1, m);
+        arma::mat y_rep_out(1, m);
+        for (std::size_t i = 0; i < m; ++i) {
+            y_hat_out(0, i) = y_hat[i];
+            y_rep_out(0, i) = y_hat[i] + sig_cur * norm01(predict_rng_);
+        }
+        if (has_X) out.emplace("y_hat", std::move(y_hat_out));
+        out.emplace("y_rep", std::move(y_rep_out));
+        return out;
+    }
+
+    // History returned as a history_map (name -> arma::mat). ARDLasso doesn't
+    // use a composite, so we build it by hand — matches the structure
+    // composite_block's merged bundle would produce for the same parameters.
+    //   $beta   : n_draws x p matrix
+    //   $alpha  : n_draws x 1 matrix
+    //   $sigma2 : n_draws x 1 matrix
+    //   $psi2   : n_draws x p matrix
+    // If no draws are stored yet, returns a 1-row fallback with the
+    // current values (matches the composite/leaf fallback convention).
+    AI4BayesCode::history_map get_history() const {
+        const std::size_t n_rec = beta_hist_.size();
+        const std::size_t n     = n_rec == 0 ? 1 : n_rec;
+
+        arma::mat beta_mat(n, p_);
+        arma::mat psi2_mat(n, p_);
+        arma::mat alpha_mat(n, 1);
+        arma::mat sigma2_mat(n, 1);
+
+        if (n_rec == 0) {
+            for (std::size_t j = 0; j < p_; ++j) {
+                beta_mat(0, j) = beta_[j];
+                psi2_mat(0, j) = psi2_[j];
+            }
+            alpha_mat(0, 0)  = alpha_;
+            sigma2_mat(0, 0) = sigma2_;
+        } else {
+            for (std::size_t i = 0; i < n_rec; ++i) {
+                for (std::size_t j = 0; j < p_; ++j) {
+                    beta_mat(i, j) = beta_hist_[i][j];
+                    psi2_mat(i, j) = psi2_hist_[i][j];
+                }
+                alpha_mat(i, 0)  = alpha_hist_[i];
+                sigma2_mat(i, 0) = sigma2_hist_[i];
+            }
+        }
+        AI4BayesCode::history_map out;
+        out.emplace("beta",   std::move(beta_mat));
+        out.emplace("alpha",  std::move(alpha_mat));
+        out.emplace("sigma2", std::move(sigma2_mat));
+        out.emplace("psi2",   std::move(psi2_mat));
+        return out;
+    }
 
 private:
     std::mt19937_64 rng_;
@@ -193,9 +402,60 @@ private:
     std::vector<arma::vec> psi2_hist_;
 };
 
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(ARDLasso_module) {
+    Rcpp::class_<ARDLasso>("ARDLasso")
+        // Backward-compatible constructor (keep_history defaults to FALSE).
+        .constructor<arma::mat, arma::vec, int>(
+            "Legacy constructor; keep_history defaults to FALSE.")
+        .constructor<arma::mat, arma::vec, int, bool>(
+            "Construct with: X (N x p), Y (length N), seed, "
+            "keep_history (record every draw; default FALSE).")
+        .method("step", (void (ARDLasso::*)())    &ARDLasso::step, "Run one sweep.")
+        .method("step", (void (ARDLasso::*)(int)) &ARDLasso::step,
+                "Run n Gibbs sweeps.")
+        .method("get_current", &ARDLasso::get_current,
+                "Return list(beta, alpha, sigma2, psi2).")
+        .method("set_current", &ARDLasso::set_current,
+                "Overwrite parameters from a named list.")
+        .method("get_dag",     &ARDLasso::get_dag,
+                "Full model DAG (gibbs_reads / gibbs_invalidates / "
+                "predict_edges / data_inputs).")
+        .method("predict_at",  &ARDLasso::predict_at,
+                "Predict: list(X = as.vector(X_new)) -> list(y_hat, y_rep). "
+                "Returns 1-row matrices in stateful mode, n_draws-row matrices "
+                "in history mode. Empty list -> posterior predictive at "
+                "training X.")
+        .method("get_history", &ARDLasso::get_history,
+                "History as a named list: beta (n_draws x p), alpha "
+                "(n_draws x 1), sigma2 (n_draws x 1), psi2 (n_draws x p).");
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(ARDLasso, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<ARDLasso>(m, "ARDLasso")
+        .def(pybind11::init<arma::mat, arma::vec, int, bool>(),
+             pybind11::arg("X"),
+             pybind11::arg("Y"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false)
+        .def("step", (void (ARDLasso::*)())    &ARDLasso::step, "Run one sweep.")
+        .def("step", (void (ARDLasso::*)(int)) &ARDLasso::step, pybind11::arg("n_steps"))
+        .def("get_current", &ARDLasso::get_current)
+        .def("set_current", &ARDLasso::set_current, pybind11::arg("params"))
+        .def("get_dag",     &ARDLasso::get_dag)
+        .def("predict_at",  &ARDLasso::predict_at,  pybind11::arg("new_data"))
+        .def("get_history", &ARDLasso::get_history);
+}
+#endif
+
 // ============================================================================
-//  Standalone recovery demo
-//  ------------------------
+//  Standalone recovery demo (frontend-independent; compiled only when NEITHER
+//  binding macro is defined). Reads state via the FULL contract get_history().
+//
 //  Simulate a sparse linear regression from a KNOWN truth:
 //      Y = alpha_true + X * beta_true + N(0, sigma_true^2)
 //  with several beta_true coefficients exactly zero (the ARD/LASSO slab
@@ -203,9 +463,9 @@ private:
 //  Fit with keep_history, discard burn-in, take posterior means, and check:
 //    (a) posterior means of active coefficients are close to truth,
 //    (b) posterior means of zero coefficients are shrunk small,
-//    (c) the ARD fit beats a no-X baseline (predict the intercept only)
-//        on training RMSE.
+//    (c) the ARD fit beats a no-X baseline on training RMSE.
 // ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 #include <cstdio>
 
 int main() {
@@ -238,16 +498,14 @@ int main() {
     const int n_keep = 4000;
     ARDLasso model(X, Y, seed, /*keep_history=*/true);
     model.step(n_burn);
-
-    // Reset history start point: run burn-in WITHOUT recording, then record.
-    // (step() with keep_history records every sweep, so to get a clean
-    //  post-burn-in trace we just run the full chain and slice off burn-in.)
     model.step(n_keep);
 
-    const auto& beta_hist   = model.beta_history();
-    const auto& alpha_hist  = model.alpha_history();
-    const auto& sigma2_hist = model.sigma2_history();
-    const std::size_t total = beta_hist.size();
+    // Read state via the full contract: get_history() -> history_map of mats.
+    const AI4BayesCode::history_map hist = model.get_history();
+    const arma::mat& beta_mat   = hist.at("beta");    // total x p
+    const arma::mat& alpha_mat  = hist.at("alpha");   // total x 1
+    const arma::mat& sigma2_mat = hist.at("sigma2");  // total x 1
+    const std::size_t total = beta_mat.n_rows;
     const std::size_t start = static_cast<std::size_t>(n_burn);  // discard burn-in
 
     // Posterior means over kept draws.
@@ -255,9 +513,9 @@ int main() {
     double alpha_pm = 0.0, sigma2_pm = 0.0;
     std::size_t kept = 0;
     for (std::size_t i = start; i < total; ++i) {
-        beta_pm   += beta_hist[i];
-        alpha_pm  += alpha_hist[i];
-        sigma2_pm += sigma2_hist[i];
+        for (std::size_t j = 0; j < p; ++j) beta_pm[j] += beta_mat(i, j);
+        alpha_pm  += alpha_mat(i, 0);
+        sigma2_pm += sigma2_mat(i, 0);
         ++kept;
     }
     beta_pm   /= static_cast<double>(kept);
@@ -276,9 +534,7 @@ int main() {
         std::printf("   beta[%zu]  % .3f    % .3f\n", j, beta_true[j], beta_pm[j]);
 
     // --- Checks ---
-    // (a) active coefficients recovered within tolerance.
     double max_active_err = 0.0;
-    // (b) zero coefficients shrunk small.
     double max_zero_mag = 0.0;
     for (std::size_t j = 0; j < p; ++j) {
         if (std::abs(beta_true[j]) > 1e-9)
@@ -288,7 +544,6 @@ int main() {
             max_zero_mag = std::max(max_zero_mag, std::abs(beta_pm[j]));
     }
 
-    // (c) ARD fit beats intercept-only baseline on training RMSE.
     arma::vec y_hat = X * beta_pm + alpha_pm;
     double sse_model = arma::dot(Y - y_hat, Y - y_hat);
     double rmse_model = std::sqrt(sse_model / static_cast<double>(N));
@@ -309,3 +564,4 @@ int main() {
     std::printf("%s\n", ok ? "[demo PASS]" : "[demo FAIL]");
     return ok ? 0 : 1;
 }
+#endif

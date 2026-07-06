@@ -360,7 +360,6 @@ public:
     // ---- Six-method R interface ------------------------------------------
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -627,5 +626,159 @@ PYBIND11_MODULE(LdaCollapsedGibbs, m) {
         .def("predict_at",  &LdaCollapsedGibbs::predict_at, pybind11::arg("new_data"))
         .def("get_dag",     &LdaCollapsedGibbs::get_dag)
         .def("get_history", &LdaCollapsedGibbs::get_history);
+}
+#endif
+
+// ============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
+//
+//  Simulates a 2-topic corpus from a KNOWN phi truth where each topic emits
+//  a mostly-disjoint half of the vocabulary, constructs the FULL-contract
+//  LdaCollapsedGibbs wrapper, runs warmup + sampling, and checks that the
+//  posterior-mean per-topic word distributions phi recover the truth after
+//  aligning topic labels (label switching) and beat the naive uniform
+//  baseline. State is read back through the six-method contract
+//  (model.get_current().at("phi")).
+// ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+int main() {
+    // ---- Ground-truth LDA generative model -------------------------------
+    const std::size_t M = 40;   // documents
+    const std::size_t V = 6;    // vocabulary
+    const std::size_t K = 2;    // topics
+    const std::size_t Ld = 30;  // tokens per document
+
+    // True per-topic word distributions (K x V). Topic 0 puts mass on the
+    // first half of the vocab; topic 1 on the second half. Some leakage so
+    // the inference is non-trivial but still recoverable.
+    arma::mat phi_true(K, V, arma::fill::zeros);
+    //                v: 0     1     2     3     4     5
+    phi_true.row(0) = arma::rowvec{0.40, 0.35, 0.15, 0.05, 0.03, 0.02};
+    phi_true.row(1) = arma::rowvec{0.02, 0.03, 0.05, 0.15, 0.35, 0.40};
+
+    std::mt19937_64 sim_rng(2024);
+    std::uniform_real_distribution<double> unif(0.0, 1.0);
+
+    // Per-document topic mixing weight (theta_d over the 2 topics). Each doc
+    // is dominated by one topic, drawn at random, with some mixing.
+    std::vector<double> doc_w0(M);
+    for (std::size_t d = 0; d < M; ++d) {
+        // dominant topic 0 for the first half of docs, topic 1 for the rest,
+        // each with mixing weight in [0.7, 0.95] on its dominant topic.
+        const double lead = 0.7 + 0.25 * unif(sim_rng);
+        doc_w0[d] = (d < M / 2) ? lead : (1.0 - lead);
+    }
+
+    auto cat_draw = [&](const arma::rowvec& p) -> std::size_t {
+        const double u = unif(sim_rng);
+        double cum = 0.0;
+        for (std::size_t j = 0; j < p.n_elem; ++j) {
+            cum += p[j];
+            if (u < cum) return j;
+        }
+        return p.n_elem - 1;
+    };
+
+    std::vector<int> w_tokens;
+    std::vector<int> doc_tokens;
+    w_tokens.reserve(M * Ld);
+    doc_tokens.reserve(M * Ld);
+    for (std::size_t d = 0; d < M; ++d) {
+        for (std::size_t n = 0; n < Ld; ++n) {
+            // z ~ Cat(theta_d) over {0, 1}
+            const std::size_t z = (unif(sim_rng) < doc_w0[d]) ? 0u : 1u;
+            // w ~ Cat(phi_z)
+            const std::size_t v = cat_draw(phi_true.row(z));
+            w_tokens.push_back(static_cast<int>(v + 1));   // 1-indexed
+            doc_tokens.push_back(static_cast<int>(d + 1)); // 1-indexed
+        }
+    }
+    const std::size_t N = w_tokens.size();
+
+    // ---- Pack tokens into arma vecs and build the full-contract wrapper --
+    arma::vec w_arma(N), doc_arma(N);
+    for (std::size_t t = 0; t < N; ++t) {
+        w_arma[t]   = static_cast<double>(w_tokens[t]);
+        doc_arma[t] = static_cast<double>(doc_tokens[t]);
+    }
+
+    // Uniform Dirichlet hyperparameters (the example default).
+    arma::vec alpha(K, arma::fill::ones);
+    arma::vec beta(V, arma::fill::ones);
+
+    LdaCollapsedGibbs model(w_arma, doc_arma,
+                            static_cast<int>(M), static_cast<int>(V),
+                            static_cast<int>(K), alpha, beta,
+                            /*rng_seed=*/7, /*keep_history=*/false);
+
+    // ---- Run warmup + sampling -------------------------------------------
+    const int n_warmup = 500;
+    const int n_keep   = 2000;
+    model.step(n_warmup);
+
+    // Accumulate posterior-mean phi (K x V col-major flat, entry [k + v*K]).
+    arma::vec phi_acc(K * V, arma::fill::zeros);
+    for (int s = 0; s < n_keep; ++s) {
+        model.step(1);
+        const auto gc = model.get_current();
+        const arma::vec& phi = gc.at("phi");   // length K*V, col-major
+        phi_acc += phi;
+    }
+    phi_acc /= static_cast<double>(n_keep);
+
+    // Reshape posterior-mean phi to a K x V matrix.
+    arma::mat phi_hat(K, V, arma::fill::zeros);
+    for (std::size_t v = 0; v < V; ++v)
+        for (std::size_t k = 0; k < K; ++k)
+            phi_hat(k, v) = phi_acc[k + v * K];
+
+    // ---- Align topic labels to truth (label switching) -------------------
+    // K = 2: try both permutations, pick the one minimizing total L1 distance
+    // to phi_true; report that aligned distance.
+    auto l1_dist = [&](const arma::mat& A, const arma::mat& B,
+                       const std::vector<std::size_t>& perm) -> double {
+        double d = 0.0;
+        for (std::size_t k = 0; k < K; ++k)
+            for (std::size_t v = 0; v < V; ++v)
+                d += std::abs(A(perm[k], v) - B(k, v));
+        return d;
+    };
+    std::vector<std::size_t> id_perm  = {0, 1};
+    std::vector<std::size_t> swp_perm = {1, 0};
+    const double d_id  = l1_dist(phi_hat, phi_true, id_perm);
+    const double d_swp = l1_dist(phi_hat, phi_true, swp_perm);
+    const std::vector<std::size_t>& best =
+        (d_id <= d_swp) ? id_perm : swp_perm;
+    const double aligned_l1 = std::min(d_id, d_swp);
+
+    // Naive baseline: uniform phi (1/V) for every topic.
+    arma::mat phi_unif(K, V, arma::fill::value(1.0 / static_cast<double>(V)));
+    const double baseline_l1 = l1_dist(phi_unif, phi_true, id_perm);
+
+    // ---- Report ----------------------------------------------------------
+    std::printf("LdaCollapsedGibbs demo: N=%zu tokens, M=%zu docs, "
+                "V=%zu vocab, K=%zu topics\n", N, M, V, K);
+    std::printf("recovered phi (topic-aligned to truth):\n");
+    for (std::size_t k = 0; k < K; ++k) {
+        std::printf("  topic %zu  hat: [", k);
+        for (std::size_t v = 0; v < V; ++v)
+            std::printf("%.3f%s", phi_hat(best[k], v), (v + 1 < V) ? " " : "");
+        std::printf("]\n");
+        std::printf("           true: [");
+        for (std::size_t v = 0; v < V; ++v)
+            std::printf("%.3f%s", phi_true(k, v), (v + 1 < V) ? " " : "");
+        std::printf("]\n");
+    }
+    std::printf("aligned L1(phi_hat, phi_true) = %.4f  "
+                "(uniform baseline = %.4f)\n", aligned_l1, baseline_l1);
+
+    // PASS criterion: aligned recovery error is small in absolute terms AND
+    // beats the naive uniform baseline by a wide margin.
+    const bool ok = (aligned_l1 < 0.30) && (aligned_l1 < 0.5 * baseline_l1);
+    std::printf("%s\n", ok
+        ? "[demo PASS] collapsed Gibbs recovers per-topic word distributions"
+        : "[demo FAIL] phi recovery off");
+    return ok ? 0 : 1;
 }
 #endif

@@ -551,7 +551,6 @@ public:
     }
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -943,7 +942,7 @@ PYBIND11_MODULE(GPRegression, m) {
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
         .def("step", (void (GPRegression::*)())    &GPRegression::step, "Run one sweep.")
-        .def("step", (void (GPRegression::*)(int)) &GPRegression::step, pybind11::arg("n_steps"))
+        .def("step", (void (GPRegression::*)(int)) &GPRegression::step,  pybind11::arg("n_steps"))
         .def("get_current",  &GPRegression::get_current)
         .def("set_current",  &GPRegression::set_current, pybind11::arg("params"))
         .def("predict_at",   &GPRegression::predict_at,  pybind11::arg("new_data"))
@@ -951,5 +950,101 @@ PYBIND11_MODULE(GPRegression, m) {
         .def("get_history",  &GPRegression::get_history)
         .def("readapt_NUTS", &GPRegression::readapt_NUTS,
              pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
+// ============================================================================
+// Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
+//
+// Simulates 1-D GP-regression data from a KNOWN smooth latent function
+//     f_true(x) = sin(3x) + 0.5 x
+// observed with Gaussian noise   y_i = f_true(x_i) + eps_i,  eps ~ N(0, s^2).
+// Fits the full model (ESS on latent f + NUTS on amplitude/lengthscale/
+// noise sigma), then checks that:
+//   (1) the posterior-mean latent f recovers f_true much better than the
+//       naive "y is the signal" baseline (RMSE(f_hat, f_true) <
+//       RMSE(y, f_true), i.e. the GP smooths out noise), and
+//   (2) the noise-sigma posterior mean is in the right ballpark of truth.
+//
+// State is read via the full 6-method contract get_current(), whose keys
+// are f / amplitude / lengthscale / sigma (see get_current() above).
+// ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+
+int main() {
+    const std::size_t N          = 40;
+    const double      sigma_true = 0.30;
+
+    // ---- Simulate from a known smooth truth -----------------------------
+    std::mt19937_64 sim_rng(2024);
+    std::normal_distribution<double> noise(0.0, sigma_true);
+
+    arma::mat X(N, 1);
+    arma::vec f_true(N);
+    arma::vec y(N);
+    for (std::size_t i = 0; i < N; ++i) {
+        const double x = -3.0 + 6.0 * static_cast<double>(i)
+                                / static_cast<double>(N - 1);  // grid on [-3,3]
+        X(i, 0)   = x;
+        f_true[i] = std::sin(3.0 * x) + 0.5 * x;
+        y[i]      = f_true[i] + noise(sim_rng);
+    }
+
+    // ---- Fit -------------------------------------------------------------
+    GPRegression model(X, y, /*rng_seed=*/11, /*keep_history=*/false);
+    model.step(800);   // warmup
+
+    const int    M = 1500;
+    arma::vec    f_sum(N, arma::fill::zeros);
+    double       sigma_bar = 0.0;
+    double       amp_bar    = 0.0;
+    double       ell_bar    = 0.0;
+    for (int s = 0; s < M; ++s) {
+        model.step(1);
+        const auto gc = model.get_current();          // copy (avoids dangling ref)
+        const arma::vec& f_cur     = gc.at("f");
+        const arma::vec& sigma_cur = gc.at("sigma");
+        const arma::vec& amp_cur   = gc.at("amplitude");
+        const arma::vec& ell_cur   = gc.at("lengthscale");
+        f_sum     += f_cur;
+        sigma_bar += sigma_cur[0];
+        amp_bar   += amp_cur[0];
+        ell_bar   += ell_cur[0];
+    }
+    const arma::vec f_hat = f_sum / static_cast<double>(M);
+    sigma_bar /= static_cast<double>(M);
+    amp_bar   /= static_cast<double>(M);
+    ell_bar   /= static_cast<double>(M);
+
+    // ---- Recovery metrics ------------------------------------------------
+    double sse_fit = 0.0, sse_naive = 0.0;
+    for (std::size_t i = 0; i < N; ++i) {
+        const double df = f_hat[i] - f_true[i];
+        const double dn = y[i]     - f_true[i];   // naive: observed == signal
+        sse_fit   += df * df;
+        sse_naive += dn * dn;
+    }
+    const double rmse_fit   = std::sqrt(sse_fit   / static_cast<double>(N));
+    const double rmse_naive = std::sqrt(sse_naive / static_cast<double>(N));
+
+    std::printf("GPRegression demo (N=%zu):\n", N);
+    std::printf("  posterior-mean f RMSE vs truth = %.4f\n", rmse_fit);
+    std::printf("  naive (y as signal)  RMSE       = %.4f\n", rmse_naive);
+    std::printf("  sigma_hat = %.4f  (truth %.2f)\n", sigma_bar, sigma_true);
+    std::printf("  amplitude_hat = %.4f   lengthscale_hat = %.4f\n",
+                amp_bar, ell_bar);
+
+    // The GP must denoise: smoothed latent f beats raw observations, and the
+    // noise scale lands in a sane band around the truth.
+    const bool denoises   = rmse_fit < rmse_naive;
+    const bool sigma_sane = sigma_bar > 0.5 * sigma_true &&
+                            sigma_bar < 2.0 * sigma_true;
+    const bool ok = denoises && sigma_sane;
+
+    std::printf("%s\n",
+        ok ? "[demo PASS] GP recovers latent f (beats naive) + sane noise sigma"
+           : "[demo FAIL] GP did not recover the latent function / noise scale");
+    return ok ? 0 : 1;
 }
 #endif

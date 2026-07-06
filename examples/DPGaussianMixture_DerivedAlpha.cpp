@@ -62,7 +62,7 @@
 //  The cluster PROPORTIONS (count/N) DO converge (2-chain rank-R-hat ~1.001), so
 //  this is a representation/labeling artifact, NOT a masked mixing failure. To
 //  make the REPORTED pi[slot] converge on its raw recorded values, this example
-//  reaches for an in-sampler canonicaliser (descending-pi slot permutation each
+//  carries an in-sampler canonicaliser (descending-pi slot permutation each
 //  sweep) as a last resort. Prefer post-MCMC relabeling for new models; this
 //  in-sampler path is the exception, not the template. See the class comment.
 //
@@ -87,12 +87,54 @@
 //          + exp(phi) * sum_k log(1 - V_k)
 //
 //  Verified at gen-time via FD verify file (deleted on PASS).
+//
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("DPGaussianMixture_DerivedAlpha")
+//   set.seed(2026)
+//   ## DGP: 3 well-separated 2-D Gaussian clusters; fit DP mixture with
+//   ## K_trunc = 8 truncation slots, alpha = exp(phi) derived from phi.
+//   N_k <- 100L; d <- 2L
+//   centers <- rbind(c(-4, -4), c(0, 4), c(5, -1))
+//   y <- do.call(rbind, lapply(1:3, function(k)
+//            matrix(rnorm(N_k * d, mean = centers[k, ], sd = 0.7),
+//                   ncol = d, byrow = TRUE)))
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(DPGaussianMixture_DerivedAlpha, y, 8L, seed),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(DPGaussianMixture_DerivedAlpha, y, 8L, 7L)  # (y, K_trunc, seed)
+//   m$step(1500)
+//   cur <- m$get_current()
+//   ## # occupied clusters ~ 3; alpha = exp(phi) finite & positive
+//   cat("alpha =", cur$alpha, " n_occupied =",
+//       length(unique(round(cur$z))), "\n")
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(2026)
+//   ## DGP: 3 well-separated 2-D Gaussian clusters.
+//   N_k, d = 100, 2
+//   centers = np.array([[-4.0, -4.0], [0.0, 4.0], [5.0, -1.0]])
+//   y = np.vstack([rng.normal(centers[k], 0.7, size=(N_k, d)) for k in range(3)])
+//   Mod = AI4BayesCode.example("DPGaussianMixture_DerivedAlpha")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.DPGaussianMixture_DerivedAlpha(y, 8, seed),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.DPGaussianMixture_DerivedAlpha(y, 8, 7)  # (y, K_trunc, seed)
+//   m.step(1500)
+//   cur = m.get_current()
+//   alpha = float(np.asarray(cur["alpha"]).ravel()[0])
+//   n_occ = len(np.unique(np.round(np.asarray(cur["z"]))))
+//   print("alpha =", alpha, " n_occupied =", n_occ)
+// @example:end
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates data from a
-// known truth, drives the composite block directly, and checks recovery.
-// No R / Python binding is built or required.
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -101,12 +143,18 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 
 #include "AI4BayesCode/categorical_gibbs_block.hpp"
 #include "AI4BayesCode/nuts_block.hpp"
@@ -120,7 +168,6 @@
 #include <limits>
 #include <memory>
 #include <random>
-#include <stdexcept>
 #include <vector>
 
 using AI4BayesCode::block_context;
@@ -307,64 +354,53 @@ private:
 
 }  // anonymous namespace
 
-// ============================================================================
-//  Frontend-independent model class.
-//
-//  Same model, same priors, same block config, same hyperparameters as the
-//  original Rcpp-bound wrapper — only the frontend binding (Rcpp::List /
-//  Rcpp::NumericMatrix / RCPP_MODULE) is gone. The data is passed as a flat
-//  arma::vec `y_flat` (row-major, N x d) so no Rcpp matrix type is needed.
-//  predict_at is omitted (the demo does not need it).
-// ============================================================================
 class DPGaussianMixture_DerivedAlpha {
 public:
     // Data-driven weakly-informative Normal-Gamma hypers (see CRITICAL
     // note in skills/block_catalogue/index.md; verified on DPGaussianMixture).
     // Fixed mis-scaled hypers over-segment into a WRONG posterior R-hat
     // cannot flag; computing from y fixes it.
-    static arma::vec dd_mu0_(const arma::vec& y_flat,
-                             std::size_t n, std::size_t d) {
-        arma::vec m(d, arma::fill::zeros);
-        for (std::size_t j = 0; j < d; ++j) {
+    static arma::vec dd_mu0_(const arma::mat& y) {
+        const int n = static_cast<int>(y.n_rows), d = static_cast<int>(y.n_cols);
+        arma::vec m(d);
+        for (int j = 0; j < d; ++j) {
             double s = 0.0;
-            for (std::size_t i = 0; i < n; ++i) s += y_flat[i * d + j];
-            m[j] = (n > 0) ? s / static_cast<double>(n) : 0.0;
+            for (int i = 0; i < n; ++i) s += y(i, j);
+            m[j] = (n > 0) ? s / n : 0.0;
         }
         return m;
     }
-    static double dd_blambda_(const arma::vec& y_flat,
-                              std::size_t n, std::size_t d) {
-        double acc = 0.0; std::size_t used = 0;
-        for (std::size_t j = 0; j < d; ++j) {
+    static double dd_blambda_(const arma::mat& y) {
+        const int n = static_cast<int>(y.n_rows), d = static_cast<int>(y.n_cols);
+        double acc = 0.0; int used = 0;
+        for (int j = 0; j < d; ++j) {
             double s = 0.0;
-            for (std::size_t i = 0; i < n; ++i) s += y_flat[i * d + j];
-            const double mean = (n > 0) ? s / static_cast<double>(n) : 0.0;
+            for (int i = 0; i < n; ++i) s += y(i, j);
+            const double mean = (n > 0) ? s / n : 0.0;
             double ss = 0.0;
-            for (std::size_t i = 0; i < n; ++i) {
-                const double dv = y_flat[i * d + j] - mean; ss += dv * dv;
+            for (int i = 0; i < n; ++i) {
+                const double dv = y(i, j) - mean; ss += dv * dv;
             }
-            const double v = (n > 1) ? ss / static_cast<double>(n - 1) : 1.0;
+            const double v = (n > 1) ? ss / (n - 1) : 1.0;
             if (std::isfinite(v) && v > 0.0) { acc += v; ++used; }
         }
-        const double b = (used > 0) ? acc / static_cast<double>(used) : 1.0;
+        const double b = (used > 0) ? acc / used : 1.0;
         return (std::isfinite(b) && b > 0.0) ? b : 1.0;
     }
 
     /// RECOMMENDED constructor: data-driven weakly-informative
     /// Normal-Gamma hypers from y. Delegates to the explicit ctor
     /// (that path is unchanged).
-    DPGaussianMixture_DerivedAlpha(const arma::vec& y_flat,
-                                   std::size_t N, std::size_t d,
+    DPGaussianMixture_DerivedAlpha(const arma::mat& y,
                                    int K_trunc,
                                    int rng_seed,
                                    bool keep_history = false)
-        : DPGaussianMixture_DerivedAlpha(y_flat, N, d, K_trunc,
-                                         dd_mu0_(y_flat, N, d), 0.01, 2.0,
-                                         dd_blambda_(y_flat, N, d),
+        : DPGaussianMixture_DerivedAlpha(y, K_trunc,
+                                         dd_mu0_(y), 0.01, 2.0,
+                                         dd_blambda_(y),
                                          rng_seed, keep_history) {}
 
-    DPGaussianMixture_DerivedAlpha(const arma::vec& y_flat,
-                                    std::size_t N, std::size_t d,
+    DPGaussianMixture_DerivedAlpha(const arma::mat& y,
                                     int K_trunc,
                                     const arma::vec& mu_0,
                                     double kappa_0,
@@ -375,6 +411,10 @@ public:
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
                    : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)}),
+          predict_rng_(rng_seed == 0
+                   ? std::mt19937_64{std::random_device{}()}
+                   : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
+                                     ^ 0x9E3779B97F4A7C15ULL}),
           readapt_rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
                    : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
@@ -383,24 +423,27 @@ public:
                 "DPGaussianMixture_DerivedAlpha")),
           keep_history_(keep_history)
     {
-        if (N < 2)               throw std::runtime_error("N must be >= 2");
-        if (d < 1)               throw std::runtime_error("d must be >= 1");
-        if (K_trunc < 2)         throw std::runtime_error("K_trunc must be >= 2");
-        if (mu_0.n_elem != d)
-            throw std::runtime_error("mu_0 length must equal d");
-        if (!(kappa_0 > 0.0))      throw std::runtime_error("kappa_0 must be > 0");
-        if (!(a_lambda_0 > 0.0))   throw std::runtime_error("a_lambda_0 must be > 0");
-        if (!(b_lambda_0 > 0.0))   throw std::runtime_error("b_lambda_0 must be > 0");
-        if (y_flat.n_elem != N * d)
-            throw std::runtime_error("y_flat length must equal N * d");
+        if (y.n_rows < 2)        ai4b::stop("N must be >= 2");
+        if (y.n_cols < 1)        ai4b::stop("d must be >= 1");
+        if (K_trunc < 2)         ai4b::stop("K_trunc must be >= 2");
+        if (mu_0.n_elem != y.n_cols)
+            ai4b::stop("mu_0 length must equal d");
+        if (!(kappa_0 > 0.0))      ai4b::stop("kappa_0 must be > 0");
+        if (!(a_lambda_0 > 0.0))   ai4b::stop("a_lambda_0 must be > 0");
+        if (!(b_lambda_0 > 0.0))   ai4b::stop("b_lambda_0 must be > 0");
 
-        N_ = N;
-        d_ = d;
+        N_ = static_cast<std::size_t>(y.n_rows);
+        d_ = static_cast<std::size_t>(y.n_cols);
         K_ = static_cast<std::size_t>(K_trunc);
 
+        arma::vec y_flat(N_ * d_);
+        for (std::size_t i = 0; i < N_; ++i)
+            for (std::size_t j = 0; j < d_; ++j)
+                y_flat[i * d_ + j] = y(i, j);
         impl_->data().set("y", y_flat);
 
-        arma::vec mu0_arma = mu_0;
+        arma::vec mu0_arma(d_);
+        for (std::size_t j = 0; j < d_; ++j) mu0_arma[j] = mu_0[j];
         impl_->data().set("mu_0", mu0_arma);
         impl_->data().set("kappa_0",     arma::vec{kappa_0});
         impl_->data().set("a_lambda_0",  arma::vec{a_lambda_0});
@@ -437,7 +480,7 @@ public:
         for (std::size_t k = 0; k < K_; ++k) {
             const std::size_t i_anchor = (k * N_) / K_;
             for (std::size_t j = 0; j < d_; ++j) {
-                mu_init[k * d_ + j] = y_flat[i_anchor * d_ + j];
+                mu_init[k * d_ + j] = y(i_anchor, j);
             }
         }
         impl_->data().set("mu", mu_init);
@@ -635,31 +678,161 @@ public:
 
     void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
-        if (n_steps < 0) throw std::runtime_error("n_steps must be >= 0");
+        if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
 
-    // Neutral-typed accessors (return arma::vec views into shared_data).
-    const arma::vec& get(const std::string& key) const {
-        return impl_->data().get(key);
+    // Backend-neutral get_current: returns a state_map (map<string, arma::vec>).
+    // mu and lambda are returned as FLAT row-major (k*d_+j) arma::vec of length
+    // K_trunc*d (reshape to K_trunc x d in R/Python if a matrix is wanted);
+    // phi/alpha/K_trunc are 1-element arma::vec (read scalar as x[0] / x.ravel()[0]).
+    AI4BayesCode::state_map get_current() const {
+        AI4BayesCode::state_map out;
+        out["z"]       = impl_->data().get("z");
+        out["pi"]      = impl_->data().get("pi");
+        out["mu"]      = impl_->data().get("mu");      // flat K_trunc*d (k*d_+j)
+        out["lambda"]  = impl_->data().get("lambda");  // flat K_trunc*d (k*d_+j)
+        out["phi"]     = impl_->data().get("phi");     // length-1
+        out["alpha"]   = impl_->data().get("alpha");   // length-1
+        out["K_trunc"] = arma::vec{static_cast<double>(K_)};
+        return out;
     }
 
-    double alpha()  const { return impl_->data().get("alpha")[0]; }
-    double phi()    const { return impl_->data().get("phi")[0]; }
-    std::size_t K() const { return K_; }
-    std::size_t N() const { return N_; }
-    std::size_t d() const { return d_; }
+    // Backend-neutral set_current: read from a state_map (map<string,arma::vec>).
+    // "y" arrives as a vectorised COLUMN-MAJOR arma::vec of a N_ x d_ matrix
+    // (the standard state_map matrix convention), i.e. y_col[j*N_ + i] = y(i,j);
+    // it is restored into the model's row-major (i*d_+j) "y" buffer.
+    void set_current(const AI4BayesCode::state_map& params) {
+        auto it_y = params.find("y");
+        if (it_y != params.end()) {
+            const arma::vec& y_col = it_y->second;   // column-major N_ x d_
+            // STRICT-N legitimate (Check #21): z allocation length-N.
+            if (y_col.n_elem != N_ * d_)
+                ai4b::stop("set_current: DPGaussianMixture_DerivedAlpha "
+                           "fixes N and d at construction (z is length-N). "
+                           "Supplied y has %d elems; required N*d = %d. "
+                           "Reconstruct to change N/d.",
+                           static_cast<int>(y_col.n_elem),
+                           static_cast<int>(N_ * d_));
+            arma::vec yflat(N_ * d_);
+            for (std::size_t i = 0; i < N_; ++i)
+                for (std::size_t j = 0; j < d_; ++j)
+                    yflat[i * d_ + j] = y_col[j * N_ + i];
+            impl_->data().set("y", yflat);
+        }
+        auto it_z = params.find("z");
+        if (it_z != params.end()) {
+            arma::vec znew = it_z->second;
+            if (znew.n_elem != N_) ai4b::stop("z length mismatch");
+            for (std::size_t i = 0; i < N_; ++i) {
+                const long lab = static_cast<long>(std::llround(znew[i]));
+                if (lab < 1 || static_cast<std::size_t>(lab) > K_)
+                    ai4b::stop("z[i] out of {1, ..., K_trunc}");
+            }
+            dynamic_cast<categorical_gibbs_block&>(
+                impl_->child(1)).set_current(znew);
+            impl_->data().set("z", znew);
+            impl_->data().refresh_derived_for("z");
+        }
+        auto it_pi = params.find("pi");
+        if (it_pi != params.end()) {
+            arma::vec pinew = it_pi->second;
+            if (pinew.n_elem != K_)
+                ai4b::stop("pi length must equal K_trunc");
+            dynamic_cast<stick_breaking_block&>(
+                impl_->child(3)).set_current(pinew);
+            impl_->data().set("pi", pinew);
+        }
+        auto it_phi = params.find("phi");
+        if (it_phi != params.end()) {
+            const double p_new = it_phi->second[0];
+            if (!std::isfinite(p_new)) ai4b::stop("phi must be finite");
+            dynamic_cast<nuts_block&>(impl_->child(4))
+                .set_current(arma::vec{p_new});
+            impl_->data().set("phi", arma::vec{p_new});
+            impl_->data().refresh_derived_for("phi");  // updates alpha
+        }
+    }
 
+    // Backend-neutral predict_at: takes an empty state_map (no covariates at v0)
+    // and returns a history_map (map<string, arma::mat>). In no-history mode each
+    // refreshed node is a 1-row arma::mat (y_rep is 1 x N_*d_, FLAT row-major
+    // i*d_+j — reshape to N_ x d_ downstream). In history mode y_rep is
+    // n_draws x N_*d_.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
+        if (!new_data.empty())
+            ai4b::stop(
+                "DPGaussianMixture_DerivedAlpha: predict_at(new_data) "
+                "does NOT support covariate-dependent BNP at v0; "
+                "pass an empty map/list.");
+
+        AI4BayesCode::history_map out;
+
+        if (!keep_history_) {
+            block_context replaced;
+            block_context result = impl_->predict_at(replaced, predict_rng_);
+            for (const auto& kv : result) {
+                const arma::vec& v = kv.second;
+                arma::mat m(1, v.n_elem);
+                for (std::size_t j = 0; j < v.n_elem; ++j) m(0, j) = v[j];
+                out.emplace(kv.first, std::move(m));
+            }
+            return out;
+        }
+
+        // History mode: see DPGaussianMixture.cpp predict_at for the
+        // canonical mixture history-mode pattern. Mu/lambda are sub-outputs
+        // of "cluster_params" so we manual-compute per draw.
+        AI4BayesCode::history_map hist = impl_->get_history();
+        const arma::mat& pi_hist  = hist.at("pi");
+        const arma::mat& mu_hist  = hist.at("mu");
+        const arma::mat& lam_hist = hist.at("lambda");
+        const std::size_t n_draws = pi_hist.n_rows;
+
+        arma::mat yrep_mat(n_draws, N_ * d_);
+        std::uniform_real_distribution<double> unif(0.0, 1.0);
+        std::normal_distribution<double> nd(0.0, 1.0);
+        for (std::size_t draw = 0; draw < n_draws; ++draw) {
+            for (std::size_t i = 0; i < N_; ++i) {
+                const double u = unif(predict_rng_);
+                double cumul = 0.0;
+                std::size_t z_i = K_ - 1;
+                for (std::size_t k = 0; k < K_; ++k) {
+                    cumul += pi_hist(draw, k);
+                    if (u < cumul) { z_i = k; break; }
+                }
+                for (std::size_t j = 0; j < d_; ++j) {
+                    const double mu_kj  = mu_hist (draw, z_i * d_ + j);
+                    const double lam_kj = lam_hist(draw, z_i * d_ + j);
+                    const double sd = 1.0 / std::sqrt(lam_kj);
+                    yrep_mat(draw, i * d_ + j) = mu_kj + sd * nd(predict_rng_);
+                }
+            }
+        }
+        out.emplace("y_rep", std::move(yrep_mat));
+        return out;
+    }
+
+    AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag(); }
+    AI4BayesCode::history_map  get_history() const { return impl_->get_history(); }
+
+    /// 7th R-level method: re-tune NUTS metric (mass matrix + step size +
+    /// dual averaging) without advancing chain state. Available because
+    /// the composite contains NUTS-family children. See system_design.md
+    /// §13 NUTS-family + validator.md §24.
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
-        if (n < 0)
-            throw std::runtime_error("readapt_NUTS: n must be non-negative");
+        if (n < 0) {
+            ai4b::stop("readapt_NUTS: n must be non-negative");
+        }
         impl_->readapt_NUTS(static_cast<std::size_t>(n),
                             reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
     }
 
+
 private:
     std::mt19937_64                  rng_;
-    mutable std::mt19937_64          readapt_rng_; // readapt_NUTS() advances it
+    mutable std::mt19937_64          predict_rng_;
+    mutable std::mt19937_64          readapt_rng_; // readapt_NUTS() advances it (7th method)
     std::unique_ptr<composite_block> impl_;
     bool                             keep_history_ = false;
     std::size_t                      N_ = 0;
@@ -667,26 +840,100 @@ private:
     std::size_t                      K_ = 0;
 };
 
-//==============================================================================
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(DPGaussianMixture_DerivedAlpha_module) {
+    Rcpp::class_<DPGaussianMixture_DerivedAlpha>(
+        "DPGaussianMixture_DerivedAlpha")
+        .constructor<arma::mat, int, int>(
+            "DEFAULT (data-driven) ctor; keep_history=FALSE. "
+            "DPGaussianMixture_DerivedAlpha(y, K_trunc, seed).")
+        .constructor<arma::mat, int, int, bool>(
+            "DEFAULT ctor: (y, K_trunc, seed, keep_history). Normal-Gamma "
+            "cluster hypers computed data-driven from y (mu_0=col means, "
+            "kappa_0=0.01, a_lambda=2, b_lambda=mean col var) so the "
+            "sampler is correctly scaled and recovers the true cluster "
+            "structure. Prefer this; the explicit-hyper ctor is advanced.")
+        .constructor<arma::mat, int, arma::vec,
+                     double, double, double, int>(
+            "Advanced explicit-hyper constructor; keep_history=FALSE. "
+            "Prefer the data-driven ctor above.")
+        .constructor<arma::mat, int, arma::vec,
+                     double, double, double, int, bool>(
+            "Construct DPGaussianMixture_DerivedAlpha(y, K_trunc, mu_0, "
+            "kappa_0, a_lambda_0, b_lambda_0, seed, keep_history). "
+            "DP mixture where alpha = exp(phi) is DERIVED from phi via "
+            "register_refresher; phi has Normal(0, 1) prior and is "
+            "sampled by NUTS. Demonstrates the alpha-as-derived "
+            "composition pattern from DESIGN_NOTES_BNP_GP_2026-04-20.md "
+            "Q6.")
+        .method("step", (void (DPGaussianMixture_DerivedAlpha::*)())    &DPGaussianMixture_DerivedAlpha::step, "Run one sweep.")
+        .method("step", (void (DPGaussianMixture_DerivedAlpha::*)(int)) &DPGaussianMixture_DerivedAlpha::step, "Run n sweeps.")
+        .method("get_current", &DPGaussianMixture_DerivedAlpha::get_current)
+        .method("set_current", &DPGaussianMixture_DerivedAlpha::set_current,
+                "Overwrite z, pi, phi, or y from a named list.")
+        .method("predict_at",  &DPGaussianMixture_DerivedAlpha::predict_at,
+                "Posterior predictive y_rep at training X.")
+        .method("get_dag",     &DPGaussianMixture_DerivedAlpha::get_dag)
+        .method("get_history", &DPGaussianMixture_DerivedAlpha::get_history)
+        .method("readapt_NUTS", &DPGaussianMixture_DerivedAlpha::readapt_NUTS);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(DPGaussianMixture_DerivedAlpha, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<DPGaussianMixture_DerivedAlpha>(
+        m, "DPGaussianMixture_DerivedAlpha")
+        // DEFAULT data-driven ctor: (y, K_trunc, rng_seed, keep_history).
+        // Normal-Gamma cluster hypers computed data-driven from y. alpha =
+        // exp(phi) DERIVED from phi (Normal(0,1) prior, NUTS-sampled) via
+        // register_refresher (DESIGN_NOTES_BNP_GP_2026-04-20.md Q6).
+        .def(pybind11::init<arma::mat, int, int, bool>(),
+             pybind11::arg("y"),
+             pybind11::arg("K_trunc"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false)
+        // Advanced explicit-hyper ctor.
+        .def(pybind11::init<arma::mat, int, arma::vec,
+                            double, double, double, int, bool>(),
+             pybind11::arg("y"),
+             pybind11::arg("K_trunc"),
+             pybind11::arg("mu_0"),
+             pybind11::arg("kappa_0"),
+             pybind11::arg("a_lambda_0"),
+             pybind11::arg("b_lambda_0"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false)
+        .def("step", (void (DPGaussianMixture_DerivedAlpha::*)())    &DPGaussianMixture_DerivedAlpha::step, "Run one sweep.")
+        .def("step", (void (DPGaussianMixture_DerivedAlpha::*)(int)) &DPGaussianMixture_DerivedAlpha::step,
+             pybind11::arg("n_steps"))
+        .def("get_current",  &DPGaussianMixture_DerivedAlpha::get_current)
+        .def("set_current",  &DPGaussianMixture_DerivedAlpha::set_current,
+             pybind11::arg("params"))
+        .def("predict_at",   &DPGaussianMixture_DerivedAlpha::predict_at,
+             pybind11::arg("new_data"))
+        .def("get_dag",      &DPGaussianMixture_DerivedAlpha::get_dag)
+        .def("get_history",  &DPGaussianMixture_DerivedAlpha::get_history)
+        .def("readapt_NUTS", &DPGaussianMixture_DerivedAlpha::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
+// ============================================================================
 //  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
+//  Active only when NEITHER binding macro is defined. Reads state via the
+//  full contract get_current() (keys: pi, mu, lambda, alpha) rather than
+//  minimal accessors. Same simulation / seeds / tolerances / checks as the
+//  core version.
 //
 //  Simulates a 1-D, 3-component Gaussian mixture from a KNOWN truth, fits the
 //  DP mixture (alpha = exp(phi) derived, phi ~ N(0,1), sampled by NUTS), and
-//  checks that the fitted mixture recovers the data structure. Because label
-//  switching / truncation makes per-component recovery awkward, we use two
-//  label-invariant, honest checks:
-//
-//   (1) The posterior-mean mixture density evaluated on a grid is far closer
-//       to the TRUE 3-component density than a single-Gaussian baseline fit to
-//       the same data (mean |error| over the grid). This directly tests that
-//       the DP mixture learned the multi-modal structure.
-//
-//   (2) The matched-truth recovery: for each of the 3 true component means,
-//       there exists an OCCUPIED fitted cluster whose mean is within tol. This
-//       confirms the cluster locations were recovered (modulo labeling).
-//
-//  ok is derived purely from these computed comparisons — nothing hard-coded.
-//==============================================================================
+//  checks recovery via two label-invariant checks:
+//   (1) posterior-mean mixture density beats a single-Gaussian baseline;
+//   (2) each true component mean is matched by an occupied fitted cluster.
+// ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 #include <cstdio>
 
 namespace {
@@ -720,20 +967,20 @@ int main() {
     std::uniform_real_distribution<double> unif(0.0, 1.0);
     std::normal_distribution<double>       snorm(0.0, 1.0);
 
-    arma::vec y_flat(N * d);
+    arma::mat y(N, d);
     for (std::size_t i = 0; i < N; ++i) {
         const double u = unif(sim_rng);
         double cum = 0.0; int comp = Kt - 1;
         for (int k = 0; k < Kt; ++k) { cum += w_true[k]; if (u < cum) { comp = k; break; } }
-        y_flat[i] = m_true[comp] + s_true[comp] * snorm(sim_rng);
+        y(i, 0) = m_true[comp] + s_true[comp] * snorm(sim_rng);
     }
 
     // Single-Gaussian baseline (the "naive" model the mixture must beat).
     double base_mu = 0.0, base_var = 0.0;
-    for (std::size_t i = 0; i < N; ++i) base_mu += y_flat[i];
+    for (std::size_t i = 0; i < N; ++i) base_mu += y(i, 0);
     base_mu /= static_cast<double>(N);
     for (std::size_t i = 0; i < N; ++i) {
-        const double dv = y_flat[i] - base_mu; base_var += dv * dv;
+        const double dv = y(i, 0) - base_mu; base_var += dv * dv;
     }
     base_var /= static_cast<double>(N - 1);
     const double base_sd = std::sqrt(base_var);
@@ -741,7 +988,7 @@ int main() {
     // ---- 2. Fit the DP mixture (alpha = exp(phi) derived) -----------------
     const int K_trunc = 10;
     DPGaussianMixture_DerivedAlpha model(
-        y_flat, N, d, K_trunc, /*rng_seed=*/7, /*keep_history=*/false);
+        y, K_trunc, /*rng_seed=*/7, /*keep_history=*/false);
 
     model.step(2000);  // warmup
 
@@ -752,13 +999,10 @@ int main() {
     for (int g = 0; g < G; ++g)
         grid[g] = xlo + (xhi - xlo) * g / (G - 1);
 
-    // Also track, across draws, recovery of the 3 true means by an occupied
-    // (pi_k above a small floor) fitted cluster.
     const int    M = 1500;
     constexpr double kInvSqrt2Pi = 0.39894228040143267794;
     double alpha_bar = 0.0;
 
-    // count how often each true mean is matched at draw level
     std::vector<int> matched_count(Kt, 0);
     const double loc_tol  = 0.6;   // cluster-mean match tolerance
     const double pi_floor = 0.03;  // "occupied" threshold
@@ -766,10 +1010,12 @@ int main() {
     for (int sdraw = 0; sdraw < M; ++sdraw) {
         model.step(1);
 
-        const arma::vec& pi  = model.get("pi");
-        const arma::vec& mu  = model.get("mu");
-        const arma::vec& lam = model.get("lambda");
-        alpha_bar += model.alpha();
+        // Read state via the FULL contract get_current() (copy; avoid dangling).
+        const auto gc = model.get_current();
+        const arma::vec& pi  = gc.at("pi");
+        const arma::vec& mu  = gc.at("mu");
+        const arma::vec& lam = gc.at("lambda");
+        alpha_bar += gc.at("alpha")[0];
 
         // accumulate predictive density: sum_k pi_k Normal(x; mu_k, 1/lam_k)
         for (int g = 0; g < G; ++g) {
@@ -797,7 +1043,6 @@ int main() {
     for (int g = 0; g < G; ++g) post_dens[g] /= static_cast<double>(M);
 
     // ---- 4. Honest comparisons --------------------------------------------
-    // (a) mean |error| of mixture vs truth, and of baseline vs truth.
     double err_mix = 0.0, err_base = 0.0;
     for (int g = 0; g < G; ++g) {
         const double td = true_density(grid[g], w_true, m_true, s_true, Kt);
@@ -809,7 +1054,6 @@ int main() {
     err_mix  /= static_cast<double>(G);
     err_base /= static_cast<double>(G);
 
-    // (b) recovery fraction for each true mean.
     double min_match_frac = 1.0;
     for (int t = 0; t < Kt; ++t) {
         const double f = static_cast<double>(matched_count[t])
@@ -831,11 +1075,6 @@ int main() {
                     static_cast<double>(matched_count[t]) / static_cast<double>(M));
     }
 
-    // PASS criteria (all derived from the computed numbers above):
-    //  - the mixture density beats the naive single-Gaussian by a clear margin
-    //  - every true mean is recovered by an occupied cluster in the large
-    //    majority of post-warmup draws
-    //  - alpha stayed finite/positive (sanity on the derived-alpha refresher)
     const bool beats_baseline = err_mix < 0.5 * err_base;
     const bool all_recovered  = min_match_frac > 0.8;
     const bool alpha_ok       = std::isfinite(alpha_bar) && alpha_bar > 0.0;
@@ -847,3 +1086,4 @@ int main() {
            : "[demo FAIL] see numbers above");
     return ok ? 0 : 1;
 }
+#endif

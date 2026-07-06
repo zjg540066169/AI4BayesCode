@@ -737,7 +737,6 @@ public:
     // ---- Six-method R interface --------------------------------------------
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -1045,5 +1044,148 @@ PYBIND11_MODULE(DPGaussianMixture, m) {
         .def("get_history",  &DPGaussianMixture::get_history)
         .def("readapt_NUTS", &DPGaussianMixture::readapt_NUTS,
              pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
+// ============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (compiled ONLY when NEITHER binding
+//  module macro is defined). Simulates a well-separated 2-component diagonal-
+//  Gaussian mixture in d = 2 from a KNOWN truth, drives the FULL Tier-A
+//  DPGaussianMixture wrapper (data-driven constructor), and recovers the two
+//  cluster means. State is read exclusively through the full 6-method contract
+//  (get_current()); mu arrives as a column-major-vectorised K_trunc x d flat
+//  vector -- element (k, j) lives at j*K_trunc + k. Label-switching-safe: we
+//  average each observation's ASSIGNED cluster mean over draws (per-point,
+//  permutation-invariant). PASS is derived from the actual computed errors.
+// ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+#include <cmath>
+#include <vector>
+int main() {
+    // ---- Known truth: 2 components in d = 2 ------------------------------
+    const std::size_t d     = 2;
+    const std::size_t n_per = 150;
+    const std::size_t N     = 2 * n_per;
+    const double mu_true[2][2] = { { -3.0, -3.0 }, { 3.0, 3.0 } };
+    const double sd_true       = 0.7;          // per-dim std (precision 1/sd^2)
+
+    std::mt19937_64 sim_rng(20260621);
+    std::normal_distribution<double> noise(0.0, sd_true);
+
+    // y as an N x d arma::mat (Tier-A constructor takes a matrix).
+    arma::mat y(N, d);
+    std::size_t idx = 0;
+    for (int comp = 0; comp < 2; ++comp) {
+        for (std::size_t r = 0; r < n_per; ++r) {
+            for (std::size_t j = 0; j < d; ++j) {
+                y(idx, j) = mu_true[comp][j] + noise(sim_rng);
+            }
+            ++idx;
+        }
+    }
+
+    // Column means (naive-baseline target, matches the data-driven mu_0).
+    double mu0[2] = { 0.0, 0.0 };
+    for (std::size_t j = 0; j < d; ++j) {
+        double s = 0.0;
+        for (std::size_t i = 0; i < N; ++i) s += y(i, j);
+        mu0[j] = s / static_cast<double>(N);
+    }
+
+    // K_trunc = max(20, ceil(N/5)); plenty of slack above the true 2.
+    const std::size_t K_trunc = std::max<std::size_t>(20, (N + 4) / 5);
+
+    // Full Tier-A wrapper via the data-driven constructor
+    // (y, K_trunc, seed, keep_history).
+    DPGaussianMixture model(y, static_cast<int>(K_trunc), 7, false);
+
+    // ---- Warmup ----------------------------------------------------------
+    const int n_warmup = 400;
+    model.step(n_warmup);
+
+    // ---- Sampling: accumulate per-observation posterior-mean cluster mean.
+    //  Label switching makes per-cluster mu averages meaningless, so we
+    //  average each observation's ASSIGNED cluster mean over draws (a
+    //  label-switching-invariant per-point quantity).
+    const int M = 1200;
+    std::vector<double> point_mu_acc(N * d, 0.0);
+    for (int s = 0; s < M; ++s) {
+        model.step(1);
+        const auto gc = model.get_current();
+        const arma::vec& z  = gc.at("z");
+        const arma::vec& mu = gc.at("mu");   // column-major flat K x d
+        for (std::size_t i = 0; i < N; ++i) {
+            const long lab = static_cast<long>(std::llround(z[i])) - 1;  // 0-idx
+            const std::size_t k = static_cast<std::size_t>(
+                std::min<long>(std::max<long>(lab, 0),
+                               static_cast<long>(K_trunc) - 1));
+            for (std::size_t j = 0; j < d; ++j) {
+                // column-major: element (k, j) at j*K_trunc + k.
+                point_mu_acc[i * d + j] += mu[j * K_trunc + k];
+            }
+        }
+    }
+    for (std::size_t t = 0; t < point_mu_acc.size(); ++t)
+        point_mu_acc[t] /= static_cast<double>(M);
+
+    // ---- Recover per-component mean = average of point-means whose TRUE
+    //      component is c. Compare to truth; compare to naive global mean.
+    double rec_mu[2][2] = { { 0, 0 }, { 0, 0 } };
+    for (int comp = 0; comp < 2; ++comp) {
+        for (std::size_t j = 0; j < d; ++j) {
+            double s = 0.0;
+            for (std::size_t r = 0; r < n_per; ++r) {
+                const std::size_t i = static_cast<std::size_t>(comp) * n_per + r;
+                s += point_mu_acc[i * d + j];
+            }
+            rec_mu[comp][j] = s / static_cast<double>(n_per);
+        }
+    }
+
+    // Recovery error (RMS over the two centres x d dims).
+    double err_sq = 0.0, base_sq = 0.0;
+    for (int comp = 0; comp < 2; ++comp) {
+        for (std::size_t j = 0; j < d; ++j) {
+            const double e = rec_mu[comp][j] - mu_true[comp][j];
+            err_sq += e * e;
+            const double bdev = mu0[j] - mu_true[comp][j];  // naive baseline
+            base_sq += bdev * bdev;
+        }
+    }
+    const double rmse_model    = std::sqrt(err_sq  / 4.0);
+    const double rmse_baseline = std::sqrt(base_sq / 4.0);
+
+    // Count occupied clusters in the final draw (sanity: DP should use ~2).
+    const auto gc_final = model.get_current();
+    const arma::vec& z_final = gc_final.at("z");
+    std::vector<int> occ_flag(K_trunc, 0);
+    for (std::size_t i = 0; i < N; ++i) {
+        long lab = static_cast<long>(std::llround(z_final[i])) - 1;
+        if (lab < 0) lab = 0;
+        if (static_cast<std::size_t>(lab) >= K_trunc) lab = static_cast<long>(K_trunc) - 1;
+        occ_flag[static_cast<std::size_t>(lab)] = 1;
+    }
+    std::size_t n_occ = 0;
+    for (std::size_t k = 0; k < K_trunc; ++k) n_occ += occ_flag[k];
+
+    const double alpha_final = gc_final.at("alpha")[0];
+
+    std::printf("DPGaussianMixture demo (truncated-DP Gaussian mixture)\n");
+    std::printf("  N=%zu d=%zu K_trunc=%zu  occupied clusters (final)=%zu  alpha=%.3f\n",
+                N, d, K_trunc, n_occ, alpha_final);
+    std::printf("  truth centres : (% .2f,% .2f) (% .2f,% .2f)\n",
+                mu_true[0][0], mu_true[0][1], mu_true[1][0], mu_true[1][1]);
+    std::printf("  recovered     : (% .2f,% .2f) (% .2f,% .2f)\n",
+                rec_mu[0][0], rec_mu[0][1], rec_mu[1][0], rec_mu[1][1]);
+    std::printf("  RMSE model=%.3f   RMSE naive-global-mean baseline=%.3f\n",
+                rmse_model, rmse_baseline);
+
+    const bool ok = (rmse_model < 0.4) &&
+                    (rmse_model < 0.25 * rmse_baseline);
+    std::printf("%s\n", ok
+        ? "[demo PASS] DP mixture recovers both component centres"
+        : "[demo FAIL] cluster-mean recovery did not meet tolerance");
+    return ok ? 0 : 1;
 }
 #endif

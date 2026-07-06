@@ -66,6 +66,12 @@
 //   X <- matrix(runif(N * 3L, -1, 1), N, 3L)      # x1,x2,x3 ~ Unif(-1,1)
 //   f <- sin(3 * X[,1]) + 0.5 * X[,2]^2 - X[,3]   # smooth low-dim mean
 //   y <- f + rnorm(N, 0, 0.5)                      # sigma_true = 0.5
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(SoftBartNoise, X, y, 50L, 2.0, 10.0, FALSE, seed, 3.0, FALSE, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m <- new(SoftBartNoise, X, y, 50L, 2.0, 10.0, FALSE, 42L)
 //   #          X,  y, ntrees, k, tau_rate, dart, seed
 //   m$step(2000); str(m$get_current())             # $f_softbart, $sigma
@@ -76,6 +82,12 @@
 //   f = np.sin(3 * X[:,0]) + 0.5 * X[:,1]**2 - X[:,2]   # smooth low-dim mean
 //   y = f + rng.normal(0, 0.5, size=N)              # sigma_true = 0.5
 //   Mod = AI4BayesCode.example("SoftBartNoise")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.SoftBartNoise(X, y, 50, 2.0, 10.0, False, seed, keep_history=True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.SoftBartNoise(X, y, 50, 2.0, 10.0, False, 42)  # X,y,ntrees,k,tau_rate,dart,seed
 //   m.step(2000); print(m.get_current())            # f_softbart, sigma
 // @example:end
@@ -633,8 +645,7 @@ RCPP_MODULE(SoftBartNoise_module) {
             "FALSE), keep_history (record numeric per-step buffers; "
             "cheap; default FALSE).")
         .method("step", (void (SoftBartNoise::*)())    &SoftBartNoise::step, "Run one sweep.")
-        .method("step", (void (SoftBartNoise::*)(int)) &SoftBartNoise::step,
-                "Run n Gibbs sweeps.")
+        .method("step", (void (SoftBartNoise::*)(int)) &SoftBartNoise::step, "Run n Gibbs sweeps.")
         .method("get_current", &SoftBartNoise::get_current,
                 "Return the current draw as a named list with $f_softbart "
                 "and $sigma. The serialized SoftBart forest is available "

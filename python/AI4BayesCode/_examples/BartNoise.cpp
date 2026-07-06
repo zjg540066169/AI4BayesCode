@@ -361,7 +361,6 @@ public:
     }
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -695,7 +694,8 @@ RCPP_MODULE(BartNoise_module) {
             "keep_history (record numeric per-step buffers for trace "
             "analysis; cheap; default FALSE).")
         .method("step", (void (BartNoise::*)())    &BartNoise::step, "Run one sweep.")
-        .method("step", (void (BartNoise::*)(int)) &BartNoise::step, "Run n Gibbs sweeps.")
+        .method("step", (void (BartNoise::*)(int)) &BartNoise::step,
+                "Run n Gibbs sweeps.")
         .method("get_current", &BartNoise::get_current,
                 "Return the current draw as a named list with $f_bart and "
                 "$sigma. The serialized BART forest is available "

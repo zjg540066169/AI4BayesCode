@@ -58,10 +58,38 @@
 //   domain.
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates B-spline data,
-// fits the joint-NUTS block, and checks recovery against a naive baseline.
-// No R / Python binding is built or required.
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("BSplineRegression")
+//   set.seed(123); N <- 100L; K_s <- 10L                       # data + basis dim
+//   x <- (0:(N-1))/(N-1); knots <- (1:K_s)/(K_s+1)             # grid + interior knots
+//   Bsp <- outer(x, knots, function(a,b) pmax(a-b, 0))         # truncated-power basis (N x K_s)
+//   y <- 0.4*sin(8*x) + 0.2*x^2 + rnorm(N, 0, 0.3)             # smooth(x) + N(0,0.3)
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(BSplineRegression, y, Bsp, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(BSplineRegression, y, Bsp, 7L, TRUE)              # y, basis, seed, keep_history
+//   m$step(2500); str(m$get_current())
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(123); N, K_s = 100, 10
+//   x = np.arange(N)/(N-1); knots = (np.arange(1,K_s+1))/(K_s+1)
+//   Bsp = np.maximum(x[:,None] - knots[None,:], 0.0)           # truncated-power basis (N x K_s)
+//   y = 0.4*np.sin(8*x) + 0.2*x**2 + rng.normal(0, 0.3, N)     # smooth(x) + N(0,0.3)
+//   Mod = AI4BayesCode.example("BSplineRegression")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.BSplineRegression(y, Bsp, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.BSplineRegression(y, Bsp, 7, True); m.step(2500); print(m.get_current())
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -70,20 +98,35 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#include <RcppArmadillo.h>
+#else
 #include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <random>
-#include <stdexcept>
 #include <vector>
+
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#include <Rcpp.h>
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
+#include <pybind11/stl.h>
+#endif
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -400,7 +443,18 @@ public:
     }
 
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
-    AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
+
+    // History is augmented with the derived positive-scale parameters
+    // sds = exp(log_sds) and sigma = exp(log_sigma) so that get_history()
+    // is consistent with get_current() (which exposes both).
+    AI4BayesCode::history_map get_history() const {
+        AI4BayesCode::history_map h = impl_->get_history();
+        auto it_sds = h.find("log_sds");
+        if (it_sds != h.end()) h["sds"] = arma::exp(it_sds->second);
+        auto it_sig = h.find("log_sigma");
+        if (it_sig != h.end()) h["sigma"] = arma::exp(it_sig->second);
+        return h;
+    }
 
     /// 7th R-level method: re-tune NUTS metric (mass matrix + step size +
     /// dual averaging) without advancing chain state. Available because
@@ -408,7 +462,7 @@ public:
     /// §13 NUTS-family + validator.md §24.
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
         if (n < 0) {
-            throw std::runtime_error("readapt_NUTS: n must be non-negative");
+            ai4b::stop("readapt_NUTS: n must be non-negative");
         }
         impl_->readapt_NUTS(static_cast<std::size_t>(n),
                             reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
@@ -423,6 +477,54 @@ private:
     bool keep_history_ = false;
 };
 
+// ============================================================================
+// Bindings
+// ============================================================================
+
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(BSplineRegression_module) {
+    Rcpp::class_<BSplineRegression>("BSplineRegression")
+        .constructor<arma::vec, arma::mat, int, bool>(
+            "1-D penalized B-spline regression.\n"
+            "Args: y (N), Bsp (N x K_s basis matrix), seed, keep_history.")
+        .method("step", (void (BSplineRegression::*)())    &BSplineRegression::step, "Run one sweep.")
+        .method("step", (void (BSplineRegression::*)(int)) &BSplineRegression::step, "Run n sweeps.")
+        .method("get_current", &BSplineRegression::get_current)
+        .method("set_current", &BSplineRegression::set_current)
+        .method("predict_at",  &BSplineRegression::predict_at)
+        .method("get_dag",     &BSplineRegression::get_dag)
+        .method("get_history", &BSplineRegression::get_history)
+        .method("readapt_NUTS", &BSplineRegression::readapt_NUTS);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+
+PYBIND11_MODULE(BSplineRegression_module, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<BSplineRegression>(m, "BSplineRegression")
+        .def(pybind11::init<arma::vec, arma::mat, int, bool>(),
+             pybind11::arg("y"), pybind11::arg("Bsp"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false,
+             "1-D penalized B-spline regression.")
+        .def("step", (void (BSplineRegression::*)())    &BSplineRegression::step, "Run one sweep.")
+        .def("step", (void (BSplineRegression::*)(int)) &BSplineRegression::step,
+             pybind11::arg("n_steps"))
+        .def("get_current", &BSplineRegression::get_current)
+        .def("set_current", &BSplineRegression::set_current,
+             pybind11::arg("params"))
+        .def("predict_at",  &BSplineRegression::predict_at,
+             pybind11::arg("new_data"))
+        .def("get_dag",     &BSplineRegression::get_dag)
+        .def("get_history", &BSplineRegression::get_history)
+        .def("readapt_NUTS", &BSplineRegression::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 //==============================================================================
 //  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
 //
@@ -519,3 +621,4 @@ int main() {
            : "[demo FAIL] fitted spline did not recover the truth");
     return ok ? 0 : 1;
 }
+#endif

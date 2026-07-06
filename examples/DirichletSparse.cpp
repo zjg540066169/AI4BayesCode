@@ -2,17 +2,17 @@
 // Licensed under the GNU General Public License v2.0 or later
 // (GPL-2.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
-//  DirichletSparse.cpp
+//  DirichletSparse_joint.cpp
 //
-//  JOINT-NUTS DirichletSparse. (s, theta) are sampled by ONE joint_nuts_block
-//  (sub-params SIMPLEX + POSITIVE) instead of two separate single nuts_blocks
-//  alternated Gibbs-style. s and theta are tightly coupled through
-//  alpha = theta/P, so a single joint NUTS trajectory mixes the dependence
-//  directly. This also exercises the dim-CHANGING SIMPLEX constraint as a joint
-//  sub-param (unconstrained width P-1, natural width P).
+//  JOINT-NUTS rewrite of DirichletSparse.cpp. Same model/priors/posterior, but
+//  (s, theta) are sampled by ONE joint_nuts_block (sub-params SIMPLEX + POSITIVE)
+//  instead of two separate single nuts_blocks alternated Gibbs-style. s and theta
+//  are tightly coupled through alpha = theta/P, so a single joint NUTS trajectory
+//  mixes the dependence directly. This also exercises the dim-CHANGING SIMPLEX
+//  constraint as a joint sub-param (unconstrained width P-1, natural width P).
 //
-//  Model
-//  -----
+//  Model (identical to DirichletSparse.cpp)
+//  ----------------------------------------
 //      y      ~ Multinomial(N, s)                       (P categories)
 //      s      ~ Dirichlet(theta/P, ..., theta/P)
 //      theta / (theta + P) ~ Beta(0.5, 1)
@@ -33,11 +33,42 @@
 //
 //  joint_nuts_block adds the per-slice Jacobians (simplex stick-breaking on s,
 //  log on theta) internally; this function stays on the NATURAL scale.
+//  Cross-validated against DirichletSparse.cpp (posteriors match, R-hat).
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates data, fits the
-// block, and checks recovery. No R / Python binding is built or required.
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("DirichletSparse")
+//   set.seed(2026)
+//   s_true <- c(0.50, 0.25, 0.15, 0.05, 0.03, 0.02)  # sparse P=6 simplex
+//   N      <- 1000L                                   # multinomial trials (N >> P)
+//   y      <- as.numeric(rmultinom(1, N, s_true))     # observed category counts
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(DirichletSparse, y, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(DirichletSparse, y, 7L, TRUE)            # y_counts, rng_seed, keep_history
+//   m$step(2500); str(m$get_current())                # s (P-simplex) + theta (>0)
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(2026)
+//   s_true = np.array([0.50, 0.25, 0.15, 0.05, 0.03, 0.02])  # sparse P=6 simplex
+//   N = 1000                                                 # multinomial trials (N >> P)
+//   y = rng.multinomial(N, s_true).astype(float)             # observed category counts
+//   Mod = AI4BayesCode.example("DirichletSparse")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.DirichletSparse(y, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.DirichletSparse(y, 7, True)  # (y_counts, rng_seed, keep_history)
+//   m.step(2500); print(m.get_current())                     # s (P-simplex) + theta (>0)
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -46,14 +77,19 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
-#include "AI4BayesCode/backend_neutral.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -99,7 +135,7 @@ double s_theta_joint_log_density(const arma::vec& x,
 
     const double lp =
           like_s                                            // Multinomial likelihood
-        + ai4b::lgammafn(theta) - Pd * ai4b::lgammafn(alpha) // Dirichlet normalizer
+        + ai4b::lgammafn(theta) - Pd * ai4b::lgammafn(alpha)// Dirichlet normalizer
         + (alpha - 1.0) * sum_log_s                         // Dirichlet prior kernel (ONCE)
         - 0.5 * std::log(theta) - 1.5 * std::log(theta + Pd); // Beta(0.5,1) hyperprior
 
@@ -137,8 +173,8 @@ public:
           keep_history_(keep_history)
     {
         const int P = static_cast<int>(y_counts.n_elem);
-        if (P < 2) throw std::runtime_error("y_counts must have length P >= 2");
-        if (arma::any(y_counts < 0.0)) throw std::runtime_error("y_counts entries must be non-negative");
+        if (P < 2) ai4b::stop("y_counts must have length P >= 2");
+        if (arma::any(y_counts < 0.0)) ai4b::stop("y_counts entries must be non-negative");
 
         const double theta_init = 1.0;
         impl_->data().set("y", y_counts);
@@ -158,7 +194,8 @@ public:
         impl_->data().declare_context_edges("theta", {"s"});
 
         impl_->data().set("y_rep", arma::vec(y_counts.n_elem, arma::fill::zeros));
-        const int N_total = static_cast<int>(arma::sum(y_counts));
+        N_total_ = static_cast<int>(arma::sum(y_counts));
+        const int N_total = N_total_;
         impl_->data().register_stochastic_refresher(
             "y_rep",
             [N_total](const AI4BayesCode::shared_data_t& d,
@@ -204,8 +241,8 @@ public:
 
     AI4BayesCode::state_map get_current() const {
         AI4BayesCode::state_map out;
-        out["s"]     = impl_->data().get("s");
-        out["theta"] = impl_->data().get("theta");
+        out["s"]     = impl_->data().get("s");      // length-P simplex vector
+        out["theta"] = impl_->data().get("theta");  // length-1 arma::vec
         return out;
     }
 
@@ -218,8 +255,8 @@ public:
         auto it_s = params.find("s");
         if (it_s != params.end()) {
             arma::vec s_new = it_s->second;
-            if (s_new.n_elem != P) throw std::runtime_error("s has wrong length");
-            if (arma::any(s_new <= 0.0)) throw std::runtime_error("s entries must be strictly positive");
+            if (s_new.n_elem != P) ai4b::stop("s has wrong length");
+            if (arma::any(s_new <= 0.0)) ai4b::stop("s entries must be strictly positive");
             const double ssum = arma::sum(s_new);
             if (std::abs(ssum - 1.0) > 1e-8) s_new /= ssum;
             for (std::size_t i = 0; i < P; ++i) cat_new[i] = s_new[i];
@@ -228,7 +265,7 @@ public:
         auto it_theta = params.find("theta");
         if (it_theta != params.end()) {
             const double th_new = it_theta->second[0];
-            if (th_new <= 0.0) throw std::runtime_error("theta must be strictly positive");
+            if (th_new <= 0.0) ai4b::stop("theta must be strictly positive");
             cat_new[P] = th_new;
             touched = true;
         }
@@ -241,9 +278,8 @@ public:
 
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
         if (!new_data.empty())
-            throw std::runtime_error(
-                "DirichletSparse has no covariate inputs. "
-                "predict_at() takes an empty map/list.");
+            ai4b::stop("DirichletSparse has no covariate inputs. "
+                       "predict_at() takes an empty map/list.");
         AI4BayesCode::history_map out;
 
         if (!keep_history_) {
@@ -257,27 +293,27 @@ public:
             }
             return out;
         }
-        // History mode: s is a joint sub-output (keyed by sub-param name "s").
+
+        // History mode: s is a joint sub-output (keyed by sub-param name "s"),
+        // so the composite predict_at rejects it as replaced context; compute
+        // y_rep manually per draw (cf. DirichletHierarchical_joint / IRT1PL_joint).
+        // y_rep ~ Multinomial(N_total, s_draw), reported as category counts.
         AI4BayesCode::history_map hist = impl_->get_history();
-        const arma::mat& s_hist = hist.at("s");
+        const arma::mat& s_hist = hist.at("s");      // n_draws x P
         const std::size_t n_draws = s_hist.n_rows;
         const std::size_t K       = s_hist.n_cols;
-        std::unordered_map<std::string, std::vector<arma::vec>> collected;
+
+        arma::mat yrep(n_draws, K);
         for (std::size_t d = 0; d < n_draws; ++d) {
-            arma::vec s(K);
-            for (std::size_t j = 0; j < K; ++j) s[j] = s_hist(d, j);
-            block_context replaced; replaced["s"] = s;
-            block_context result = impl_->predict_at(replaced, predict_rng_);
-            for (const auto& kv : result) collected[kv.first].push_back(kv.second);
+            std::vector<double> probs(K);
+            for (std::size_t j = 0; j < K; ++j) probs[j] = s_hist(d, j);
+            std::discrete_distribution<int> cat(probs.begin(), probs.end());
+            arma::vec counts(K, arma::fill::zeros);
+            for (int n = 0; n < N_total_; ++n)
+                counts[static_cast<std::size_t>(cat(predict_rng_))] += 1.0;
+            for (std::size_t j = 0; j < K; ++j) yrep(d, j) = counts[j];
         }
-        for (const auto& kv : collected) {
-            if (kv.second.empty()) continue;
-            const std::size_t dim = kv.second[0].n_elem;
-            arma::mat m(n_draws, dim);
-            for (std::size_t i = 0; i < n_draws; ++i)
-                for (std::size_t j = 0; j < dim; ++j) m(i, j) = kv.second[i][j];
-            out.emplace(kv.first, std::move(m));
-        }
+        out.emplace("y_rep", std::move(yrep));
         return out;
     }
 
@@ -285,7 +321,7 @@ public:
     AI4BayesCode::history_map   get_history() const { return impl_->get_history(); }
 
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
-        if (n < 0) throw std::runtime_error("readapt_NUTS: n must be non-negative");
+        if (n < 0) ai4b::stop("readapt_NUTS: n must be non-negative");
         impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
     }
 
@@ -295,16 +331,57 @@ private:
     mutable std::mt19937_64          readapt_rng_;
     std::unique_ptr<composite_block> impl_;
     bool                             keep_history_ = false;
+    int                              N_total_      = 0;
 };
 
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(DirichletSparse_module) {
+    Rcpp::class_<DirichletSparse>("DirichletSparse")
+        .constructor<arma::vec, int>("Legacy constructor; keep_history defaults to FALSE.")
+        .constructor<arma::vec, int, bool>(
+            "Joint-NUTS DirichletSparse: (s, theta) in one joint_nuts_block.")
+        .method("step", (void (DirichletSparse::*)())    &DirichletSparse::step, "Run one sweep.")
+        .method("step", (void (DirichletSparse::*)(int)) &DirichletSparse::step,
+                "Run n sweeps (each: one JOINT NUTS update of (s, theta)).")
+        .method("get_current", &DirichletSparse::get_current)
+        .method("set_current", &DirichletSparse::set_current)
+        .method("predict_at",  &DirichletSparse::predict_at)
+        .method("get_dag",     &DirichletSparse::get_dag)
+        .method("get_history", &DirichletSparse::get_history)
+        .method("readapt_NUTS",&DirichletSparse::readapt_NUTS);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(DirichletSparse, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<DirichletSparse>(m, "DirichletSparse")
+        .def(pybind11::init<arma::vec, int, bool>(),
+             pybind11::arg("y_counts"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false)
+        .def("step", (void (DirichletSparse::*)())    &DirichletSparse::step, "Run one sweep.")
+        .def("step", (void (DirichletSparse::*)(int)) &DirichletSparse::step,    pybind11::arg("n_steps"))
+        .def("get_current",  &DirichletSparse::get_current)
+        .def("set_current",  &DirichletSparse::set_current, pybind11::arg("params"))
+        .def("predict_at",   &DirichletSparse::predict_at,  pybind11::arg("new_data"))
+        .def("get_dag",      &DirichletSparse::get_dag)
+        .def("get_history",  &DirichletSparse::get_history)
+        .def("readapt_NUTS", &DirichletSparse::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
 //==============================================================================
-//  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
-//  Simulates multinomial counts from a known sparse probability vector s_true,
-//  fits via the joint-NUTS block (s SIMPLEX, theta POSITIVE), and checks that
-//  the posterior-mean of s recovers s_true better than the naive frequency
-//  estimate would be expected to deteriorate. PASS is derived from a real
-//  computed error vs the truth, never hard-coded.
+//  Standalone FRONTEND-INDEPENDENT demo (active only when NO binding macro is
+//  defined). Simulates multinomial counts from a known sparse probability
+//  vector s_true, fits via the joint-NUTS block (s SIMPLEX, theta POSITIVE),
+//  and checks that the posterior-mean of s recovers s_true. State is read via
+//  the full contract get_current() (keys "s", "theta"). PASS is derived from a
+//  real computed error vs the truth, never hard-coded.
 //==============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 #include <cstdio>
 int main() {
     // Sparse truth: most mass on a few categories.
@@ -327,9 +404,11 @@ int main() {
     const int M = 3000;
     for (int it = 0; it < M; ++it) {
         model.step(1);
-        const auto cur = model.get_current();
-        s_bar     += cur.at("s");
-        theta_bar += cur.at("theta")[0];
+        const auto gc = model.get_current();          // copy (avoids dangling ref)
+        const arma::vec& s_cur     = gc.at("s");
+        const arma::vec& theta_cur = gc.at("theta");
+        s_bar     += s_cur;
+        theta_bar += theta_cur[0];
     }
     s_bar     /= static_cast<double>(M);
     theta_bar /= static_cast<double>(M);
@@ -357,3 +436,4 @@ int main() {
                            : "[demo FAIL]");
     return ok ? 0 : 1;
 }
+#endif

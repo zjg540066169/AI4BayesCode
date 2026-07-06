@@ -82,10 +82,38 @@
 //  on eta-scale) until a gamma_j=1 move is accepted.
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates spike-and-slab
-// data, drives the composite block directly, and checks variable-selection /
-// coefficient recovery. No R / Python binding is built or required.
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("SpikeSlabRJMCMC")
+//   set.seed(20260621); N <- 300L; p <- 8L; sigma_true <- 1.0
+//   beta_true <- numeric(p); beta_true[c(1,4,7)] <- c(2.5, -1.8, 1.2)  # actives {1,4,7}
+//   X <- matrix(rnorm(N * p), N, p); X <- scale(X, center = TRUE, scale = FALSE)  # center cols (no intercept)
+//   y <- as.numeric(X %*% beta_true + rnorm(N, 0, sigma_true)); y <- y - mean(y)  # center y
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(SpikeSlabRJMCMC, X, y, 1.0, 1.0, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(SpikeSlabRJMCMC, X, y, 1.0, 1.0, 7L, TRUE)  # X (N x p), y, a_pi=1, b_pi=1 (Beta prior on pi), seed=7, keep_history=TRUE
+//   m$step(2500); str(m$get_current())
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(20260621); N, p, sigma_true = 300, 8, 1.0
+//   beta_true = np.zeros(p); beta_true[[0, 3, 6]] = [2.5, -1.8, 1.2]   # actives {1,4,7}
+//   X = rng.standard_normal((N, p)); X = X - X.mean(axis=0)             # center cols (no intercept)
+//   y = X @ beta_true + rng.normal(0.0, sigma_true, N); y = y - y.mean()  # center y
+//   Mod = AI4BayesCode.example("SpikeSlabRJMCMC")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.SpikeSlabRJMCMC(X, y, 1.0, 1.0, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.SpikeSlabRJMCMC(X, y, 1.0, 1.0, 7, True)  # (X, y, a_pi=1, b_pi=1, seed=7, keep_history=True)
+//   m.step(2500); print(m.get_current())              # gamma ~ {0,3,6} active, sigma ~ 1
+// @example:end
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -94,18 +122,25 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/beta_gibbs_block.hpp"
 #include "AI4BayesCode/nuts_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/rjmcmc_block.hpp"
 
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <random>
 #include <vector>
@@ -398,12 +433,7 @@ double spike_slab_continuous_update(std::mt19937_64& rng,
 } // anonymous namespace
 
 // ============================================================================
-//  SpikeSlabRJMCMC -- frontend-independent driver class.
-//
-//  Same model wiring as the original Rcpp-bound class (priors, log-densities,
-//  block configs, DAG, hyperparameters preserved EXACTLY); only the frontend
-//  binding (Rcpp::List get/set/predict, RCPP_MODULE) has been removed. step()
-//  drives the composite; get_current() returns a neutral AI4BayesCode::state_map.
+//  SpikeSlabRJMCMC -- user-facing wrapper class
 // ============================================================================
 
 class SpikeSlabRJMCMC {
@@ -417,6 +447,10 @@ public:
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
                    : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)}),
+          predict_rng_(rng_seed == 0
+                   ? std::mt19937_64{std::random_device{}()}
+                   : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
+                                     ^ 0x9E3779B97F4A7C15ULL}),
           readapt_rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
                    : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
@@ -426,11 +460,11 @@ public:
     {
         const std::size_t N = X.n_rows;
         const std::size_t p = X.n_cols;
-        if (N == 0)       throw std::runtime_error("X must have at least 1 row");
-        if (p == 0)       throw std::runtime_error("X must have at least 1 column");
-        if (y.n_elem != N) throw std::runtime_error("y length must equal X row count");
+        if (N == 0)       ai4b::stop("X must have at least 1 row");
+        if (p == 0)       ai4b::stop("X must have at least 1 column");
+        if (y.n_elem != N) ai4b::stop("y length must equal X row count");
         if (!(a_pi_prior > 0.0) || !(b_pi_prior > 0.0))
-            throw std::runtime_error("a_pi / b_pi must be > 0");
+            ai4b::stop("a_pi / b_pi must be > 0");
         N_ = N; p_ = p;
 
         // Data in shared_data.
@@ -683,58 +717,322 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
-
-    // ---- Neutral-typed driver interface (no Rcpp) ----
+    // ---- Canonical 6-method R interface ----
 
     void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
-        if (n_steps < 0) throw std::runtime_error("n_steps must be >= 0");
+        if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
 
-    // Returns the current draw as a neutral AI4BayesCode::state_map.
     AI4BayesCode::state_map get_current() const {
+        // Each value is an arma::vec; scalars are length-1 (the frontend
+        // converts state_map -> R named list / Python dict; length-1 vectors
+        // surface as 1-element numeric vectors / numpy arrays).
         AI4BayesCode::state_map out;
-        out["gamma"] = impl_->data().get("gamma");
-        out["beta"]  = impl_->data().get("beta");
-        out["sigma"] = impl_->data().get("sigma");
-        out["tau"]   = impl_->data().get("tau");
-        out["pi"]    = impl_->data().get("pi");
+        out["gamma"] = impl_->data().get("gamma");   // length p
+        out["beta"]  = impl_->data().get("beta");    // length p
+        out["sigma"] = impl_->data().get("sigma");   // length 1
+        out["tau"]   = impl_->data().get("tau");     // length 1
+        out["pi"]    = impl_->data().get("pi");      // length 1
         return out;
     }
 
-    AI4BayesCode::dag_info    get_dag()     const { return impl_->get_dag(); }
+    void set_current(const AI4BayesCode::state_map& params) {
+        // Backend-neutral I/O: every value is an arma::vec (frontend already
+        // converted R list / Python dict). X arrives as a VECTORISED N*p
+        // arma::vec, column-major (element (i,j) at index i + j*N), matching
+        // how X is stored in data() (arma::vectorise of the N x p design)
+        // and how predict_at receives it.
+        auto* pi_blk = dynamic_cast<beta_gibbs_block*>(&impl_->child(0));
+        auto* sg_blk = dynamic_cast<nuts_block*>(&impl_->child(1));
+        auto* tu_blk = dynamic_cast<nuts_block*>(&impl_->child(2));
+        auto* rj_blk = dynamic_cast<rjmcmc_block*>(&impl_->child(3));
+
+        auto it_g = params.find("gamma");
+        auto it_b = params.find("beta");
+        const bool has_g = (it_g != params.end());
+        const bool has_b = (it_b != params.end());
+        if (has_g || has_b) {
+            arma::vec g_new = impl_->data().get("gamma");
+            arma::vec b_new = impl_->data().get("beta");
+            if (has_g) {
+                const arma::vec& gv = it_g->second;
+                if (static_cast<std::size_t>(gv.n_elem) != p_)
+                    ai4b::stop("set_current: gamma length mismatch");
+                for (std::size_t j = 0; j < p_; ++j)
+                    g_new[j] = (gv[j] >= 0.5) ? 1.0 : 0.0;
+            }
+            if (has_b) {
+                const arma::vec& bv = it_b->second;
+                if (static_cast<std::size_t>(bv.n_elem) != p_)
+                    ai4b::stop("set_current: beta length mismatch");
+                for (std::size_t j = 0; j < p_; ++j)
+                    b_new[j] = bv[j];
+            }
+            for (std::size_t j = 0; j < p_; ++j)
+                if (g_new[j] == 0.0) b_new[j] = 0.0;
+            arma::vec cat(2 * p_);
+            for (std::size_t j = 0; j < p_; ++j) {
+                cat[j]      = g_new[j];
+                cat[p_ + j] = b_new[j];
+            }
+            rj_blk->set_current(cat);
+            impl_->data().set("gamma", g_new);
+            impl_->data().set("beta",  b_new);
+        }
+        auto it_sigma = params.find("sigma");
+        if (it_sigma != params.end()) {
+            const double sg = it_sigma->second[0];
+            if (!(sg > 0.0)) ai4b::stop("sigma must be > 0");
+            sg_blk->set_current(arma::vec{sg});
+            impl_->data().set("sigma", arma::vec{sg});
+        }
+        auto it_tau = params.find("tau");
+        if (it_tau != params.end()) {
+            const double tu = it_tau->second[0];
+            if (!(tu > 0.0)) ai4b::stop("tau must be > 0");
+            tu_blk->set_current(arma::vec{tu});
+            impl_->data().set("tau", arma::vec{tu});
+        }
+        auto it_pi = params.find("pi");
+        if (it_pi != params.end()) {
+            const double pv = it_pi->second[0];
+            if (!(pv > 0.0 && pv < 1.0))
+                ai4b::stop("pi must be in (0, 1)");
+            pi_blk->set_current(arma::vec{pv});
+            impl_->data().set("pi", arma::vec{pv});
+        }
+        // ---- X / y branches: canonical dynamic-N pattern
+        // (codegen_cpp.md §7a; system_design.md §7 rules 4 + 6).
+        // p is strict (gamma/beta length); N is dynamic and updated
+        // atomically with X. y_rep refresher reads N from X.n_elem/p.
+        // X is a vectorised N*p column-major arma::vec; p_ is fixed, so
+        // N_new = x_flat.n_elem / p_.
+        auto it_X = params.find("X");
+        auto it_y = params.find("y");
+        const bool has_X_in = (it_X != params.end());
+        const bool has_y_in = (it_y != params.end());
+        if (has_X_in) {
+            const arma::vec& x_flat = it_X->second;
+            if (p_ == 0 || x_flat.n_elem % p_ != 0)
+                ai4b::stop("set_current: X must be a vectorised N*p "
+                           "(column-major) arma::vec; p is fixed by "
+                           "internal block state at p = %zu. Reconstruct "
+                           "to change p.", p_);
+            const std::size_t N_new = x_flat.n_elem / p_;
+            if (has_y_in) {
+                const arma::vec& y_chk = it_y->second;
+                if (static_cast<std::size_t>(y_chk.n_elem) != N_new)
+                    ai4b::stop("set_current: X has %zu rows but y has "
+                               "length %zu.", N_new,
+                               (std::size_t)y_chk.n_elem);
+            }
+            impl_->data().set("X", x_flat);
+            if (N_new != N_) {
+                impl_->data().set("y_rep",
+                                  arma::vec(N_new, arma::fill::zeros));
+                if (keep_history_ && impl_->history_size() > 1) {
+                    // Non-fatal warning. backend_neutral.hpp's installed R
+                    // copy only guarantees ai4b::stop (not ai4b::warning),
+                    // so guard the warning by backend: Rcpp::warning under R
+                    // (identical to the original behavior), stderr under
+                    // pybind/standalone.
+#ifdef AI4BAYESCODE_RCPP_MODULE
+                    Rcpp::warning("set_current: X row count changed from "
+                                  "%zu to %zu; clearing history (mixed-N "
+                                  "history is unsupported).", N_, N_new);
+#else
+                    std::fprintf(stderr,
+                                 "warning: set_current: X row count changed "
+                                 "from %zu to %zu; clearing history (mixed-N "
+                                 "history is unsupported).\n", N_, N_new);
+#endif
+                    impl_->clear_history();
+                }
+            }
+            N_ = N_new;
+        }
+        if (has_y_in) {
+            const arma::vec& y_new = it_y->second;
+            if (y_new.n_elem != N_)
+                ai4b::stop("set_current: y length %zu != current N = %zu",
+                           (std::size_t)y_new.n_elem, N_);
+            impl_->data().set("y", y_new);
+        }
+    }
+
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        // Backend-neutral I/O. Supports:
+        //   predict_at({})              -> posterior-predictive y_rep
+        //   predict_at({"X" = X_new})   -> y_rep at new covariates
+        //
+        //   * INPUT  : new_data["X"] is a VECTORISED N_new*p arma::vec,
+        //              column-major (element (i,j) at index i + j*N_new),
+        //              matching how X is stored in data() (arma::vectorise of
+        //              the N x p design). R/Python callers pass
+        //              as.vector(X_new) / X_new flattened column-major.
+        //   * OUTPUT : every key is an arma::mat. keep_history = FALSE returns
+        //              1-row matrices (single predict at current draw);
+        //              keep_history = TRUE returns n_draws-row matrices
+        //              (posterior predictive over all draws).
+
+        // ---- Parse X input once (shared across both modes) ----------------
+        bool has_X = !new_data.empty();
+        arma::vec x_flat;
+        if (has_X) {
+            for (const auto& kv : new_data) {
+                if (kv.first != "X")
+                    ai4b::stop("SpikeSlabRJMCMC::predict_at: unknown key '%s'. "
+                               "Valid keys: 'X' (or empty map/list).",
+                               kv.first.c_str());
+            }
+            auto it_X = new_data.find("X");
+            x_flat = it_X->second;
+            if (p_ == 0 || x_flat.n_elem % p_ != 0) {
+                ai4b::stop("SpikeSlabRJMCMC::predict_at: X must be a vectorised "
+                           "N_new*p (column-major) arma::vec; training X has "
+                           "p = %zu columns.", p_);
+            }
+        }
+
+        AI4BayesCode::history_map out;
+
+        if (!keep_history_) {
+            // ---- Stateful mode: single predict at current draw ------------
+            block_context replaced;
+            if (has_X) replaced["X"] = x_flat;
+            block_context result = impl_->predict_at(replaced, predict_rng_);
+            for (const auto& kv : result) {
+                arma::mat m(1, kv.second.n_elem);
+                for (std::size_t j = 0; j < kv.second.n_elem; ++j)
+                    m(0, j) = kv.second[j];
+                out.emplace(kv.first, std::move(m));
+            }
+            return out;
+        }
+
+        // ---- History mode: loop over all posterior draws ------------------
+        // We bypass composite_block::predict_at here because `beta` is a
+        // sub-output of the rjmcmc block (block name "gamma_beta_rj", which
+        // writes both `gamma` and `beta` to shared_data). composite_block's
+        // input-validation only accepts (data_input keys ∪ block names) as
+        // valid `replaced` keys, so `replaced["beta"]` is rejected. The
+        // semantically correct pattern (mirrors ARDLasso) is to read the
+        // sampled history directly and compute y_rep manually per draw.
+        AI4BayesCode::history_map hist = impl_->get_history();
+        if (!hist.count("beta") || !hist.count("sigma")) {
+            ai4b::stop("SpikeSlabRJMCMC::predict_at: keep_history_ requires "
+                       "beta and sigma history, but get_history() lacks them. "
+                       "Did you forget to construct with keep_history = TRUE?");
+        }
+        const arma::mat& beta_hist  = hist.at("beta");   // n_draws × p
+        const arma::mat& sigma_hist = hist.at("sigma");  // n_draws × 1
+        const std::size_t n_draws   = beta_hist.n_rows;
+        if (sigma_hist.n_rows != n_draws) {
+            ai4b::stop("SpikeSlabRJMCMC::predict_at: inconsistent history "
+                       "sizes (beta n_draws=%zu, sigma n_draws=%zu)",
+                       (std::size_t)beta_hist.n_rows,
+                       (std::size_t)sigma_hist.n_rows);
+        }
+
+        // Pick X for this prediction round (training X by default, new X if
+        // user supplied one). shared_data stores X as a column-major flat
+        // arma::vec of length N*p.
+        const arma::vec& X_use = has_X ? x_flat : impl_->data().get("X");
+        const std::size_t N_pred = X_use.n_elem / p_;
+
+        // y_rep matrix: n_draws × N_pred. For each draw d:
+        //   y_rep[d, i] = sum_j X[i + j*N_pred] * beta_d[j] + sigma_d * N(0,1)
+        arma::mat yrep_mat(n_draws, N_pred);
+        std::normal_distribution<double> norm01(0.0, 1.0);
+        for (std::size_t d = 0; d < n_draws; ++d) {
+            const double sigma_d = sigma_hist(d, 0);
+            for (std::size_t i = 0; i < N_pred; ++i) {
+                double xb = 0.0;
+                for (std::size_t j = 0; j < p_; ++j) {
+                    xb += X_use[i + j * N_pred] * beta_hist(d, j);
+                }
+                yrep_mat(d, i) = xb + sigma_d * norm01(predict_rng_);
+            }
+        }
+
+        out.emplace("y_rep", std::move(yrep_mat));
+        return out;
+    }
+
+    AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
 
-    // Re-tune NUTS metric (mass matrix + step size + dual averaging) without
-    // advancing chain state. Available because the composite contains
-    // NUTS-family children.
+    /// 7th R-level method: re-tune NUTS metric (mass matrix + step size +
+    /// dual averaging) without advancing chain state. Available because
+    /// the composite contains NUTS-family children. See system_design.md
+    /// §13 NUTS-family + validator.md §24.
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
-        if (n < 0) throw std::runtime_error("readapt_NUTS: n must be non-negative");
-        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
+        if (n < 0) {
+            ai4b::stop("readapt_NUTS: n must be non-negative");
+        }
+        impl_->readapt_NUTS(static_cast<std::size_t>(n),
+                            reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
     }
+
 
 private:
     std::mt19937_64                  rng_;
-    mutable std::mt19937_64          readapt_rng_;
+    mutable std::mt19937_64          predict_rng_;
+    mutable std::mt19937_64          readapt_rng_; // readapt_NUTS() advances it (7th method)
     std::unique_ptr<composite_block> impl_;
     bool                             keep_history_ = false;
     std::size_t                      N_ = 0;
     std::size_t                      p_ = 0;
 };
 
-//==============================================================================
-//  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
-//
-//  Simulates a sparse linear-regression spike-and-slab problem from KNOWN
-//  truth (only a few predictors active), fits via the four-block sampler
-//  (pi | gamma; sigma; tau; (gamma, beta) RJMCMC), then checks:
-//    (1) variable selection: posterior inclusion prob (PIP) high on the true
-//        active set, low on the true null set;
-//    (2) coefficient recovery: posterior-mean beta close to truth on actives;
-//    (3) sigma recovery.
-//  PASS is derived from these computed comparisons (never hard-coded).
-//==============================================================================
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(SpikeSlabRJMCMC_module) {
+    Rcpp::class_<SpikeSlabRJMCMC>("SpikeSlabRJMCMC")
+        .constructor<arma::mat, arma::vec,
+                     double, double,
+                     int>(
+            "Legacy constructor; keep_history defaults to FALSE.")
+        .constructor<arma::mat, arma::vec,
+                     double, double,
+                     int, bool>(
+            "Construct with: X (N x p, centered), y (length N, centered), "
+            "a_pi_prior, b_pi_prior (Beta prior for inclusion probability "
+            "pi), rng_seed, keep_history. "
+            "Priors on scale parameters are Jeffreys "
+            "(p(sigma) ∝ 1/sigma, p(tau) ∝ 1/tau); no hyperparameters "
+            "needed. Slab variance is sigma^2 * tau^2 (Ishwaran-Rao 2005 "
+            "form), making tau dimensionless and the posterior scale-"
+            "invariant. gamma_init uses marginal-OLS screening to ensure "
+            "k >= 1 active signal at iteration 1, avoiding the improper "
+            "conditional on tau at k = 0.")
+        .method("step", (void (SpikeSlabRJMCMC::*)())    &SpikeSlabRJMCMC::step, "Run one sweep.")
+        .method("step", (void (SpikeSlabRJMCMC::*)(int)) &SpikeSlabRJMCMC::step, "Run n sweeps.")
+        .method("get_current", &SpikeSlabRJMCMC::get_current)
+        .method("set_current", &SpikeSlabRJMCMC::set_current)
+        .method("predict_at",  &SpikeSlabRJMCMC::predict_at)
+        .method("get_dag",     &SpikeSlabRJMCMC::get_dag)
+        .method("get_history", &SpikeSlabRJMCMC::get_history)
+        .method("readapt_NUTS", &SpikeSlabRJMCMC::readapt_NUTS);
+}
+#endif
+
+// ============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (pure C++; active only when neither
+//  the Rcpp nor the pybind module macro is defined). Simulates a sparse
+//  linear-regression spike-and-slab problem from KNOWN truth (only a few
+//  predictors active), fits via the four-block sampler, then checks:
+//    (1) variable selection: posterior inclusion prob (PIP) high on true
+//        actives, low on true nulls;
+//    (2) coefficient recovery on actives;
+//    (3) sigma recovery;
+//    (4) beats a naive OLS baseline at zeroing out true nulls.
+//  State is read through the FULL contract get_current() (keys: gamma, beta,
+//  sigma, tau, pi). PASS is derived from the computed comparisons.
+// ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 #include <cstdio>
 int main() {
     // -------- Known truth: p predictors, only a few active --------------
@@ -785,14 +1083,14 @@ int main() {
     double       sigma_sum = 0.0;
     for (int s = 0; s < M; ++s) {
         model.step(1);
-        const auto cur = model.get_current();
-        const arma::vec& g = cur.at("gamma");
-        const arma::vec& b = cur.at("beta");
+        const auto gc = model.get_current();          // copy (avoids dangling ref)
+        const arma::vec& g = gc.at("gamma");
+        const arma::vec& b = gc.at("beta");
         for (std::size_t j = 0; j < p; ++j) {
             if (g[j] > 0.5) pip[j] += 1.0;
             beta_sum[j] += b[j];
         }
-        sigma_sum += cur.at("sigma")[0];
+        sigma_sum += gc.at("sigma")[0];
     }
     pip      /= static_cast<double>(M);
     beta_sum /= static_cast<double>(M);
@@ -852,3 +1150,28 @@ int main() {
     (void)k_true;
     return ok ? 0 : 1;
 }
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(SpikeSlabRJMCMC, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<SpikeSlabRJMCMC>(m, "SpikeSlabRJMCMC")
+        .def(pybind11::init<arma::mat, arma::vec, double, double, int, bool>(),
+             pybind11::arg("X"),
+             pybind11::arg("y"),
+             pybind11::arg("a_pi_prior") = 1.0,
+             pybind11::arg("b_pi_prior") = 1.0,
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false)
+        .def("step", (void (SpikeSlabRJMCMC::*)())    &SpikeSlabRJMCMC::step, "Run one sweep.")
+        .def("step", (void (SpikeSlabRJMCMC::*)(int)) &SpikeSlabRJMCMC::step, pybind11::arg("n_steps"))
+        .def("get_current",  &SpikeSlabRJMCMC::get_current)
+        .def("set_current",  &SpikeSlabRJMCMC::set_current, pybind11::arg("params"))
+        .def("predict_at",   &SpikeSlabRJMCMC::predict_at,  pybind11::arg("new_data"))
+        .def("get_dag",      &SpikeSlabRJMCMC::get_dag)
+        .def("get_history",  &SpikeSlabRJMCMC::get_history)
+        .def("readapt_NUTS", &SpikeSlabRJMCMC::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif

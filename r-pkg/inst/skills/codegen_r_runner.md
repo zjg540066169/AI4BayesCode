@@ -29,14 +29,16 @@ For the C++ file emission, see `codegen_cpp.md`.
 ## 9. Output
 
 1. Create output folder if missing (default `./generated/<ClassName>/`).
-2. Write `<folder>/<ClassName>.cpp`. **It MUST carry the `@example:R`
-   header block** (per `codegen_cpp.md` §5 "Header `@example` block"):
-   the SAME toy DGP this runner uses, distilled to ≤ ~8 runnable lines
-   using the packaged API (`library(AI4BayesCode)` → `new(<ClassName>,
-   ...)`). This is what `ai4bayescode_doc()` shows as the Example. If
-   the backend is Both R+Python, also emit `@example:python`. Write the
-   DGP once and mirror it into the header so runner and card cannot
-   drift.
+2. Write `<folder>/<ClassName>.cpp`. **It MUST carry BOTH the `@example:R`
+   AND the `@example:python` header blocks** (per `codegen_cpp.md` §5 "Header
+   `@example` block") — the `.cpp` is ALWAYS dual-module, so a Python user who
+   takes the same file must still see the Python example via
+   `AI4BayesCode.doc()`, and an R user the R example via `ai4bayescode_doc()`.
+   Both blocks are the SAME toy DGP this runner uses, distilled to ≤ ~8
+   runnable lines using each language's packaged API (`library(AI4BayesCode)`
+   → `new(<ClassName>, ...)` for R; `AI4BayesCode.source(...)` → `Mod(...)`
+   for Python). Write the DGP once and mirror it into BOTH header blocks so
+   the runner and both doc cards cannot drift.
 3. Write the R runner `<folder>/run_<ClassName>.R` following the
    template below and **use it to gate generation** (it carries the
    Layer-3 R1/R2/R3 harness — see the CORRECTNESS INVARIANT in

@@ -610,8 +610,9 @@ int main() {
     arma::vec beta_sum(p, arma::fill::zeros);
     for (int s = 0; s < n_keep; ++s) {
         model.step(1);
-        AI4BayesCode::state_map cur = model.get_current();
-        beta_sum += cur.at("beta");
+        const auto gc = model.get_current();      // copy (avoids dangling ref)
+        const arma::vec& beta_cur = gc.at("beta"); // key from package get_current()
+        beta_sum += beta_cur;
     }
     arma::vec beta_hat = beta_sum / static_cast<double>(n_keep);
 

@@ -43,12 +43,45 @@
 // GPL-2.0-or-later; combined work remains GPL-2.0-or-later.
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates a 1D GP
-// classification dataset from a known latent function, fits the joint-NUTS +
-// ESS blocks, and checks that the recovered class probabilities track the
-// ground truth (and beat a naive constant-rate baseline). No R / Python
-// binding is built or required.
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("GPClassification")
+//   set.seed(2026)
+//   N <- 120                                     # >> #hyperparams: rich signal
+//   x <- runif(N, -3, 3)                         # 1D inputs on [-3, 3]
+//   f_true <- 1.6 * sin(1.3 * x)                 # smooth latent GP-like signal
+//   p_true <- 1 / (1 + exp(-f_true))             # Bernoulli success prob
+//   y <- as.numeric(runif(N) < p_true)           # 0/1 labels
+//   X <- matrix(x, ncol = 1)                     # N x 1 design matrix
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(GPClassification, X, y, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(GPClassification, X, y, 7L, TRUE)   # X(Nx1), y(0/1), seed=7L, keep_history=TRUE
+//   m$step(2500); str(m$get_current())           # single chain; amplitude, lengthscale, f
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(2026)
+//   N = 120
+//   x = rng.uniform(-3.0, 3.0, N)                 # 1D inputs on [-3, 3]
+//   f_true = 1.6 * np.sin(1.3 * x)                 # smooth latent GP-like signal
+//   p_true = 1.0 / (1.0 + np.exp(-f_true))         # Bernoulli success prob
+//   y = (rng.uniform(size=N) < p_true).astype(float)   # 0/1 labels
+//   X = x.reshape(N, 1)                            # N x 1 design matrix
+//   Mod = AI4BayesCode.example("GPClassification")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.GPClassification(X, y, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.GPClassification(X, y, 7, True)        # X(Nx1), y(0/1), seed=7, keep_history=True
+//   m.step(2500); print(m.get_current())          # dict: f, amplitude, lengthscale
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -57,13 +90,19 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/elliptical_slice_sampling_block.hpp"
 
 // Vendored libgp kernel subsystem (BSD-3).
@@ -74,7 +113,6 @@
 #include <limits>
 #include <memory>
 #include <random>
-#include <stdexcept>
 #include <vector>
 
 using AI4BayesCode::block_context;
@@ -198,9 +236,9 @@ public:
           keep_history_(keep_history)
     {
         if (X.n_rows != y.n_elem)
-            throw std::runtime_error("GPClassification: X and y row/length mismatch");
+            ai4b::stop("GPClassification: X and y row/length mismatch");
         if (X.n_rows < 2)
-            throw std::runtime_error("GPClassification: N must be >= 2");
+            ai4b::stop("GPClassification: N must be >= 2");
 
         const std::size_t N = static_cast<std::size_t>(X.n_rows);
         const std::size_t p = static_cast<std::size_t>(X.n_cols);
@@ -212,13 +250,16 @@ public:
         for (std::size_t i = 0; i < N; ++i) {
             const double yi = y[i];
             if (yi != 0.0 && yi != 1.0)
-                throw std::runtime_error("GPClassification: y must contain only 0/1 values");
+                ai4b::stop("GPClassification: y must contain only 0/1 values");
             y_arma[i] = yi;
         }
         impl_->data().set("y", y_arma);
 
         // Cache X as arma::mat + per-row Eigen::VectorXd for libgp.
-        X_arma_ = X;
+        X_arma_ = arma::mat(N, p);
+        for (std::size_t i = 0; i < N; ++i)
+            for (std::size_t j = 0; j < p; ++j)
+                X_arma_(i, j) = X(i, j);
         X_rows_.reserve(N);
         for (std::size_t i = 0; i < N; ++i) {
             Eigen::VectorXd row(p);
@@ -399,17 +440,19 @@ public:
 
     AI4BayesCode::state_map get_current() const {
         // sub-params are written back to data() under sub-param names by
-        // joint_nuts_block; read directly from data().
+        // joint_nuts_block; read directly from data(). Each output is an
+        // arma::vec; the frontend converts state_map -> R list / Python dict.
         AI4BayesCode::state_map out;
-        out["f"]           = impl_->data().get("f");
-        out["amplitude"]   = impl_->data().get("amplitude");
-        out["lengthscale"] = impl_->data().get("lengthscale");
+        out["f"]           = impl_->data().get("f");                 // length N
+        out["amplitude"]   = impl_->data().get("amplitude");         // length 1
+        out["lengthscale"] = impl_->data().get("lengthscale");       // length 1
         return out;
     }
 
     void set_current(const AI4BayesCode::state_map& params) {
         // For the joint block: read its current concatenated vector, overwrite
-        // the relevant slice(s), set_current, mirror to data().
+        // the relevant slice(s), set_current, mirror to data(). Each value in
+        // params is an arma::vec (frontend already converted list/dict).
         auto& jblk = dynamic_cast<joint_nuts_block&>(impl_->child(0));
         arma::vec cat_new = jblk.current();   // [amplitude, lengthscale]
         bool touched_joint = false;
@@ -417,14 +460,14 @@ public:
         auto it_amp = params.find("amplitude");
         if (it_amp != params.end()) {
             const double a = it_amp->second[0];
-            if (!(a > 0.0)) throw std::runtime_error("amplitude must be positive");
+            if (!(a > 0.0)) ai4b::stop("amplitude must be positive");
             cat_new[0] = a;
             touched_joint = true;
         }
         auto it_ell = params.find("lengthscale");
         if (it_ell != params.end()) {
             const double l = it_ell->second[0];
-            if (!(l > 0.0)) throw std::runtime_error("lengthscale must be positive");
+            if (!(l > 0.0)) ai4b::stop("lengthscale must be positive");
             cat_new[1] = l;
             touched_joint = true;
         }
@@ -440,26 +483,285 @@ public:
         if (it_f != params.end()) {
             const arma::vec& f_new = it_f->second;
             if (static_cast<std::size_t>(f_new.n_elem) != N_)
-                throw std::runtime_error("GPClassification::set_current: f length mismatch");
+                ai4b::stop("GPClassification::set_current: f length mismatch");
             impl_->data().set("f", f_new);
             dynamic_cast<elliptical_slice_sampling_block&>(
                 impl_->child(1)).set_current(f_new);
         }
     }
 
-    // NOTE: the Rcpp/pybind frontend exposed a predict_at() method (GP
-    // posterior predictive p(f* | X*) -> sigmoid -> Bernoulli y_rep). It is
-    // omitted from this frontend-independent build: the standalone demo
-    // checks recovery directly from get_current() / the latent f, and
-    // predict_at returned frontend (Rcpp::List) types. The MODEL (priors,
-    // log-density, block config, hyperparameters) is preserved exactly.
+    // predict_at: state_map{"X" = X_new} -> posterior p(f_star | X_new),
+    // samples f_star, returns prob_star = sigmoid(f_star) and y_rep ~
+    // Bernoulli(prob_star). Empty map -> posterior predictive at training X
+    // using current f.
+    //
+    // Backend-neutral I/O (frontend converts state_map <-> R list / Python
+    // dict and history_map <-> R list-of-matrices / Python dict-of-arrays):
+    //   * INPUT  : new_data["X"] is a VECTORISED N_new*p arma::vec, column
+    //              major (so element (i,j) is at index i + j*N_new), matching
+    //              how X is stored in data() (arma::vectorise of the N x p
+    //              design). R/Python callers pass as.vector(X_new) / X_new
+    //              flattened column-major.
+    //   * OUTPUT : every key is an arma::mat. keep_history = FALSE returns
+    //              1-row matrices (single predict at the current draw);
+    //              keep_history = TRUE returns n_draws-row matrices (posterior
+    //              predictive over all draws).
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        // ---- Parse optional X (vectorised N_new*p, column-major) ----------
+        bool has_X = false;
+        arma::vec x_flat;
+        std::size_t N_new = 0;
+        for (const auto& kv : new_data) {
+            if (kv.first != "X")
+                ai4b::stop("GPClassification::predict_at: unknown key '%s'",
+                           kv.first.c_str());
+        }
+        auto it_X = new_data.find("X");
+        if (it_X != new_data.end()) {
+            x_flat = it_X->second;
+            if (p_ == 0 || x_flat.n_elem % p_ != 0)
+                ai4b::stop("GPClassification::predict_at: X must be vectorised "
+                           "N_new*p (column-major)");
+            N_new = x_flat.n_elem / p_;
+            has_X = true;
+        }
+
+        AI4BayesCode::history_map out;
+
+        if (!has_X) {
+            if (keep_history_) {
+                // History mode at training X: per-draw Bernoulli y_rep from
+                // sigmoid(f_d). amplitude and lengthscale are sub-outputs of
+                // the joint block (keyed by sub-param name in get_history()),
+                // so access via hist.at("amplitude") / hist.at("lengthscale").
+                // f is keyed by block name "f" (ESS block).
+                AI4BayesCode::history_map hist = impl_->get_history();
+                const arma::mat& f_hist = hist.at("f");  // n_draws x N
+                const std::size_t n_draws = f_hist.n_rows;
+                const std::size_t N_local = f_hist.n_cols;
+                arma::mat f_mean_mat(n_draws, N_local);
+                arma::mat prob_mat(n_draws, N_local);
+                arma::mat yrep_mat(n_draws, N_local);
+                std::uniform_real_distribution<double> ud(0.0, 1.0);
+                for (std::size_t d = 0; d < n_draws; ++d) {
+                    for (std::size_t i = 0; i < N_local; ++i) {
+                        const double fi = f_hist(d, i);
+                        const double pi = stable_sigmoid(fi);
+                        f_mean_mat(d, i) = fi;
+                        prob_mat(d, i)   = pi;
+                        yrep_mat(d, i)   = (ud(predict_rng_) < pi) ? 1.0 : 0.0;
+                    }
+                }
+                out.emplace("f_mean", std::move(f_mean_mat));
+                out.emplace("prob",   std::move(prob_mat));
+                out.emplace("y_rep",  std::move(yrep_mat));
+                return out;
+            }
+            const arma::vec& f = impl_->data().get("f");
+            std::uniform_real_distribution<double> ud(0.0, 1.0);
+            arma::mat f_mean_mat(1, f.n_elem);
+            arma::mat prob_mat(1, f.n_elem);
+            arma::mat yrep_mat(1, f.n_elem);
+            for (std::size_t i = 0; i < f.n_elem; ++i) {
+                const double pi = stable_sigmoid(f[i]);
+                f_mean_mat(0, i) = f[i];
+                prob_mat(0, i)   = pi;
+                yrep_mat(0, i)   = (ud(predict_rng_) < pi) ? 1.0 : 0.0;
+            }
+            out.emplace("f_mean", std::move(f_mean_mat));
+            out.emplace("prob",   std::move(prob_mat));
+            out.emplace("y_rep",  std::move(yrep_mat));
+            return out;
+        }
+
+        // ---- Reconstruct per-row Eigen vectors from vectorised X ----------
+        // x_flat is column-major N_new x p: X_new(i,j) = x_flat[i + j*N_new].
+        std::vector<Eigen::VectorXd> X_new_rows(N_new);
+        for (std::size_t i = 0; i < N_new; ++i) {
+            Eigen::VectorXd row(p_);
+            for (std::size_t j = 0; j < p_; ++j)
+                row[j] = x_flat[i + j * N_new];
+            X_new_rows[i] = row;
+        }
+
+        if (keep_history_) {
+            // new-X + history: per-draw GP classification at X_new using
+            // (amp_d, ell_d, f_d) from history. amplitude and lengthscale are
+            // sub-outputs of the joint block, keyed by sub-param name.
+            AI4BayesCode::history_map hist = impl_->get_history();
+            const arma::mat& amp_hist = hist.at("amplitude");
+            const arma::mat& ell_hist = hist.at("lengthscale");
+            const arma::mat& f_hist   = hist.at("f");
+            const std::size_t n_draws = amp_hist.n_rows;
+            auto* cf_mut = const_cast<libgp::CovSEiso*>(cf_.get());
+
+            arma::mat f_mean_mat(n_draws, N_new);
+            arma::mat prob_mat  (n_draws, N_new);
+            arma::mat yrep_mat  (n_draws, N_new);
+            std::normal_distribution<double> nd(0.0, 1.0);
+            std::uniform_real_distribution<double> ud(0.0, 1.0);
+
+            for (std::size_t d = 0; d < n_draws; ++d) {
+                const double amp_d = amp_hist(d, 0);
+                const double ell_d = ell_hist(d, 0);
+                Eigen::VectorXd hyper(2);
+                hyper[0] = std::log(std::max(ell_d, 1e-10));
+                hyper[1] = std::log(std::max(amp_d, 1e-10));
+                cf_mut->set_loghyper(hyper);
+
+                arma::mat K_train_d(N_, N_);
+                for (std::size_t i = 0; i < N_; ++i) {
+                    for (std::size_t j = i; j < N_; ++j) {
+                        double k = cf_mut->get(X_rows_[i], X_rows_[j]);
+                        K_train_d(i, j) = k;
+                        K_train_d(j, i) = k;
+                    }
+                }
+                K_train_d.diag() += 1e-8;
+                arma::mat L_d;
+                arma::chol(L_d, K_train_d, "lower");
+
+                arma::mat K_star_X(N_new, N_);
+                arma::mat K_star_star(N_new, N_new);
+                for (std::size_t i = 0; i < N_new; ++i) {
+                    for (std::size_t j = 0; j < N_; ++j)
+                        K_star_X(i, j) = cf_mut->get(X_new_rows[i], X_rows_[j]);
+                    K_star_star(i, i) = cf_mut->get(X_new_rows[i], X_new_rows[i]);
+                    for (std::size_t j = i + 1; j < N_new; ++j) {
+                        double k = cf_mut->get(X_new_rows[i], X_new_rows[j]);
+                        K_star_star(i, j) = k;
+                        K_star_star(j, i) = k;
+                    }
+                }
+
+                arma::vec f_d = f_hist.row(d).t();
+                arma::vec alpha = arma::solve(arma::trimatu(L_d.t()),
+                                    arma::solve(arma::trimatl(L_d), f_d));
+                arma::vec mu_star = K_star_X * alpha;
+                arma::mat V = arma::solve(arma::trimatl(L_d), K_star_X.t());
+                arma::mat Sigma_star = K_star_star - V.t() * V;
+                Sigma_star.diag() += 1e-8;
+
+                arma::mat L_star;
+                arma::vec f_star(N_new);
+                if (arma::chol(L_star, Sigma_star, "lower")) {
+                    arma::vec z(N_new);
+                    for (std::size_t i = 0; i < N_new; ++i) z[i] = nd(predict_rng_);
+                    f_star = mu_star + L_star * z;
+                } else {
+                    for (std::size_t i = 0; i < N_new; ++i) {
+                        const double sd = std::sqrt(std::max(Sigma_star(i, i), 0.0));
+                        f_star[i] = mu_star[i] + sd * nd(predict_rng_);
+                    }
+                }
+                for (std::size_t i = 0; i < N_new; ++i) {
+                    f_mean_mat(d, i) = mu_star[i];
+                    const double p_di = stable_sigmoid(f_star[i]);
+                    prob_mat(d, i) = p_di;
+                    yrep_mat(d, i) = (ud(predict_rng_) < p_di) ? 1.0 : 0.0;
+                }
+            }
+            out.emplace("f_mean", std::move(f_mean_mat));
+            out.emplace("prob",   std::move(prob_mat));
+            out.emplace("y_rep",  std::move(yrep_mat));
+            return out;
+        }
+
+        // ---- new-X + stateful (current draw) ------------------------------
+        const arma::vec& f_cur  = impl_->data().get("f");
+        const arma::vec& L_flat = impl_->data().get("L_chol");
+        arma::mat L(const_cast<double*>(L_flat.memptr()), N_, N_,
+                     /*copy_aux_mem=*/false, /*strict=*/true);
+
+        // Configure libgp cf with current hyperparams
+        const double amp = impl_->data().get("amplitude")[0];
+        const double ell = impl_->data().get("lengthscale")[0];
+        Eigen::VectorXd hyper(2);
+        hyper[0] = std::log(std::max(ell, 1e-10));
+        hyper[1] = std::log(std::max(amp, 1e-10));
+        auto* cf_mut = const_cast<libgp::CovSEiso*>(cf_.get());
+        cf_mut->set_loghyper(hyper);
+
+        // Build K_star_X (N_new x N_) and K_star_star
+        arma::mat K_star_X(N_new, N_);
+        arma::mat K_star_star(N_new, N_new);
+        for (std::size_t i = 0; i < N_new; ++i) {
+            for (std::size_t j = 0; j < N_; ++j) {
+                K_star_X(i, j) = cf_mut->get(X_new_rows[i], X_rows_[j]);
+            }
+            K_star_star(i, i) = cf_mut->get(X_new_rows[i], X_new_rows[i]);
+            for (std::size_t j = i + 1; j < N_new; ++j) {
+                double k = cf_mut->get(X_new_rows[i], X_new_rows[j]);
+                K_star_star(i, j) = k;
+                K_star_star(j, i) = k;
+            }
+        }
+
+        // mu_star = K_star_X @ (L L^T)^{-1} @ f_cur
+        arma::vec alpha = arma::solve(arma::trimatu(L.t()),
+                            arma::solve(arma::trimatl(L), f_cur));
+        arma::vec mu_star = K_star_X * alpha;
+
+        // Sigma_star = K_star_star - K_star_X @ (L L^T)^{-1} @ K_star_X^T
+        arma::mat V = arma::solve(arma::trimatl(L), K_star_X.t());
+        arma::mat Sigma_star = K_star_star - V.t() * V;
+
+        arma::vec f_star_sd(N_new);
+        for (std::size_t i = 0; i < N_new; ++i)
+            f_star_sd[i] = std::sqrt(std::max(Sigma_star(i, i), 0.0));
+
+        // Sample f_star ~ N(mu_star, Sigma_star) via Cholesky with jitter.
+        arma::mat Sigma_star_reg = Sigma_star;
+        Sigma_star_reg.diag() += 1e-8;
+        arma::mat L_star;
+        bool chol_ok = arma::chol(L_star, Sigma_star_reg, "lower");
+        arma::vec f_star(N_new);
+        std::normal_distribution<double> nd(0.0, 1.0);
+        if (chol_ok) {
+            arma::vec z(N_new);
+            for (std::size_t i = 0; i < N_new; ++i) z[i] = nd(predict_rng_);
+            f_star = mu_star + L_star * z;
+        } else {
+            for (std::size_t i = 0; i < N_new; ++i)
+                f_star[i] = mu_star[i] + f_star_sd[i] * nd(predict_rng_);
+        }
+
+        // prob_star = sigmoid(f_star); y_rep ~ Bern(prob_star)
+        std::uniform_real_distribution<double> ud(0.0, 1.0);
+        arma::vec prob_star(N_new), y_rep(N_new);
+        for (std::size_t i = 0; i < N_new; ++i) {
+            prob_star[i] = stable_sigmoid(f_star[i]);
+            y_rep[i]     = (ud(predict_rng_) < prob_star[i]) ? 1.0 : 0.0;
+        }
+
+        // Pack each output as a 1-row matrix (single predict at current draw).
+        arma::mat f_mean_mat (1, N_new);
+        arma::mat f_sd_mat   (1, N_new);
+        arma::mat f_star_mat (1, N_new);
+        arma::mat prob_mat   (1, N_new);
+        arma::mat yrep_mat   (1, N_new);
+        for (std::size_t i = 0; i < N_new; ++i) {
+            f_mean_mat (0, i) = mu_star[i];
+            f_sd_mat   (0, i) = f_star_sd[i];
+            f_star_mat (0, i) = f_star[i];
+            prob_mat   (0, i) = prob_star[i];
+            yrep_mat   (0, i) = y_rep[i];
+        }
+        out.emplace("f_mean", std::move(f_mean_mat));
+        out.emplace("f_sd",   std::move(f_sd_mat));
+        out.emplace("f_star", std::move(f_star_mat));
+        out.emplace("prob",   std::move(prob_mat));
+        out.emplace("y_rep",  std::move(yrep_mat));
+        return out;
+    }
 
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
 
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
         if (n < 0) {
-            throw std::runtime_error("readapt_NUTS: n must be non-negative");
+            ai4b::stop("readapt_NUTS: n must be non-negative");
         }
         impl_->readapt_NUTS(static_cast<std::size_t>(n),
                             reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
@@ -480,6 +782,48 @@ private:
     std::vector<Eigen::VectorXd>     X_rows_;
 };
 
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(GPClassification_module) {
+    Rcpp::class_<GPClassification>("GPClassification")
+        .constructor<arma::mat, arma::vec, int>(
+            "Legacy constructor; keep_history defaults to FALSE.")
+        .constructor<arma::mat, arma::vec, int, bool>(
+            "Joint-NUTS GP classification: (amplitude, lengthscale) in one "
+            "joint_nuts_block + ESS on latent f + Bernoulli-logit likelihood. "
+            "Inputs: X (N x p), y in {0,1} length N, rng_seed, keep_history.")
+        .method("step", (void (GPClassification::*)())    &GPClassification::step, "Run one sweep.")
+        .method("step", (void (GPClassification::*)(int)) &GPClassification::step, "Run n sweeps.")
+        .method("get_current",  &GPClassification::get_current)
+        .method("set_current",  &GPClassification::set_current)
+        .method("predict_at",   &GPClassification::predict_at)
+        .method("get_dag",      &GPClassification::get_dag)
+        .method("get_history",  &GPClassification::get_history)
+        .method("readapt_NUTS", &GPClassification::readapt_NUTS);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(GPClassification, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<GPClassification>(m, "GPClassification")
+        .def(pybind11::init<arma::mat, arma::vec, int, bool>(),
+             pybind11::arg("X"),
+             pybind11::arg("y"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false)
+        .def("step", (void (GPClassification::*)())    &GPClassification::step, "Run one sweep.")
+        .def("step", (void (GPClassification::*)(int)) &GPClassification::step,  pybind11::arg("n_steps"))
+        .def("get_current",  &GPClassification::get_current)
+        .def("set_current",  &GPClassification::set_current, pybind11::arg("params"))
+        .def("predict_at",   &GPClassification::predict_at,  pybind11::arg("new_data"))
+        .def("get_dag",      &GPClassification::get_dag)
+        .def("get_history",  &GPClassification::get_history)
+        .def("readapt_NUTS", &GPClassification::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
 //==============================================================================
 //  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
 //
@@ -495,7 +839,11 @@ private:
 //    (a) the posterior probabilities track the TRUE probabilities better than
 //        a naive constant-rate baseline (mean(y)) — i.e. lower mean abs error;
 //    (b) the recovered probabilities are accurate in absolute terms.
+//
+//  State is read via the FULL contract get_current() (keys: f, amplitude,
+//  lengthscale), matching the dual-module get_current() implementation.
 //==============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 #include <cstdio>
 int main() {
     const std::size_t N = 60;
@@ -533,8 +881,8 @@ int main() {
     const int M = 1500;
     for (int s = 0; s < M; ++s) {
         model.step(1);
-        const auto cur = model.get_current();
-        const arma::vec& f = cur.at("f");
+        const auto gc = model.get_current();        // copy (avoids dangling ref)
+        const arma::vec& f = gc.at("f");
         for (std::size_t i = 0; i < N; ++i) {
             const double fi = f[i];
             const double pi = (fi >= 0.0)
@@ -555,9 +903,9 @@ int main() {
     mae_model /= static_cast<double>(N);
     mae_naive /= static_cast<double>(N);
 
-    const auto cur = model.get_current();
-    const double amp_hat = cur.at("amplitude")[0];
-    const double ell_hat = cur.at("lengthscale")[0];
+    const auto gc = model.get_current();            // copy (avoids dangling ref)
+    const double amp_hat = gc.at("amplitude")[0];
+    const double ell_hat = gc.at("lengthscale")[0];
 
     std::printf("GPClassification demo (N=%zu, 1D GP-logit):\n", N);
     std::printf("  amplitude_hat = %.3f   lengthscale_hat = %.3f\n",
@@ -575,3 +923,4 @@ int main() {
           "surface");
     return ok ? 0 : 1;
 }
+#endif

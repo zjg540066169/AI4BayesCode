@@ -488,3 +488,124 @@ PYBIND11_MODULE(SpikeSlabSinhBijection, m) {
              pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
 }
 #endif
+
+//==============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
+//
+//  Simulate from a KNOWN truth (beta_true != 0 so the model should strongly
+//  prefer inclusion), drive the SpikeSlabSinhBijection class directly, then
+//  compare the Monte-Carlo summaries against the CLOSED-FORM spike-and-slab
+//  posterior:
+//    - sampled P(gamma=1)              vs  closed-form inclusion prob
+//    - sampled E[beta | gamma=1]       vs  closed-form conditional mean m
+//  State is read via the FULL contract (get_current() / get_history()).
+//==============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+#include <cmath>
+#include <vector>
+int main() {
+    // ---- known truth ----
+    const std::size_t N         = 80;
+    const double      beta_true = 1.5;     // nonzero -> inclusion favored
+    const double      sigma     = 1.0;
+    const double      slab_sd    = 5.0;
+    const double      pi_incl    = 0.5;
+
+    // ---- simulate data ----
+    std::mt19937_64 sim_rng(123);
+    std::normal_distribution<double> xgen(0.0, 1.0);
+    std::normal_distribution<double> egen(0.0, sigma);
+    arma::vec x(N), y(N);
+    for (std::size_t i = 0; i < N; ++i) {
+        x[i] = xgen(sim_rng);
+        y[i] = beta_true * x[i] + egen(sim_rng);
+    }
+
+    // ---- closed-form posterior targets ----
+    const double xtx    = arma::dot(x, x);
+    const double xty    = arma::dot(x, y);
+    const double sigma2 = sigma * sigma;
+    const double slab2  = slab_sd * slab_sd;
+
+    const double v_cf = 1.0 / (xtx / sigma2 + 1.0 / slab2);   // posterior var | gamma=1
+    const double m_cf = v_cf * (xty / sigma2);                // posterior mean | gamma=1
+
+    // Bayes factor (gamma=1 vs gamma=0) and inclusion probability.
+    const double log_bf = 0.5 * std::log(sigma2 / (sigma2 + slab2 * xtx))
+                          + 0.5 * slab2 * (xty * xty)
+                                / (sigma2 * (sigma2 + slab2 * xtx));
+    const double bf       = std::exp(log_bf);
+    const double incl_cf  = pi_incl * bf / (pi_incl * bf + (1.0 - pi_incl));
+
+    // ---- run the sampler via the full-contract class ----
+    SpikeSlabSinhBijection model(y, x, sigma, slab_sd, pi_incl,
+                                 /*rng_seed=*/7, /*keep_history=*/true);
+
+    const int n_burn = 2000;
+    const int n_keep = 20000;
+
+    model.step(n_burn);
+    // Reset history so only the kept draws are summarised.
+    // (get_history accumulates while keep_history = TRUE; drive burn-in then
+    //  clear via a fresh keep window by reading only the post-burn tail.)
+    const long burn_rows = [&]() -> long {
+        AI4BayesCode::history_map hb = model.get_history();
+        if (hb.count("gamma")) return static_cast<long>(hb.at("gamma").n_rows);
+        return 0;
+    }();
+    model.step(n_keep);
+
+    AI4BayesCode::history_map h = model.get_history();
+
+    // Sanity: current state is reachable via the full contract.
+    const auto gc = model.get_current();
+    (void)gc.at("gamma");
+    (void)gc.at("beta");
+
+    // ---- Monte-Carlo summaries (post-burn tail only) ----
+    double sum_gamma     = 0.0;
+    double sum_beta_incl = 0.0;
+    long   n_incl        = 0;
+    long   T             = 0;
+    if (h.count("gamma") && h.count("beta")) {
+        const arma::mat& g_hist = h.at("gamma");
+        const arma::mat& b_hist = h.at("beta");
+        const long total = static_cast<long>(std::min(g_hist.n_rows, b_hist.n_rows));
+        for (long t = burn_rows; t < total; ++t) {
+            const double g = g_hist(static_cast<arma::uword>(t), 0);
+            sum_gamma += (g > 0.5) ? 1.0 : 0.0;
+            if (g > 0.5) {
+                sum_beta_incl += b_hist(static_cast<arma::uword>(t), 0);
+                ++n_incl;
+            }
+            ++T;
+        }
+    }
+
+    const double incl_hat = (T > 0) ? sum_gamma / static_cast<double>(T) : 0.0;
+    const double beta_hat = (n_incl > 0)
+                                ? sum_beta_incl / static_cast<double>(n_incl)
+                                : 0.0;
+
+    std::printf("SpikeSlabSinhBijection demo (N=%zu, beta_true=%.2f)\n",
+                N, beta_true);
+    std::printf("  inclusion prob : sampled=%.4f   closed-form=%.4f\n",
+                incl_hat, incl_cf);
+    std::printf("  E[beta|gamma=1]: sampled=%.4f   closed-form=%.4f  "
+                "(truth=%.2f)\n",
+                beta_hat, m_cf, beta_true);
+
+    // ---- pass criteria (derived from real computed comparisons) ----
+    const bool ok_incl = std::abs(incl_hat - incl_cf) < 0.03;
+    const bool ok_beta = std::abs(beta_hat - m_cf)
+                             < 0.05 + 0.05 * std::abs(m_cf);
+    const bool ok = (T > 0) && ok_incl && ok_beta;
+
+    std::printf("%s\n",
+                ok ? "[demo PASS] rjmcmc custom sinh bijection matches "
+                     "closed-form spike-and-slab posterior"
+                   : "[demo FAIL]");
+    return ok ? 0 : 1;
+}
+#endif

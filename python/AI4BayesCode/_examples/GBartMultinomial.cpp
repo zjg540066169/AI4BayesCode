@@ -386,7 +386,6 @@ public:
     }
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -725,7 +724,8 @@ RCPP_MODULE(GBartMultinomial_module) {
             "FALSE), keep_history (numeric buffers; cheap; default "
             "FALSE).")
         .method("step", (void (GBartMultinomial::*)())    &GBartMultinomial::step, "Run one sweep.")
-        .method("step", (void (GBartMultinomial::*)(int)) &GBartMultinomial::step, "Run n Gibbs sweeps.")
+        .method("step", (void (GBartMultinomial::*)(int)) &GBartMultinomial::step,
+                "Run n Gibbs sweeps.")
         .method("get_current", &GBartMultinomial::get_current,
                 "Return the current draw as a named list with $r "
                 "(flattened N x (C-1)), $probs (flattened N x C), and "
@@ -845,9 +845,11 @@ int main() {
     double    log_phi_check = 0.0;
     for (int it = 0; it < n_keep; ++it) {
         model.step(1);
-        AI4BayesCode::state_map cur = model.get_current();
-        probs_sum += cur.at("probs");
-        log_phi_check += cur.at("log_phi")[0];
+        const auto gc = model.get_current();          // copy (avoids dangling ref)
+        const arma::vec& probs = gc.at("probs");      // key from get_current()
+        const arma::vec& log_phi = gc.at("log_phi");  // key from get_current()
+        probs_sum += probs;
+        log_phi_check += log_phi[0];
     }
     const arma::vec probs_hat = probs_sum / static_cast<double>(n_keep);
 

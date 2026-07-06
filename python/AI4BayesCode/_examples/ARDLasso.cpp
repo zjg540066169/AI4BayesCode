@@ -141,7 +141,6 @@ public:
     }
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         std::normal_distribution<double> norm01(0.0, 1.0);
 
@@ -413,7 +412,8 @@ RCPP_MODULE(ARDLasso_module) {
             "Construct with: X (N x p), Y (length N), seed, "
             "keep_history (record every draw; default FALSE).")
         .method("step", (void (ARDLasso::*)())    &ARDLasso::step, "Run one sweep.")
-        .method("step", (void (ARDLasso::*)(int)) &ARDLasso::step, "Run n Gibbs sweeps.")
+        .method("step", (void (ARDLasso::*)(int)) &ARDLasso::step,
+                "Run n Gibbs sweeps.")
         .method("get_current", &ARDLasso::get_current,
                 "Return list(beta, alpha, sigma2, psi2).")
         .method("set_current", &ARDLasso::set_current,
@@ -449,5 +449,119 @@ PYBIND11_MODULE(ARDLasso, m) {
         .def("get_dag",     &ARDLasso::get_dag)
         .def("predict_at",  &ARDLasso::predict_at,  pybind11::arg("new_data"))
         .def("get_history", &ARDLasso::get_history);
+}
+#endif
+
+// ============================================================================
+//  Standalone recovery demo (frontend-independent; compiled only when NEITHER
+//  binding macro is defined). Reads state via the FULL contract get_history().
+//
+//  Simulate a sparse linear regression from a KNOWN truth:
+//      Y = alpha_true + X * beta_true + N(0, sigma_true^2)
+//  with several beta_true coefficients exactly zero (the ARD/LASSO slab
+//  prior should shrink those toward 0 while recovering the active ones).
+//  Fit with keep_history, discard burn-in, take posterior means, and check:
+//    (a) posterior means of active coefficients are close to truth,
+//    (b) posterior means of zero coefficients are shrunk small,
+//    (c) the ARD fit beats a no-X baseline on training RMSE.
+// ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+
+int main() {
+    const std::size_t N = 200;     // observations
+    const std::size_t p = 6;       // predictors
+    const int seed     = 20260621;
+
+    // Known truth: 3 active, 3 exactly-zero coefficients.
+    arma::vec beta_true = {2.5, 0.0, -1.5, 0.0, 0.8, 0.0};
+    const double alpha_true = 1.0;
+    const double sigma_true = 0.5;
+
+    // Simulate design + response.
+    std::mt19937_64 data_rng(static_cast<std::uint64_t>(seed));
+    std::normal_distribution<double> rnorm(0.0, 1.0);
+
+    arma::mat X(N, p);
+    for (std::size_t i = 0; i < N; ++i)
+        for (std::size_t j = 0; j < p; ++j)
+            X(i, j) = rnorm(data_rng);
+
+    arma::vec Y(N);
+    for (std::size_t i = 0; i < N; ++i) {
+        double mu = alpha_true + arma::dot(X.row(i).t(), beta_true);
+        Y[i] = mu + sigma_true * rnorm(data_rng);
+    }
+
+    // Fit ARD LASSO.
+    const int n_burn = 2000;
+    const int n_keep = 4000;
+    ARDLasso model(X, Y, seed, /*keep_history=*/true);
+    model.step(n_burn);
+    model.step(n_keep);
+
+    // Read state via the full contract: get_history() -> history_map of mats.
+    const AI4BayesCode::history_map hist = model.get_history();
+    const arma::mat& beta_mat   = hist.at("beta");    // total x p
+    const arma::mat& alpha_mat  = hist.at("alpha");   // total x 1
+    const arma::mat& sigma2_mat = hist.at("sigma2");  // total x 1
+    const std::size_t total = beta_mat.n_rows;
+    const std::size_t start = static_cast<std::size_t>(n_burn);  // discard burn-in
+
+    // Posterior means over kept draws.
+    arma::vec beta_pm(p, arma::fill::zeros);
+    double alpha_pm = 0.0, sigma2_pm = 0.0;
+    std::size_t kept = 0;
+    for (std::size_t i = start; i < total; ++i) {
+        for (std::size_t j = 0; j < p; ++j) beta_pm[j] += beta_mat(i, j);
+        alpha_pm  += alpha_mat(i, 0);
+        sigma2_pm += sigma2_mat(i, 0);
+        ++kept;
+    }
+    beta_pm   /= static_cast<double>(kept);
+    alpha_pm  /= static_cast<double>(kept);
+    sigma2_pm /= static_cast<double>(kept);
+
+    // --- Report recovery ---
+    std::printf("ARD LASSO recovery demo (N=%zu, p=%zu, kept draws=%zu)\n",
+                N, p, kept);
+    std::printf("  alpha:  truth=% .3f   post.mean=% .3f\n",
+                alpha_true, alpha_pm);
+    std::printf("  sigma:  truth=% .3f   post.mean=% .3f  (from sigma2)\n",
+                sigma_true, std::sqrt(sigma2_pm));
+    std::printf("  coef     truth    post.mean\n");
+    for (std::size_t j = 0; j < p; ++j)
+        std::printf("   beta[%zu]  % .3f    % .3f\n", j, beta_true[j], beta_pm[j]);
+
+    // --- Checks ---
+    double max_active_err = 0.0;
+    double max_zero_mag = 0.0;
+    for (std::size_t j = 0; j < p; ++j) {
+        if (std::abs(beta_true[j]) > 1e-9)
+            max_active_err = std::max(max_active_err,
+                                      std::abs(beta_pm[j] - beta_true[j]));
+        else
+            max_zero_mag = std::max(max_zero_mag, std::abs(beta_pm[j]));
+    }
+
+    arma::vec y_hat = X * beta_pm + alpha_pm;
+    double sse_model = arma::dot(Y - y_hat, Y - y_hat);
+    double rmse_model = std::sqrt(sse_model / static_cast<double>(N));
+
+    double ybar = arma::mean(Y);
+    double sse_base = arma::dot(Y - ybar, Y - ybar);
+    double rmse_base = std::sqrt(sse_base / static_cast<double>(N));
+
+    std::printf("  active coef max abs error : % .4f  (tol 0.30)\n", max_active_err);
+    std::printf("  zero   coef max abs mean  : % .4f  (tol 0.30)\n", max_zero_mag);
+    std::printf("  train RMSE  model=% .4f   baseline(intercept)=% .4f\n",
+                rmse_model, rmse_base);
+
+    bool ok = (max_active_err < 0.30)
+           && (max_zero_mag   < 0.30)
+           && (rmse_model     < 0.50 * rmse_base);
+
+    std::printf("%s\n", ok ? "[demo PASS]" : "[demo FAIL]");
+    return ok ? 0 : 1;
 }
 #endif

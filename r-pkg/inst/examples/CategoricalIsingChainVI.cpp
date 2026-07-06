@@ -427,3 +427,190 @@ PYBIND11_MODULE(CategoricalIsingChainVI, m) {
         .def("get_history", &CategoricalIsingChainVI::get_history);
 }
 #endif // AI4BAYESCODE_PYBIND_MODULE
+
+// ============================================================================
+//  STANDALONE DEMO (int main)
+//  ---------------------------------------------------------------------------
+//  Compiled ONLY when neither binding module macro is defined. Drives the
+//  full-contract class directly: DGP + recovery check ported from the core
+//  standalone demo, but reads state via get_current() (key "phi", stored
+//  COLUMN-MAJOR: phi(i,k) == phi_flat[k*n + i]).
+//
+//  Validation strategy (a prior-only VI sampler has NO likelihood, so we
+//  check the variational marginals against the KNOWN exact joint marginals
+//  obtained by brute-force enumeration of the small chain):
+//
+//    (1) Symmetric chain (h = 0): by the state-permutation symmetry of the
+//        Potts energy the exact node marginal is uniform (1/K per state).
+//        VI must recover phi_i ~ uniform.
+//
+//    (2) Asymmetric chain (strong positive field h on state 1): enumerate the
+//        true joint p~(z) over all K^n states, normalise, marginalise to get
+//        the exact node marginals. VI marginals must (a) be close to exact in
+//        total-variation distance, and (b) be a large improvement over the
+//        uniform baseline.
+// ============================================================================
+
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+
+#include <cstdio>
+#include <limits>
+
+namespace {
+
+// Extract VI marginals phi as an n x K matrix via the FULL contract
+// (get_current()["phi"], stored column-major).
+arma::mat get_phi(const CategoricalIsingChainVI& model,
+                  std::size_t n, std::size_t K) {
+    const auto gc = model.get_current();
+    const arma::vec& phi_flat = gc.at("phi");   // column-major: (i,k) at k*n + i
+    arma::mat phi_mat(n, K);
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t k = 0; k < K; ++k)
+            phi_mat(i, k) = phi_flat[k * n + i];
+    return phi_mat;
+}
+
+// Brute-force EXACT node marginals of the true joint p~(z) by enumerating
+// all K^n states. Returns an n x K matrix of marginal probabilities.
+arma::mat exact_marginals(std::size_t n, std::size_t K, double beta,
+                          const std::vector<double>& h) {
+    std::size_t total = 1;
+    for (std::size_t i = 0; i < n; ++i) total *= K;
+
+    auto log_density = [&](const std::vector<std::size_t>& z) -> double {
+        double v = 0.0;
+        for (std::size_t i = 0; i + 1 < n; ++i)
+            if (z[i] == z[i + 1]) v += beta;
+        for (std::size_t i = 0; i < n; ++i)
+            if (z[i] == 1u) v += h[i];
+        return v;
+    };
+
+    // First pass: max log-density for numerical stability.
+    std::vector<std::size_t> z(n, 0);
+    double max_lp = -std::numeric_limits<double>::infinity();
+    for (std::size_t s = 0; s < total; ++s) {
+        std::size_t r = s;
+        for (std::size_t i = 0; i < n; ++i) { z[i] = r % K; r /= K; }
+        const double lp = log_density(z);
+        if (lp > max_lp) max_lp = lp;
+    }
+
+    arma::mat marg(n, K, arma::fill::zeros);
+    double Z = 0.0;
+    for (std::size_t s = 0; s < total; ++s) {
+        std::size_t r = s;
+        for (std::size_t i = 0; i < n; ++i) { z[i] = r % K; r /= K; }
+        const double w = std::exp(log_density(z) - max_lp);
+        Z += w;
+        for (std::size_t i = 0; i < n; ++i) marg(i, z[i]) += w;
+    }
+    marg /= Z;
+    return marg;
+}
+
+// Mean total-variation distance between two n x K marginal matrices.
+double mean_tv(const arma::mat& a, const arma::mat& b) {
+    const std::size_t n = a.n_rows, K = a.n_cols;
+    double acc = 0.0;
+    for (std::size_t i = 0; i < n; ++i) {
+        double tv = 0.0;
+        for (std::size_t k = 0; k < K; ++k)
+            tv += std::abs(a(i, k) - b(i, k));
+        acc += 0.5 * tv;
+    }
+    return acc / static_cast<double>(n);
+}
+
+} // namespace
+
+int main() {
+    std::printf("=== CategoricalIsingChainVI standalone demo ===\n");
+    std::printf("Mean-field VI on a discrete Potts/Ising chain.\n");
+    std::printf("(prior-only sampler: validate VI marginals vs EXACT "
+                "enumerated marginals)\n\n");
+
+    const std::size_t n = 4;     // chain length
+    const std::size_t K = 3;     // states per node (K^n = 81 states: exact)
+    const double      beta = 0.8;
+    const int         seed = 20260621;
+
+    bool ok = true;
+
+    // ---- Test 1: symmetric chain (h = 0) -> exact marginal is uniform ----
+    {
+        std::vector<double> h(n, 0.0);
+        arma::vec h_arma(n);
+        for (std::size_t i = 0; i < n; ++i) h_arma[i] = h[i];
+        CategoricalIsingChainVI model(static_cast<int>(n), static_cast<int>(K),
+                                      beta, h_arma, /*exact=*/true, seed);
+        // Run enough steps for RAABBVI to converge (inner_iter_per_epoch=200,
+        // up to max_epochs=25). step() is a no-op once converged.
+        model.step(6000);
+
+        const arma::mat phi   = get_phi(model, n, K);
+        const arma::mat exact = exact_marginals(n, K, beta, h);
+
+        const double tv = mean_tv(phi, exact);
+        // Exact marginal here is uniform 1/K; max deviation from uniform:
+        double max_dev = 0.0;
+        for (std::size_t i = 0; i < n; ++i)
+            for (std::size_t k = 0; k < K; ++k)
+                max_dev = std::max(max_dev,
+                                   std::abs(phi(i, k) - 1.0 / K));
+
+        const bool t1_ok = (tv < 0.02) && (max_dev < 0.03);
+        ok = ok && t1_ok;
+        std::printf("[Test 1] symmetric chain  beta=%.2f  h=0\n", beta);
+        std::printf("  VI phi[node0]   = [%.4f %.4f %.4f]\n",
+                    phi(0, 0), phi(0, 1), phi(0, 2));
+        std::printf("  exact (uniform) = [%.4f %.4f %.4f]\n",
+                    exact(0, 0), exact(0, 1), exact(0, 2));
+        std::printf("  mean TV(VI,exact)=%.5f   max|phi-1/K|=%.5f   -> %s\n\n",
+                    tv, max_dev, t1_ok ? "OK" : "FAIL");
+    }
+
+    // ---- Test 2: asymmetric chain (strong field on state 1) -------------
+    {
+        std::vector<double> h(n, 2.0);   // strong positive field on state 1
+        arma::vec h_arma(n);
+        for (std::size_t i = 0; i < n; ++i) h_arma[i] = h[i];
+        CategoricalIsingChainVI model(static_cast<int>(n), static_cast<int>(K),
+                                      beta, h_arma, /*exact=*/true, seed);
+        model.step(6000);
+
+        const arma::mat phi   = get_phi(model, n, K);
+        const arma::mat exact = exact_marginals(n, K, beta, h);
+
+        const double tv_vi = mean_tv(phi, exact);
+
+        // Uniform baseline marginals (what you'd report with NO inference).
+        arma::mat uniform(n, K);
+        uniform.fill(1.0 / K);
+        const double tv_base = mean_tv(uniform, exact);
+
+        // VI must (a) track exact closely and (b) beat the uniform baseline,
+        // confirming it actually learned the field-induced concentration.
+        const bool t2_ok = (tv_vi < 0.05) && (tv_vi < 0.5 * tv_base);
+        ok = ok && t2_ok;
+
+        std::printf("[Test 2] asymmetric chain  beta=%.2f  h=2.0 (state 1)\n",
+                    beta);
+        std::printf("  VI phi[node0]    = [%.4f %.4f %.4f]\n",
+                    phi(0, 0), phi(0, 1), phi(0, 2));
+        std::printf("  exact[node0]     = [%.4f %.4f %.4f]\n",
+                    exact(0, 0), exact(0, 1), exact(0, 2));
+        std::printf("  mean TV(VI,   exact)=%.5f\n", tv_vi);
+        std::printf("  mean TV(unif, exact)=%.5f  (naive baseline)\n",
+                    tv_base);
+        std::printf("  VI improvement over baseline: %.1fx   -> %s\n\n",
+                    tv_base / std::max(tv_vi, 1e-12),
+                    t2_ok ? "OK" : "FAIL");
+    }
+
+    std::printf("=== %s ===\n", ok ? "[demo PASS]" : "[demo FAIL]");
+    return ok ? 0 : 1;
+}
+
+#endif // standalone demo

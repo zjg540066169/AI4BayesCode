@@ -24,10 +24,10 @@
 //  Architectural choices DEMONSTRATED here (must transfer)
 //  -------------------------------------------------------
 //   1. Reparameterize EVERY positive scalar (amp, ell, sigma) to the log
-//      scale and treat them as REAL parameters. This keeps the whole
-//      joint vector REAL so the dense-metric (Welford) pilot phase of
-//      `joint_nuts_block` applies; the identity metric alone cannot
-//      navigate the banana / funnel geometry.
+//      scale and treat them as REAL parameters. This unlocks
+//      `joint_nuts_block` (real-only) and its dense-metric pilot phase.
+//      `joint_nuts_block_mixed` does NOT support dense metric (the
+//      banana / funnel cannot be navigated with the identity metric).
 //   2. Put ALL real parameters into ONE `joint_nuts_block` and set
 //      `cfg.use_dense_metric = true`. The Welford pilot covariance learns
 //      the (amp, ell) banana, the (amp, zs) funnel, and the (Intercept,
@@ -68,11 +68,36 @@
 //   leaking the solution to applied test cases.
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates 1-D data from a
-// known smooth function, fits the HSGP block, and checks that the posterior
-// predictive mean recovers the truth better than a naive intercept baseline.
-// No R / Python binding is built or required.
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("HSGPRegression")
+//   set.seed(601); N <- 80L; M <- 25L                 # sample size, basis count
+//   x <- runif(N, -3, 3)                              # 1-D inputs on [-3, 3]
+//   y <- 1.5 * sin(2 * x) + 0.3 * x + rnorm(N, 0, 0.4) # smooth truth + N(0,0.4)
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(HSGPRegression, y, x, M, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(HSGPRegression, y, x, M, 7L, TRUE)       # y, x, M, seed, keep_history
+//   m$step(2500); str(m$get_current())
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(601); N = 80; M = 25       # sample size, basis count
+//   x = rng.uniform(-3, 3, N)                              # 1-D inputs on [-3, 3]
+//   y = 1.5*np.sin(2*x) + 0.3*x + rng.normal(0, 0.4, N)    # smooth truth + N(0,0.4)
+//   Mod = AI4BayesCode.example("HSGPRegression")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.HSGPRegression(y, x, M, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.HSGPRegression(y, x, M, 7, True); m.step(2500); print(m.get_current())
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -81,21 +106,36 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#include <RcppArmadillo.h>
+#else
 #include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <limits>
 #include <memory>
 #include <random>
 #include <string>
 #include <vector>
+
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#include <Rcpp.h>
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
+#include <pybind11/stl.h>
+#endif
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -559,7 +599,7 @@ public:
     /// §13 NUTS-family + validator.md §24.
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
         if (n < 0) {
-            throw std::runtime_error("readapt_NUTS: n must be non-negative");
+            ai4b::stop("readapt_NUTS: n must be non-negative");
         }
         impl_->readapt_NUTS(static_cast<std::size_t>(n),
                             reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
@@ -574,6 +614,55 @@ private:
     bool keep_history_ = false;
 };
 
+// ============================================================================
+// Bindings
+// ============================================================================
+
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(HSGPRegression_module) {
+    Rcpp::class_<HSGPRegression>("HSGPRegression")
+        .constructor<arma::vec, arma::vec, int, int, bool>(
+            "1-D Hilbert-space GP regression (canonical reduced-rank GP).\n"
+            "Args: y (N), x (N), M (basis count, e.g. 25), seed, keep_history.")
+        .method("step", (void (HSGPRegression::*)())    &HSGPRegression::step, "Run one sweep.")
+        .method("step", (void (HSGPRegression::*)(int)) &HSGPRegression::step, "Run n sweeps.")
+        .method("get_current", &HSGPRegression::get_current)
+        .method("set_current", &HSGPRegression::set_current)
+        .method("predict_at",  &HSGPRegression::predict_at)
+        .method("get_dag",     &HSGPRegression::get_dag)
+        .method("get_history", &HSGPRegression::get_history)
+        .method("readapt_NUTS", &HSGPRegression::readapt_NUTS);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+
+PYBIND11_MODULE(HSGPRegression_module, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<HSGPRegression>(m, "HSGPRegression")
+        .def(pybind11::init<arma::vec, arma::vec, int, int, bool>(),
+             pybind11::arg("y"), pybind11::arg("x"), pybind11::arg("M"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false,
+             "1-D HSGP regression (reduced-rank GP).")
+        .def("step", (void (HSGPRegression::*)())    &HSGPRegression::step, "Run one sweep.")
+        .def("step", (void (HSGPRegression::*)(int)) &HSGPRegression::step,
+             pybind11::arg("n_steps"))
+        .def("get_current", &HSGPRegression::get_current)
+        .def("set_current", &HSGPRegression::set_current,
+             pybind11::arg("params"))
+        .def("predict_at",  &HSGPRegression::predict_at,
+             pybind11::arg("new_data"))
+        .def("get_dag",     &HSGPRegression::get_dag)
+        .def("get_history", &HSGPRegression::get_history)
+        .def("readapt_NUTS", &HSGPRegression::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
 // ============================================================================
 // Standalone demo
 // ============================================================================
@@ -696,3 +785,4 @@ int main() {
                    : "[demo FAIL] HSGP did not recover the signal");
     return ok ? 0 : 1;
 }
+#endif

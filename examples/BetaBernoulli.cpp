@@ -18,10 +18,40 @@
 //  Analytic posterior: p | y ~ Beta(a + sum(y), b + N - sum(y))
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates Bernoulli data,
-// fits p with NUTS under an interval(0,1) constraint, and checks recovery
-// against the analytic Beta posterior. No R / Python binding is built.
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("BetaBernoulli")
+//   set.seed(2026)
+//   N <- 500; p_true <- 0.30            # N Bernoulli trials, true success prob
+//   y <- as.numeric(runif(N) < p_true)  # 0/1 data vector
+//   # new(BetaBernoulli, y, a, b, seed, keep_history):
+//   #   y = data, a = 2 / b = 2 Beta prior shapes, seed = 7, keep_history = TRUE
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(BetaBernoulli, y, 2, 2, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(BetaBernoulli, y, 2, 2, 7L, TRUE)
+//   m$step(2500); str(m$get_current())  # posterior mean p ~= (a+sum_y)/(a+b+N)
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(2026)
+//   N, p_true = 500, 0.30
+//   y = (rng.random(N) < p_true).astype(float)        # 0/1 data vector
+//   Mod = AI4BayesCode.example("BetaBernoulli")
+//   # BetaBernoulli(y, a, b, rng_seed, keep_history): a=2/b=2 Beta prior, seed=7
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.BetaBernoulli(y, 2.0, 2.0, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.BetaBernoulli(y, 2.0, 2.0, 7, True)
+//   m.step(2500); print(m.get_current())
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -30,21 +60,25 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/nuts_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <limits>
 #include <memory>
 #include <random>
-#include <stdexcept>
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -270,7 +304,7 @@ public:
     /// §13 NUTS-family + validator.md §24.
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
         if (n < 0) {
-            throw std::runtime_error("readapt_NUTS: n must be non-negative");
+            ai4b::stop("readapt_NUTS: n must be non-negative");
         }
         impl_->readapt_NUTS(static_cast<std::size_t>(n),
                             reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
@@ -285,6 +319,51 @@ private:
     bool                             keep_history_ = false;
 };
 
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(BetaBernoulli_module) {
+    Rcpp::class_<BetaBernoulli>("BetaBernoulli")
+        .constructor<arma::vec, double, double, int>(
+            "Legacy constructor; keep_history defaults to FALSE.")
+        .constructor<arma::vec, double, double, int, bool>(
+            "Construct with: y (0/1 vector), Beta prior a, b, seed, "
+            "keep_history (default FALSE).")
+        .method("step", (void (BetaBernoulli::*)())    &BetaBernoulli::step, "Run one sweep.")
+        .method("step", (void (BetaBernoulli::*)(int)) &BetaBernoulli::step, "Run n sweeps.")
+        .method("get_current", &BetaBernoulli::get_current)
+        .method("set_current", &BetaBernoulli::set_current)
+        .method("predict_at",  &BetaBernoulli::predict_at)
+        .method("get_dag",     &BetaBernoulli::get_dag)
+        .method("get_history", &BetaBernoulli::get_history)
+        .method("readapt_NUTS", &BetaBernoulli::readapt_NUTS);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(BetaBernoulli, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<BetaBernoulli>(m, "BetaBernoulli")
+        .def(pybind11::init<arma::vec, double, double, int, bool>(),
+             pybind11::arg("y"),
+             pybind11::arg("a") = 1.0, pybind11::arg("b") = 1.0,
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false,
+             "Bayesian Beta-Bernoulli conjugate. p ~ Beta(a,b); "
+             "y ~ Bernoulli(p). Uses beta_gibbs_block (exact).")
+        .def("step", (void (BetaBernoulli::*)())    &BetaBernoulli::step, "Run one sweep.")
+        .def("step", (void (BetaBernoulli::*)(int)) &BetaBernoulli::step, pybind11::arg("n_steps"))
+        .def("get_current", &BetaBernoulli::get_current)
+        .def("set_current", &BetaBernoulli::set_current, pybind11::arg("params"))
+        .def("predict_at",  &BetaBernoulli::predict_at, pybind11::arg("new_data"))
+        .def("get_dag",     &BetaBernoulli::get_dag)
+        .def("get_history", &BetaBernoulli::get_history)
+        .def("readapt_NUTS", &BetaBernoulli::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
 // ============================================================================
 //  Standalone demo: simulate Bernoulli(p_true) data, fit p with NUTS under the
 //  interval(0, 1) constraint, and confirm the sampled posterior mean recovers
@@ -346,3 +425,4 @@ int main() {
                    : "[demo FAIL] posterior mean off");
     return ok ? 0 : 1;
 }
+#endif

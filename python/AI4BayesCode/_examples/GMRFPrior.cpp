@@ -203,7 +203,6 @@ public:
     // ---- Canonical backend-neutral interface ----------------------------
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -315,5 +314,111 @@ PYBIND11_MODULE(GMRFPrior, m) {
         .def("predict_at",  &GMRFPrior::predict_at,  pybind11::arg("new_data"))
         .def("get_dag",     &GMRFPrior::get_dag)
         .def("get_history", &GMRFPrior::get_history);
+}
+#endif
+
+//==============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
+//
+//  Active only when NEITHER binding macro is defined, so this same file is a
+//  valid dual-module (R/Python) source AND a runnable standalone demo.
+//
+//  GMRFPrior is a PURE-PRIOR sampler — there is no observation likelihood, so
+//  "recovery" means: the draws must reproduce the prior's KNOWN moments.
+//
+//  For the ICAR prior  x ~ N(0, (κ R)^{-1})  with the sum-to-zero constraint,
+//  the constrained draws are supported on the orthogonal complement of the
+//  constant vector 1, and their covariance equals the scaled Moore-Penrose
+//  pseudo-inverse of the (rank-deficient) graph Laplacian:
+//
+//        Cov(x) = (1/κ) · R^+ ,
+//
+//  where R^+ is the pseudo-inverse of R restricted to range(R) = 1^⊥
+//  (Rue & Held 2005 §3.3.2 / §3.4.2). We check three things against this
+//  closed form:
+//    (1) every draw is exactly sum-to-zero (constraint honoured);
+//    (2) the empirical mean is ≈ 0;
+//    (3) the empirical covariance ≈ (1/κ) R^+ in relative Frobenius norm.
+//
+//  State is read via the full contract get_current() (key "x"), matching the
+//  dual-module accessor.
+//==============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+int main() {
+    // ---- small lattice so we can form R^+ densely -------------------------
+    const int    L_x   = 4;
+    const int    L_y   = 4;
+    const double kappa = 2.0;
+    const std::size_t N = static_cast<std::size_t>(L_x) *
+                          static_cast<std::size_t>(L_y);   // 16 nodes
+
+    GMRFPrior model(L_x, L_y, kappa,
+                    /*periodic=*/false, /*eight_nn=*/false,
+                    /*rng_seed=*/123, /*keep_history=*/false);
+
+    // ---- closed-form target covariance:  Cov(x) = (1/κ) R^+ ---------------
+    // Rebuild R densely here (same lattice/edges as the model) and form its
+    // pseudo-inverse. R^+ already lives on 1^⊥, matching the constrained draw.
+    arma::umat edges = make_2d_lattice_edges(
+        static_cast<std::size_t>(L_x), static_cast<std::size_t>(L_y),
+        /*periodic=*/false, /*eight_nn=*/false);
+    arma::sp_mat R_sp = build_graph_laplacian(N, edges);
+    arma::mat    R    = arma::mat(R_sp);
+    arma::mat    Rplus = arma::pinv(R);              // R^+ on range(R) = 1^⊥
+    arma::mat    Cov_true = Rplus / kappa;
+
+    // ---- warmup (direct sampler: not strictly needed, but harmless) -------
+    model.step(50);
+
+    // ---- collect draws ----------------------------------------------------
+    const int    M = 200000;
+    arma::vec    mean_acc(N, arma::fill::zeros);
+    arma::mat    cov_acc(N, N, arma::fill::zeros);
+    double       max_abs_sum = 0.0;   // worst per-draw |sum(x)| -> constraint
+
+    for (int s = 0; s < M; ++s) {
+        model.step(1);
+        const auto gc = model.get_current();          // copy (avoids dangling ref)
+        const arma::vec& x = gc.at("x");              // key from package get_current()
+        max_abs_sum = std::max(max_abs_sum, std::abs(arma::accu(x)));
+        mean_acc += x;
+        cov_acc  += x * x.t();
+    }
+    mean_acc /= static_cast<double>(M);
+    cov_acc  /= static_cast<double>(M);
+    // E[x]≈0 so the empirical second moment ≈ covariance; subtract mean outer
+    // product for the unbiased-ish estimate.
+    arma::mat Cov_emp = cov_acc - mean_acc * mean_acc.t();
+
+    // ---- compare ----------------------------------------------------------
+    const double mean_max   = arma::abs(mean_acc).max();
+    const double cov_relerr =
+        arma::norm(Cov_emp - Cov_true, "fro") /
+        arma::norm(Cov_true, "fro");
+
+    std::printf("GMRFPrior demo: ICAR on %dx%d lattice (N=%zu), kappa=%.1f, "
+                "M=%d draws\n", L_x, L_y, N, kappa, M);
+    std::printf("  max |sum(x)| over all draws = %.3e   (constraint, want ~0)\n",
+                max_abs_sum);
+    std::printf("  max |empirical mean|        = %.4f   (want ~0)\n", mean_max);
+    std::printf("  Cov relative Frobenius err  = %.4f   (emp vs (1/kappa) R^+)\n",
+                cov_relerr);
+
+    // Diagonal spot-check (a couple of marginal variances).
+    std::printf("  diag var: node0 emp=%.4f true=%.4f | node5 emp=%.4f "
+                "true=%.4f\n",
+                Cov_emp(0, 0), Cov_true(0, 0),
+                Cov_emp(5, 5), Cov_true(5, 5));
+
+    const bool ok =
+        (max_abs_sum < 1e-8) &&     // sum-to-zero is exact per draw
+        (mean_max    < 0.02) &&     // Monte-Carlo mean ~ 0
+        (cov_relerr  < 0.03);       // covariance matches (1/kappa) R^+
+
+    std::printf("%s\n", ok
+        ? "[demo PASS] ICAR draws match prior moments (1/kappa) R^+"
+        : "[demo FAIL] sampled moments do not match the ICAR prior");
+    return ok ? 0 : 1;
 }
 #endif

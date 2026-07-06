@@ -34,13 +34,23 @@ echo "• include/AI4BayesCode -> python/_vendored_include/AI4BayesCode (core he
 sync_dir include/AI4BayesCode python/AI4BayesCode/_vendored_include/AI4BayesCode
 
 echo "• bart_pure_cpp/ -> r-pkg/inst ; start.md -> both"
-# NOTE: r-pkg/inst/examples are the DUAL-MODULE (RCPP_MODULE) versions used by
-# new() / ai4bayescode_example -- NOT the repo-root *frontend-independent* examples
-# (those have no RCPP_MODULE). They are maintained in r-pkg directly and are
-# deliberately NOT overwritten here. Same for python/AI4BayesCode/_examples (PYBIND).
 sync_dir bart_pure_cpp  r-pkg/inst/bart_pure_cpp
 cp -f start.md r-pkg/inst/start.md
 cp -f start.md python/AI4BayesCode/start.md
+
+# examples/ are now UNIFIED tri-module .cpp: each file carries a fenced
+# int main() + an #ifdef AI4BAYESCODE_RCPP_MODULE block + an
+# #ifdef AI4BAYESCODE_PYBIND_MODULE block, so the SAME file runs standalone,
+# in R (new() / ai4bayescode_example), AND in Python (pybind). Single source of
+# truth = repo-root examples/; the .cpp are synced to BOTH packages here (edit
+# once, in examples/, then run this script). R-only helper scripts under
+# r-pkg/inst/examples (run_*.R / test_*.R / Makevars) are NOT part of the .cpp
+# source-of-truth and are left untouched by this loop.
+echo "• examples/*.cpp -> r-pkg/inst/examples , python/AI4BayesCode/_examples (tri-module)"
+for f in examples/*.cpp; do
+  cp -f "$f" "r-pkg/inst/examples/$(basename "$f")"
+  cp -f "$f" "python/AI4BayesCode/_examples/$(basename "$f")"
+done
 
 find r-pkg/inst python/AI4BayesCode/_skills python/AI4BayesCode/_vendored_include \
      -name '.DS_Store' -delete 2>/dev/null || true

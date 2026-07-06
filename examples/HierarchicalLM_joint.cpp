@@ -2,14 +2,14 @@
 // Licensed under the GNU General Public License v2.0 or later
 // (GPL-2.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
-//  HierarchicalLM_joint.cpp
+//  HierarchicalLM_joint_v2.cpp
 //
-//  Hierarchical linear model with a non-centered reparameterization (NCR):
-//  tau and sigma are FOLDED INTO the single joint_nuts_block alongside the
-//  non-centered random effects z_u.
+//  NCR refactor of HierarchicalLM_joint.cpp.  Same model, same priors,
+//  same posterior — but tau and sigma are FOLDED INTO the single
+//  joint_nuts_block alongside the non-centered random effects z_u.
 //
-//  Model
-//  -----
+//  Model (identical to HierarchicalLM_joint.cpp)
+//  -----------------------------------------------
 //      y_n | alpha, beta, u, sigma  ~ Normal(alpha + X_n' beta + u_{g[n]}, sigma^2)
 //      u_g | tau                     ~ Normal(0, tau^2),   g = 1..G
 //      alpha                         ~ Normal(0, 10^2)
@@ -45,16 +45,50 @@
 //
 //  get_current()/get_history() expose NATURAL parameters:
 //      alpha, beta, u (= tau * z_u), tau, sigma.
-//  z_u is also exposed so the reparameterized space can be inspected.
+//  z_u is also exposed so cross-val can inspect the reparameterized space.
 //
-//  Class name:  HierarchicalLM_joint
+//  Cross-validation against HierarchicalLM_joint.cpp
+//  ---------------------------------------------------
+//  Class name: HierarchicalLM_joint
 //  Module name: HierarchicalLM_joint_module
+//  Coexists with the original; both can be loaded in one R session.
 // ============================================================================
+//
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("HierarchicalLM_joint")
+//   set.seed(2024); G<-8L; p<-2L; per<-30L; N<-G*per                # balanced hierarchical LM
+//   g<-rep(1:G, each=per); u<-rnorm(G, 0, 1.2)                      # u_g ~ N(0, tau=1.2)
+//   X<-matrix(rnorm(N*p), N, p)                                     # design matrix N x p
+//   y<-1.5 + X %*% c(2.0,-1.0) + u[g] + rnorm(N, 0, 0.7)           # alpha=1.5,beta=(2,-1),sigma=0.7
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(HierarchicalLM_joint, as.numeric(y), X, as.numeric(g), G, 1.0, 1.0, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m<-new(HierarchicalLM_joint, as.numeric(y), X, as.numeric(g), G, 1.0, 1.0, 7L, TRUE)  # y,X,g_idx(1-based,numeric),G,sigma_init,tau_init,seed,keep_history
+//   m$step(2500); str(m$get_current())
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(2024)
+//   G, p, per = 8, 2, 30; N = G * per                              # balanced hierarchical LM
+//   g = np.repeat(np.arange(1, G + 1), per)                        # 1-based group index, length N
+//   u = rng.normal(0.0, 1.2, G)                                    # u_g ~ N(0, tau=1.2)
+//   X = rng.normal(0.0, 1.0, (N, p))                               # design matrix N x p
+//   y = 1.5 + X @ np.array([2.0, -1.0]) + u[g - 1] + rng.normal(0.0, 0.7, N)  # alpha=1.5,beta=(2,-1),sigma=0.7
+//   Mod = AI4BayesCode.example("HierarchicalLM_joint")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.HierarchicalLM_joint(y, X, g.astype(np.int32), G, 1.0, 1.0, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.HierarchicalLM_joint(y, X, g.astype(np.int32), G, 1.0, 1.0, 7, True)  # y,X,g_idx(1-based),G,sigma_init,tau_init,seed,keep_history
+//   m.step(2500); print(m.get_current())
+// @example:end
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates hierarchical
-// data, fits the joint-NUTS block, and checks recovery. No R / Python binding
-// is built or required.
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -63,20 +97,25 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <random>
-#include <stdexcept>
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -226,7 +265,13 @@ class HierarchicalLM_joint {
 public:
     HierarchicalLM_joint(const arma::vec& y,
                             const arma::mat& X,
-                            const arma::ivec& g_idx_1based,   // 1-based group index
+                            const arma::vec& g_idx_1based,    // 1-based group index
+                                                              // (passed as numeric so
+                                                              // both the R-list and
+                                                              // Python-dict backend
+                                                              // casters apply; no
+                                                              // arma::ivec caster
+                                                              // exists in pybind_casters)
                             int G,
                             double sigma_init,
                             double tau_init,
@@ -248,18 +293,19 @@ public:
     {
         const std::size_t N = y.n_elem;
         const std::size_t p = X.n_cols;
-        if (X.n_rows != N) throw std::runtime_error("X rows must equal length(y)");
+        if (X.n_rows != N) ai4b::stop("X rows must equal length(y)");
         if (g_idx_1based.n_elem != static_cast<arma::uword>(N))
-            throw std::runtime_error("g_idx length must equal length(y)");
-        if (G < 1) throw std::runtime_error("G must be >= 1");
+            ai4b::stop("g_idx length must equal length(y)");
+        if (G < 1) ai4b::stop("G must be >= 1");
         if (sigma_init <= 0.0 || tau_init <= 0.0)
-            throw std::runtime_error("sigma_init and tau_init must be > 0");
+            ai4b::stop("sigma_init and tau_init must be > 0");
 
-        // Convert 1-based to 0-based.
+        // Convert 1-based to 0-based. g_idx_1based arrives as numeric; round to
+        // the nearest integer group label before shifting.
         arma::vec g_idx(N);
         for (std::size_t n = 0; n < N; ++n) {
-            const int gn = g_idx_1based[n] - 1;
-            if (gn < 0 || gn >= G) throw std::runtime_error("g_idx entries must be in 1..G");
+            const int gn = static_cast<int>(std::llround(g_idx_1based[n])) - 1;
+            if (gn < 0 || gn >= G) ai4b::stop("g_idx entries must be in 1..G");
             g_idx[n] = static_cast<double>(gn);
         }
 
@@ -415,20 +461,25 @@ public:
 
     // get_current: exposes NATURAL parameters alpha, beta, u, tau, sigma.
     // Also exposes z_u for cross-validation of the NCR parameterization.
+    // Backend-neutral: returns a state_map (map<string,arma::vec>); scalars
+    // are length-1 arma::vec, vectors are passed through as-is. The
+    // rcpp_wrap.hpp / pybind glue converts to an R list / Python dict.
     AI4BayesCode::state_map get_current() const {
         AI4BayesCode::state_map out;
-        out["alpha"] = impl_->data().get("alpha");
-        out["beta"]  = impl_->data().get("beta");
-        out["z_u"]   = impl_->data().get("z_u");
-        out["u"]     = impl_->data().get("u");
-        out["sigma"] = impl_->data().get("sigma");
-        out["tau"]   = impl_->data().get("tau");
+        out["alpha"] = impl_->data().get("alpha");   // length-1
+        out["beta"]  = impl_->data().get("beta");    // length p
+        out["z_u"]   = impl_->data().get("z_u");     // length G
+        out["u"]     = impl_->data().get("u");       // length G
+        out["sigma"] = impl_->data().get("sigma");   // length-1
+        out["tau"]   = impl_->data().get("tau");     // length-1
         return out;
     }
 
     // set_current: overwrite any subset of {alpha, beta, z_u, tau, sigma}.
     // u is derived from (tau, z_u) and is recomputed automatically.
     // Setting u directly is NOT supported (set z_u instead).
+    // Backend-neutral: takes a state_map (map<string,arma::vec>); read each
+    // entry via params.count / params.at, no Rcpp::as.
     void set_current(const AI4BayesCode::state_map& params) {
         auto& joint_blk = dynamic_cast<joint_nuts_block&>(impl_->child(0));
         arma::vec cat_cur = joint_blk.current();
@@ -440,34 +491,40 @@ public:
 
         auto it_alpha = params.find("alpha");
         if (it_alpha != params.end()) {
+            if (it_alpha->second.n_elem < 1)
+                ai4b::stop("set_current: alpha must have length 1");
             cat_cur[0] = it_alpha->second[0];
             touched = true;
         }
         auto it_beta = params.find("beta");
         if (it_beta != params.end()) {
             const arma::vec& b = it_beta->second;
-            if (b.n_elem != p) throw std::runtime_error("set_current: beta length must equal p");
+            if (b.n_elem != p) ai4b::stop("set_current: beta length must equal p");
             for (std::size_t k = 0; k < p; ++k) cat_cur[1 + k] = b[k];
             touched = true;
         }
         auto it_zu = params.find("z_u");
         if (it_zu != params.end()) {
             const arma::vec& z = it_zu->second;
-            if (z.n_elem != G) throw std::runtime_error("set_current: z_u length must equal G");
+            if (z.n_elem != G) ai4b::stop("set_current: z_u length must equal G");
             for (std::size_t g = 0; g < G; ++g) cat_cur[1 + p + g] = z[g];
             touched = true;
         }
         auto it_tau = params.find("tau");
         if (it_tau != params.end()) {
+            if (it_tau->second.n_elem < 1)
+                ai4b::stop("set_current: tau must have length 1");
             const double tu = it_tau->second[0];
-            if (!(tu > 0.0)) throw std::runtime_error("tau must be > 0");
+            if (!(tu > 0.0)) ai4b::stop("tau must be > 0");
             cat_cur[p + G + 1] = tu;
             touched = true;
         }
         auto it_sigma = params.find("sigma");
         if (it_sigma != params.end()) {
+            if (it_sigma->second.n_elem < 1)
+                ai4b::stop("set_current: sigma must have length 1");
             const double sg = it_sigma->second[0];
-            if (!(sg > 0.0)) throw std::runtime_error("sigma must be > 0");
+            if (!(sg > 0.0)) ai4b::stop("sigma must be > 0");
             cat_cur[p + G + 2] = sg;
             touched = true;
         }
@@ -494,14 +551,17 @@ public:
 
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
 
-    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
+    // Backend-neutral predict_at: takes a state_map of replaced data inputs
+    // (empty here) and returns a history_map (map<string,arma::mat>). The
+    // rcpp_wrap.hpp / pybind glue converts each matrix to an R matrix /
+    // Python 2D array. Cf. GaussianLocationScale::predict_at.
+    AI4BayesCode::history_map
+    predict_at(const AI4BayesCode::state_map& new_data) const {
         if (!new_data.empty()) {
-            throw std::runtime_error(
-                "HierarchicalLM_joint::predict_at: does not accept "
-                "replaced data inputs. Call with an empty map for "
-                "posterior-predictive y_rep at training X / g_idx.");
+            ai4b::stop("HierarchicalLM_joint::predict_at: does not accept "
+                       "replaced data inputs. Call with an empty map/list for "
+                       "posterior-predictive y_rep at training X / g_idx.");
         }
-
         AI4BayesCode::history_map out;
 
         if (!keep_history_) {
@@ -550,7 +610,7 @@ public:
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
 
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
-        if (n < 0) throw std::runtime_error("readapt_NUTS: n must be non-negative");
+        if (n < 0) ai4b::stop("readapt_NUTS: n must be non-negative");
         impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
     }
 
@@ -562,6 +622,63 @@ private:
     bool                             keep_history_ = false;
 };
 
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(HierarchicalLM_joint_module) {
+    Rcpp::class_<HierarchicalLM_joint>("HierarchicalLM_joint")
+        .constructor<arma::vec, arma::mat, arma::vec, int,
+                     double, double, int>(
+            "Legacy constructor; keep_history defaults to FALSE.")
+        .constructor<arma::vec, arma::mat, arma::vec, int,
+                     double, double, int, bool>(
+            "NCR refactor: joint NUTS over (alpha, beta, z_u, tau, sigma). "
+            "u_g = tau * z_u_g is exposed in get_current() for cross-val. "
+            "Args: y, X (N x p), g_idx (1-based, length N), G, "
+            "sigma_init (>0), tau_init (>0), seed (int), keep_history (default FALSE).")
+        .method("step", (void (HierarchicalLM_joint::*)())    &HierarchicalLM_joint::step, "Run one sweep.")
+        .method("step", (void (HierarchicalLM_joint::*)(int)) &HierarchicalLM_joint::step,
+                "Run n Gibbs sweeps (each is one joint NUTS step).")
+        .method("get_current",  &HierarchicalLM_joint::get_current)
+        .method("set_current",  &HierarchicalLM_joint::set_current,
+                "Overwrite any subset of {alpha, beta, z_u, tau, sigma}. "
+                "u is recomputed from (tau, z_u).")
+        .method("get_history",  &HierarchicalLM_joint::get_history)
+        .method("predict_at",   &HierarchicalLM_joint::predict_at)
+        .method("get_dag",      &HierarchicalLM_joint::get_dag)
+        .method("readapt_NUTS", &HierarchicalLM_joint::readapt_NUTS);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(HierarchicalLM_joint, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<HierarchicalLM_joint>(m, "HierarchicalLM_joint")
+        .def(pybind11::init<arma::vec, arma::mat, arma::vec, int,
+                            double, double, int, bool>(),
+             pybind11::arg("y"),
+             pybind11::arg("X"),
+             pybind11::arg("g_idx_1based"),
+             pybind11::arg("G"),
+             pybind11::arg("sigma_init") = 1.0,
+             pybind11::arg("tau_init")   = 1.0,
+             pybind11::arg("rng_seed")   = 1,
+             pybind11::arg("keep_history") = false)
+        .def("step", (void (HierarchicalLM_joint::*)())    &HierarchicalLM_joint::step, "Run one sweep.")
+        .def("step", (void (HierarchicalLM_joint::*)(int)) &HierarchicalLM_joint::step,
+             pybind11::arg("n_steps"))
+        .def("get_current",  &HierarchicalLM_joint::get_current)
+        .def("set_current",  &HierarchicalLM_joint::set_current,
+             pybind11::arg("params"))
+        .def("get_history",  &HierarchicalLM_joint::get_history)
+        .def("predict_at",   &HierarchicalLM_joint::predict_at,
+             pybind11::arg("new_data"))
+        .def("get_dag",      &HierarchicalLM_joint::get_dag)
+        .def("readapt_NUTS", &HierarchicalLM_joint::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 //==============================================================================
 //  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
 //
@@ -593,11 +710,11 @@ int main() {
 
     // Design matrix X (N x p), group index g_idx (1-based), response y.
     arma::mat  X(N, p);
-    arma::ivec g_idx_1based(N);
+    arma::vec  g_idx_1based(N);
     arma::vec  y(N);
     for (std::size_t n = 0; n < N; ++n) {
         const std::size_t g = n / per_group;     // balanced design
-        g_idx_1based[n] = static_cast<int>(g) + 1;
+        g_idx_1based[n] = static_cast<double>(g) + 1.0;
         double mu = alpha_true + u_true[g];
         for (std::size_t k = 0; k < p; ++k) {
             const double xnk = norm(sim_rng);
@@ -676,3 +793,4 @@ int main() {
                    : "[demo FAIL]");
     return ok ? 0 : 1;
 }
+#endif

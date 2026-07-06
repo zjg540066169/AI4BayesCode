@@ -2,20 +2,20 @@
 // Licensed under the GNU General Public License v2.0 or later
 // (GPL-2.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
-//  IRT1PL_joint.cpp
+//  IRT1PL_joint_v2.cpp
 //
 //  One-parameter logistic IRT (Rasch) model with a NON-CENTERED
-//  reparameterization (NCR) for the item-difficulty hierarchy.  The NCR
-//  resolves the (sigma_b, b) funnel geometry: sigma_b is folded INTO the
-//  joint block with (theta, z_b) rather than left in a SEPARATE nuts_block,
-//  which would split the funnel across two Gibbs blocks.
+//  reparameterization (NCR) for the item-difficulty hierarchy.  This
+//  resolves the funnel geometry in IRT1PL_joint.cpp, which samples
+//  (theta, b) jointly but leaves sigma_b in a SEPARATE nuts_block —
+//  splitting the (sigma_b, b) funnel across two Gibbs blocks.
 //
 //  Mode 1 fix (joint_nuts_failure.md): fold sigma_b INTO the joint block
 //  with NCR so the sampler never has to cross the funnel boundary
 //  between a separate sigma_b step and the b-step.
 //
-//  Model
-//  -----
+//  Model (unchanged from IRT1PL_joint.cpp)
+//  ----------------------------------------
 //      Y_ij | theta_i, b_j  ~ Bernoulli( sigma(theta_i - b_j) )
 //      theta_i              ~ Normal(0, 1)
 //      b_j | sigma_b        ~ Normal(0, sigma_b^2)
@@ -73,7 +73,45 @@
 //    z_b; no funnel split.
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("IRT1PL_joint")
+//   set.seed(2026)
+//   N <- 200L; J <- 12L; sigma_b <- 1.2          # students, items, item-difficulty scale
+//   theta <- rnorm(N)                            # student abilities ~ N(0,1)
+//   b     <- sigma_b * rnorm(J)                  # item difficulties b_j = sigma_b * z_b_j
+//   eta   <- outer(theta, b, "-")                # eta_ij = theta_i - b_j   (N x J)
+//   Y     <- matrix(as.numeric(runif(N * J) < 1 / (1 + exp(-eta))), N, J)  # Bernoulli responses
+//   # ctor: Y (N x J), theta_init (len N), b_init (len J), sigma_b_init (>0), seed, keep_history
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(IRT1PL_joint, Y, numeric(N), numeric(J), 1.0, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(IRT1PL_joint, Y, numeric(N), numeric(J), 1.0, 7L, TRUE)
+//   m$step(2500); str(m$get_current())
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(2026)
+//   N, J, sigma_b = 200, 12, 1.2                 # students, items, item-difficulty scale
+//   theta = rng.standard_normal(N)               # student abilities ~ N(0,1)
+//   b     = sigma_b * rng.standard_normal(J)     # item difficulties b_j = sigma_b * z_b_j
+//   eta   = theta[:, None] - b[None, :]          # eta_ij = theta_i - b_j   (N x J)
+//   Y     = (rng.random((N, J)) < 1 / (1 + np.exp(-eta))).astype(float)    # Bernoulli responses
+//   Mod = AI4BayesCode.example("IRT1PL_joint")
+//   # ctor: Y, theta_init (len N), b_init (len J), sigma_b_init (>0), seed, keep_history
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.IRT1PL_joint(Y, np.zeros(N), np.zeros(J), 1.0, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.IRT1PL_joint(Y, np.zeros(N), np.zeros(J), 1.0, 7, True)
+//   m.step(2500); print(m.get_current())
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -82,13 +120,19 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -417,8 +461,8 @@ public:
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
 
-    // get_current() exposes natural-scale (theta, b, sigma_b); b is the
-    // reconstructed natural item difficulty (sigma_b * z_b).
+    // get_current() exposes natural-scale (theta, b, sigma_b) to match
+    // IRT1PL_joint's interface for cross-validation.
     AI4BayesCode::state_map get_current() const {
         AI4BayesCode::state_map out;
         out["theta"]   = impl_->data().get("theta");
@@ -564,7 +608,7 @@ public:
 
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
         if (n < 0) {
-            throw std::runtime_error("readapt_NUTS: n must be non-negative");
+            ai4b::stop("readapt_NUTS: n must be non-negative");
         }
         impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
     }
@@ -577,6 +621,65 @@ private:
     bool                             keep_history_ = false;
 };
 
+// ============================================================================
+//  Rcpp module
+// ============================================================================
+
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(IRT1PL_joint_module) {
+    Rcpp::class_<IRT1PL_joint>("IRT1PL_joint")
+        .constructor<arma::mat, arma::vec, arma::vec, double, int>(
+            "Legacy constructor; keep_history defaults to FALSE.")
+        .constructor<arma::mat, arma::vec, arma::vec, double, int, bool>(
+            "NCR version: Y (N x J, NA for missing), theta_init (length N), "
+            "b_init (length J), sigma_b_init (>0), RNG seed, keep_history. "
+            "Joint block: (theta, z_b, sigma_b) with b = sigma_b*z_b derived.")
+        .method("step", (void (IRT1PL_joint::*)())    &IRT1PL_joint::step, "Run one sweep.")
+        .method("step", (void (IRT1PL_joint::*)(int)) &IRT1PL_joint::step, "Run n sweeps.")
+        .method("get_current",     &IRT1PL_joint::get_current)
+        .method("get_current_raw", &IRT1PL_joint::get_current_raw)
+        .method("set_current",     &IRT1PL_joint::set_current)
+        .method("predict_at",      &IRT1PL_joint::predict_at)
+        .method("get_dag",         &IRT1PL_joint::get_dag)
+        .method("get_history",     &IRT1PL_joint::get_history)
+        .method("readapt_NUTS",    &IRT1PL_joint::readapt_NUTS);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(IRT1PL_joint, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<IRT1PL_joint>(m, "IRT1PL_joint")
+        .def(pybind11::init<arma::mat, arma::vec, arma::vec, double, int, bool>(),
+             pybind11::arg("Y"),
+             pybind11::arg("theta_init"),
+             pybind11::arg("b_init"),
+             pybind11::arg("sigma_b_init") = 1.0,
+             pybind11::arg("rng_seed")     = 1,
+             pybind11::arg("keep_history") = false,
+             "NCR Rasch (1PL IRT) model: joint NUTS on (theta, z_b, sigma_b) "
+             "with b = sigma_b * z_b reconstructed.")
+        .def("step", (void (IRT1PL_joint::*)())    &IRT1PL_joint::step, "Run one sweep.")
+        .def("step", (void (IRT1PL_joint::*)(int)) &IRT1PL_joint::step,
+             pybind11::arg("n_steps"))
+        .def("get_current",     &IRT1PL_joint::get_current)
+        .def("get_current_raw", &IRT1PL_joint::get_current_raw)
+        .def("set_current",     &IRT1PL_joint::set_current,
+             pybind11::arg("params"))
+        .def("predict_at",      &IRT1PL_joint::predict_at,
+             pybind11::arg("new_data"))
+        .def("get_dag",         &IRT1PL_joint::get_dag)
+        .def("get_history",     &IRT1PL_joint::get_history)
+        .def("readapt_NUTS",    &IRT1PL_joint::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
+// ============================================================================
+//  Standalone demo (only compiled when NEITHER frontend module is defined).
+// ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 //==============================================================================
 //  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
 //
@@ -691,3 +794,4 @@ int main() {
            : "[demo FAIL]");
     return ok ? 0 : 1;
 }
+#endif

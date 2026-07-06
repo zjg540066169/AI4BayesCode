@@ -240,7 +240,6 @@ public:
     }
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -372,7 +371,7 @@ PYBIND11_MODULE(DirichletSimplex, m) {
              "Joint-NUTS Dirichlet(alpha) prior on the simplex with multinomial "
              "likelihood. Uses joint_nuts_block on stick-breaking unconstraining.")
         .def("step", (void (DirichletSimplex::*)())    &DirichletSimplex::step, "Run one sweep.")
-        .def("step", (void (DirichletSimplex::*)(int)) &DirichletSimplex::step, pybind11::arg("n_steps"))
+        .def("step", (void (DirichletSimplex::*)(int)) &DirichletSimplex::step,        pybind11::arg("n_steps"))
         .def("get_current",  &DirichletSimplex::get_current)
         .def("set_current",  &DirichletSimplex::set_current, pybind11::arg("params"))
         .def("predict_at",   &DirichletSimplex::predict_at,  pybind11::arg("new_data"))

@@ -259,7 +259,6 @@ public:
     }
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -508,7 +507,8 @@ RCPP_MODULE(GBartPoisson_module) {
             "FALSE), keep_history (numeric per-step buffers; cheap; "
             "default FALSE).")
         .method("step", (void (GBartPoisson::*)())    &GBartPoisson::step, "Run one sweep.")
-        .method("step", (void (GBartPoisson::*)(int)) &GBartPoisson::step, "Run n generalized-BART RJMCMC sweeps.")
+        .method("step", (void (GBartPoisson::*)(int)) &GBartPoisson::step,
+                "Run n generalized-BART RJMCMC sweeps.")
         .method("get_current", &GBartPoisson::get_current,
                 "Return the current draw as a named list with $r (log "
                 "rate) and $rate (= exp(r)). The serialized BART forest is "

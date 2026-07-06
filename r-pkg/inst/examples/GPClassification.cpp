@@ -823,3 +823,104 @@ PYBIND11_MODULE(GPClassification, m) {
              pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
 }
 #endif
+
+//==============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
+//
+//  Simulates a 1D GP-classification dataset from a KNOWN latent function:
+//      x_i      ~ Uniform(-3, 3)
+//      f_true_i = 1.6 * sin(1.3 * x_i)          (a smooth latent signal)
+//      p_true_i = sigmoid(f_true_i)
+//      y_i      ~ Bernoulli(p_true_i)
+//
+//  Fits the model (joint-NUTS on amplitude+lengthscale, ESS on latent f,
+//  Bernoulli-logit likelihood), averages the posterior latent f -> posterior
+//  class probability at each training point, and checks that:
+//    (a) the posterior probabilities track the TRUE probabilities better than
+//        a naive constant-rate baseline (mean(y)) — i.e. lower mean abs error;
+//    (b) the recovered probabilities are accurate in absolute terms.
+//
+//  State is read via the FULL contract get_current() (keys: f, amplitude,
+//  lengthscale), matching the dual-module get_current() implementation.
+//==============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+int main() {
+    const std::size_t N = 60;
+
+    std::mt19937_64 sim_rng(20260621ULL);
+    std::uniform_real_distribution<double> xdist(-3.0, 3.0);
+    std::uniform_real_distribution<double> udist(0.0, 1.0);
+
+    // Stable sigmoid for the simulation side.
+    auto sig = [](double z) {
+        if (z >= 0.0) { const double e = std::exp(-z); return 1.0 / (1.0 + e); }
+        const double e = std::exp(z); return e / (1.0 + e);
+    };
+
+    arma::mat X(N, 1);
+    arma::vec y(N);
+    arma::vec p_true(N);
+    double y_mean = 0.0;
+    for (std::size_t i = 0; i < N; ++i) {
+        const double x = xdist(sim_rng);
+        X(i, 0) = x;
+        const double f_true = 1.6 * std::sin(1.3 * x);
+        const double pi = sig(f_true);
+        p_true[i] = pi;
+        y[i] = (udist(sim_rng) < pi) ? 1.0 : 0.0;
+        y_mean += y[i];
+    }
+    y_mean /= static_cast<double>(N);
+
+    GPClassification model(X, y, /*rng_seed=*/11, /*keep_history=*/false);
+    model.step(300);   // warmup (joint block also self-warms n_warmup_first_call)
+
+    // Posterior mean of sigmoid(f) at each training point.
+    arma::vec prob_bar(N, arma::fill::zeros);
+    const int M = 1500;
+    for (int s = 0; s < M; ++s) {
+        model.step(1);
+        const auto gc = model.get_current();        // copy (avoids dangling ref)
+        const arma::vec& f = gc.at("f");
+        for (std::size_t i = 0; i < N; ++i) {
+            const double fi = f[i];
+            const double pi = (fi >= 0.0)
+                ? 1.0 / (1.0 + std::exp(-fi))
+                : std::exp(fi) / (1.0 + std::exp(fi));
+            prob_bar[i] += pi;
+        }
+    }
+    prob_bar /= static_cast<double>(M);
+
+    // Mean absolute error of posterior prob vs TRUE prob, and of the naive
+    // constant-rate baseline mean(y) vs TRUE prob.
+    double mae_model = 0.0, mae_naive = 0.0;
+    for (std::size_t i = 0; i < N; ++i) {
+        mae_model += std::abs(prob_bar[i] - p_true[i]);
+        mae_naive += std::abs(y_mean     - p_true[i]);
+    }
+    mae_model /= static_cast<double>(N);
+    mae_naive /= static_cast<double>(N);
+
+    const auto gc = model.get_current();            // copy (avoids dangling ref)
+    const double amp_hat = gc.at("amplitude")[0];
+    const double ell_hat = gc.at("lengthscale")[0];
+
+    std::printf("GPClassification demo (N=%zu, 1D GP-logit):\n", N);
+    std::printf("  amplitude_hat = %.3f   lengthscale_hat = %.3f\n",
+                amp_hat, ell_hat);
+    std::printf("  MAE(post prob vs true) = %.4f\n", mae_model);
+    std::printf("  MAE(naive mean(y)=%.3f vs true) = %.4f\n", y_mean, mae_naive);
+
+    // Pass: model recovers the latent class-probability surface better than the
+    // naive constant baseline AND is accurate in absolute terms.
+    const bool ok = (mae_model < mae_naive) && (mae_model < 0.20);
+    std::printf("%s\n", ok
+        ? "[demo PASS] GP-logit recovers latent class probabilities, "
+          "beats naive baseline"
+        : "[demo FAIL] posterior probabilities did not recover the latent "
+          "surface");
+    return ok ? 0 : 1;
+}
+#endif

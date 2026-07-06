@@ -372,3 +372,68 @@ PYBIND11_MODULE(DirichletSparse, m) {
              pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
 }
 #endif
+
+//==============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (active only when NO binding macro is
+//  defined). Simulates multinomial counts from a known sparse probability
+//  vector s_true, fits via the joint-NUTS block (s SIMPLEX, theta POSITIVE),
+//  and checks that the posterior-mean of s recovers s_true. State is read via
+//  the full contract get_current() (keys "s", "theta"). PASS is derived from a
+//  real computed error vs the truth, never hard-coded.
+//==============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+int main() {
+    // Sparse truth: most mass on a few categories.
+    const arma::vec s_true = arma::vec{0.50, 0.25, 0.15, 0.05, 0.03, 0.02};
+    const std::size_t P = s_true.n_elem;
+    const int N = 500;   // multinomial trials
+
+    // Simulate y ~ Multinomial(N, s_true).
+    std::mt19937_64 sim_rng(2026);
+    std::discrete_distribution<int> cat(s_true.begin(), s_true.end());
+    arma::vec y(P, arma::fill::zeros);
+    for (int n = 0; n < N; ++n) y[static_cast<std::size_t>(cat(sim_rng))] += 1.0;
+
+    // Fit.
+    DirichletSparse model(y, /*rng_seed=*/7, /*keep_history=*/false);
+    model.step(800);   // warmup sweeps (block also self-warms n_warmup_first_call)
+
+    arma::vec s_bar(P, arma::fill::zeros);
+    double theta_bar = 0.0;
+    const int M = 3000;
+    for (int it = 0; it < M; ++it) {
+        model.step(1);
+        const auto gc = model.get_current();          // copy (avoids dangling ref)
+        const arma::vec& s_cur     = gc.at("s");
+        const arma::vec& theta_cur = gc.at("theta");
+        s_bar     += s_cur;
+        theta_bar += theta_cur[0];
+    }
+    s_bar     /= static_cast<double>(M);
+    theta_bar /= static_cast<double>(M);
+
+    // Posterior mean of s should recover s_true. Naive frequency baseline = y/N.
+    const arma::vec s_freq = y / static_cast<double>(N);
+    const double err_post = arma::norm(s_bar  - s_true, 2);
+    const double err_freq = arma::norm(s_freq - s_true, 2);
+
+    std::printf("DirichletSparse demo (P=%zu, N=%d):\n", P, N);
+    std::printf("  s_true = ");
+    for (std::size_t i = 0; i < P; ++i) std::printf("%.3f ", s_true[i]);
+    std::printf("\n  s_hat  = ");
+    for (std::size_t i = 0; i < P; ++i) std::printf("%.3f ", s_bar[i]);
+    std::printf("\n  s_freq = ");
+    for (std::size_t i = 0; i < P; ++i) std::printf("%.3f ", s_freq[i]);
+    std::printf("\n  L2(post - truth) = %.4f   L2(freq - truth) = %.4f\n",
+                err_post, err_freq);
+    std::printf("  theta_hat = %.3f\n", theta_bar);
+
+    // PASS criterion: posterior mean is close to truth in an absolute sense AND
+    // is at least as good as the naive frequency estimate (within slack).
+    const bool ok = (err_post < 0.05) && (err_post <= err_freq + 0.01);
+    std::printf("%s\n", ok ? "[demo PASS] joint-NUTS recovers sparse s"
+                           : "[demo FAIL]");
+    return ok ? 0 : 1;
+}
+#endif

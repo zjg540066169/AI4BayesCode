@@ -380,7 +380,6 @@ public:
     }
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         if (n_steps < 0) throw std::runtime_error("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -511,7 +510,8 @@ PYBIND11_MODULE(BSplineRegression_module, m) {
              pybind11::arg("keep_history") = false,
              "1-D penalized B-spline regression.")
         .def("step", (void (BSplineRegression::*)())    &BSplineRegression::step, "Run one sweep.")
-        .def("step", (void (BSplineRegression::*)(int)) &BSplineRegression::step, pybind11::arg("n_steps"))
+        .def("step", (void (BSplineRegression::*)(int)) &BSplineRegression::step,
+             pybind11::arg("n_steps"))
         .def("get_current", &BSplineRegression::get_current)
         .def("set_current", &BSplineRegression::set_current,
              pybind11::arg("params"))

@@ -55,11 +55,38 @@
 //  (verifies PG(1, z) mean matches analytical + beta recovery).
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates Bernoulli data
-// from a known beta, fits the Polya-Gamma logistic block, and checks that the
-// posterior mean recovers beta (and beats a naive zero-beta baseline). No R /
-// Python binding is built or required.
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("LogisticRegression")
+//   set.seed(2026); N <- 800; p <- 3; beta_true <- c(-0.5, 1.2, -0.8)
+//   X <- cbind(1, matrix(rnorm(N * (p - 1)), N, p - 1))   # col1 intercept, rest N(0,1)
+//   prob <- 1 / (1 + exp(-(X %*% beta_true)))             # sigmoid(X beta)
+//   y <- as.numeric(runif(N) < prob)                      # Bernoulli 0/1
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(LogisticRegression, X, y, 10.0, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(LogisticRegression, X, y, 10.0, 7L, TRUE)    # X, y, prior_sd, seed, keep_history
+//   m$step(2500); str(m$get_current())
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(2026); N, p = 800, 3; beta_true = np.array([-0.5, 1.2, -0.8])
+//   X = np.column_stack([np.ones(N), rng.standard_normal((N, p - 1))])  # intercept + N(0,1)
+//   prob = 1.0 / (1.0 + np.exp(-(X @ beta_true)))                       # sigmoid(X beta)
+//   y = (rng.random(N) < prob).astype(float)                           # Bernoulli 0/1
+//   Mod = AI4BayesCode.example("LogisticRegression")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.LogisticRegression(X, y, 10.0, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.LogisticRegression(X, y, 10.0, 7, True); m.step(2500); print(m.get_current())
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -68,19 +95,23 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/pg_logistic_block.hpp"
 
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <memory>
 #include <random>
-#include <stdexcept>
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -256,7 +287,11 @@ public:
                 impl_->data().set("y_rep",
                                   arma::vec(N_new, arma::fill::zeros));
                 if (keep_history_ && impl_->history_size() > 1) {
-                    // N changed; clear history (mixed-N is unsupported).
+#ifdef AI4BAYESCODE_RCPP_MODULE
+                    Rcpp::warning("set_current: N changed from %zu to %zu; "
+                                  "clearing history (mixed-N is unsupported).",
+                                  N_, N_new);
+#endif
                     impl_->clear_history();
                 }
             }
@@ -364,6 +399,48 @@ private:
     std::size_t                      p_ = 0;
 };
 
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(LogisticRegression_module) {
+    Rcpp::class_<LogisticRegression>("LogisticRegression")
+        .constructor<arma::mat, arma::vec, double, int>(
+            "Legacy constructor; keep_history defaults to FALSE.")
+        .constructor<arma::mat, arma::vec, double, int, bool>(
+            "Construct with X (N x p), y (length N, 0/1), prior_sd, seed, keep_history.")
+        .method("step", (void (LogisticRegression::*)())    &LogisticRegression::step, "Run one sweep.")
+        .method("step", (void (LogisticRegression::*)(int)) &LogisticRegression::step, "Run n sweeps.")
+        .method("get_current", &LogisticRegression::get_current)
+        .method("set_current", &LogisticRegression::set_current)
+        .method("predict_at",  &LogisticRegression::predict_at)
+        .method("get_dag",     &LogisticRegression::get_dag)
+        .method("get_history", &LogisticRegression::get_history);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(LogisticRegression, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<LogisticRegression>(m, "LogisticRegression")
+        .def(pybind11::init<arma::mat, arma::vec, double, int, bool>(),
+             pybind11::arg("X"), pybind11::arg("y"),
+             pybind11::arg("prior_sd") = 10.0,
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false,
+             "Bayesian logistic regression via Polya-Gamma augmentation "
+             "(Polson-Scott-Windle 2013). 10-100x faster than NUTS on "
+             "logistic for moderate p.")
+        .def("step", (void (LogisticRegression::*)())    &LogisticRegression::step, "Run one sweep.")
+        .def("step", (void (LogisticRegression::*)(int)) &LogisticRegression::step, pybind11::arg("n_steps"))
+        .def("get_current", &LogisticRegression::get_current)
+        .def("set_current", &LogisticRegression::set_current, pybind11::arg("params"))
+        .def("predict_at",  &LogisticRegression::predict_at, pybind11::arg("new_data"))
+        .def("get_dag",     &LogisticRegression::get_dag)
+        .def("get_history", &LogisticRegression::get_history);
+}
+#endif
+
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
 // ============================================================================
 //  Standalone demo: simulate Bernoulli data from a KNOWN beta, fit via
 //  Polya-Gamma Gibbs, recover the posterior mean of beta, and check it
@@ -450,3 +527,4 @@ int main() {
                    : "[demo FAIL]");
     return ok ? 0 : 1;
 }
+#endif

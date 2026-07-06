@@ -223,7 +223,6 @@ public:
     // ---- Canonical 6-method R interface ----
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
@@ -378,5 +377,98 @@ PYBIND11_MODULE(HMMGaussian2State, m) {
              pybind11::arg("new_data"))
         .def("get_dag",     &HMMGaussian2State::get_dag)
         .def("get_history", &HMMGaussian2State::get_history);
+}
+#endif
+
+//==============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
+//
+//  Simulates a 2-state Gaussian HMM from a KNOWN transition matrix, initial
+//  distribution, emission means and sd, AND a known latent state path z*.
+//  Then fits the hmm_block (A / pi / mu / sigma FIXED at truth, exactly as the
+//  model intends — only z is sampled) and checks that the per-timestep
+//  posterior-mode state path recovers z*.
+//
+//  State is read through the FULL CONTRACT get_current() (key "z").
+//==============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+int main() {
+    // ---- Known truth -------------------------------------------------------
+    const std::size_t T = 400;
+    // Sticky transition matrix (row-major 2x2): stay w.p. 0.92, switch 0.08.
+    const arma::vec A   = { 0.92, 0.08,
+                            0.08, 0.92 };
+    const arma::vec pi0 = { 0.5, 0.5 };
+    const arma::vec mu  = { -2.0, 2.0 };   // well-separated relative to sigma
+    const double    sigma = 1.0;
+
+    // ---- Simulate latent path z* and emissions y --------------------------
+    std::mt19937_64 sim_rng(2026);
+    std::uniform_real_distribution<double> unif(0.0, 1.0);
+    std::normal_distribution<double>       gz(0.0, 1.0);
+
+    arma::vec z_true(T);
+    arma::vec y(T);
+
+    // initial state from pi0
+    std::size_t z_prev = (unif(sim_rng) < pi0[0]) ? 0u : 1u;
+    z_true[0] = static_cast<double>(z_prev);
+    y[0]      = mu[z_prev] + sigma * gz(sim_rng);
+    for (std::size_t t = 1; t < T; ++t) {
+        // transition: A row z_prev
+        const double stay = A[z_prev * 2 + z_prev];
+        std::size_t z_cur;
+        if (unif(sim_rng) < stay) z_cur = z_prev;
+        else                      z_cur = 1u - z_prev;
+        z_true[t] = static_cast<double>(z_cur);
+        y[t]      = mu[z_cur] + sigma * gz(sim_rng);
+        z_prev    = z_cur;
+    }
+
+    // ---- Fit: only z is sampled (A, pi, mu, sigma fixed at truth) ---------
+    HMMGaussian2State model(y, A, pi0, mu, sigma, /*rng_seed=*/7,
+                            /*keep_history=*/false);
+    model.step(200);   // warmup sweeps (FFBS is exact; just burn label noise)
+
+    // Accumulate per-timestep posterior smoothing marginals P(z_t = 1).
+    const int M = 2000;
+    arma::vec p1(T, arma::fill::zeros);
+    for (int s = 0; s < M; ++s) {
+        model.step(1);
+        const auto gc = model.get_current();          // copy (avoids dangling ref)
+        const arma::vec& z = gc.at("z");              // key from get_current()
+        for (std::size_t t = 0; t < T; ++t)
+            if (static_cast<int>(z[t]) == 1) p1[t] += 1.0;
+    }
+    p1 /= static_cast<double>(M);
+
+    // ---- Posterior-mode path + recovery metrics ---------------------------
+    std::size_t n_correct = 0;
+    double      sum_p_at_truth = 0.0;
+    for (std::size_t t = 0; t < T; ++t) {
+        const int z_hat   = (p1[t] >= 0.5) ? 1 : 0;
+        const int z_star  = static_cast<int>(z_true[t]);
+        if (z_hat == z_star) ++n_correct;
+        sum_p_at_truth += (z_star == 1) ? p1[t] : (1.0 - p1[t]);
+    }
+    const double acc        = static_cast<double>(n_correct) / static_cast<double>(T);
+    const double mean_p_true = sum_p_at_truth / static_cast<double>(T);
+    const double naive_acc   = 0.5;   // coin-flip baseline
+
+    std::printf("HMMGaussian2State demo: T=%zu  sweeps=%d\n", T, M);
+    std::printf("  posterior-mode path accuracy = %.3f  (naive baseline %.2f)\n",
+                acc, naive_acc);
+    std::printf("  mean P(z_t = z*_t)           = %.3f\n", mean_p_true);
+
+    // Well-separated means (|mu|=2, sigma=1) + sticky chain => FFBS should
+    // recover the path on the large majority of timesteps and dominate the
+    // coin-flip baseline; marginals should concentrate above 0.5 at truth.
+    const bool ok = (acc > 0.85) && (acc > naive_acc + 0.30) &&
+                    (mean_p_true > 0.80);
+    std::printf("%s\n",
+                ok ? "[demo PASS] FFBS recovers the latent state path"
+                   : "[demo FAIL] FFBS did not recover the latent path");
+    return ok ? 0 : 1;
 }
 #endif

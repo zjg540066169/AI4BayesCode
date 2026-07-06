@@ -224,7 +224,6 @@ public:
     }
 
     void step() { step(1); }              // no-arg convenience: one sweep
-
     void step(int n_steps) {
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
@@ -341,7 +340,7 @@ PYBIND11_MODULE(GaussianLocationScale, m) {
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
         .def("step", (void (GaussianLocationScale::*)())    &GaussianLocationScale::step, "Run one sweep.")
-        .def("step", (void (GaussianLocationScale::*)(int)) &GaussianLocationScale::step, pybind11::arg("n_steps"))
+        .def("step", (void (GaussianLocationScale::*)(int)) &GaussianLocationScale::step,  pybind11::arg("n_steps"))
         .def("get_current",  &GaussianLocationScale::get_current)
         .def("set_current",  &GaussianLocationScale::set_current, pybind11::arg("params"))
         .def("predict_at",   &GaussianLocationScale::predict_at,  pybind11::arg("new_data"))

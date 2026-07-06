@@ -27,10 +27,41 @@
 //  The log-density MUST NOT include it.
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates data, fits the
-// joint_nuts_block, and checks (alpha, beta, sigma) recovery. No R / Python
-// binding is built or required.
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("LinearRegJointMixed")
+//   set.seed(2026)
+//   N <- 300L; p <- 3L                                  # N >> p: well-identified
+//   alpha <- 1.5; beta <- c(2.0, -1.0, 0.5); sigma <- 0.8
+//   X <- matrix(rnorm(N * p), N, p)                     # iid N(0,1) design
+//   y <- as.numeric(alpha + X %*% beta + rnorm(N, 0, sigma))
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(LinearRegJointMixed, y, X, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(LinearRegJointMixed, y, X, 7L, TRUE)       # ctor: y, X, seed, keep_history
+//   m$step(2500); str(m$get_current())                 # -> alpha, beta(p), sigma
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(2026)
+//   N, p = 300, 3                                       # N >> p: well-identified
+//   alpha, beta, sigma = 1.5, np.array([2.0, -1.0, 0.5]), 0.8
+//   X = rng.standard_normal((N, p))                     # iid N(0,1) design
+//   y = alpha + X @ beta + rng.standard_normal(N) * sigma
+//   Mod = AI4BayesCode.example("LinearRegJointMixed")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.LinearRegJointMixed(y, X, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.LinearRegJointMixed(y, X, 7, True)          # ctor: y, X, seed, keep_history
+//   m.step(2500); print(m.get_current())
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -39,21 +70,25 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
 
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <limits>
 #include <memory>
 #include <random>
-#include <stdexcept>
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -79,7 +114,6 @@ namespace {
 //
 // The log|Jacobian| for the positive sigma slice is added automatically by
 // joint_nuts_block; DO NOT include it here.
-// (Copied verbatim from LinearRegJointMixed.cpp.)
 double joint_log_density(const arma::vec& cat_nat,
                          const block_context& ctx,
                          arma::vec* grad_nat) {
@@ -418,7 +452,7 @@ public:
 
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
         if (n < 0) {
-            throw std::runtime_error("readapt_NUTS: n must be non-negative");
+            ai4b::stop("readapt_NUTS: n must be non-negative");
         }
         impl_->readapt_NUTS(static_cast<std::size_t>(n),
                             reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
@@ -434,10 +468,57 @@ private:
     std::size_t                      p_ = 0;
 };
 
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(LinearRegJointMixed_module) {
+    Rcpp::class_<LinearRegJointMixed>("LinearRegJointMixed")
+        .constructor<arma::vec, arma::mat, int>(
+            "Legacy constructor; keep_history defaults to FALSE.")
+        .constructor<arma::vec, arma::mat, int, bool>(
+            "Unified-class migration of LinearRegJointMixed. "
+            "Construct with y, X, seed, keep_history.")
+        .method("step", (void (LinearRegJointMixed::*)())    &LinearRegJointMixed::step, "Run one sweep.")
+        .method("step", (void (LinearRegJointMixed::*)(int)) &LinearRegJointMixed::step, "Run n sweeps.")
+        .method("get_current",  &LinearRegJointMixed::get_current)
+        .method("set_current",  &LinearRegJointMixed::set_current)
+        .method("get_history",  &LinearRegJointMixed::get_history)
+        .method("predict_at",   &LinearRegJointMixed::predict_at)
+        .method("get_dag",      &LinearRegJointMixed::get_dag)
+        .method("readapt_NUTS", &LinearRegJointMixed::readapt_NUTS);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(LinearRegJointMixed, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<LinearRegJointMixed>(m, "LinearRegJointMixed")
+        .def(pybind11::init<arma::vec, arma::mat, int, bool>(),
+             pybind11::arg("y"), pybind11::arg("X"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false,
+             "Linear regression with (alpha, beta, sigma) sampled jointly "
+             "via unified joint_nuts_block (REAL + POSITIVE per-slice). "
+             "Migration of LinearRegJointMixed off the legacy mixed shim.")
+        .def("step", (void (LinearRegJointMixed::*)())    &LinearRegJointMixed::step, "Run one sweep.")
+        .def("step", (void (LinearRegJointMixed::*)(int)) &LinearRegJointMixed::step, pybind11::arg("n_steps"))
+        .def("get_current", &LinearRegJointMixed::get_current)
+        .def("set_current", &LinearRegJointMixed::set_current, pybind11::arg("params"))
+        .def("predict_at",  &LinearRegJointMixed::predict_at, pybind11::arg("new_data"))
+        .def("get_dag",     &LinearRegJointMixed::get_dag)
+        .def("get_history", &LinearRegJointMixed::get_history)
+        .def("readapt_NUTS", &LinearRegJointMixed::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+}
+#endif
+
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+#include <vector>
 // ============================================================================
 //  Standalone demo: simulate from a KNOWN truth, fit, recover (alpha, beta,
-//  sigma) posterior means, and check against the truth (and a naive OLS-free
-//  baseline). No R / Python binding required.
+//  sigma) posterior means, and check against the truth. No R / Python binding
+//  required. State is read via the FULL contract get_current() (keys: alpha,
+//  beta, sigma).
 // ============================================================================
 int main() {
     const std::size_t N = 300;
@@ -473,10 +554,13 @@ int main() {
     const int M = 2000;
     for (int s = 0; s < M; ++s) {
         model.step(1);
-        const auto cur = model.get_current();
-        alpha_bar += cur.at("alpha")[0];
-        sigma_bar += cur.at("sigma")[0];
-        beta_bar  += cur.at("beta");
+        const auto gc = model.get_current();
+        const arma::vec& alpha_v = gc.at("alpha");
+        const arma::vec& beta_v  = gc.at("beta");
+        const arma::vec& sigma_v = gc.at("sigma");
+        alpha_bar += alpha_v[0];
+        sigma_bar += sigma_v[0];
+        beta_bar  += beta_v;
     }
     alpha_bar /= static_cast<double>(M);
     sigma_bar /= static_cast<double>(M);
@@ -500,3 +584,4 @@ int main() {
         : "[demo FAIL] posterior mean off from truth");
     return ok ? 0 : 1;
 }
+#endif

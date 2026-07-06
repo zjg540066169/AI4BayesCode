@@ -165,18 +165,24 @@ Printing the block and continuing is NOT the gate; you MUST fire the structured 
 model right.) Prior *completion* (filling `(prior: to be chosen)`) and the full-spec sign-off come
 later, at §2 and §3. **Once the model is confirmed**, ask the upfront questions:
 
-1. **Runtime backend.** Which host language will call the sampler?
-   - **R** (default) — emit `RCPP_MODULE` block. Runner is `.R` using
-     `ai4bayescode_sourceCpp()`. Classic Rcpp workflow.
-   - **Python** — emit `PYBIND11_MODULE` block. Runner is `.py` using
-     `AI4BayesCode.sourceCpp()`. Requires `pybind11>=2.11` + Python ≥ 3.11.
-   - **C++** — emit a standalone `int main()` with the class used
-     directly. No host language. Runner is the compiled binary.
-   - **Both R + Python** — emit DUAL-MODULE with both blocks guarded
-     by `#ifdef AI4BAYESCODE_RCPP_MODULE / #ifdef AI4BAYESCODE_PYBIND_MODULE`.
-     R helper sets `-DAI4BAYESCODE_RCPP_MODULE`, Python helper sets
-     `-DAI4BAYESCODE_PYBIND_MODULE`. See the 6 shipped examples for the
-     pattern.
+1. **Runtime backend.** Which host language will call the sampler? **The
+   generated `.cpp` is ALWAYS the same tri-module file regardless of this
+   answer** — it carries BOTH an `#ifdef AI4BAYESCODE_RCPP_MODULE` block AND an
+   `#ifdef AI4BAYESCODE_PYBIND_MODULE` block AND a fenced standalone `int main()`.
+   So the same file can be `source`-d in R (`ai4bayescode_source`, sets
+   `-DAI4BAYESCODE_RCPP_MODULE`), in Python (`AI4BayesCode.source`, sets
+   `-DAI4BAYESCODE_PYBIND_MODULE`), or compiled as a plain binary — a user who
+   generates in R can hand the identical `.cpp` to Python and run it there. The
+   backend choice ONLY decides which **runner** file(s) get written:
+   - **R** (default) — write the `.R` runner (`ai4bayescode_run_chains` +
+     `ai4bayescode_diagnose`).
+   - **Python** — write the `.py` runner (`AI4BayesCode.run_chains` +
+     `AI4BayesCode.diagnose`). Requires `pybind11>=2.11` + Python ≥ 3.11.
+   - **Both R + Python** — write both runners.
+   The standalone `int main()` is always present, so running the `.cpp` as a
+   plain C++ binary is available in every case. **Never gate the `.cpp` binding
+   blocks on this choice — always emit both**, per `codegen_cpp.md`
+   §"C++ standalone demo first". See the shipped examples for the pattern.
 2. **Class name.** CamelCase, e.g. `HierarchicalNormal`. **Ask this BEFORE the output folder** —
    the folder default derives from it (`./generated/<ClassName>/`), so asking the folder first
    would have to default to a name you have not elicited yet (the "folder-before-name" absurdity).

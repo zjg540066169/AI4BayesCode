@@ -2,27 +2,15 @@
 // Licensed under the GNU General Public License v2.0 or later
 // (GPL-2.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
-//  LinearRegJointMixed_v2.cpp
+//  LinearRegJointMixed.cpp
 //
-//  Mechanical migration of LinearRegJointMixed.cpp off the legacy
-//  joint_nuts_block_mixed shim onto the UNIFIED joint_nuts_block class.
-//  Coexists with the original (class LinearRegJointMixed, distinct module)
-//  for cross-validation: both files expose the SAME posterior and the SAME
-//  natural-scale log-density (copied verbatim here); only the wrapper
-//  types/fields change.
+//  Linear regression with a joint NUTS block over MIXED REAL + POSITIVE
+//  slices: (alpha, beta) are REAL and sigma is POSITIVE, all sampled by ONE
+//  unified joint_nuts_block (no separate "_mixed" block class is needed —
+//  joint_nuts_block handles per-slice constraints directly).
 //
-//  Changes vs. LinearRegJointMixed.cpp
-//  ------------------------------------
-//    joint_nuts_block_mixed        -> joint_nuts_block
-//    joint_nuts_block_mixed_config -> joint_nuts_block_config
-//    joint_nuts_sub_param_mixed    -> joint_nuts_sub_param
-//    cfg.log_density_grad_natural  -> cfg.log_density_grad
-//    cfg.initial_nat               -> cfg.initial_cat
-//    cfg.n_warmup_first_call       1000 -> 800
-//    + cfg.use_diagonal_metric = true   (new; the unified block supports it)
-//
-//  Model (identical to LinearRegJointMixed.cpp)
-//  --------------------------------------------
+//  Model
+//  -----
 //      y_n | alpha, beta, sigma  ~ Normal(alpha + X_n' beta, sigma^2)
 //      alpha                      ~ Normal(0, 10^2)
 //      beta_k                     ~ Normal(0, 10^2)
@@ -126,7 +114,6 @@ namespace {
 //
 // The log|Jacobian| for the positive sigma slice is added automatically by
 // joint_nuts_block; DO NOT include it here.
-// (Copied verbatim from LinearRegJointMixed.cpp.)
 double joint_log_density(const arma::vec& cat_nat,
                          const block_context& ctx,
                          arma::vec* grad_nat) {
@@ -526,10 +513,12 @@ PYBIND11_MODULE(LinearRegJointMixed, m) {
 
 #if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 #include <cstdio>
+#include <vector>
 // ============================================================================
 //  Standalone demo: simulate from a KNOWN truth, fit, recover (alpha, beta,
-//  sigma) posterior means, and check against the truth (and a naive OLS-free
-//  baseline). No R / Python binding required.
+//  sigma) posterior means, and check against the truth. No R / Python binding
+//  required. State is read via the FULL contract get_current() (keys: alpha,
+//  beta, sigma).
 // ============================================================================
 int main() {
     const std::size_t N = 300;
@@ -565,10 +554,13 @@ int main() {
     const int M = 2000;
     for (int s = 0; s < M; ++s) {
         model.step(1);
-        const auto cur = model.get_current();
-        alpha_bar += cur.at("alpha")[0];
-        sigma_bar += cur.at("sigma")[0];
-        beta_bar  += cur.at("beta");
+        const auto gc = model.get_current();
+        const arma::vec& alpha_v = gc.at("alpha");
+        const arma::vec& beta_v  = gc.at("beta");
+        const arma::vec& sigma_v = gc.at("sigma");
+        alpha_bar += alpha_v[0];
+        sigma_bar += sigma_v[0];
+        beta_bar  += beta_v;
     }
     alpha_bar /= static_cast<double>(M);
     sigma_bar /= static_cast<double>(M);

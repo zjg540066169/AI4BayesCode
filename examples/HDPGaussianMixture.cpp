@@ -123,12 +123,67 @@
 //  No hand-written log-density (no NUTS); the canonicaliser is deterministic
 //  and all 4 + G sampling children are conjugate Gibbs / MH-deterministic.
 //  Check #12 vacuous.
+//
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("HDPGaussianMixture")
+//   set.seed(2026)
+//   ## Two groups (G=2) sharing T=6 truncated atoms in 2-D. Three well-
+//   ## separated true clusters; groups differ in mixing weights.
+//   d <- 2L; G <- 2L; Ng <- 120L
+//   centers <- rbind(c(-4, -4), c(4, 4), c(0, 6))   # 3 atoms
+//   draw_group <- function(g) {
+//     w <- if (g == 0L) c(0.6, 0.3, 0.1) else c(0.1, 0.4, 0.5)
+//     z <- sample(1:3, Ng, replace = TRUE, prob = w)
+//     centers[z, ] + matrix(rnorm(Ng * d, sd = 0.6), Ng, d)
+//   }
+//   y <- rbind(draw_group(0L), draw_group(1L))
+//   group_idx <- c(rep(0L, Ng), rep(1L, Ng))
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(HDPGaussianMixture, y, group_idx, 6L, c(0, 0), 0.1, diag(d), 4.0, 1.0, 1.0, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(HDPGaussianMixture,
+//            y, group_idx, 6L,                 # y (N x d), group_idx, K_trunc
+//            c(0, 0), 0.1,                      # mu_0, kappa_0
+//            diag(d), 4.0,                      # Psi_0, nu_0
+//            1.0, 1.0,                          # alpha, gamma_0
+//            7L, FALSE)                         # rng_seed, keep_history
+//   m$step(800); cur <- m$get_current()
+//   ## mu is a flat length-(T*d) cluster-major vector; reshape byrow=TRUE.
+//   mu  <- matrix(cur$mu, nrow = 6L, ncol = d, byrow = TRUE)
+//   ord <- order(cur$beta, decreasing = TRUE)
+//   ## occupied atoms recover the 3 true centers (up to label permutation)
+//   print(round(mu[ord, ][1:3, ], 1))
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(2026)
+//   d, G, Ng = 2, 2, 120
+//   centers = np.array([[-4.0, -4.0], [4.0, 4.0], [0.0, 6.0]])  # 3 atoms
+//   def draw_group(g):
+//       w = np.array([0.6, 0.3, 0.1]) if g == 0 else np.array([0.1, 0.4, 0.5])
+//       z = rng.choice(3, size=Ng, p=w)
+//       return centers[z] + rng.normal(0.0, 0.6, size=(Ng, d))
+//   y = np.vstack([draw_group(0), draw_group(1)])
+//   group_idx = np.concatenate([np.zeros(Ng), np.ones(Ng)])   # 0/1 group labels
+//   Mod = AI4BayesCode.example("HDPGaussianMixture")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.HDPGaussianMixture(y, group_idx, 6, np.zeros(d), 0.1, np.eye(d), 4.0, 1.0, 1.0, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.HDPGaussianMixture(y, group_idx, 6, np.zeros(d), 0.1,
+//                              np.eye(d), 4.0, 1.0, 1.0, 7, False)
+//   m.step(800); cur = m.get_current()
+//   mu = cur["mu"].reshape(6, d); beta = cur["beta"]
+//   print(np.round(mu[np.argsort(beta)[::-1]][:3], 1))  # ~ the 3 true centers
+// @example:end
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates grouped
-// Gaussian-mixture data, fits the composed HDP sampler, and checks atom
-// recovery. No R / Python binding is built or required.
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -137,11 +192,17 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 
 #include "AI4BayesCode/categorical_gibbs_block.hpp"
 #include "AI4BayesCode/dirichlet_gibbs_block.hpp"
@@ -156,7 +217,6 @@
 #include <memory>
 #include <random>
 #include <sstream>
-#include <stdexcept>
 #include <vector>
 
 using AI4BayesCode::block_context;
@@ -347,13 +407,8 @@ private:
 
 class HDPGaussianMixture {
 public:
-    // Frontend-independent constructor: y is an N×d data matrix, group_idx
-    // an N-length integer vector with values in {0, ..., G-1}, and the NIW
-    // hyperparameters are passed as plain arma containers. The MODEL (priors,
-    // log-density, block configs) is identical to the original Rcpp wrapper;
-    // only the binding types changed.
     HDPGaussianMixture(const arma::mat& y,
-                       const arma::ivec& group_idx,
+                       const arma::vec& group_idx,  // length N, values 0..G-1
                        int K_trunc,
                        const arma::vec& mu_0,
                        double kappa_0,
@@ -374,37 +429,38 @@ public:
           keep_history_(keep_history)
     {
         if (y.n_rows < 2)
-            throw std::runtime_error("HDPGaussianMixture: N must be >= 2");
+            ai4b::stop("HDPGaussianMixture: N must be >= 2");
         if (y.n_cols < 1)
-            throw std::runtime_error("HDPGaussianMixture: d must be >= 1");
+            ai4b::stop("HDPGaussianMixture: d must be >= 1");
         if (group_idx.n_elem != y.n_rows)
-            throw std::runtime_error("HDPGaussianMixture: group_idx length must equal N");
+            ai4b::stop("HDPGaussianMixture: group_idx length must equal N");
         if (K_trunc < 2)
-            throw std::runtime_error("HDPGaussianMixture: K_trunc must be >= 2");
+            ai4b::stop("HDPGaussianMixture: K_trunc must be >= 2");
         if (mu_0.n_elem != y.n_cols)
-            throw std::runtime_error("HDPGaussianMixture: mu_0 length must equal d");
+            ai4b::stop("HDPGaussianMixture: mu_0 length must equal d");
         if (Psi_0.n_rows != y.n_cols || Psi_0.n_cols != y.n_cols)
-            throw std::runtime_error("HDPGaussianMixture: Psi_0 must be d x d");
-        if (!(kappa_0 > 0.0)) throw std::runtime_error("kappa_0 must be > 0");
+            ai4b::stop("HDPGaussianMixture: Psi_0 must be d x d");
+        if (!(kappa_0 > 0.0)) ai4b::stop("kappa_0 must be > 0");
         if (!(nu_0 > static_cast<double>(y.n_cols) - 1.0))
-            throw std::runtime_error("nu_0 must be > d - 1");
-        if (!(alpha > 0.0)) throw std::runtime_error("alpha must be > 0");
-        if (!(gamma_0 > 0.0)) throw std::runtime_error("gamma_0 must be > 0");
+            ai4b::stop("nu_0 must be > d - 1");
+        if (!(alpha > 0.0)) ai4b::stop("alpha must be > 0");
+        if (!(gamma_0 > 0.0)) ai4b::stop("gamma_0 must be > 0");
 
         N_ = static_cast<std::size_t>(y.n_rows);
         d_ = static_cast<std::size_t>(y.n_cols);
         T_ = static_cast<std::size_t>(K_trunc);
 
-        // Determine G from group_idx.
+        // Determine G from group_idx (stored as double; values are integer
+        // group labels 0..G-1).
         int g_max = 0;
-        for (std::size_t i = 0; i < group_idx.n_elem; ++i) {
-            const int g = static_cast<int>(group_idx[i]);
+        for (std::size_t i = 0; i < N_; ++i) {
+            const long g = static_cast<long>(std::llround(group_idx[i]));
             if (g < 0)
-                throw std::runtime_error("HDPGaussianMixture: group_idx must be non-negative");
-            if (g > g_max) g_max = g;
+                ai4b::stop("HDPGaussianMixture: group_idx must be non-negative");
+            if (g > g_max) g_max = static_cast<int>(g);
         }
         G_ = static_cast<std::size_t>(g_max + 1);
-        if (G_ < 1) throw std::runtime_error("HDPGaussianMixture: must have >= 1 group");
+        if (G_ < 1) ai4b::stop("HDPGaussianMixture: must have >= 1 group");
 
         // ---- Data + priors ------------------------------------------
         arma::vec y_flat(N_ * d_);
@@ -415,7 +471,8 @@ public:
 
         arma::vec g_arma(N_);
         for (std::size_t i = 0; i < N_; ++i)
-            g_arma[i] = static_cast<double>(group_idx[i]);
+            g_arma[i] = static_cast<double>(
+                std::llround(group_idx[i]));
         impl_->data().set("group_idx", g_arma);
 
         arma::vec mu0_arma(d_);
@@ -744,36 +801,184 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
-    // ---- Frontend-independent (neutral-typed) interface ----
+    // ---- Six-method R interface ----
 
     void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
-        if (n_steps < 0) throw std::runtime_error("n_steps must be >= 0");
+        if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
 
-    // Returns the current state as a neutral state_map. mu / sigma are flat
-    // (cluster-major); pi_g exposed per group under "pi_<g>".
+    // Backend-neutral current draw. Every entry is a FLAT arma::vec (the
+    // state_map value type). Matrix-shaped parameters are flattened ROW-MAJOR
+    // so the R/Python @example code can `matrix(.., byrow=TRUE)` / numpy
+    // `.reshape(rows, cols)` (C-order) back to (atom/group)-major rows:
+    //   - mu         : length T*d, cluster-major  (mu[k*d + j])   -> reshape(T, d)
+    //   - sigma_flat : length T*d*d, cluster-major, row-major within each dxd
+    //   - pi         : length G*T, group-major     (pi[g*T + t])  -> reshape(G, T)
+    //   - z, beta    : as-is (length N, length T)
+    //   - alpha, gamma_0, K_trunc, G : 1-element vectors (scalars).
     AI4BayesCode::state_map get_current() const {
         AI4BayesCode::state_map out;
-        out["z"]     = impl_->data().get("z");
-        out["beta"]  = impl_->data().get("beta");
-        out["mu"]    = impl_->data().get("mu");
-        out["sigma"] = impl_->data().get("sigma");
+
+        out.emplace("z",    impl_->data().get("z"));
+        out.emplace("beta", impl_->data().get("beta"));
+
+        // mu: cluster-major flat (already stored that way), length T*d.
+        out.emplace("mu",    impl_->data().get("mu"));
+        // sigma: cluster-major, row-major within each dxd block (as stored).
+        out.emplace("sigma_flat", impl_->data().get("sigma"));
+
+        // pi: G*T flat, group-major rows (pi[g*T + t]).
+        arma::vec pi_flat(G_ * T_);
         for (std::size_t g = 0; g < G_; ++g) {
-            const std::string key = pi_key_for_group(g);
-            out[key] = impl_->data().get(key);
+            const arma::vec& pi_g = impl_->data().get(pi_key_for_group(g));
+            for (std::size_t t = 0; t < T_; ++t)
+                pi_flat[g * T_ + t] = pi_g[t];
         }
+        out.emplace("pi", std::move(pi_flat));
+
+        out.emplace("alpha",   impl_->data().get("alpha"));
+        out.emplace("gamma_0", impl_->data().get("gamma_0"));
+        out.emplace("K_trunc",
+                    arma::vec{static_cast<double>(T_)});
+        out.emplace("G",
+                    arma::vec{static_cast<double>(G_)});
+        return out;
+    }
+
+    // Backend-neutral set_current. Overwrite z, alpha, gamma_0, or y from a
+    // state_map. A "y" entry is a vectorised (column-major from numpy/R's
+    // matrix caster) length-(N*d) flat vector; here it represents the N x d
+    // data matrix and is read row-major (y[i*d + j]) — callers pass the same
+    // cluster-major flattening get_current uses, OR a flat vector built from
+    // the original N x d matrix row-major. (set_current("y") is an internal
+    // refit hook; N and d are fixed at construction.)
+    void set_current(const AI4BayesCode::state_map& params) {
+        auto it_y = params.find("y");
+        if (it_y != params.end()) {
+            const arma::vec& y_new = it_y->second;
+            // STRICT-N legitimate (Check #21): z allocation length-N
+            // + per-group sufficient stats; HDP also fixes group count.
+            if (y_new.n_elem != N_ * d_)
+                ai4b::stop("set_current: HDPGaussianMixture fixes N and d at "
+                           "construction; y must be a flat length-(N*d) "
+                           "vector (N=%zu, d=%zu). Reconstruct to change "
+                           "shape.", N_, d_);
+            arma::vec yflat(N_ * d_);
+            for (std::size_t i = 0; i < N_ * d_; ++i) yflat[i] = y_new[i];
+            impl_->data().set("y", yflat);
+        }
+        auto it_z = params.find("z");
+        if (it_z != params.end()) {
+            arma::vec znew = it_z->second;
+            if (znew.n_elem != N_)
+                ai4b::stop("set_current: z length must equal N");
+            for (std::size_t i = 0; i < N_; ++i) {
+                const long lab = static_cast<long>(std::llround(znew[i]));
+                if (lab < 1 || static_cast<std::size_t>(lab) > T_)
+                    ai4b::stop("set_current: z[i] out of {1, ..., T}");
+            }
+            // child(1) is the categorical z block (child(0) is the relabel
+            // canonicaliser, inserted first).
+            dynamic_cast<categorical_gibbs_block&>(
+                impl_->child(1)).set_current(znew);
+            impl_->data().set("z", znew);
+            impl_->data().refresh_derived_for("z");
+        }
+        auto it_alpha = params.find("alpha");
+        if (it_alpha != params.end()) {
+            const double a = it_alpha->second[0];
+            if (!(a > 0.0)) ai4b::stop("alpha must be > 0");
+            impl_->data().set("alpha", arma::vec{a});
+        }
+        auto it_gamma = params.find("gamma_0");
+        if (it_gamma != params.end()) {
+            const double g = it_gamma->second[0];
+            if (!(g > 0.0)) ai4b::stop("gamma_0 must be > 0");
+            impl_->data().set("gamma_0", arma::vec{g});
+        }
+    }
+
+    // Posterior-predictive y_rep at the training groups. No covariate inputs
+    // at v0; new_data must be empty. Returns a history_map: each entry is a
+    // 2-D arma::mat (rows = draws in history mode, or a single row otherwise).
+    // y_rep is returned FLAT (length N*d, cluster/obs-major row-major) per
+    // row, matching the y_rep refresher's flat layout.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        if (!new_data.empty())
+            ai4b::stop(
+                "HDPGaussianMixture: predict_at(new_data) does NOT support "
+                "covariate-dependent inference at v0; pass an empty map/list.");
+
+        AI4BayesCode::history_map out;
+
+        if (!keep_history_) {
+            block_context replaced;
+            block_context result = impl_->predict_at(replaced, predict_rng_);
+            for (const auto& kv : result) {
+                const arma::vec& v = kv.second;
+                arma::mat m(1, v.n_elem);
+                for (std::size_t j = 0; j < v.n_elem; ++j) m(0, j) = v[j];
+                out.emplace(kv.first, std::move(m));
+            }
+            return out;
+        }
+
+        // History mode: per-draw resample. mu and sigma are sub-outputs of
+        // the cluster_params block; pi_g_key for each group g is its own
+        // block. Replicates the stochastic refresher's logic per draw.
+        AI4BayesCode::history_map hist = impl_->get_history();
+        const arma::mat& mu_hist  = hist.at("mu");      // n_draws x (T*d)
+        const arma::mat& sig_hist = hist.at("sigma");   // n_draws x (T*d*d)
+        std::vector<arma::mat> pi_g_hist; pi_g_hist.reserve(G_);
+        for (std::size_t g = 0; g < G_; ++g)
+            pi_g_hist.push_back(hist.at(pi_key_for_group(g)));
+        const std::size_t n_draws = mu_hist.n_rows;
+
+        const arma::vec& g_idx = impl_->data().get("group_idx");
+
+        arma::mat yrep_mat(n_draws, N_ * d_);
+        std::uniform_real_distribution<double> unif(0.0, 1.0);
+        std::normal_distribution<double> nd(0.0, 1.0);
+        for (std::size_t draw = 0; draw < n_draws; ++draw) {
+            for (std::size_t i = 0; i < N_; ++i) {
+                const std::size_t g = static_cast<std::size_t>(
+                    std::llround(g_idx[i]));
+                const arma::mat& pi_mat = pi_g_hist[g];
+                // Sample z_i ~ Cat(pi_g_d)
+                const double u = unif(predict_rng_);
+                double cumul = 0.0;
+                std::size_t z_i = T_ - 1;
+                for (std::size_t t = 0; t < T_; ++t) {
+                    cumul += pi_mat(draw, t);
+                    if (u < cumul) { z_i = t; break; }
+                }
+                // Sample y ~ N(mu_z, sigma_z)
+                arma::mat S(d_, d_);
+                for (std::size_t a = 0; a < d_; ++a)
+                    for (std::size_t b = 0; b < d_; ++b)
+                        S(a, b) = sig_hist(draw, z_i * d_ * d_ + a * d_ + b);
+                arma::mat L;
+                if (!arma::chol(L, S, "lower")) {
+                    S.diag() += 1e-8;
+                    arma::chol(L, S, "lower");
+                }
+                arma::vec eps(d_);
+                for (std::size_t j = 0; j < d_; ++j) eps[j] = nd(predict_rng_);
+                arma::vec L_eps = L * eps;
+                for (std::size_t j = 0; j < d_; ++j)
+                    yrep_mat(draw, i * d_ + j) =
+                        mu_hist(draw, z_i * d_ + j) + L_eps[j];
+            }
+        }
+        out.emplace("y_rep", std::move(yrep_mat));
         return out;
     }
 
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag(); }
     AI4BayesCode::history_map  get_history() const { return impl_->get_history(); }
-
-    std::size_t N() const { return N_; }
-    std::size_t d() const { return d_; }
-    std::size_t T() const { return T_; }
-    std::size_t G() const { return G_; }
 
 private:
     std::mt19937_64                  rng_;
@@ -786,6 +991,65 @@ private:
     std::size_t                      G_ = 0;
 };
 
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(HDPGaussianMixture_module) {
+    Rcpp::class_<HDPGaussianMixture>("HDPGaussianMixture")
+        .constructor<arma::mat, arma::vec, int,
+                     arma::vec, double, arma::mat,
+                     double, double, double, int>(
+            "Legacy constructor; keep_history defaults to FALSE.")
+        .constructor<arma::mat, arma::vec, int,
+                     arma::vec, double, arma::mat,
+                     double, double, double, int, bool>(
+            "Construct HDPGaussianMixture(y, group_idx, K_trunc, mu_0, "
+            "kappa_0, Psi_0, nu_0, alpha, gamma_0, seed, keep_history). "
+            "Truncated HDP with V0 SIMPLIFIED β update (heuristic on "
+            "combined counts_t; NOT the rigorous Antoniak-table CRF). "
+            "See header for caveat. group_idx: numeric vector length N "
+            "with integer values in {0, 1, ..., G-1}.")
+        .method("step", (void (HDPGaussianMixture::*)())    &HDPGaussianMixture::step, "Run one sweep.")
+        .method("step", (void (HDPGaussianMixture::*)(int)) &HDPGaussianMixture::step, "Run n sweeps.")
+        .method("get_current", &HDPGaussianMixture::get_current)
+        .method("set_current", &HDPGaussianMixture::set_current,
+                "Overwrite z, alpha, gamma_0, or y from a named list.")
+        .method("predict_at",  &HDPGaussianMixture::predict_at,
+                "Posterior predictive y_rep at training X. Empty list only.")
+        .method("get_dag",     &HDPGaussianMixture::get_dag)
+        .method("get_history", &HDPGaussianMixture::get_history);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(HDPGaussianMixture, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<HDPGaussianMixture>(m, "HDPGaussianMixture")
+        .def(pybind11::init<arma::mat, arma::vec, int,
+                            arma::vec, double, arma::mat,
+                            double, double, double, int, bool>(),
+             pybind11::arg("y"),
+             pybind11::arg("group_idx"),
+             pybind11::arg("K_trunc"),
+             pybind11::arg("mu_0"),
+             pybind11::arg("kappa_0"),
+             pybind11::arg("Psi_0"),
+             pybind11::arg("nu_0"),
+             pybind11::arg("alpha"),
+             pybind11::arg("gamma_0"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false)
+        .def("step", (void (HDPGaussianMixture::*)())    &HDPGaussianMixture::step, "Run one sweep.")
+        .def("step", (void (HDPGaussianMixture::*)(int)) &HDPGaussianMixture::step, pybind11::arg("n_steps"))
+        .def("get_current", &HDPGaussianMixture::get_current)
+        .def("set_current", &HDPGaussianMixture::set_current,
+             pybind11::arg("params"))
+        .def("predict_at",  &HDPGaussianMixture::predict_at,
+             pybind11::arg("new_data"))
+        .def("get_dag",     &HDPGaussianMixture::get_dag)
+        .def("get_history", &HDPGaussianMixture::get_history);
+}
+#endif
+
 //==============================================================================
 //  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
 //
@@ -796,7 +1060,11 @@ private:
 //  POPULATED atoms and check that the set of recovered locations matches the
 //  three true atom means. Recovery is label-invariant: we match each true mean
 //  to its nearest recovered populated-atom mean.
+//
+//  State is read via the full six-method contract (get_current()); the keys
+//  used here ("mu", "z") come from HDPGaussianMixture::get_current().
 //==============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 #include <cstdio>
 
 int main() {
@@ -820,7 +1088,7 @@ int main() {
     std::normal_distribution<double>       gauss(0.0, 1.0);
 
     arma::mat  y(N, d);
-    arma::ivec group_idx(N);
+    arma::vec  group_idx(N);   // package ctor takes arma::vec (double labels)
     std::size_t row = 0;
     for (std::size_t g = 0; g < G; ++g) {
         for (std::size_t i = 0; i < n_per_group; ++i) {
@@ -832,7 +1100,7 @@ int main() {
                 if (u < cum) { a = k; break; }
             }
             y(row, 0)       = atom_mu[a] + atom_sd * gauss(sim_rng);
-            group_idx[row]  = static_cast<long long>(g);
+            group_idx[row]  = static_cast<double>(g);
             ++row;
         }
     }
@@ -853,14 +1121,14 @@ int main() {
     model.step(500);   // warmup
 
     const int  M = 1500;
-    const std::size_t T = model.T();
+    const std::size_t T = static_cast<std::size_t>(K_trunc);
     arma::vec mu_sum(T, arma::fill::zeros);   // sum of mu_t over draws
     arma::vec occ_sum(T, arma::fill::zeros);  // sum of occupancy (counts) over draws
     for (int s = 0; s < M; ++s) {
         model.step(1);
-        const auto cur = model.get_current();
-        const arma::vec& mu = cur.at("mu");          // length T*d (d=1)
-        const arma::vec& z  = cur.at("z");           // length N, labels 1..T
+        const auto gc = model.get_current();          // copy (avoids dangling ref)
+        const arma::vec& mu = gc.at("mu");            // length T*d (d=1)
+        const arma::vec& z  = gc.at("z");             // length N, labels 1..T
         for (std::size_t t = 0; t < T; ++t) mu_sum[t] += mu[t];
         for (std::size_t i = 0; i < N; ++i) {
             const long lab = static_cast<long>(std::llround(z[i]));
@@ -910,3 +1178,4 @@ int main() {
                    : "[demo FAIL] HDP did not recover the shared atoms");
     return ok ? 0 : 1;
 }
+#endif

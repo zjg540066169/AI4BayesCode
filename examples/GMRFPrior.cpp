@@ -6,7 +6,8 @@
 //
 //  Pure-prior 2D ICAR sampler — first specialised-block demo for the
 //  Block 2 v1.2 ship. Wires gmrf_precision_block (Rue 2001 sparse-
-//  Cholesky direct sampling) through composite_block.
+//  Cholesky direct sampling) through composite_block + a DUAL frontend
+//  (RCPP_MODULE for R, PYBIND11_MODULE for Python).
 //
 //  Model
 //  -----
@@ -30,7 +31,8 @@
 //      kappa    precision scale (scalar, > 0) — fixed at construction
 //               by default; can be overwritten via set_current("kappa")
 //
-//  No observation likelihood — pure prior demo.
+//  No observation likelihood — pure prior demo. predict_at returns an
+//  empty history_map. Documented exception per system_design.md §5.
 //
 //  JUSTIFICATION (Check #16): Fixed-dim continuous Gaussian with sparse
 //  precision (system_design.md §11.1 class 1, specialised efficiency
@@ -43,10 +45,47 @@
 //      two-init R-hat across 4 chains on n=50.
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that samples from the prior
-// and checks its moments against the known ICAR covariance. No R / Python
-// binding is built or required.
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("GMRFPrior")
+//   # Pure-prior 2D ICAR: x ~ N(0, (kappa R)^{-1}) with sum(x)=0 on a
+//   # 4x4 lattice. No data — x is drawn directly (Rue 2001 sparse-Cholesky),
+//   # so each step is an exact i.i.d. prior draw (no observation likelihood).
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(GMRFPrior, 4L, 4L, 2.0, FALSE, FALSE, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(GMRFPrior,
+//            4L,     # L_x : lattice width
+//            4L,     # L_y : lattice height (N = L_x*L_y = 16 latent nodes)
+//            2.0,    # kappa : precision scale (> 0), fixed at construction
+//            FALSE,  # periodic : open boundary (no edge wrap)
+//            FALSE,  # eight_nn : 4-nearest-neighbour adjacency
+//            7L,     # rng_seed
+//            TRUE)   # keep_history
+//   m$step(2500); str(m$get_current())  # x is mean ~0, sum(x) ~ 0 (constraint)
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   # Pure-prior 2D ICAR: x ~ N(0, (kappa R)^{-1}) with sum(x)=0 on a 4x4
+//   # lattice. No data — x is an exact sparse-Cholesky prior draw each step.
+//   Mod = AI4BayesCode.example("GMRFPrior")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.GMRFPrior(4, 4, 2.0, False, False, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.GMRFPrior(4, 4, 2.0, False, False, 7, True)
+//   #             (L_x, L_y, kappa, periodic, eight_nn, rng_seed, keep_history)
+//   m.step(2500)
+//   cur = m.get_current()
+//   x = np.asarray(cur["x"]).ravel()
+//   print("mean(x)=", x.mean(), " sum(x)=", x.sum())  # ~0, ~0 (sum-to-zero)
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -55,11 +94,17 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/gmrf_precision_block.hpp"
 #include "AI4BayesCode/ising_cluster_block.hpp"  // reuse make_2d_lattice_edges
 
@@ -67,7 +112,6 @@
 #include <cstdint>
 #include <memory>
 #include <random>
-#include <stdexcept>
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -106,13 +150,17 @@ public:
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
                    : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)}),
+          predict_rng_(rng_seed == 0
+                   ? std::mt19937_64{std::random_device{}()}
+                   : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
+                                     ^ 0x9E3779B97F4A7C15ULL}),
           impl_(std::make_unique<composite_block>("GMRFPrior")),
           keep_history_(keep_history),
           L_x_(L_x), L_y_(L_y)
     {
-        if (L_x_ < 1)        throw std::runtime_error("L_x must be >= 1");
-        if (L_y_ < 1)        throw std::runtime_error("L_y must be >= 1");
-        if (!(kappa > 0.0))  throw std::runtime_error("kappa must be > 0");
+        if (L_x_ < 1)        ai4b::stop("L_x must be >= 1");
+        if (L_y_ < 1)        ai4b::stop("L_y must be >= 1");
+        if (!(kappa > 0.0))  ai4b::stop("kappa must be > 0");
 
         N_ = static_cast<std::size_t>(L_x_) *
               static_cast<std::size_t>(L_y_);
@@ -152,18 +200,18 @@ public:
         if (keep_history_) impl_->set_keep_history(true);
     }
 
-    // ---- Canonical neutral-typed interface ----------------------------
+    // ---- Canonical backend-neutral interface ----------------------------
 
     void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
-        if (n_steps < 0) throw std::runtime_error("n_steps must be >= 0");
+        if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
 
     AI4BayesCode::state_map get_current() const {
         AI4BayesCode::state_map out;
-        out["x"]     = impl_->data().get("x");
-        out["kappa"] = impl_->data().get("kappa");
+        out["x"]     = impl_->data().get("x");      // length N flat arma::vec
+        out["kappa"] = impl_->data().get("kappa");  // length-1 arma::vec
         return out;
     }
 
@@ -173,46 +221,107 @@ public:
             auto* x_blk = dynamic_cast<gmrf_precision_block*>(
                 &impl_->child(0));
             if (!x_blk) {
-                throw std::runtime_error(
-                    "internal: child 0 is not gmrf_precision_block");
+                ai4b::stop("internal: child 0 is not gmrf_precision_block");
             }
             const arma::vec& x_new = it_x->second;
             if (x_new.n_elem != N_) {
-                throw std::runtime_error(
-                    "set_current: x length must equal L_x * L_y");
+                ai4b::stop("set_current: x length must equal L_x * L_y");
             }
             x_blk->set_current(x_new);
             impl_->data().set("x", x_new);
         }
-        auto it_k = params.find("kappa");
-        if (it_k != params.end()) {
-            const arma::vec& kappa_new = it_k->second;
+        auto it_kappa = params.find("kappa");
+        if (it_kappa != params.end()) {
+            const arma::vec& kappa_new = it_kappa->second;
             if (kappa_new.n_elem != 1) {
-                throw std::runtime_error(
-                    "set_current: kappa must be a length-1 vector");
+                ai4b::stop("set_current: kappa must be a length-1 vector");
             }
             if (!(kappa_new[0] > 0.0)) {
-                throw std::runtime_error("set_current: kappa must be > 0");
+                ai4b::stop("set_current: kappa must be > 0");
             }
             impl_->data().set("kappa", kappa_new);
         }
     }
 
+    // GMRFPrior has no observation model — no y_rep, no data inputs.
+    // predict_at always returns an empty history_map (documented exception
+    // per system_design.md §5). Non-empty input is rejected.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        if (!new_data.empty()) {
+            ai4b::stop("GMRFPrior::predict_at: no valid keys to replace "
+                       "(no observation model); pass an empty map/list.");
+        }
+        return AI4BayesCode::history_map();
+    }
+
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag();     }
     AI4BayesCode::history_map  get_history() const { return impl_->get_history(); }
 
-    std::size_t dim() const noexcept { return N_; }
-
 private:
     std::mt19937_64                  rng_;
+    mutable std::mt19937_64          predict_rng_;
     std::unique_ptr<composite_block> impl_;
     bool                             keep_history_ = false;
     int                              L_x_ = 0, L_y_ = 0;
     std::size_t                      N_   = 0;
 };
 
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(GMRFPrior_module) {
+    Rcpp::class_<GMRFPrior>("GMRFPrior")
+        .constructor<int, int, double, bool, bool, int>(
+            "Legacy constructor; keep_history defaults to FALSE. Args: "
+            "L_x, L_y, kappa, periodic, eight_nn, rng_seed.")
+        .constructor<int, int, double, bool, bool, int, bool>(
+            "Construct with L_x, L_y (lattice dims), kappa (precision "
+            "scale, > 0), periodic (bool, wrap edges), eight_nn (bool, "
+            "include diagonals), rng_seed, keep_history. Pure-prior 2D "
+            "ICAR via gmrf_precision_block sparse-Cholesky direct "
+            "sampling (Rue 2001). Sum-to-zero constraint enforced. "
+            "Check #15 parity tests under tests/test_gmrf_precision_block.cpp.")
+        .method("step", (void (GMRFPrior::*)())    &GMRFPrior::step, "Run one sweep.")
+        .method("step", (void (GMRFPrior::*)(int)) &GMRFPrior::step, "Run n sweeps.")
+        .method("get_current", &GMRFPrior::get_current)
+        .method("set_current", &GMRFPrior::set_current,
+                "Overwrite x (length L_x*L_y) and/or kappa (length-1, > 0) "
+                "from a named list. Unknown keys are silently ignored.")
+        .method("predict_at",  &GMRFPrior::predict_at,
+                "Returns empty list — GMRFPrior has no observation model. "
+                "Pass an empty list; non-empty input is rejected.")
+        .method("get_dag",     &GMRFPrior::get_dag)
+        .method("get_history", &GMRFPrior::get_history);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(GMRFPrior, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<GMRFPrior>(m, "GMRFPrior")
+        .def(pybind11::init<int, int, double, bool, bool, int, bool>(),
+             pybind11::arg("L_x"),
+             pybind11::arg("L_y"),
+             pybind11::arg("kappa"),
+             pybind11::arg("periodic") = false,
+             pybind11::arg("eight_nn") = false,
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false)
+        .def("step", (void (GMRFPrior::*)())    &GMRFPrior::step, "Run one sweep.")
+        .def("step", (void (GMRFPrior::*)(int)) &GMRFPrior::step, pybind11::arg("n_steps"))
+        .def("get_current", &GMRFPrior::get_current)
+        .def("set_current", &GMRFPrior::set_current, pybind11::arg("params"))
+        .def("predict_at",  &GMRFPrior::predict_at,  pybind11::arg("new_data"))
+        .def("get_dag",     &GMRFPrior::get_dag)
+        .def("get_history", &GMRFPrior::get_history);
+}
+#endif
+
 //==============================================================================
 //  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
+//
+//  Active only when NEITHER binding macro is defined, so this same file is a
+//  valid dual-module (R/Python) source AND a runnable standalone demo.
 //
 //  GMRFPrior is a PURE-PRIOR sampler — there is no observation likelihood, so
 //  "recovery" means: the draws must reproduce the prior's KNOWN moments.
@@ -230,7 +339,11 @@ private:
 //    (1) every draw is exactly sum-to-zero (constraint honoured);
 //    (2) the empirical mean is ≈ 0;
 //    (3) the empirical covariance ≈ (1/κ) R^+ in relative Frobenius norm.
+//
+//  State is read via the full contract get_current() (key "x"), matching the
+//  dual-module accessor.
 //==============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 #include <cstdio>
 int main() {
     // ---- small lattice so we can form R^+ densely -------------------------
@@ -266,7 +379,8 @@ int main() {
 
     for (int s = 0; s < M; ++s) {
         model.step(1);
-        const arma::vec x = model.get_current().at("x");
+        const auto gc = model.get_current();          // copy (avoids dangling ref)
+        const arma::vec& x = gc.at("x");              // key from package get_current()
         max_abs_sum = std::max(max_abs_sum, std::abs(arma::accu(x)));
         mean_acc += x;
         cov_acc  += x * x.t();
@@ -307,3 +421,4 @@ int main() {
         : "[demo FAIL] sampled moments do not match the ICAR prior");
     return ok ? 0 : 1;
 }
+#endif

@@ -49,12 +49,55 @@
 // textbook (Neal 2003), validated by the library parity test at
 // tests_autodiff/block_tests/test_univariate_slice_sampling_block.cpp.
 // See skills/codegen.md section 2b.1 for when to use slice vs NUTS.
+//
+// predict_at: celerite_gp_block is placed LAST in the composite's Gibbs
+// order so its internal CholeskySolver reflects the post-sweep state;
+// predict_at then calls celerite_gp_block::predict_mean_var(t_new)
+// directly, without any re-stepping.
 // ============================================================================
 
-// Frontend-INDEPENDENT example: pure standalone C++ (NO Rcpp, NO pybind).
-// Compile + run directly: it has an int main() that simulates an OU process
-// from a known timescale and recovers the GP hyperparameters via celerite +
-// slice sampling. No R / Python binding is built or required.
+// @example:R
+//   library(AI4BayesCode)
+//   ai4bayescode_example("GPTimeSeries")
+//   set.seed(2026)
+//   N <- 300L; dt <- 1.0
+//   amp_true <- 2.0; tau_true <- 40.0; sigma_true <- 1.0   # OU truth
+//   rho <- exp(-dt / tau_true); innov <- amp_true * sqrt(1 - rho^2)
+//   f <- numeric(N); f[1] <- amp_true * rnorm(1)            # stationary start
+//   for (i in 2:N) f[i] <- rho * f[i-1] + innov * rnorm(1)  # OU latent path
+//   t <- (0:(N-1)) * dt
+//   y <- f + sigma_true * rnorm(N)                          # + observation noise
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(GPTimeSeries, t, y, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(GPTimeSeries, t, y, 7L, TRUE)  # t, y, rng_seed, keep_history=TRUE
+//   m$step(2500); str(m$get_current())      # amp / tau / sigma / logp
+// @example:python
+//   import numpy as np, AI4BayesCode
+//   rng = np.random.default_rng(2026)
+//   N = 300; dt = 1.0
+//   amp_true, tau_true, sigma_true = 2.0, 40.0, 1.0     # OU truth
+//   rho = np.exp(-dt / tau_true); innov = amp_true * np.sqrt(1 - rho**2)
+//   f = np.empty(N); f[0] = amp_true * rng.standard_normal()  # stationary start
+//   for i in range(1, N):                               # OU latent path
+//       f[i] = rho * f[i-1] + innov * rng.standard_normal()
+//   t = np.arange(N) * dt
+//   y = f + sigma_true * rng.standard_normal(N)         # + observation noise
+//   Mod = AI4BayesCode.example("GPTimeSeries")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.GPTimeSeries(t, y, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.GPTimeSeries(t, y, 7, True)                 # t, y, rng_seed, keep_history
+//   m.step(2500); print(m.get_current())               # dict: amp / tau / sigma / logp
+// @example:end
+
+// [[Rcpp::depends(RcppArmadillo)]]
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -63,12 +106,18 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#include <armadillo>
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#  include <RcppArmadillo.h>
+#else
+#  include <armadillo>
+#endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
+#include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/univariate_slice_sampling_block.hpp"
 #include "AI4BayesCode/celerite_marginal_likelihood.hpp"
 #include "AI4BayesCode/celerite_gp_block.hpp"
@@ -77,7 +126,6 @@
 #include <cstdint>
 #include <memory>
 #include <random>
-#include <stdexcept>
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -167,7 +215,7 @@ double sigma_slice_log_density(const arma::vec& sigma_unc,
 }  // namespace
 
 // ============================================================================
-// User-facing class  (FRONTEND-INDEPENDENT: neutral arma / state_map types)
+// User-facing class
 // ============================================================================
 
 class GPTimeSeries {
@@ -187,19 +235,22 @@ public:
           keep_history_(keep_history)
     {
         if (t.n_elem != y.n_elem)
-            throw std::runtime_error("GPTimeSeries: t and y length mismatch");
+            ai4b::stop("GPTimeSeries: t and y length mismatch");
         if (t.n_elem < 3)
-            throw std::runtime_error("GPTimeSeries: N must be >= 3");
+            ai4b::stop("GPTimeSeries: N must be >= 3");
 
-        const std::size_t N = t.n_elem;
+        const std::size_t N = static_cast<std::size_t>(t.n_elem);
         N_ = N;
 
-        arma::vec t_arma = t;
-        arma::vec y_arma = y;
+        arma::vec t_arma(N), y_arma(N);
+        for (std::size_t i = 0; i < N; ++i) {
+            t_arma[i] = t[i];
+            y_arma[i] = y[i];
+        }
         // celerite requires t sorted ascending.
         for (std::size_t i = 1; i < N; ++i) {
             if (t_arma[i] < t_arma[i-1])
-                throw std::runtime_error("GPTimeSeries: t must be sorted ascending");
+                ai4b::stop("GPTimeSeries: t must be sorted ascending");
         }
 
         impl_->data().set("t", t_arma);
@@ -277,12 +328,53 @@ public:
         impl_->data().declare_invalidates("tau",   {"c_real"});
         impl_->data().declare_invalidates("sigma", {"obs_diag"});
 
+        // ---- Predict DAG + y_rep stochastic refresher ------------------
+        // Rough-proxy posterior predictive: y_rep = y_obs + sigma*epsilon.
+        // Direct parents are `y` and `sigma`. celerite_logp is kept as an
+        // edge source to anchor the celerite GP block on the DAG (proper
+        // GP predict at new t goes through the celerite block's own
+        // predict path, triggered by t_new_flag).
+        impl_->data().declare_data_input("t_new_flag");
+        impl_->data().declare_data_input("y");
+        impl_->data().declare_predict_edges("y",             {"y_rep"});
+        impl_->data().declare_predict_edges("sigma",         {"y_rep"});
+        impl_->data().declare_predict_edges("celerite_logp", {"y_rep"});
+
+        // ---- Generative-DAG context (VIZ-ONLY; predict_at BFS never
+        //      reads context_edges_). amp ~ half-Normal(0,
+        //      amp_prior_sd); tau ~ InverseGamma(tau_prior_shape,
+        //      tau_prior_scale); the celerite kernel coefficients
+        //      (a_real, c_real) are built from the sampled (amp, tau)
+        //      hyperparameters. sigma ~ Jeffreys (no slot). Drawn faded
+        //      by ai4bayescode_plot_dag.
+        impl_->data().declare_context_edges("amp_prior_sd",   {"amp"});
+        impl_->data().declare_context_edges("tau_prior_shape",{"tau"});
+        impl_->data().declare_context_edges("tau_prior_scale",{"tau"});
+        impl_->data().declare_context_edges("amp", {"a_real", "c_real"});
+        impl_->data().declare_context_edges("tau", {"a_real", "c_real"});
+        impl_->data().set("y_rep", arma::vec(N, arma::fill::zeros));
+        impl_->data().register_stochastic_refresher("y_rep",
+            [](const AI4BayesCode::shared_data_t& d,
+               std::mt19937_64& rng) {
+                const arma::vec& y_obs = d.get("y");
+                const double sig = d.get("sigma")[0];
+                std::normal_distribution<double> nd(0.0, 1.0);
+                arma::vec out(y_obs.n_elem);
+                // Posterior predictive at training t, rough proxy:
+                // y_rep = y + noise. celerite users typically call
+                // predict_at(list(t=t_new)) for proper predictive at new t.
+                for (std::size_t i = 0; i < y_obs.n_elem; ++i)
+                    out[i] = y_obs[i] + sig * nd(rng);
+                return out;
+            });
+
         // ---- Add child blocks in Gibbs order ---------------------------
         // Order:
         //   child(0) slice(amp)
         //   child(1) slice(tau)
         //   child(2) slice(sigma)
-        //   child(3) celerite_gp_block   (LAST -- solver reflects final state)
+        //   child(3) celerite_gp_block   (LAST -- solver reflects final state;
+        //                                  predict_at uses it directly)
         {
             univariate_slice_sampling_block_config cfg;
             cfg.name         = "amp";
@@ -344,31 +436,168 @@ public:
     }
 
     void set_current(const AI4BayesCode::state_map& params) {
+        auto refresh_all_after = [&]() {
+            impl_->data().refresh_all();
+        };
         auto it_amp = params.find("amp");
         if (it_amp != params.end()) {
             const double a = it_amp->second[0];
-            if (!(a > 0)) throw std::runtime_error("amp must be positive");
+            if (!(a > 0)) ai4b::stop("amp must be positive");
             dynamic_cast<univariate_slice_sampling_block&>(
                 impl_->child(0)).set_current(arma::vec{a});
             impl_->data().set("amp", arma::vec{a});
         }
         auto it_tau = params.find("tau");
         if (it_tau != params.end()) {
-            const double tt = it_tau->second[0];
-            if (!(tt > 0)) throw std::runtime_error("tau must be positive");
+            const double t = it_tau->second[0];
+            if (!(t > 0)) ai4b::stop("tau must be positive");
             dynamic_cast<univariate_slice_sampling_block&>(
-                impl_->child(1)).set_current(arma::vec{tt});
-            impl_->data().set("tau", arma::vec{tt});
+                impl_->child(1)).set_current(arma::vec{t});
+            impl_->data().set("tau", arma::vec{t});
         }
-        auto it_sig = params.find("sigma");
-        if (it_sig != params.end()) {
-            const double s = it_sig->second[0];
-            if (!(s > 0)) throw std::runtime_error("sigma must be positive");
+        auto it_sigma = params.find("sigma");
+        if (it_sigma != params.end()) {
+            const double s = it_sigma->second[0];
+            if (!(s > 0)) ai4b::stop("sigma must be positive");
             dynamic_cast<univariate_slice_sampling_block&>(
                 impl_->child(2)).set_current(arma::vec{s});
             impl_->data().set("sigma", arma::vec{s});
         }
-        impl_->data().refresh_all();
+        refresh_all_after();
+    }
+
+    // predict_at: backend-neutral I/O. INPUT new_data may contain key "t"
+    // (a flat arma::vec of new time points). OUTPUT is a history_map; every
+    // key is an arma::mat (1-row in stateful mode, n_draws-row in history
+    // mode). Empty map -> posterior predictive y_rep at training t.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        AI4BayesCode::history_map out;
+        auto it_t = new_data.find("t");
+        const bool has_t = it_t != new_data.end() && it_t->second.n_elem > 0;
+        if (!has_t) {
+            if (keep_history_) {
+                // History mode at training t: per-draw y_rep_d = y + sigma_d * N(0,1).
+                AI4BayesCode::history_map hist = impl_->get_history();
+                const arma::mat& sigma_hist = hist.at("sigma");  // n_draws x 1
+                const arma::vec& y = impl_->data().get("y");
+                const std::size_t n_draws = sigma_hist.n_rows;
+                const std::size_t N = y.n_elem;
+                arma::mat yrep_mat(n_draws, N);
+                std::normal_distribution<double> nd(0.0, 1.0);
+                for (std::size_t d = 0; d < n_draws; ++d) {
+                    const double sigma_d = sigma_hist(d, 0);
+                    for (std::size_t i = 0; i < N; ++i)
+                        yrep_mat(d, i) = y[i] + sigma_d * nd(predict_rng_);
+                }
+                out.emplace("y_rep", std::move(yrep_mat));
+                return out;
+            }
+            // Stateful: y_rep at training t, using current sigma.
+            const arma::vec& y = impl_->data().get("y");
+            const double sig = impl_->data().get("sigma")[0];
+            std::normal_distribution<double> nd(0.0, 1.0);
+            arma::mat y_rep(1, y.n_elem);
+            for (std::size_t i = 0; i < y.n_elem; ++i)
+                y_rep(0, i) = y[i] + sig * nd(predict_rng_);
+            out.emplace("y_rep", std::move(y_rep));
+            return out;
+        }
+
+        // t arrives as a flat (vectorised) arma::vec under key "t".
+        const arma::vec& t_new_in = it_t->second;
+
+        if (keep_history_) {
+            // new-t + history: per-draw celerite solver re-build with
+            // (amp_d, tau_d, sigma_d) from history, then predict_mean_var
+            // at t_new and sample y_rep.
+            arma::vec t_new_h = t_new_in;
+            const std::size_t N_new_h = t_new_h.n_elem;
+
+            AI4BayesCode::history_map hist = impl_->get_history();
+            const arma::mat& amp_hist   = hist.at("amp");
+            const arma::mat& tau_hist   = hist.at("tau");
+            const arma::mat& sigma_hist = hist.at("sigma");
+            const std::size_t n_draws   = amp_hist.n_rows;
+
+            auto& cel = dynamic_cast<celerite_gp_block&>(impl_->child(3));
+            block_context ctx = impl_->data().build_context_for("celerite_logp");
+
+            arma::mat mu_mat (n_draws, N_new_h);
+            arma::mat sd_mat (n_draws, N_new_h);
+            arma::mat fs_mat (n_draws, N_new_h);
+            arma::mat yr_mat (n_draws, N_new_h);
+            std::normal_distribution<double> nd(0.0, 1.0);
+
+            for (std::size_t d = 0; d < n_draws; ++d) {
+                const double amp_d   = amp_hist(d, 0);
+                const double tau_d   = tau_hist(d, 0);
+                const double sigma_d = sigma_hist(d, 0);
+                ctx["amp"]   = arma::vec{amp_d};
+                ctx["tau"]   = arma::vec{tau_d};
+                ctx["sigma"] = arma::vec{sigma_d};
+                cel.set_context(ctx);
+                cel.step(const_cast<std::mt19937_64&>(predict_rng_));
+                auto [mu, var] = cel.predict_mean_var(t_new_h);
+                for (std::size_t i = 0; i < N_new_h; ++i) {
+                    const double sd_i = std::sqrt(std::max(var[i], 0.0));
+                    const double fs_i = mu[i] + sd_i * nd(predict_rng_);
+                    mu_mat(d, i) = mu[i];
+                    sd_mat(d, i) = sd_i;
+                    fs_mat(d, i) = fs_i;
+                    yr_mat(d, i) = fs_i + sigma_d * nd(predict_rng_);
+                }
+            }
+            out.emplace("f_mean", std::move(mu_mat));
+            out.emplace("f_sd",   std::move(sd_mat));
+            out.emplace("f_star", std::move(fs_mat));
+            out.emplace("y_rep",  std::move(yr_mat));
+            return out;
+        }
+
+        arma::vec t_new = t_new_in;
+
+        // celerite_gp_block is child(3) (LAST in Gibbs order); its
+        // internal solver_ reflects the current post-sweep state thanks
+        // to the end-of-sweep celerite_logp step. No re-step needed.
+        auto& cel = dynamic_cast<celerite_gp_block&>(impl_->child(3));
+
+        // Provide cel's context in case predict_at is called immediately
+        // after construction (before any step()). build_context_for
+        // projects the declared dependencies.
+        block_context ctx = impl_->data().build_context_for("celerite_logp");
+        cel.set_context(ctx);
+        // A single step refreshes the solver (O(N)) -- idempotent if the
+        // state hasn't changed since the last sweep.
+        cel.step(const_cast<std::mt19937_64&>(predict_rng_));
+
+        auto [mu, var] = cel.predict_mean_var(t_new);
+        const double sig = impl_->data().get("sigma")[0];
+        const std::size_t N_new = t_new.n_elem;
+        arma::vec sd(N_new);
+        for (std::size_t i = 0; i < N_new; ++i) sd[i] = std::sqrt(var[i]);
+
+        std::normal_distribution<double> nd(0.0, 1.0);
+        arma::vec f_star(N_new), y_rep(N_new);
+        for (std::size_t i = 0; i < N_new; ++i) {
+            f_star[i] = mu[i] + sd[i] * nd(predict_rng_);
+            y_rep[i]  = f_star[i] + sig * nd(predict_rng_);
+        }
+
+        // Pack each output as a 1-row matrix (single predict at current draw).
+        arma::mat mu_out(1, N_new), sd_out(1, N_new),
+                  fs_out(1, N_new), yr_out(1, N_new);
+        for (std::size_t i = 0; i < N_new; ++i) {
+            mu_out(0, i) = mu[i];
+            sd_out(0, i) = sd[i];
+            fs_out(0, i) = f_star[i];
+            yr_out(0, i) = y_rep[i];
+        }
+        out.emplace("f_mean", std::move(mu_out));
+        out.emplace("f_sd",   std::move(sd_out));
+        out.emplace("f_star", std::move(fs_out));
+        out.emplace("y_rep",  std::move(yr_out));
+        return out;
     }
 
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
@@ -381,6 +610,46 @@ private:
     std::size_t                      N_ = 0;
     bool                             keep_history_ = false;
 };
+
+#ifdef AI4BAYESCODE_RCPP_MODULE
+RCPP_MODULE(GPTimeSeries_module) {
+    Rcpp::class_<GPTimeSeries>("GPTimeSeries")
+        .constructor<arma::vec, arma::vec, int>(
+            "Legacy constructor; keep_history defaults to FALSE.")
+        .constructor<arma::vec, arma::vec, int, bool>(
+            "Construct 1-D time-series GP via celerite O(N) Cholesky. "
+            "Hyperparameters (amp, tau, sigma) sampled by "
+            "univariate_slice_sampling_block (Neal 2003 section 4.1). "
+            "See file header for v0.5 design notes.")
+        .method("step", (void (GPTimeSeries::*)())    &GPTimeSeries::step, "Run one sweep.")
+        .method("step", (void (GPTimeSeries::*)(int)) &GPTimeSeries::step, "Run n sweeps.")
+        .method("get_current", &GPTimeSeries::get_current)
+        .method("set_current", &GPTimeSeries::set_current)
+        .method("predict_at",  &GPTimeSeries::predict_at)
+        .method("get_dag",     &GPTimeSeries::get_dag)
+        .method("get_history", &GPTimeSeries::get_history);
+}
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+PYBIND11_MODULE(GPTimeSeries, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);
+    pybind11::class_<GPTimeSeries>(m, "GPTimeSeries")
+        .def(pybind11::init<arma::vec, arma::vec, int, bool>(),
+             pybind11::arg("t"),
+             pybind11::arg("y"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false)
+        .def("step", (void (GPTimeSeries::*)())    &GPTimeSeries::step, "Run one sweep.")
+        .def("step", (void (GPTimeSeries::*)(int)) &GPTimeSeries::step,  pybind11::arg("n_steps"))
+        .def("get_current", &GPTimeSeries::get_current)
+        .def("set_current", &GPTimeSeries::set_current, pybind11::arg("params"))
+        .def("predict_at",  &GPTimeSeries::predict_at,  pybind11::arg("new_data"))
+        .def("get_dag",     &GPTimeSeries::get_dag)
+        .def("get_history", &GPTimeSeries::get_history);
+}
+#endif
 
 //==============================================================================
 //  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
@@ -398,7 +667,10 @@ private:
 //      y_i   = f_i + sigma * noise
 //  => stationary Var(f) = amp^2, lag-k corr = exp(-k*dt/tau), matching
 //     k(dt) = amp^2 exp(-|dt|/tau).
+//
+//  State is read via the full-contract get_current() (keys amp / tau / sigma).
 //==============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 #include <cstdio>
 int main() {
     // Strongly-correlated latent (large tau / many points per timescale) plus
@@ -436,10 +708,13 @@ int main() {
     const int M = 1500;
     for (int s = 0; s < M; ++s) {
         model.step(1);
-        const auto cur = model.get_current();
-        amp_bar   += cur.at("amp")[0];
-        tau_bar   += cur.at("tau")[0];
-        sigma_bar += cur.at("sigma")[0];
+        const auto gc = model.get_current();          // copy (avoids dangling ref)
+        const arma::vec& amp_v   = gc.at("amp");
+        const arma::vec& tau_v   = gc.at("tau");
+        const arma::vec& sigma_v = gc.at("sigma");
+        amp_bar   += amp_v[0];
+        tau_bar   += tau_v[0];
+        sigma_bar += sigma_v[0];
     }
     amp_bar   /= static_cast<double>(M);
     tau_bar   /= static_cast<double>(M);
@@ -485,3 +760,4 @@ int main() {
                     sigma_ok, amp_ok, tau_sane, beats_naive);
     return ok ? 0 : 1;
 }
+#endif

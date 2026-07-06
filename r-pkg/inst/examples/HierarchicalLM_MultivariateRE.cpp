@@ -890,3 +890,136 @@ PYBIND11_MODULE(HierarchicalLM_MultivariateRE, m) {
              pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
 }
 #endif
+
+//==============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
+//
+//  Simulates hierarchical linear data with multivariate (d=2) random effects
+//  from a KNOWN truth:
+//      y_i = X_i' beta + Z_i' u_{g(i)} + sigma * eps_i,
+//      u_j = diag(tau) . chol(R) . z_j,   z_j ~ N(0, I_2),
+//  with X_{i,0} = 1 (intercept) and Z_i = [X_{i,0}, X_{i,1}] (random
+//  intercept + random slope). Fits via joint-NUTS (beta, z, log_tau,
+//  log_sigma) + a modular cholesky_corr block on R, then checks:
+//    (1) posterior-mean fixed effects beta recover the truth, and
+//    (2) the model BEATS a naive pooled OLS-residual sigma (i.e. accounting
+//        for the random effects reduces residual scale toward sigma_true).
+//
+//  State is read through the full-contract get_current() (keys: beta, z, tau,
+//  L, R, sigma) — R is the 2x2 implied correlation, col-major flat, so R[1] is
+//  the off-diagonal rho.
+//==============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+int main() {
+    const std::size_t J = 30;          // number of groups
+    const std::size_t per_group = 20;  // observations per group
+    const std::size_t N = J * per_group;
+    const std::size_t p = 3;           // fixed-effect dimension (incl. intercept)
+
+    const arma::vec beta_true = {1.5, -2.0, 0.8};
+    const double    sigma_true = 0.6;
+    const arma::vec tau_true   = {0.9, 0.7};   // RE scales (intercept, slope)
+    // True RE correlation matrix R_true (rho = 0.5) and its Cholesky factor.
+    const double rho = 0.5;
+    arma::mat R_true = {{1.0, rho}, {rho, 1.0}};
+    arma::mat L_true = arma::chol(R_true, "lower");
+
+    std::mt19937_64 sim_rng(2024);
+    std::normal_distribution<double> snorm(0.0, 1.0);
+
+    // Design matrix: column 0 = intercept, columns 1..2 = covariates.
+    arma::mat X(N, p, arma::fill::ones);
+    for (std::size_t i = 0; i < N; ++i) {
+        X(i, 1) = snorm(sim_rng);
+        X(i, 2) = snorm(sim_rng);
+    }
+    // group is a 1-indexed numeric vector (integer labels stored as doubles),
+    // matching the constructor's arma::vec signature (shared R/Python caster).
+    arma::vec group(N);
+    for (std::size_t i = 0; i < N; ++i)
+        group[i] = static_cast<double>(i / per_group) + 1.0;  // 1-indexed
+
+    // Random effects per group: u_j = diag(tau) L z_j. The model assumes
+    // E[u] = 0; we center the simulated RE columns to exactly zero mean so
+    // the fixed intercept stays identifiable (a non-zero RE sample mean is
+    // otherwise indistinguishable from a shift in the fixed intercept).
+    arma::mat u_true(2, J);
+    for (std::size_t j = 0; j < J; ++j) {
+        arma::vec z(2);
+        z[0] = snorm(sim_rng);
+        z[1] = snorm(sim_rng);
+        arma::vec u = L_true * z;
+        u_true(0, j) = tau_true[0] * u[0];
+        u_true(1, j) = tau_true[1] * u[1];
+    }
+    u_true.row(0) -= arma::mean(u_true.row(0));
+    u_true.row(1) -= arma::mean(u_true.row(1));
+
+    // Response. Z_i = [X_{i,0}=1, X_{i,1}] -> random intercept + random slope.
+    arma::vec y(N);
+    for (std::size_t i = 0; i < N; ++i) {
+        const std::size_t g = static_cast<std::size_t>(
+            std::llround(group[i])) - 1u;
+        double mu = arma::dot(X.row(i), beta_true);
+        mu += X(i, 0) * u_true(0, g) + X(i, 1) * u_true(1, g);
+        y[i] = mu + sigma_true * snorm(sim_rng);
+    }
+
+    // Naive baseline: pooled OLS ignoring random effects -> residual std.
+    arma::vec beta_ols = arma::solve(X, y);
+    arma::vec r_ols = y - X * beta_ols;
+    const double sigma_naive = arma::stddev(r_ols);
+
+    // Fit the hierarchical model.
+    HierarchicalLM_MultivariateRE model(y, X, group, /*rng_seed=*/7,
+                                        /*keep_history=*/false);
+    model.step(500);   // warmup
+
+    arma::vec beta_bar(p, arma::fill::zeros);
+    double    sigma_bar = 0.0;
+    double    rho_bar = 0.0;
+    const int M = 1500;
+    for (int s = 0; s < M; ++s) {
+        model.step(1);
+        // Read state via the full contract get_current() (copy to avoid a
+        // dangling reference into the internal map).
+        const auto gc = model.get_current();
+        const arma::vec& beta_cur  = gc.at("beta");
+        const arma::vec& sigma_cur = gc.at("sigma");
+        const arma::vec& R_cur     = gc.at("R");   // 2x2 col-major flat
+        beta_bar  += beta_cur;
+        sigma_bar += sigma_cur[0];
+        rho_bar   += R_cur[1];                     // off-diagonal correlation
+    }
+    beta_bar  /= static_cast<double>(M);
+    sigma_bar /= static_cast<double>(M);
+    rho_bar   /= static_cast<double>(M);
+
+    std::printf("HierarchicalLM_MultivariateRE demo (N=%zu, J=%zu groups)\n",
+                N, J);
+    std::printf("  beta_hat  = [% .3f % .3f % .3f]  (truth [% .3f % .3f % .3f])\n",
+                beta_bar[0], beta_bar[1], beta_bar[2],
+                beta_true[0], beta_true[1], beta_true[2]);
+    std::printf("  sigma_hat = %.3f  (truth %.3f)   sigma_naive(pooled OLS) = %.3f\n",
+                sigma_bar, sigma_true, sigma_naive);
+    std::printf("  rho_hat   = %.3f  (truth %.3f)\n", rho_bar, rho);
+
+    const double beta_err = arma::norm(beta_bar - beta_true, "inf");
+    const bool beta_ok  = beta_err < 0.20;
+    const bool sigma_ok = std::abs(sigma_bar - sigma_true) < 0.15;
+    // Accounting for the random effects must beat the naive pooled sigma.
+    const bool beats_naive = sigma_bar < sigma_naive - 0.10;
+    const bool ok = beta_ok && sigma_ok && beats_naive;
+
+    std::printf("  |beta_hat - beta_true|_inf = %.3f (< 0.20 ? %s)\n",
+                beta_err, beta_ok ? "yes" : "no");
+    std::printf("  beats naive sigma by %.3f (> 0.10 ? %s)\n",
+                sigma_naive - sigma_bar, beats_naive ? "yes" : "no");
+    std::printf("%s\n",
+                ok ? "[demo PASS] joint-NUTS + cholesky_corr recovers "
+                     "(beta, sigma) and beats pooled OLS"
+                   : "[demo FAIL]");
+    return ok ? 0 : 1;
+}
+#endif

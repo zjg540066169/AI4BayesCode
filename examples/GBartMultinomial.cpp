@@ -81,6 +81,12 @@
 //   r2 <- -1.0 * X[,1] + 1.5 * X[,3]              # class 2 vs ref log-odds
 //   E  <- cbind(1, exp(r1), exp(r2)); P <- E / rowSums(E)   # softmax(0,r1,r2)
 //   y  <- apply(P, 1L, function(p) sample.int(3L, 1L, prob = p)) - 1L  # 0..2
+//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(GBartMultinomial, X, as.numeric(y), 3L, 50L, seed, FALSE, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   # ---- Advanced: stateful single-chain control ----
 //   m  <- new(GBartMultinomial, X, as.numeric(y), 3L, 50L, 42L, TRUE)
 //   #          X,    y,         C,  ntrees, seed, keep_history
 //   m$step(2000); str(m$get_current())            # $r, $probs, $log_phi
@@ -93,6 +99,12 @@
 //   P  = E / E.sum(1, keepdims=True)
 //   y  = np.array([rng.choice(3, p=P[i]) for i in range(N)], float)  # 0..2
 //   Mod = AI4BayesCode.example("GBartMultinomial")
+//   # ---- Recommended: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.GBartMultinomial(X, y, 3, 50, seed, False, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GBartMultinomial(X, y, 3, 50, 42, False, True)  # X,y,C,ntrees,seed,keep_tree,keep_history
 //   m.step(2000); print(m.get_current())            # r, probs, log_phi
 // @example:end
@@ -833,9 +845,11 @@ int main() {
     double    log_phi_check = 0.0;
     for (int it = 0; it < n_keep; ++it) {
         model.step(1);
-        AI4BayesCode::state_map cur = model.get_current();
-        probs_sum += cur.at("probs");
-        log_phi_check += cur.at("log_phi")[0];
+        const auto gc = model.get_current();          // copy (avoids dangling ref)
+        const arma::vec& probs = gc.at("probs");      // key from get_current()
+        const arma::vec& log_phi = gc.at("log_phi");  // key from get_current()
+        probs_sum += probs;
+        log_phi_check += log_phi[0];
     }
     const arma::vec probs_hat = probs_sum / static_cast<double>(n_keep);
 

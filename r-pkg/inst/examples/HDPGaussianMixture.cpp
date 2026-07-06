@@ -1049,3 +1049,133 @@ PYBIND11_MODULE(HDPGaussianMixture, m) {
         .def("get_history", &HDPGaussianMixture::get_history);
 }
 #endif
+
+//==============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
+//
+//  Simulates a 2-group, 1-D Gaussian mixture with THREE shared atoms at known
+//  locations. Each group mixes the shared atoms in different proportions (atom
+//  sharing across groups is the whole point of an HDP). We fit the truncated
+//  HDP sampler, then recover the posterior-mean cluster locations of the three
+//  POPULATED atoms and check that the set of recovered locations matches the
+//  three true atom means. Recovery is label-invariant: we match each true mean
+//  to its nearest recovered populated-atom mean.
+//
+//  State is read via the full six-method contract (get_current()); the keys
+//  used here ("mu", "z") come from HDPGaussianMixture::get_current().
+//==============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+
+int main() {
+    // ---- Ground truth: 3 shared atoms, 2 groups -----------------------------
+    const std::size_t d        = 1;
+    const std::size_t G        = 2;
+    const int         K_trunc  = 8;          // truncation > 3 true atoms
+    const double      atom_mu[3]  = { -6.0, 0.0, 6.0 };
+    const double      atom_sd     = 0.6;     // tight, well-separated atoms
+
+    // Per-group mixing weights over the 3 shared atoms (rows sum to 1).
+    const double w[G][3] = {
+        { 0.60, 0.30, 0.10 },   // group 0 favours atom 0
+        { 0.10, 0.30, 0.60 }    // group 1 favours atom 2
+    };
+    const std::size_t n_per_group = 150;
+    const std::size_t N           = G * n_per_group;
+
+    std::mt19937_64 sim_rng(123);
+    std::uniform_real_distribution<double> unif(0.0, 1.0);
+    std::normal_distribution<double>       gauss(0.0, 1.0);
+
+    arma::mat  y(N, d);
+    arma::vec  group_idx(N);   // package ctor takes arma::vec (double labels)
+    std::size_t row = 0;
+    for (std::size_t g = 0; g < G; ++g) {
+        for (std::size_t i = 0; i < n_per_group; ++i) {
+            // pick a true atom from this group's weights
+            const double u = unif(sim_rng);
+            double cum = 0.0; std::size_t a = 2;
+            for (std::size_t k = 0; k < 3; ++k) {
+                cum += w[g][k];
+                if (u < cum) { a = k; break; }
+            }
+            y(row, 0)       = atom_mu[a] + atom_sd * gauss(sim_rng);
+            group_idx[row]  = static_cast<double>(g);
+            ++row;
+        }
+    }
+
+    // ---- NIW prior: weak, centred on the data mean -------------------------
+    arma::vec mu_0  = { arma::mean(y.col(0)) };
+    const double kappa_0 = 0.05;        // weak prior on the mean
+    arma::mat Psi_0 = arma::mat(1, 1, arma::fill::value(1.0));
+    const double nu_0    = 3.0;         // > d - 1
+    const double alpha   = 1.0;         // group-level concentration
+    const double gamma_0 = 1.0;         // top-level concentration
+
+    HDPGaussianMixture model(y, group_idx, K_trunc, mu_0, kappa_0, Psi_0,
+                             nu_0, alpha, gamma_0, /*rng_seed=*/7,
+                             /*keep_history=*/false);
+
+    // ---- Warmup + sampling --------------------------------------------------
+    model.step(500);   // warmup
+
+    const int  M = 1500;
+    const std::size_t T = static_cast<std::size_t>(K_trunc);
+    arma::vec mu_sum(T, arma::fill::zeros);   // sum of mu_t over draws
+    arma::vec occ_sum(T, arma::fill::zeros);  // sum of occupancy (counts) over draws
+    for (int s = 0; s < M; ++s) {
+        model.step(1);
+        const auto gc = model.get_current();          // copy (avoids dangling ref)
+        const arma::vec& mu = gc.at("mu");            // length T*d (d=1)
+        const arma::vec& z  = gc.at("z");             // length N, labels 1..T
+        for (std::size_t t = 0; t < T; ++t) mu_sum[t] += mu[t];
+        for (std::size_t i = 0; i < N; ++i) {
+            const long lab = static_cast<long>(std::llround(z[i]));
+            if (lab >= 1 && static_cast<std::size_t>(lab) <= T)
+                occ_sum[static_cast<std::size_t>(lab) - 1] += 1.0;
+        }
+    }
+    arma::vec mu_bar  = mu_sum  / static_cast<double>(M);
+    arma::vec occ_bar = occ_sum / static_cast<double>(M);   // avg #points per atom
+
+    // ---- Identify POPULATED atoms (avg occupancy > threshold) --------------
+    const double occ_thresh = 0.05 * static_cast<double>(N);  // >= 5% of data
+    std::vector<double> populated_mu;
+    for (std::size_t t = 0; t < T; ++t)
+        if (occ_bar[t] > occ_thresh) populated_mu.push_back(mu_bar[t]);
+
+    std::printf("HDPGaussianMixture demo: N=%zu, G=%zu, K_trunc=%d, "
+                "true atoms = {%.1f, %.1f, %.1f}\n",
+                N, G, K_trunc, atom_mu[0], atom_mu[1], atom_mu[2]);
+    std::printf("  populated atoms found: %zu (occupancy > %.0f pts)\n",
+                populated_mu.size(), occ_thresh);
+    for (std::size_t t = 0; t < T; ++t)
+        if (occ_bar[t] > occ_thresh)
+            std::printf("    atom %zu: mu_hat=%+.3f  (avg occ %.1f pts)\n",
+                        t, mu_bar[t], occ_bar[t]);
+
+    // ---- Label-invariant recovery check ------------------------------------
+    // Each true atom mean must have a populated recovered atom within tol.
+    const double tol = 0.6;
+    bool all_matched = true;
+    for (std::size_t a = 0; a < 3; ++a) {
+        double best = std::numeric_limits<double>::infinity();
+        for (double mh : populated_mu)
+            best = std::min(best, std::abs(mh - atom_mu[a]));
+        std::printf("  true atom %.1f -> nearest recovered err = %.3f%s\n",
+                    atom_mu[a], best, best <= tol ? "" : "  <-- MISS");
+        if (best > tol) all_matched = false;
+    }
+
+    // We expect exactly the 3 populated atoms (allow 1 spurious tiny extra,
+    // but the 3 true ones must each be matched and recovered count >= 3).
+    const bool count_ok = populated_mu.size() >= 3;
+    const bool ok = all_matched && count_ok;
+
+    std::printf("%s\n",
+                ok ? "[demo PASS] HDP recovers the 3 shared atoms across groups"
+                   : "[demo FAIL] HDP did not recover the shared atoms");
+    return ok ? 0 : 1;
+}
+#endif

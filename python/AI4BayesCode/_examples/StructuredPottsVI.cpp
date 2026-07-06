@@ -469,3 +469,158 @@ PYBIND11_MODULE(StructuredPottsVI, m) {
         .def("get_history",  &StructuredPottsVI::get_history);
 }
 #endif // AI4BAYESCODE_PYBIND_MODULE
+
+// ============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (pure C++; no Rcpp, no pybind).
+//
+//  Built ONLY when NEITHER binding macro is defined. It constructs the SAME
+//  StructuredPottsVI class above with a small discrete Potts MRF whose
+//  unnormalised log-density is
+//
+//      log p~(z) = sum_e beta_e * I[z_u = z_v] + sum_i h_i[z_i],
+//
+//  with K = 2 states per node and 6 nodes arranged as TWO triangles:
+//
+//        1---2        4---5
+//         \ /          \ /
+//          3            6            (1-based node labels)
+//
+//  Strong intra-triangle coupling (beta = 1.5) + a single weak bridge edge
+//  (3--6, beta = 0.2) + a small external field that breaks the label
+//  symmetry. The clique partition is {1,2,3} and {4,5,6} — exactly the two
+//  triangles — so the structured mean field captures all the strong coupling
+//  exactly and only mean-fields the weak bridge.
+//
+//  GROUND TRUTH is computed in main() by full enumeration of all 2^6 = 64
+//  joint states (same log-density), giving exact per-node marginals
+//  q*_i(z_i = 1). We then fit the VI class (exact-enumeration gradient mode,
+//  since 64 <= exact_state_cap) and check that the recovered per-node
+//  marginals (read via the FULL get_current() contract, key "marginals",
+//  flattened column-major) match the exact ones, and beat a naive uniform-0.5
+//  baseline.
+// ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+
+namespace {
+
+// Edge list (0-based) and per-edge coupling strengths — used ONLY by the
+// exact-enumeration ground truth below. The StructuredPottsVI class receives
+// the SAME edges 1-based.
+struct DemoEdge { std::size_t u, v; double beta; };
+
+const std::vector<DemoEdge> kEdges = {
+    {0, 1, 1.5}, {1, 2, 1.5}, {0, 2, 1.5},   // triangle A (nodes 1,2,3)
+    {3, 4, 1.5}, {4, 5, 1.5}, {3, 5, 1.5},   // triangle B (nodes 4,5,6)
+    {2, 3, 0.2},                             // weak bridge (3--6)
+};
+
+constexpr std::size_t kN = 6;
+constexpr std::size_t kK = 2;
+
+// Per-node external field h_i[k]; a mild field that breaks the global
+// label-flip symmetry so the marginals are non-trivially != 0.5.
+const double kH[kN][kK] = {
+    { 0.0,  0.6}, { 0.0,  0.4}, { 0.0,  0.2},
+    { 0.0, -0.3}, { 0.0, -0.5}, { 0.0, -0.7},
+};
+
+// Unnormalised log-density log p~(z) for exact-enumeration ground truth.
+double potts_log_density(const arma::uvec& z) {
+    double v = 0.0;
+    for (const auto& e : kEdges)
+        if (z[e.u] == z[e.v]) v += e.beta;
+    for (std::size_t i = 0; i < kN; ++i)
+        v += kH[i][z[i]];
+    return v;
+}
+
+}  // namespace
+
+int main() {
+    // ---- 1. EXACT per-node marginals by full enumeration of 2^6 states ----
+    arma::vec exact_marg1(kN, arma::fill::zeros);   // q*_i(z_i = 1)
+    double    Z = 0.0;
+    arma::uvec z(kN);
+    const std::size_t total = static_cast<std::size_t>(1) << kN;  // 2^6
+    for (std::size_t s = 0; s < total; ++s) {
+        for (std::size_t i = 0; i < kN; ++i)
+            z[i] = (s >> i) & 1u;
+        const double w = std::exp(potts_log_density(z));
+        Z += w;
+        for (std::size_t i = 0; i < kN; ++i)
+            if (z[i] == 1u) exact_marg1[i] += w;
+    }
+    exact_marg1 /= Z;
+
+    // ---- 2. Build the SAME StructuredPottsVI class the frontends use ------
+    // edges as (n_edges × 2) 1-based matrix; edge strengths; h; cliques.
+    arma::mat edges_mat(kEdges.size(), 2);
+    arma::vec edge_strengths(kEdges.size());
+    for (std::size_t e = 0; e < kEdges.size(); ++e) {
+        edges_mat(e, 0) = static_cast<double>(kEdges[e].u) + 1.0; // 1-based
+        edges_mat(e, 1) = static_cast<double>(kEdges[e].v) + 1.0;
+        edge_strengths[e] = kEdges[e].beta;
+    }
+    arma::mat h_mat(kN, kK);
+    for (std::size_t i = 0; i < kN; ++i)
+        for (std::size_t k = 0; k < kK; ++k)
+            h_mat(i, k) = kH[i][k];
+
+    std::vector<std::vector<int>> cliques = { {1, 2, 3}, {4, 5, 6} };  // 1-based
+
+    StructuredPottsVI model(
+        static_cast<int>(kN), static_cast<int>(kK),
+        edges_mat, edge_strengths, h_mat, cliques,
+        /*exact_enumeration=*/true, /*rng_seed=*/7, /*keep_history=*/false);
+
+    // ---- 3. Run VI to convergence (block self-terminates) -----------------
+    model.step(20000);
+
+    // ---- 4. Recover per-node VI marginals via the FULL contract -----------
+    const auto gc = model.get_current();
+    const arma::vec& marg_flat = gc.at("marginals");   // column-major (n × K)
+    const arma::vec& elbo_v    = gc.at("elbo");
+    const arma::vec& conv_v    = gc.at("converged");
+    const arma::vec& epoch_v   = gc.at("epoch");
+    // Column-major (n × K): q(z_i = 1) is column index 1 → offset kN + i.
+    arma::vec vi_marg1(kN);
+    for (std::size_t i = 0; i < kN; ++i)
+        vi_marg1[i] = marg_flat[kN + i];
+
+    const bool converged = (conv_v[0] != 0.0);
+
+    // ---- 5. Compare to exact truth + naive uniform baseline ---------------
+    double max_abs_err_vi = 0.0;
+    double max_abs_err_naive = 0.0;
+    for (std::size_t i = 0; i < kN; ++i) {
+        max_abs_err_vi    = std::max(max_abs_err_vi,
+                                     std::abs(vi_marg1[i] - exact_marg1[i]));
+        max_abs_err_naive = std::max(max_abs_err_naive,
+                                     std::abs(0.5 - exact_marg1[i]));
+    }
+
+    std::printf("StructuredPottsVI demo  (2 triangles, K=2, exact-grad VI)\n");
+    std::printf("  converged=%s, epoch=%d, ELBO=%.4f\n",
+                converged ? "yes" : "no",
+                static_cast<int>(epoch_v[0]), elbo_v[0]);
+    std::printf("  node   exact q(z=1)   VI q(z=1)   |err|\n");
+    for (std::size_t i = 0; i < kN; ++i)
+        std::printf("   %2zu     %8.4f     %8.4f   %7.4f\n",
+                    i, exact_marg1[i], vi_marg1[i],
+                    std::abs(vi_marg1[i] - exact_marg1[i]));
+    std::printf("  max |err|: VI=%.4f   naive-uniform=%.4f\n",
+                max_abs_err_vi, max_abs_err_naive);
+
+    // VI on the true cliques should track the exact marginals tightly (the
+    // only approximation is the single weak bridge edge), and must clearly
+    // beat the naive 0.5 baseline.
+    const bool ok = converged
+                 && max_abs_err_vi < 0.03
+                 && max_abs_err_vi < 0.5 * max_abs_err_naive;
+    std::printf("%s\n", ok
+        ? "[demo PASS] structured VI recovers Potts marginals (beats naive)"
+        : "[demo FAIL] VI marginals did not match exact within tolerance");
+    return ok ? 0 : 1;
+}
+#endif  // standalone demo

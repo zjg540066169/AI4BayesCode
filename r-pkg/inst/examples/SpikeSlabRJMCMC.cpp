@@ -1019,6 +1019,139 @@ RCPP_MODULE(SpikeSlabRJMCMC_module) {
 }
 #endif
 
+// ============================================================================
+//  Standalone FRONTEND-INDEPENDENT demo (pure C++; active only when neither
+//  the Rcpp nor the pybind module macro is defined). Simulates a sparse
+//  linear-regression spike-and-slab problem from KNOWN truth (only a few
+//  predictors active), fits via the four-block sampler, then checks:
+//    (1) variable selection: posterior inclusion prob (PIP) high on true
+//        actives, low on true nulls;
+//    (2) coefficient recovery on actives;
+//    (3) sigma recovery;
+//    (4) beats a naive OLS baseline at zeroing out true nulls.
+//  State is read through the FULL contract get_current() (keys: gamma, beta,
+//  sigma, tau, pi). PASS is derived from the computed comparisons.
+// ============================================================================
+#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
+#include <cstdio>
+int main() {
+    // -------- Known truth: p predictors, only a few active --------------
+    const std::size_t N = 300;
+    const std::size_t p = 8;
+    const double      sigma_true = 1.0;
+
+    // True coefficients: actives {0, 3, 6}, the rest exactly zero.
+    arma::vec beta_true(p, arma::fill::zeros);
+    beta_true[0] =  2.5;
+    beta_true[3] = -1.8;
+    beta_true[6] =  1.2;
+    std::vector<bool> active_true(p, false);
+    active_true[0] = active_true[3] = active_true[6] = true;
+    std::size_t k_true = 3;
+
+    // -------- Simulate standardized design + Gaussian noise -------------
+    std::mt19937_64 sim_rng(20260621u);
+    std::normal_distribution<double> gen_x(0.0, 1.0);
+    std::normal_distribution<double> gen_e(0.0, sigma_true);
+
+    arma::mat X(N, p);
+    for (std::size_t i = 0; i < N; ++i)
+        for (std::size_t j = 0; j < p; ++j)
+            X(i, j) = gen_x(sim_rng);
+    // Center each column (model expects centered X; spike-slab has no
+    // intercept).
+    for (std::size_t j = 0; j < p; ++j)
+        X.col(j) -= arma::mean(X.col(j));
+
+    arma::vec y(N);
+    for (std::size_t i = 0; i < N; ++i) {
+        double xb = 0.0;
+        for (std::size_t j = 0; j < p; ++j) xb += X(i, j) * beta_true[j];
+        y[i] = xb + gen_e(sim_rng);
+    }
+    y -= arma::mean(y);   // center y as well
+
+    // -------- Fit: Beta(1, 1) prior on inclusion probability ------------
+    SpikeSlabRJMCMC model(X, y, /*a_pi=*/1.0, /*b_pi=*/1.0,
+                          /*rng_seed=*/7, /*keep_history=*/false);
+
+    model.step(1500);   // warmup
+
+    const int    M = 4000;
+    arma::vec    pip(p, arma::fill::zeros);   // posterior inclusion prob
+    arma::vec    beta_sum(p, arma::fill::zeros);
+    double       sigma_sum = 0.0;
+    for (int s = 0; s < M; ++s) {
+        model.step(1);
+        const auto gc = model.get_current();          // copy (avoids dangling ref)
+        const arma::vec& g = gc.at("gamma");
+        const arma::vec& b = gc.at("beta");
+        for (std::size_t j = 0; j < p; ++j) {
+            if (g[j] > 0.5) pip[j] += 1.0;
+            beta_sum[j] += b[j];
+        }
+        sigma_sum += gc.at("sigma")[0];
+    }
+    pip      /= static_cast<double>(M);
+    beta_sum /= static_cast<double>(M);
+    const double sigma_hat = sigma_sum / static_cast<double>(M);
+
+    // -------- Report --------------------------------------------------
+    std::printf("SpikeSlabRJMCMC demo  (N=%zu, p=%zu, true actives={0,3,6})\n",
+                N, p);
+    std::printf("  j  truth_active  beta_true  PIP     beta_postmean\n");
+    for (std::size_t j = 0; j < p; ++j) {
+        std::printf("  %zu      %d        %+6.2f    %.3f   %+7.3f\n",
+                    j, active_true[j] ? 1 : 0, beta_true[j],
+                    pip[j], beta_sum[j]);
+    }
+    std::printf("  sigma_hat=%.3f (truth %.2f)\n", sigma_hat, sigma_true);
+
+    // -------- Derive PASS from computed comparisons -------------------
+    // (a) every TRUE active selected with high PIP;
+    // (b) every TRUE null mostly excluded (low PIP);
+    // (c) coefficient recovery on actives within tolerance;
+    // (d) sigma recovered.
+    bool sel_ok = true;
+    for (std::size_t j = 0; j < p; ++j) {
+        if (active_true[j] && pip[j] < 0.80) sel_ok = false;   // miss
+        if (!active_true[j] && pip[j] > 0.50) sel_ok = false;  // false sel
+    }
+    double max_beta_err = 0.0;
+    for (std::size_t j = 0; j < p; ++j)
+        if (active_true[j])
+            max_beta_err = std::max(max_beta_err,
+                                    std::abs(beta_sum[j] - beta_true[j]));
+    const bool beta_ok  = max_beta_err < 0.35;
+    const bool sigma_ok = std::abs(sigma_hat - sigma_true) < 0.25;
+
+    // Compare against a NAIVE baseline (full OLS, no selection): does the
+    // spike-and-slab actually zero-out the true nulls that OLS would not?
+    arma::vec beta_ols = arma::solve(X.t() * X, X.t() * y);
+    double naive_null_mass = 0.0, ss_null_mass = 0.0;
+    for (std::size_t j = 0; j < p; ++j)
+        if (!active_true[j]) {
+            naive_null_mass += std::abs(beta_ols[j]);
+            ss_null_mass    += std::abs(beta_sum[j]);
+        }
+    std::printf("  null-set |coef| mass: OLS=%.3f  spike-slab=%.3f "
+                "(spike-slab should be smaller)\n",
+                naive_null_mass, ss_null_mass);
+    const bool beats_naive = ss_null_mass < naive_null_mass;
+
+    const bool ok = sel_ok && beta_ok && sigma_ok && beats_naive;
+    std::printf("  selection_ok=%d  beta_ok=%d (max_err=%.3f)  "
+                "sigma_ok=%d  beats_naive=%d\n",
+                (int)sel_ok, (int)beta_ok, max_beta_err,
+                (int)sigma_ok, (int)beats_naive);
+    std::printf("%s\n", ok ? "[demo PASS] spike-and-slab RJMCMC recovers "
+                             "the sparse support + coefficients"
+                           : "[demo FAIL]");
+    (void)k_true;
+    return ok ? 0 : 1;
+}
+#endif
+
 #ifdef AI4BAYESCODE_PYBIND_MODULE
 #include "AI4BayesCode/pybind_casters.hpp"
 PYBIND11_MODULE(SpikeSlabRJMCMC, m) {
