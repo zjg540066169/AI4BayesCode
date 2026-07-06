@@ -1,13 +1,13 @@
 ---
 name: AI4BayesCode-label-switching
 description: |
-  Reference guide for handling label switching in sim1 cross-implementation
-  comparison scripts. Covers detection, the simple-sort shortcut, the full
+  Reference guide for handling label switching in exchangeable-component
+  models (mixtures, HMMs, LDA, DP/BNP clusters). Covers detection, the simple-sort shortcut, the full
   Stephens 2000 pipeline, model-family-specific allocation probability
   formulas, Hungarian truth matching, and fallback strategies.
 ---
 
-# Label Switching — sim1 reference
+# Label Switching
 
 ## 1. What it is and when it matters
 

@@ -2148,7 +2148,15 @@ if (ess_ratio < 0.01) {
 If R-hat stays >= 1.05 even at the 20k+20k extended budget, the likely
 cause is a Semantic bug (parameterization, parallel/sequential,
 Jacobian, dead param) — return to Layer 2 and re-audit before trusting
-the posterior.
+the posterior — but if the model has exchangeable components, first rule
+out label switching (R2.L).
+
+### R2.L. Label switching
+
+If the model has exchangeable component labels (mixtures, HMM states, LDA
+topics, DP/BNP clusters, factor-sign flips), a high raw per-component R-hat
+can be benign label switching, not a convergence failure — diagnose and
+resolve per `label_switching.md` before treating it as an R2 failure.
 
 ### R2.s. Conditional-relevance R-hat exclusion (Dirac spike-and-slab — slab DISTRIBUTION parameters)
 
