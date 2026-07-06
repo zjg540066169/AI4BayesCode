@@ -148,10 +148,13 @@ phase loads exactly ONE `block_design_skills/<phase>.md` module on entry.
  SKILL / (c) Other`. It is RECOMMENDED (cheapest end-to-end check + what a future registry
  submission needs), but the user may decline. **Load `example.md` ONLY on "yes"; on "no" skip
  straight to SKILL** (do not load the module — save the tokens). When it runs: ONE
- **FRONTEND-INDEPENDENT** C++ example `examples/<Model>.cpp` driving the block end-to-end via an
- `int main()` (simulate → fit → recover); **NO R / Python binding** (no `RCPP_MODULE`, no
- `PYBIND11_MODULE`, no `rcpp_wrap.hpp`, no Rcpp/pybind types; C++ libs like Eigen / Armadillo are
- fine). It is both the human-readable demo AND a smoke target.
+ **TRI-MODULE** C++ example `examples/<Model>.cpp` (same shape as core, e.g.
+ `GaussianLocationScale.cpp`): a fenced `int main()` (simulate → fit → recover) + a `RCPP_MODULE`
+ block + a `PYBIND11_MODULE` block + BOTH `@example:R` and `@example:python`. A contributed block
+ ships usable from R AND Python, so both bindings + both (TESTED) `@example` are always emitted —
+ NO backend question here (unlike codegen). The `int main()` is both the human-readable demo AND the
+ C++ smoke target (the module blocks are inert without their macro, so the standalone compile is
+ unchanged).
 
 5. **SKILL** — `block_design_skills/skill.md`
  The block-local skill `skills/<Block>.md` (routing row / when-to-use /
@@ -317,7 +320,7 @@ it `Depends:` on). That is WHY vendored code goes in the block's own folder, not
  manifest.dcf # routing + metadata (DCF / DESCRIPTION-style)
  skills/<Block>.md # block-local skill (cites core, never restates)
  skills/<Block>_validation.md # OPTIONAL — the BL# checks (only if any; manifest ValidationSkill:)
- examples/<Model>.cpp # OPTIONAL frontend-independent C++ demo (ask first; int main; no Rcpp/pybind)
+ examples/<Model>.cpp # OPTIONAL tri-module demo (ask first; int main + RCPP_MODULE + PYBIND11_MODULE + both tested @example)
  vendor/<lib>/ # OPTIONAL pinned third-party source + its LICENSE — travels WITH the bundle
 ```
 
@@ -339,7 +342,7 @@ path (`contrib.md`).
 | `intake.md` | INTAKE: math spec · naming-uniqueness gate · `SelectWhen` · advisory novelty/benchmark · geometry classification + correctness gate |
 | `design.md` | DESIGN: algorithm spec (Gibbs/NUTS/slice-ESS/VI) · constraint mapping · three-tier interface impl |
 | `validate.md` | VALIDATE: library test scaffold · validator-check map (#1–#25) · compile+test on "go" (mandatory T0–T4 + Check #12 AD-twin) · cross-chain R-hat < 1.01 fixed · heavy audit = submission-path extra |
-| `example.md` | EXAMPLE: **offered (ask first; default yes, skippable)** — ONE **frontend-independent** C++ demo `examples/<Model>.cpp` (`int main`, no Rcpp/pybind; cheapest end-to-end check + needed for registry submission) |
+| `example.md` | EXAMPLE: **offered (ask first; default yes, skippable)** — ONE **tri-module** demo `examples/<Model>.cpp` (`int main` + `RCPP_MODULE` + `PYBIND11_MODULE` + both TESTED `@example`; source-able in R AND Python; cheapest end-to-end check + needed for registry submission) |
 | `skill.md` | SKILL: block-local `skills/<Block>.md` (cites core) + `manifest.dcf` (13 fields) · §5b doc-consistency · §5c FINAL GPL-3 license check |
 | `vendor.md` | VENDOR sub-skill (loaded ONLY if the block vendors a kernel): STATEFUL adaptation of the borrowed code — isolate global/`static` state, thread the block's `rng`, rebuild caches on `set_context` · minimal-diff staging + `PATCHES.md` · upstream license kept verbatim |
 | `contrib.md` | REFERENCE: tiers (core/local/[FUTURE] downloaded) · CRAN-flat naming · manifest schema · FUTURE submission/registry gate |
