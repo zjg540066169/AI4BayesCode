@@ -2,7 +2,7 @@
 //  GBartPoisson.cpp
 //
 //  Copyright (C) 2026 AI4BayesCode.
-//  Licensed under GPL-2.0-or-later (inherits from genbart_block.hpp)
+//  Licensed under GPL-3.0-or-later (uses genbart_block.hpp, which is GPL-2.0-or-later)
 //
 //  REFERENCE TEMPLATE for the AI4BayesCode skill -- genbart_block variant
 //  with the shipped `genbart::lik::poisson_lik`. Generated samplers that

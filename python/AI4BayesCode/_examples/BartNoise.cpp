@@ -2,7 +2,7 @@
 //  BartNoise.cpp
 //
 //  Copyright (C) 2026 AI4BayesCode.
-//  Licensed under GPL-2.0-or-later (inherits from bart_block.hpp)
+//  Licensed under GPL-3.0-or-later (uses bart_block.hpp, which is GPL-2.0-or-later)
 //
 //  REFERENCE TEMPLATE for the AI4BayesCode skill -- bart_block variant.
 //  Generated samplers that involve a BART mean component should follow the

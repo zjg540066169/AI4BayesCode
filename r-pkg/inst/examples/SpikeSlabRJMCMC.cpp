@@ -1,6 +1,6 @@
 // Copyright (C) 2026 AI4BayesCode.
-// Licensed under the GNU General Public License v2.0 or later
-// (GPL-2.0-or-later). See COPYING / LICENSE at the repo root.
+// Licensed under the GNU General Public License v3.0 or later
+// (GPL-3.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
 //  SpikeSlabRJMCMC.cpp -- Dirac spike-and-slab variable selection via
 //                         rjmcmc_block v0, following AI4BayesCode's "NUTS by

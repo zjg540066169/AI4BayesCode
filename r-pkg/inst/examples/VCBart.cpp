@@ -2,7 +2,7 @@
 //  VCBart.cpp
 //
 //  Copyright (C) 2026 AI4BayesCode.
-//  Licensed under GPL-2.0-or-later (inherits from bart_block.hpp)
+//  Licensed under GPL-3.0-or-later (uses bart_block.hpp, which is GPL-2.0-or-later)
 //
 //  REFERENCE TEMPLATE for the AI4BayesCode skill -- VARYING-COEFFICIENT BART
 //  (VC-BART, Deshpande et al.) built entirely from `bart_block` via BACKFITTING.

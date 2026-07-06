@@ -2,7 +2,7 @@
 //  SoftBartNoise.cpp
 //
 //  Copyright (C) 2026 AI4BayesCode.
-//  Licensed under GPL-2.0-or-later (inherits from softbart_block.hpp)
+//  Licensed under GPL-3.0-or-later (uses softbart_block.hpp, which is GPL-2.0-or-later)
 //
 //  REFERENCE EXAMPLE for the AI4BayesCode skill -- softbart_block variant.
 //
