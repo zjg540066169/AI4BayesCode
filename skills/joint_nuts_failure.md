@@ -189,16 +189,3 @@ when a `joint_nuts_block` is present:
 
 A Mode-1 match with a centered cpp is a **FAIL_24(a)**: the fix is this skill's
 NCR recipe.
-
----
-
-## v1.2 deferred modes (documented for forward reference, not yet shipped)
-
-- **Mode 4 — Mixed-scale posteriors**: parameter scales spanning orders of
-  magnitude; the single mass matrix can't adapt to both. Fix: per-parameter
-  rescaling, or fall back to per-param nuts_block (Mode-3 escalation).
-- **Mode 5 — Constraint-boundary hits**: a positive parameter hugging 0;
-  divergences at the boundary. Fix: tighter / offset prior.
-- **Mode 6 — Weak identification / plateau**: high autocorrelation, posterior
-  ≈ prior on some parameter. Fix: tighten the prior, or report
-  "non-identifiable" in the model card.
