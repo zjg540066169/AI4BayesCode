@@ -164,23 +164,34 @@ Printing the block and continuing is NOT the gate; you MUST fire the structured 
 model right.) Prior *completion* (filling `(prior: to be chosen)`) and the full-spec sign-off come
 later, at Sec.2 and Sec.3. **Once the model is confirmed**, ask the upfront questions:
 
-1. **Runtime backend.** Which host language will call the sampler? **The
-   generated `.cpp` is ALWAYS the same tri-module file regardless of this
-   answer** -- it carries BOTH an `#ifdef AI4BAYESCODE_RCPP_MODULE` block AND an
-   `#ifdef AI4BAYESCODE_PYBIND_MODULE` block AND a fenced standalone `int main()`.
-   So the same file can be `source`-d in R (`ai4bayescode_source`, sets
-   `-DAI4BAYESCODE_RCPP_MODULE`), in Python (`AI4BayesCode.source`, sets
-   `-DAI4BAYESCODE_PYBIND_MODULE`), or compiled as a plain binary -- a user who
-   generates in R can hand the identical `.cpp` to Python and run it there. The
-   backend choice ONLY decides which **runner** file(s) get written:
-   - **R** (default) -- write the `.R` runner (`ai4bayescode_run_chains` +
-     `ai4bayescode_diagnose`).
-   - **Python** -- write the `.py` runner (`AI4BayesCode.run_chains` +
-     `AI4BayesCode.diagnose`). Requires `pybind11>=2.11` + Python >= 3.11.
-   - **Both R + Python** -- write both runners.
-   The standalone `int main()` is always present, so running the `.cpp` as a
-   plain C++ binary is available in every case. **Never gate the `.cpp` binding
-   blocks on this choice -- always emit both**, per `codegen_cpp.md`
+1. **Which language's usage example?** Write this question for a BEGINNER --
+   do NOT use the words "host language", "runner", "tri-module", "backend", or
+   "#ifdef" in what the user sees. The key thing to REASSURE them: the generated
+   sampler ALWAYS works from R, Python, AND C++ -- they lose nothing by their
+   answer. This choice ONLY decides which language a ready-to-run **usage
+   example** is written in (a short script that simulates data, runs the sampler,
+   and shows the diagnostics). Phrase it plainly, e.g.:
+
+   > Your sampler will run from R, Python, and C++ either way. Which language
+   > would you like the ready-to-run example written in?
+   > - R (default) -- a short .R script that runs the sampler and shows diagnostics.
+   > - Python -- the same as a .py script (needs Python >= 3.11 and pybind11 >= 2.11).
+   > - Both R and Python -- an example in each.
+   > - C++ only -- just the .cpp file and its built-in demo; no R or Python script.
+
+   (Emit it as `AskUserQuestion` per Sec.0; keep the option descriptions in this
+   plain, jargon-free style -- not `ai4bayescode_run_chains` / `sourceCpp`.)
+
+   TECHNICAL (agent-only -- do NOT surface any of this to the user): the answer
+   picks which runner file(s) get written -- R (`ai4bayescode_run_chains` +
+   `ai4bayescode_diagnose`), Python (`AI4BayesCode.run_chains` +
+   `AI4BayesCode.diagnose`), or both. The `.cpp` is ALWAYS the same file
+   regardless: it carries BOTH `#ifdef AI4BAYESCODE_RCPP_MODULE` and
+   `#ifdef AI4BAYESCODE_PYBIND_MODULE` blocks AND a fenced standalone `int main()`,
+   so it source-compiles in R (`ai4bayescode_source`), Python
+   (`AI4BayesCode.source`), or as a plain binary -- a user who generates in R can
+   hand the identical `.cpp` to Python and run it there. **Never gate the `.cpp`
+   binding blocks on this choice -- always emit both**, per `codegen_cpp.md`
    Sec."C++ standalone demo first". See the shipped examples for the pattern.
 2. **Class name.** CamelCase, e.g. `HierarchicalNormal`. **Ask this BEFORE the output folder** --
    the folder default derives from it (`./generated/<ClassName>/`), so asking the folder first

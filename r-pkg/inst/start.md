@@ -481,11 +481,12 @@ You should now:
    when using the markdown fallback (no structured-question tool):
 
    ```
-   Runtime backend?
-   (a) R (default)
-   (b) Python
-   (c) C++ standalone
-   (d) Both R + Python (dual-module)
+   Which language for the ready-to-run example?
+   (your sampler runs from R, Python, and C++ either way -- this only picks the example)
+   (a) R (default) -- a short .R script that runs + diagnoses the sampler
+   (b) Python -- the same as a .py script
+   (c) Both R and Python
+   (d) C++ only -- just the .cpp and its built-in demo
    (e) Other / custom
 
    Output folder?
