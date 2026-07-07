@@ -240,6 +240,12 @@ test_partition_mcmc_rhat: test_partition_mcmc_rhat.cpp $(AI4BAYESCODE_ORDER_MCMC
 test_order_mcmc_block_partition: test_order_mcmc_block_partition.cpp $(AI4BAYESCODE_ORDER_MCMC_HEADERS)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 
+# Data + AI-sample generator for the BiDAG partition cross-check (run the R
+# script audit_PartitionMCMCBN_vs_BiDAG.R on its output). Not a self-checking
+# unit test, so it is NOT in TARGETS / the run panel.
+partition_crosscheck_gen: partition_crosscheck_gen.cpp $(AI4BAYESCODE_ORDER_MCMC_HEADERS)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
+
 # VI-family headers (Phase 2 / 3 / 4 of the VI track)
 AI4BAYESCODE_VI_HEADERS := \
   $(INC_DIR)/AI4BayesCode/vi_block.hpp \

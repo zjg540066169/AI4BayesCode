@@ -95,11 +95,13 @@ arma::imat sim_discrete(std::size_t N, std::size_t n, unsigned seed) {
 }
 
 // Returns the max abs deviation between empirical and exact DAG posterior.
-double run_case(std::size_t n, std::size_t n_samples, unsigned seed) {
+double run_case(std::size_t n, std::size_t n_samples, unsigned seed,
+                arma::mat edge_lp = arma::mat()) {
     bde_scorer_config bcfg;
     bcfg.data = sim_discrete(50, n, 4000u + static_cast<unsigned>(n));
     bcfg.cardinalities = arma::uvec(n); bcfg.cardinalities.fill(2u);
     bcfg.alpha = 1.0; bcfg.use_structure_prior = false;
+    bcfg.edge_log_prior = edge_lp;    // per-edge structural prior (empty = none)
     bde_scorer scorer(bcfg);
 
     score_cache_config sc;
@@ -254,6 +256,14 @@ int main() {
           "P2-BGe n=4: partition sampler unbiased with the BGe (continuous) score");
     check(run_case(5, 2000000, 55u) < 0.010,
           "P3 n=5 (29281 DAGs): partition sampler unbiased at n=5 (BDe)");
+    {   // edge-specific prior: unbiasedness must still hold WITH a per-edge prior
+        // (the exact posterior in run_case includes it via family_score).
+        arma::mat elp(4, 4, arma::fill::zeros);
+        elp(1, 0) =  2.0;   // strongly favour edge 0 -> 1
+        elp(2, 1) = -1.5;   // disfavour edge 1 -> 2
+        check(run_case(4, 800000, 66u, elp) < 0.010,
+              "P-edge n=4: partition unbiased WITH a per-edge structural prior");
+    }
     std::printf("\n====== Summary: %d PASS / %d FAIL ======\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

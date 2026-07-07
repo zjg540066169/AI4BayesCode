@@ -103,6 +103,15 @@ struct bde_scorer_config {
     /// order_mcmc_block). Used only for early-rejection guards;
     /// family_score itself respects any |U| up to 64.
     std::size_t max_parents = 5;
+
+    /// Edge-specific structural prior: an n x n matrix of per-edge log-prior
+    /// weights. When node j is a parent of node i (edge j -> i), the amount
+    /// edge_log_prior(i, j) is ADDED to the family score of i. This lets a user
+    /// up/down-weight individual edges (expert knowledge), on top of / instead
+    /// of the FK per-family prior. Empty (default) = no per-edge prior. Because
+    /// the term is per-family it composes with order AND partition MCMC and does
+    /// not change the exact-posterior structure of the score.
+    arma::mat edge_log_prior;
 };
 
 /**
@@ -147,6 +156,11 @@ public:
         if (!(cfg_.alpha > 0.0)) {
             throw std::invalid_argument(
                 "bde_scorer: alpha must be > 0");
+        }
+        if (!cfg_.edge_log_prior.is_empty() &&
+            (cfg_.edge_log_prior.n_rows != n_ || cfg_.edge_log_prior.n_cols != n_)) {
+            throw std::invalid_argument(
+                "bde_scorer: edge_log_prior must be empty or n x n");
         }
         // Validate data range.
         for (std::size_t i = 0; i < N_; ++i) {
@@ -258,6 +272,10 @@ public:
         // Structure prior (FK Eq. 2): log rho(U) = -log C(n-1, |U|).
         if (cfg_.use_structure_prior) {
             score -= log_binom_[parents.size()];
+        }
+        // Edge-specific structural prior: per-edge log-weight for each edge j->i.
+        if (!cfg_.edge_log_prior.is_empty()) {
+            for (std::size_t j : parents) score += cfg_.edge_log_prior(i, j);
         }
 
         return score;

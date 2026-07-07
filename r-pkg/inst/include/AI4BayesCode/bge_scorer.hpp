@@ -91,6 +91,11 @@ struct bge_scorer_config {
     /// induced DAG prior penalises high fan-in. Same hook/semantics as
     /// bde_scorer. Default false (uniform DAG prior).
     bool use_structure_prior = false;
+
+    /// Edge-specific structural prior: n x n matrix of per-edge log-prior
+    /// weights; edge_log_prior(i, j) is added to node i's family score when j is
+    /// a parent of i. Same semantics as bde_scorer. Empty (default) = none.
+    arma::mat edge_log_prior;
 };
 
 /**
@@ -134,6 +139,10 @@ public:
                 "bge_scorer: mu0 length must equal number of variables");
         if (!(cfg_.edgepf > 0.0))
             throw std::invalid_argument("bge_scorer: edgepf must be > 0");
+        if (!cfg_.edge_log_prior.is_empty() &&
+            (cfg_.edge_log_prior.n_rows != n_ || cfg_.edge_log_prior.n_cols != n_))
+            throw std::invalid_argument(
+                "bge_scorer: edge_log_prior must be empty or n x n");
 
         // ---- posterior scatter T_N = T0 + S_N + mean-shift ----
         const double Nd = static_cast<double>(N_);
@@ -220,6 +229,8 @@ public:
 
         if (cfg_.use_structure_prior && n_ > 1)
             score -= log_binom_[p];          // FK Eq 2: 1 / C(n-1, |Pa|)
+        if (!cfg_.edge_log_prior.is_empty())
+            for (arma::uword j : pa) score += cfg_.edge_log_prior(i, j);
 
         return score;
     }

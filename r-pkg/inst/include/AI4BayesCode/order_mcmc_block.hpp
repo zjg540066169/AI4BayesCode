@@ -181,6 +181,28 @@
  *      and 4 matched chains: BOTH implementations achieve R-hat <
  *      1.01 (ours 1.00073, BiDAG 1.00000). Outcome (A): our code
  *      converges to the same target as the reference.
+ *  - Check #15 (v1.2.1 partition MCMC + BGe panels):
+ *      * tests/test_bge_scorer.cpp — BGe (continuous) local-score parity:
+ *        likelihood-equivalence EXACT (X->Y == Y->X), 3-node Markov class,
+ *        parent-order invariance, structure-prior hook, df/am validation.
+ *      * tests/test_partition_geometry.cpp — partition-score geometry
+ *        (Kuipers-Moffa Eq. 3) vs outpoint-peel + disjoint cover: exact to
+ *        ~1e-14 at n = 3/4/5 (25/543/29281 DAGs).
+ *      * tests/test_partition_mcmc_diagnostics.cpp — UNBIASEDNESS by exact
+ *        enumeration: empirical DAG frequencies == P(G|D) at n = 3/4/5 for
+ *        BDeu AND BGe, and WITH a per-edge structural prior; HARD < 0.01
+ *        (achieves ~0.001). The sharp check the equivalence-class
+ *        edge-direction R-hat cannot provide.
+ *      * tests/test_partition_mcmc_rhat.cpp — two-chain Gelman-Rubin R-hat
+ *        from over-dispersed inits (n = 6): log-score, skeleton, AND
+ *        directed-edge R-hat all < 1.01 (the Sec.5 edge-reversal move mixes
+ *        edge directions).
+ *      * tests/test_order_mcmc_block_partition.cpp — block API in
+ *        method=partition over BDeu + BGe (named outputs, structure recovery).
+ *  - Check #15 (partition reference cross-check):
+ *      see tests/audit_PartitionMCMCBN_vs_BiDAG.R — head-to-head with
+ *      BiDAG::partitionMCMC on identical synthetic data; cross-impl R-hat on
+ *      the BDeu log-marginal-likelihood scalar (both target P(G|D)).
  *  - Check #16 (inline JUSTIFICATION at every wrapper call site):
  *      see examples/OrderMCMCBN.cpp ~line 43.
  *  - Check #17: only std::uniform_real_distribution and
@@ -200,6 +222,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <random>
 #include <stdexcept>
@@ -278,6 +301,13 @@ struct order_mcmc_block_config {
     /// degrees of freedom (0 = the default n + am + 1; must be > n + 1).
     double bge_am = 1.0;
     double bge_aw = 0.0;
+
+    /// Edge-specific structural prior: an n x n matrix of per-edge log-prior
+    /// weights forwarded to whichever scorer is used. edge_log_prior(i, j) is
+    /// added to node i's family score when j is a parent of i (edge j -> i),
+    /// letting a user up/down-weight individual edges. Composes with either
+    /// method and with use_structure_prior. Empty (default) = no per-edge prior.
+    arma::mat edge_log_prior;
 };
 
 /**
@@ -327,12 +357,25 @@ public:
         sc.candidate_top_C = cfg_.candidate_top_C;
         sc.family_top_F = cfg_.family_cache_F;
         sc.gamma_prune_nats = cfg_.gamma_prune_nats;
+        if (cfg_.method == order_mcmc_block_config::method_t::partition) {
+            // Partition MCMC needs the FULL family set. Its ">= 1 parent in the
+            // adjacent partition element" constraint can be STARVED by the FK
+            // top-C / top-F / gamma-pruning heuristic (which is safe for order
+            // MCMC where any predecessor subset is permissible): if every cached
+            // family carrying a required parent is pruned, that node's partition
+            // score is a spurious -inf. So use the exact, unpruned cache in
+            // partition mode (this bounds partition mode to roughly n <= 20).
+            sc.candidate_top_C  = (n_ > 1) ? (n_ - 1) : 1;
+            sc.family_top_F     = std::numeric_limits<std::size_t>::max();
+            sc.gamma_prune_nats = std::numeric_limits<double>::infinity();
+        }
         if (use_bge) {
             bge_scorer_config gcfg;
             gcfg.data = cfg_.continuous_data;
             gcfg.am = cfg_.bge_am;
             gcfg.aw = cfg_.bge_aw;
             gcfg.use_structure_prior = cfg_.use_structure_prior;
+            gcfg.edge_log_prior = cfg_.edge_log_prior;
             cache_ = std::make_unique<score_cache>(
                 std::make_unique<bge_scorer>(std::move(gcfg)), sc);
         } else {
@@ -342,6 +385,7 @@ public:
             bcfg.alpha = cfg_.bdeu_alpha;
             bcfg.use_structure_prior = cfg_.use_structure_prior;
             bcfg.max_parents = cfg_.max_parents;
+            bcfg.edge_log_prior = cfg_.edge_log_prior;
             cache_ = std::make_unique<score_cache>(
                 std::make_unique<bde_scorer>(std::move(bcfg)), sc);
         }
