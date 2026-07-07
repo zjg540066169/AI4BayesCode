@@ -172,8 +172,8 @@ later, at Sec.2 and Sec.3. **Once the model is confirmed**, ask the upfront ques
    example** is written in (a short script that simulates data, runs the sampler,
    and shows the diagnostics). Phrase it plainly, e.g.:
 
-   > Your sampler will run from R, Python, and C++ either way. Which language
-   > would you like the ready-to-run example written in?
+   > Your sampler will be able to run from R, Python, and C++ either way. Which
+   > language would you like the ready-to-run example written in?
    > - R (default) -- a short .R script that runs the sampler and shows diagnostics.
    > - Python -- the same as a .py script (needs Python >= 3.11 and pybind11 >= 2.11).
    > - Both R and Python -- an example in each.
