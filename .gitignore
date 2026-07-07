@@ -20,6 +20,7 @@ venv/
 .RData
 .Ruserdata
 *.Rproj
+Rplots.pdf
 r-pkg/src/*.o
 r-pkg/src/*.so
 r-pkg/src/*.dll
@@ -40,7 +41,13 @@ PROMPT.txt
 *_BACKUP_*
 *_DRAFT.md
 _archive/
-"* 2.md"
+# macOS / iCloud duplication artifacts ("foo 2.hpp", "foo 2.txt", ...).
+# NB: unquoted — .gitignore treats quotes as literal, so the old "* 2.md" never matched.
+* 2.*
+# stray one-off dev backups (e.g. old NUTS-kernel experiments)
+*.optA
+*.patched
+*.cache_v1_broken
 
 # ── logs + compiled test binaries (sources + Makefile stay tracked) ──
 *.log
