@@ -219,21 +219,18 @@ rank — do NOT read "item 1" as "try this first":
    FREEZE outright on funnels — so joint is the default, not an
    optimization.
 
-   **Funnel pattern (positive scale OR variance + raw effects) →
-   MANDATORY non-centered reparameterization.** The funnel appears in
-   TWO equally-common forms: (A) a positive **sd** `τ,σ` with `raw_j ~
-   Normal(·, scale)`, and (B) a positive **variance** with `var ~
-   InvGamma / Scaled-Inv-χ²` (or precision ~ Gamma) and `raw_j ~
-   Normal(·, sqrt(var))` — the Gaussian-hierarchical / ARD / Neal-1996
-   BNN standard (e.g. nn_rbm). Form (B) is the one that gets missed
-   because the word "scale" never appears and `var` is conjugate
-   (tempting a Gibbs update) — but centered/Gibbs FREEZES on it exactly
-   as on (A) (empirically: eight_schools_centered → random-effect
-   ESS = NA, R-hat 2.23). In BOTH forms apply NCR (`θ := μ + τ·η` or
-   `θ := μ + sqrt(σ²)·η`) and follow **`skills/joint_nuts_failure.md`
-   (Mode 1)** for the recipe + constraint-kind layout. Validator
-   Check #24 enforces it. (Verified reference:
-   `tests/test_joint_nuts_ncr_funnel.cpp`.)
+   **Funnel pattern (positive scale, variance, OR precision + raw
+   effects) → non-centered reparameterization** (the default for
+   weak/prior-dominated data). Commonly missed: the VARIANCE form
+   (`var ~ InvGamma; raw_j ~ Normal(·, sqrt(var))`) and precision form
+   (`prec ~ Gamma; Normal(·, 1/sqrt(prec))`) — the Gaussian-hier / ARD /
+   Neal-1996 BNN standard (e.g. nn_rbm), missed because "scale" never
+   appears and `var` is conjugate (tempting a wrong Gibbs update; it
+   FREEZES: eight_schools_centered → ESS = NA, R-hat 2.23). The full
+   recipe, the sqrt mapping, and the data-informativeness caveat (NCR is
+   NOT unconditional — centered wins for strongly-informative groups)
+   live in **`skills/joint_nuts_failure.md` (Mode 1)** — follow it; do
+   not restate it here. Validator Check #24 enforces.
 
    Fill in `joint_nuts_block_config` directly (fields
    `log_density_grad` / `initial_cat`); POSITIVE and all per-slice

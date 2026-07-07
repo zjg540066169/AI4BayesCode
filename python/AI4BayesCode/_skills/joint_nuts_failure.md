@@ -54,10 +54,11 @@ hyperparameter is a standard deviation OR a variance:
     scale ~ HalfNormal / HalfCauchy / Exponential            (a POSITIVE sd)
     for j:  raw_j ~ Normal(<loc>, scale * <const>)           (sd used DIRECTLY)
 
-(B) VARIANCE-parameterized — the Gaussian-hierarchical / ARD / Neal-1996 BNN
-    standard (weight-variance priors; e.g. nn_rbm, ridge/ARD):
-    var  ~ InvGamma / Scaled-Inv-χ²   (or precision ~ Gamma)  (a POSITIVE variance)
-    for j:  raw_j ~ Normal(<loc>, sqrt(var) * <const>)        (sd = SQUARE ROOT of the positive param)
+(B) VARIANCE- or PRECISION-parameterized — the Gaussian-hierarchical / ARD /
+    Neal-1996 BNN standard (weight-variance priors; e.g. nn_rbm, ridge/ARD):
+    var  ~ InvGamma / Scaled-Inv-χ²   (POSITIVE variance)   ->  sd = sqrt(var)
+    prec ~ Gamma                      (POSITIVE precision)  ->  sd = 1 / sqrt(prec)
+    for j:  raw_j ~ Normal(<loc>, sd * <const>)             (sd = sqrt(var) OR 1/sqrt(prec))
 ```
 `<loc>` may be 0, a global mean μ, or a linear predictor.
 
@@ -68,25 +69,33 @@ always signal form (B). Do NOT dismiss `var ~ InvGamma; θ ~ Normal(0, sqrt(var)
 as a non-funnel because it is variance-parameterized — it IS Mode 1, and centered
 + joint NUTS (or Gibbs on the conjugate `var`) freezes on it exactly as in (A).
 
-### Fix — MANDATORY non-centered reparameterization (NCR)
-Do **not** keep the centered form on a joint_nuts_block. Centered + joint NUTS
-on a funnel diverges or maxes tree depth on essentially every iteration.
+### Fix — non-centered reparameterization (NCR); the DEFAULT for weak-data funnels
+Centered + joint NUTS on a weak-data funnel diverges or maxes tree depth on
+essentially every iteration, so NCR is the default — but it is NOT unconditional
+(see the caveat below).
 
 ```
-CENTERED  (BAD — funnel):
-    τ  ~ HalfNormal(s)    # POSITIVE sd      -- OR --    σ² ~ InvGamma(a,b)   # POSITIVE variance
-    θ_j ~ Normal(μ, τ)                                   θ_j ~ Normal(μ, sqrt(σ²))
-                                                         # θ tightly coupled to the scale either way
+CENTERED  (BAD on a weak-data funnel):
+    τ ~ HalfNormal   # sd   -- OR --   σ² ~ InvGamma   # variance   -- OR --   ω ~ Gamma   # precision
+    θ_j ~ Normal(μ, τ)                 θ_j ~ Normal(μ, sqrt(σ²))                θ_j ~ Normal(μ, 1/sqrt(ω))
 
-NON-CENTERED  (GOOD — flat geometry):
-    τ  ~ HalfNormal(s)    # POSITIVE slice   -- OR --    σ² ~ InvGamma(a,b)   # POSITIVE slice
-    η_j ~ Normal(0, 1)                                   η_j ~ Normal(0, 1)   # REAL, standardized
-    θ_j := μ + τ · η_j    # DETERMINISTIC                θ_j := μ + sqrt(σ²) · η_j   # NOT sampled
+NON-CENTERED  (flat geometry):  same POSITIVE slice (τ / σ² / ω) + η_j ~ Normal(0,1)  # REAL, standardized
+    θ_j := μ + τ · η_j    OR    μ + sqrt(σ²) · η_j    OR    μ + η_j / sqrt(ω)    # DETERMINISTIC, NOT sampled
 ```
-The variance form is the SAME reparameterization with the scale = `sqrt(σ²)`:
-materialize `θ_j := μ + sqrt(σ²)·η_j` inside the natural-scale log-density. The
-POSITIVE slice (on `τ` OR on `σ²`) supplies its own `log|J|` — never hand-write
-a Jacobian, and never add `+ log(sqrt(σ²))`.
+Materialize `θ_j` inside the natural-scale log-density; the POSITIVE slice (τ, σ²,
+OR ω) supplies its own `log|J|` — never hand-write a Jacobian (`+ log τ`,
+`+ log sqrt(σ²)`, …).
+
+**Caveat — NCR is not unconditional (data informativeness).** CP and NCP are
+mirror geometries of the SAME posterior (Betancourt & Girolami 2013). NCR helps
+only when the per-group likelihood is WEAK (few obs/group, shrinkage / tiny-scale
+priors — the common auto-gen case, so NCR is usually right). For STRONGLY-
+informative per-group data (many obs, small noise) centered is better and blanket
+NCP re-introduces an inverted funnel. Tell-tale: an already-NCP model that STILL
+funnels (tree-depth saturation, low τ-ESS) needs that scale CENTERED, not "more
+NCR". The general dominant form is partial non-centering `θ_j := μ + a·τ·η_j`,
+`a ∈ [0,1]` (Papaspiliopoulos-Roberts-Sköld 2007) — `a` a deterministic constant,
+no Jacobian.
 
 Rules:
 - The `joint_nuts_block` contains `(μ [REAL], scale-or-variance [POSITIVE], η_1..p [REAL])`.
