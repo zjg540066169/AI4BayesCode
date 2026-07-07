@@ -47,12 +47,26 @@ small in the body). Per-block Gibbs is even worse: each block's step is tuned
 to one slice of the funnel and is wrong for the rest.
 
 ### Detection (from the prompt, before codegen)
-Match this structural pattern:
+Match EITHER form — the funnel geometry is identical whether the positive
+hyperparameter is a standard deviation OR a variance:
 ```
-scale  ~ HalfNormal / HalfCauchy / InvGamma / Exponential   (a POSITIVE hyper-scale)
-for j:  raw_j ~ Normal(<loc>, scale * <const>)               (effects drawn at that scale)
+(A) SD-parameterized:
+    scale ~ HalfNormal / HalfCauchy / Exponential            (a POSITIVE sd)
+    for j:  raw_j ~ Normal(<loc>, scale * <const>)           (sd used DIRECTLY)
+
+(B) VARIANCE-parameterized — the Gaussian-hierarchical / ARD / Neal-1996 BNN
+    standard (weight-variance priors; e.g. nn_rbm, ridge/ARD):
+    var  ~ InvGamma / Scaled-Inv-χ²   (or precision ~ Gamma)  (a POSITIVE variance)
+    for j:  raw_j ~ Normal(<loc>, sqrt(var) * <const>)        (sd = SQUARE ROOT of the positive param)
 ```
 `<loc>` may be 0, a global mean μ, or a linear predictor.
+
+**Form (B) is at least as common as (A) and is the one that gets missed** — the
+positive slice is a VARIANCE and the sd entering the Normal is its `sqrt`, so the
+literal word "scale" never appears. `InvGamma` / `Gamma`-on-precision almost
+always signal form (B). Do NOT dismiss `var ~ InvGamma; θ ~ Normal(0, sqrt(var))`
+as a non-funnel because it is variance-parameterized — it IS Mode 1, and centered
++ joint NUTS (or Gibbs on the conjugate `var`) freezes on it exactly as in (A).
 
 ### Fix — MANDATORY non-centered reparameterization (NCR)
 Do **not** keep the centered form on a joint_nuts_block. Centered + joint NUTS
@@ -60,17 +74,24 @@ on a funnel diverges or maxes tree depth on essentially every iteration.
 
 ```
 CENTERED  (BAD — funnel):
-    τ      ~ HalfNormal(s)                 # POSITIVE
-    θ_j    ~ Normal(μ, τ)                  # tightly coupled to τ
+    τ  ~ HalfNormal(s)    # POSITIVE sd      -- OR --    σ² ~ InvGamma(a,b)   # POSITIVE variance
+    θ_j ~ Normal(μ, τ)                                   θ_j ~ Normal(μ, sqrt(σ²))
+                                                         # θ tightly coupled to the scale either way
 
 NON-CENTERED  (GOOD — flat geometry):
-    τ      ~ HalfNormal(s)                 # POSITIVE slice
-    η_j    ~ Normal(0, 1)                  # REAL slice (standardized)
-    θ_j   := μ + τ · η_j                   # DETERMINISTIC — NOT sampled
+    τ  ~ HalfNormal(s)    # POSITIVE slice   -- OR --    σ² ~ InvGamma(a,b)   # POSITIVE slice
+    η_j ~ Normal(0, 1)                                   η_j ~ Normal(0, 1)   # REAL, standardized
+    θ_j := μ + τ · η_j    # DETERMINISTIC                θ_j := μ + sqrt(σ²) · η_j   # NOT sampled
 ```
+The variance form is the SAME reparameterization with the scale = `sqrt(σ²)`:
+materialize `θ_j := μ + sqrt(σ²)·η_j` inside the natural-scale log-density. The
+POSITIVE slice (on `τ` OR on `σ²`) supplies its own `log|J|` — never hand-write
+a Jacobian, and never add `+ log(sqrt(σ²))`.
 
 Rules:
-- The `joint_nuts_block` contains `(μ [REAL], τ [POSITIVE], η_1..p [REAL])`.
+- The `joint_nuts_block` contains `(μ [REAL], scale-or-variance [POSITIVE], η_1..p [REAL])`.
+  The POSITIVE slice is `τ` (sd form) OR `σ²` (variance form); `θ_j` is built with
+  `τ·η_j` or `sqrt(σ²)·η_j` accordingly.
 - `θ_j` is **computed inside the natural-scale log-density** (to evaluate the
   likelihood) and, if a downstream block needs it, in a **deterministic
   refresher** reading μ/τ/η — it is NEVER a sampled sub-parameter.
@@ -90,6 +111,11 @@ cfg.sub_params = {
     {"tau", 1, joint_constraint::POSITIVE},  // hyper-scale  (block adds log|J|)
     {"eta", J, joint_constraint::REAL},      // standardized raw effects
 };
+// VARIANCE form (nn_rbm / ARD): make the POSITIVE slice the variance and take
+// its sqrt when building theta —
+//     {"sigma2", 1, joint_constraint::POSITIVE},   // a VARIANCE, not an sd
+//     ... theta_j = mu + sqrt(sigma2) * eta_j;      // sqrt() inside the log-density
+// Keep sigma2's InvGamma prior; the POSITIVE slice still supplies log|J|.
 // initial values are NATURAL-scale (tau > 0). The block maps to the
 // unconstrained sampler state internally.
 cfg.initial_cat = arma::join_cols(arma::vec{0.0}, arma::vec{1.0},
@@ -189,9 +215,11 @@ never wrong-target — EXCEPT on funnels, where per-param NUTS itself freezes
 
 Check #24 (joint-NUTS pathology pre-flight) is the static guard. It verifies,
 when a `joint_nuts_block` is present:
-1. **Funnel NCR done** — if the prompt declares the Mode-1 pattern, the cpp
+1. **Funnel NCR done** — if the prompt declares the Mode-1 pattern (SD form (A)
+   OR variance form (B) `var ~ InvGamma; θ ~ Normal(0, sqrt(var))`), the cpp
    must contain the non-centered form (`eta_j` declared; `theta_j := mu +
-   tau*eta_j` deterministic), not the centered form.
+   tau*eta_j` OR `theta_j := mu + sqrt(sigma2)*eta_j` deterministic), not the
+   centered form and not Gibbs on the conjugate variance.
 2. **Constraint kinds match** — each slice's `joint_constraint` matches the
    prompt's support (scale → POSITIVE, mean/effect → REAL).
 3. **Lambda completeness** — every declared sub-parameter is read inside the

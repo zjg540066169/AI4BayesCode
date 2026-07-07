@@ -156,6 +156,19 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep,
 
 # Simulate a toy data set
 # <commented synthetic generation of <data_args> + a held-out X test>
+#
+# HIERARCHICAL / random-effects / weight-variance models — draw the scale or
+# variance hyperparameter FROM ITS PRIOR, then draw the effects at that scale.
+# Do NOT hard-code the scale to an arbitrary "moderate" value (e.g. sd = 0.6).
+# A fixed moderate scale can CONFLICT with a tight or heavy-tailed prior — the
+# classic case is a tiny-scale InvGamma weight-variance prior (Neal-1996 / ARD,
+# e.g. nn_rbm, where s0^2 = (0.05 / M^2)^2 ≈ 1e-6): fixed sd 0.6 makes the DATA
+# scream "σ² ≈ 0.36" while the PRIOR insists "σ² ≈ 1e-6". That prior-data
+# conflict is an artificially HARD, poorly-mixing posterior (R-hat stuck ~1.02,
+# tiny ESS) that then gets wrongly blamed on the sampler. Prior-drawn hyper-
+# parameters keep the L3 self-test calibrated (SBC-style) and on the geometry
+# the model actually targets. If the model ships its own reference simulator
+# (e.g. a `simulate_data(seed)` in the model card), PREFER it over an invented DGP.
 
 # Monolithic chain (non-stateful use)
 mono_chain <- run_chain_<ClassName>(<data_args>, seed = 1,
@@ -500,7 +513,23 @@ if (d$ess_ratio < 0.005) {
 # The generation harness greps stdout for exactly this token. `d$rhat` is the
 # worst rank-normalized R-hat from r2_diag() above. Emit it verbatim.
 max_rhat <- d$rhat
-if (max_rhat < 1.01) cat("AI4BAYES_VALIDATE: PASS\n") else cat(sprintf("AI4BAYES_VALIDATE: FAIL maxRhat=%.4f\n", max_rhat))
+# The PASS/FAIL token uses the DEFAULT HARD gate = 1.05 (matches the stopifnot
+# above and validator.md §R2). It MUST match the gate: a stricter 1.01 threshold
+# here would print FAIL while the run continues at 1.05 — the confusing
+# "FAIL-but-SUCCESS" seen in practice. Keep the token text EXACT (the harness
+# greps for it).
+if (max_rhat < 1.05) cat("AI4BAYES_VALIDATE: PASS\n") else cat(sprintf("AI4BAYES_VALIDATE: FAIL maxRhat=%.4f\n", max_rhat))
+# R-hat GRAY ZONE (1.01, 1.05]: the run PASSES the default gate but not the strict
+# Vehtari-2021 1.01 bar. Do NOT auto-escalate. Instead follow start.md's "R-hat
+# gray zone — opt-in stricter convergence" protocol: surface the structured
+# question (a: ship as-is at 1.05 [default] / b: extend chain budget 20k->40k->80k
+# toward <1.01 / c: AI-proposed structural fix / d: other). A heavy-tailed
+# hierarchical variance (InvGamma) can legitimately sit at 1.01-1.02 even when the
+# posterior is CORRECT (predictive matches a Stan/reference cross-check) — there,
+# option (b) or a higher joint_nuts `max_tree_depth` (10-12) is the remedy, NOT a
+# different model. Emitting this line is what SIGNALS the gray zone to the agent.
+if (max_rhat >= 1.01)
+    cat(sprintf("  [convergence] gray zone: PASS at the default 1.05 gate, strict 1.01 NOT met (maxRhat=%.4f) -> apply start.md's opt-in stricter-convergence question.\n", max_rhat))
 
 # ---- Layer 3 R3: posterior predictive p-values + PSIS-LOO ---------------
 suppressPackageStartupMessages(library(loo))

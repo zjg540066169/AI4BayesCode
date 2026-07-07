@@ -385,6 +385,18 @@ mod = AI4BayesCode.source("<folder>/<ClassName>.cpp")
 # (Synthetic data block — exactly matches the codegen_priors.md "Validation
 # fixture" guidance; see §6 of that skill for the shape conventions.)
 # ... <data setup> ...
+#
+# HIERARCHICAL / random-effects / weight-variance models — draw the scale or
+# variance hyperparameter FROM ITS PRIOR, then draw the effects at that scale;
+# do NOT hard-code the scale to an arbitrary "moderate" value (e.g. sd=0.6).
+# A fixed moderate scale can CONFLICT with a tight or heavy-tailed prior — the
+# classic case is a tiny-scale InvGamma weight-variance prior (Neal-1996 / ARD,
+# e.g. nn_rbm, s0^2=(0.05/M^2)^2 ~ 1e-6): fixed sd 0.6 makes the DATA say
+# "sigma^2 ~ 0.36" while the PRIOR insists "sigma^2 ~ 1e-6", an artificially HARD
+# prior-data-conflict posterior (R-hat stuck ~1.02, tiny ESS) wrongly blamed on
+# the sampler. Prior-drawn hyperparameters keep the L3 self-test calibrated
+# (SBC-style). If the model ships a reference simulator (simulate_data(seed)),
+# PREFER it over an invented DGP.
 
 # Per-chain runner helper (with periodic readapt — see § above).
 # Signature MUST include diagnosis=False; when diagnosis=True, CALL the
@@ -621,10 +633,25 @@ AI4BayesCode.perf_hint(
 
 # === Final validation verdict (MUST be the VERY LAST line printed) ===
 # The generator greps stdout for this exact sentinel. worst_rhat is from R2 above.
-if worst_rhat < 1.01:
+# The PASS/FAIL token uses the DEFAULT HARD gate = 1.05 (matches the assert above
+# and validator.md §R2); it MUST match the gate, else it prints FAIL while the run
+# continues at 1.05 (the confusing "FAIL-but-SUCCESS"). Keep the token text EXACT.
+if worst_rhat < 1.05:
     print("AI4BAYES_VALIDATE: PASS")
 else:
     print(f"AI4BAYES_VALIDATE: FAIL maxRhat={worst_rhat:.4f}")
+# R-hat GRAY ZONE (1.01, 1.05]: PASSES the default gate but not the strict
+# Vehtari-2021 1.01 bar. Do NOT auto-escalate — follow start.md's "R-hat gray
+# zone — opt-in stricter convergence" protocol: surface the structured question
+# (a: ship as-is at 1.05 [default] / b: extend budget 20k->40k->80k toward <1.01 /
+# c: AI-proposed structural fix / d: other). A heavy-tailed hierarchical variance
+# (InvGamma) can legitimately sit at 1.01-1.02 even when the posterior is CORRECT
+# (predictive matches a reference); there, option (b) or a higher joint_nuts
+# max_tree_depth (10-12) is the remedy, NOT a different model. This line SIGNALS
+# the gray zone to the agent.
+if worst_rhat >= 1.01:
+    print(f"  [convergence] gray zone: PASS at the default 1.05 gate, strict 1.01 "
+          f"NOT met (maxRhat={worst_rhat:.4f}) -> apply start.md's opt-in stricter-convergence question.")
 ```
 
 ### Special case: per-step outputs NOT in `get_history()`

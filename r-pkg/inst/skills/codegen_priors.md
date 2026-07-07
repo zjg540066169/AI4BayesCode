@@ -219,14 +219,20 @@ rank — do NOT read "item 1" as "try this first":
    FREEZE outright on funnels — so joint is the default, not an
    optimization.
 
-   **Funnel pattern (positive scale + raw effects) → MANDATORY
-   non-centered reparameterization.** If a positive scale parameter
-   (τ, σ) governs the spread of raw effects (`raw_j ~ Normal(·,
-   scale)`), the centered form FREEZES even joint NUTS (empirically:
-   eight_schools_centered → random-effect ESS = NA, R-hat 2.23).
-   Apply NCR and follow **`skills/joint_nuts_failure.md` (Mode 1)**
-   for the recipe + constraint-kind layout. Validator Check #24
-   enforces it. (Verified reference:
+   **Funnel pattern (positive scale OR variance + raw effects) →
+   MANDATORY non-centered reparameterization.** The funnel appears in
+   TWO equally-common forms: (A) a positive **sd** `τ,σ` with `raw_j ~
+   Normal(·, scale)`, and (B) a positive **variance** with `var ~
+   InvGamma / Scaled-Inv-χ²` (or precision ~ Gamma) and `raw_j ~
+   Normal(·, sqrt(var))` — the Gaussian-hierarchical / ARD / Neal-1996
+   BNN standard (e.g. nn_rbm). Form (B) is the one that gets missed
+   because the word "scale" never appears and `var` is conjugate
+   (tempting a Gibbs update) — but centered/Gibbs FREEZES on it exactly
+   as on (A) (empirically: eight_schools_centered → random-effect
+   ESS = NA, R-hat 2.23). In BOTH forms apply NCR (`θ := μ + τ·η` or
+   `θ := μ + sqrt(σ²)·η`) and follow **`skills/joint_nuts_failure.md`
+   (Mode 1)** for the recipe + constraint-kind layout. Validator
+   Check #24 enforces it. (Verified reference:
    `tests/test_joint_nuts_ncr_funnel.cpp`.)
 
    Fill in `joint_nuts_block_config` directly (fields
