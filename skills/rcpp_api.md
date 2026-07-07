@@ -14,7 +14,7 @@ description: |
 | numeric vector | `Rcpp::NumericVector` | `arma::vec` | `arma::vec(x.begin(), n, false)` for no-copy |
 | numeric matrix | `Rcpp::NumericMatrix` | `arma::mat` | Column-major (like R), NOT row-major |
 | integer vector | `Rcpp::IntegerVector` | `arma::ivec` | |
-| list | `Rcpp::List` | — | No compile-time key checking |
+| list | `Rcpp::List` | -- | No compile-time key checking |
 
 ## Common pitfalls
 
@@ -40,7 +40,7 @@ if (params.containsElementNamed("key")) {
 // Copy (safe, allocates new memory):
 arma::vec v = Rcpp::as<arma::vec>(rcpp_vec);
 
-// No-copy (fast but dangerous — data dies with rcpp_vec):
+// No-copy (fast but dangerous -- data dies with rcpp_vec):
 arma::vec v(rcpp_vec.begin(), rcpp_vec.size(), /*copy=*/false);
 ```
 Use no-copy only for temporary computation within a single function.
@@ -55,7 +55,7 @@ Rcpp/RcppArmadillo **transitively**, because their public APIs
 (`get_history()`, `get_dag()`) return `Rcpp::List` / `Rcpp::NumericMatrix`.
 The include graph is:
 
-- `block_sampler.hpp` — single entry point that literally does
+- `block_sampler.hpp` -- single entry point that literally does
   `#include <RcppArmadillo.h>`.
 - All other headers (`composite_block.hpp`, `nuts_block.hpp`,
   `joint_nuts_block.hpp`,
@@ -65,7 +65,7 @@ The include graph is:
   `<Rcpp.h>` or `<RcppArmadillo.h>` directly.
 - `bart_block.hpp` additionally pulls the BART unity header from
   `../../bart_pure_cpp/src/bart_kernel_unity.h` (unified BART_unified vendor as
-  of 2026-05-03). `genbart_block.hpp` no longer needs a unity header —
+  of 2026-05-03). `genbart_block.hpp` no longer needs a unity header --
   the new `genbart::genbart_model` (renamed from `gbart_model`) and its
   vendored kernel under `bart_pure_cpp/src/GENBART/` are header-only. Standard
   BART's `src/BART/` still has `.cpp` files, so its unity header folds
@@ -84,8 +84,8 @@ dependencies must use unity/amalgamation headers (like
 vendor under `bart_pure_cpp/src/GENBART/` is header-only and needs no unity.
 
 ### 7. R's RNG vs C++ RNG
-BART uses R's RNG via `arn` — reproducible with `set.seed()` in R.
-NUTS blocks use `std::mt19937_64` — reproducible with the seed passed
+BART uses R's RNG via `arn` -- reproducible with `set.seed()` in R.
+NUTS blocks use `std::mt19937_64` -- reproducible with the seed passed
 to the constructor. These are independent RNG streams.
 
 ### 8. Rcpp Module method signatures
@@ -117,7 +117,7 @@ Rcpp::NumericVector out(v.n_elem);
 for (std::size_t i = 0; i < v.n_elem; ++i) out[i] = v[i];
 ```
 
-### 11. Distribution parameterization — COMMENT THE FORM YOU USE
+### 11. Distribution parameterization -- COMMENT THE FORM YOU USE
 
 **This is a critical source of silent bugs.** When using random
 distributions in C++ code, ALWAYS write a comment next to the call
@@ -130,20 +130,20 @@ std::gamma_distribution<double> gam(shape, scale);
 // ^ C++ std::gamma_distribution uses shape-SCALE form
 // E[X] = shape * scale
 
-// WRONG — no comment, reader cannot verify:
+// WRONG -- no comment, reader cannot verify:
 std::gamma_distribution<double> gam(a, b);
 ```
 
 **C++ standard library parameterizations:**
-- `std::gamma_distribution<double>(shape, scale)` — shape-**SCALE**, E[X] = shape * scale
-- `std::normal_distribution<double>(mean, stddev)` — NOT variance
-- `std::chi_squared_distribution<double>(df)` — E[X] = df
+- `std::gamma_distribution<double>(shape, scale)` -- shape-**SCALE**, E[X] = shape * scale
+- `std::normal_distribution<double>(mean, stddev)` -- NOT variance
+- `std::chi_squared_distribution<double>(df)` -- E[X] = df
 
 **R function parameterizations (for cross-checking):**
-- `rgamma(n, shape, rate)` — shape-**RATE**, E[X] = shape / rate
-- `rgamma(n, shape, scale=s)` — shape-**SCALE**, E[X] = shape * s
-- `rnorm(n, mean, sd)` — NOT variance
-- `MCMCpack::rinvgamma(n, shape, scale)` — E[X] = scale / (shape - 1)
+- `rgamma(n, shape, rate)` -- shape-**RATE**, E[X] = shape / rate
+- `rgamma(n, shape, scale=s)` -- shape-**SCALE**, E[X] = shape * s
+- `rnorm(n, mean, sd)` -- NOT variance
+- `MCMCpack::rinvgamma(n, shape, scale)` -- E[X] = scale / (shape - 1)
 
 **C++ std uses SCALE. R rgamma default uses RATE. They are inverses.**
 To draw Gamma(shape, rate=r) in C++:

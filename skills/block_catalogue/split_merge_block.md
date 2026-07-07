@@ -7,18 +7,18 @@ proposal. Accelerates mixing on partitions vs single-i Gibbs.
 **Algorithm**: Jain & Neal 2004 "A Split-Merge Markov Chain Monte Carlo
 Procedure for the Dirichlet Process Mixture Model". This block
 implements the algorithm in the **truncated SBP regime** (NOT
-CRP-marginal): `π` is held fixed during the MH ratio, and the prior on
-`z` is product-of-categorical Cat(π).
+CRP-marginal): `pi` is held fixed during the MH ratio, and the prior on
+`z` is product-of-categorical Cat(pi).
 
 **Algorithm summary** (per step):
 1. Sample (i, j) uniformly w/o replacement from {0..N-1}.
-2. If `z[i] == z[j]` → SPLIT proposal:
+2. If `z[i] == z[j]` -> SPLIT proposal:
    - Pick `c_new` uniformly from EMPTY slots.
-   - Initialise S = {k : z[k] == z[i], k ≠ i, j} randomly to `{s_i, c_new}`.
+   - Initialise S = {k : z[k] == z[i], k != i, j} randomly to `{s_i, c_new}`.
    - Run T restricted-Gibbs scans; final iteration accumulates log q(z*|z).
    - log A = log q(z|z*) - log q(z*|z) + log_prior + log_lik
-3. Else → MERGE proposal:
-   - Set z*[k] = s_i for all k in {j} ∪ S.
+3. Else -> MERGE proposal:
+   - Set z*[k] = s_i for all k in {j}  U  S.
    - Compute reverse-split q via launch state + T restricted scans
      accumulating at the final iter where target = z[k].
 
@@ -39,12 +39,12 @@ cfg.pi_key = "pi";
 cfg.mu_key = "mu";
 cfg.lambda_key = "lambda";         // exactly ONE of lambda_key / sigma_key
 // cfg.sigma_key = "sigma";        // (full covariance path)
-cfg.n_restricted_gibbs_iters = 5;  // Jain-Neal §3.1 typical
+cfg.n_restricted_gibbs_iters = 5;  // Jain-Neal Sec.3.1 typical
 cfg.initial_z = z_init;
 impl_->add_child(std::make_unique<split_merge_block>(std::move(cfg)));
 
 // REQUIRED: `categorical_gibbs_block` and `split_merge_block` both
-// drive — and both record to history — the SAME allocation `z`.
+// drive -- and both record to history -- the SAME allocation `z`.
 // shared_data writes coexist fine (last writer in the sweep wins),
 // but composite_block::get_history() rejects a history key emitted by
 // two children UNLESS it is explicitly declared shared. Declare it,
@@ -56,14 +56,14 @@ impl_->declare_shared_history("z");
 **Composite integration**: add `split_merge_block` as a child AFTER
 `categorical_gibbs_block` in the Gibbs sweep, and call
 `impl_->declare_shared_history("z")` (see above). Both blocks write
-shared_data key "z" (coexist fine — last writer in the sweep wins) AND
+shared_data key "z" (coexist fine -- last writer in the sweep wins) AND
 both record "z" to history; the `declare_shared_history` call makes
-`get_history()` keep the LAST contributor in scan order — i.e. the
+`get_history()` keep the LAST contributor in scan order -- i.e. the
 post-split-merge, scan-END `z` draw, which is the correct posterior
 chain. Without the declaration `get_history()` throws
 `duplicate key 'z' contributed by multiple children`. Each step
-alternates: per-i Gibbs → split-merge proposal → cluster_params
-update → π update.
+alternates: per-i Gibbs -> split-merge proposal -> cluster_params
+update -> pi update.
 
 **Acceptance asymmetry note**: Jain-Neal's q-density is asymmetric
 (merge is deterministic; split is random over restricted Gibbs). So
@@ -82,4 +82,4 @@ verifies (a) smoke + valid output on identical-cluster fixture; (b)
 truth-recovery K_active >= 2 on a 2-cluster split-favored fixture;
 (c) full-covariance sigma_key path runs.
 
-**No hand-written Jacobian** (Check #5 vacuous — discrete-allocation MH).
+**No hand-written Jacobian** (Check #5 vacuous -- discrete-allocation MH).

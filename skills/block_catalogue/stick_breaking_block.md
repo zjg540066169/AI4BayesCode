@@ -1,4 +1,4 @@
-## stick_breaking_block (truncated SBP — DP / PY / custom)
+## stick_breaking_block (truncated SBP -- DP / PY / custom)
 
 Closed-form Gibbs leaf that samples a length-K_trunc simplex pi via
 truncated stick-breaking (Ishwaran & James 2001). User supplies the
@@ -38,7 +38,7 @@ cfg.initial_pi = arma::vec(20, arma::fill::value(1.0 / 20));
 ```
 
 **JUSTIFICATION (Check #16): Exception 1** (per-stick Beta conditional
-on a NEW Tier-B block — Ishwaran-James textbook scheme).
+on a NEW Tier-B block -- Ishwaran-James textbook scheme).
 **Check #15** parity: `tests_autodiff/block_tests/test_stick_breaking_block.cpp`
 verifies analytic E[pi_k] under both empty-counts (GEM(alpha) regime)
 and populated-counts DP regimes within 5% on 20k draws.

@@ -11,12 +11,12 @@ plug-in API (`set_X / set_Y / set_data / set_offset / set_s / get_s /
 update_step / current_sigma / current_var_probs / current_var_counts /
 get_invchi / startdart`) is uniform with `genbart_block`. softBART
 (`softbart::softbart_model`) is also vendored under the same `bart_pure_cpp/`
-tree (`bart_pure_cpp/src/SOFTBART_VENDOR`), and `softbart_block` ships with the same uniform interface —
+tree (`bart_pure_cpp/src/SOFTBART_VENDOR`), and `softbart_block` ships with the same uniform interface --
 see `examples/SoftBartNoise.cpp` for a worked example.
 
 **For nested MCMC**: `BartNoise::set_current(Rcpp::List)` already
 accepts any subset of `{X, y, sigma}` and routes them into the block
-— use this when composing BART inside an outer Gibbs. No other R
+-- use this when composing BART inside an outer Gibbs. No other R
 methods are exposed; the unified six-method interface is the whole
 API. (System-design agents modifying `bart_block` itself should read
 `skills/system_design.md`; code-generation agents do NOT need
@@ -88,11 +88,11 @@ cfg.binary               = false;   // see "Binary leaf prior" below
 | `cfg.binary` | tau formula | When to use |
 |--------------|-------------|-------------|
 | `false` (default) | `(max(y_init) - min(y_init)) / (2 * k * sqrt(ntrees))` | Gaussian regression `y ~ N(BART(X), sigma^2)`. The data range gives a sensible leaf scale. |
-| `true` | `3 / (k * sqrt(ntrees))` | **Probit BART via Albert-Chib data augmentation.** The BART working response is a latent z whose effective range under truncation is ~6 (≈ ±3 SD). Using the Gaussian formula on an arbitrary y_init scale (e.g. ±1) over-shrinks the leaves by a factor of 3. This formula matches `BART::pbart` / `cpbart.cpp` line 244 exactly. |
+| `true` | `3 / (k * sqrt(ntrees))` | **Probit BART via Albert-Chib data augmentation.** The BART working response is a latent z whose effective range under truncation is ~6 (~= +/-3 SD). Using the Gaussian formula on an arbitrary y_init scale (e.g. +/-1) over-shrinks the leaves by a factor of 3. This formula matches `BART::pbart` / `cpbart.cpp` line 244 exactly. |
 
 Non-Gaussian likelihoods that are NOT data augmentation (e.g. logistic
 BART via `genbart_block + genbart::lik::logistic_lik`) do not use
-`bart_block` at all — see the `genbart_block` section below.
+`bart_block` at all -- see the `genbart_block` section below.
 
 When generating a probit-BART wrapper that uses Albert-Chib (the user
 prompt says "data augmentation"), set `cfg.binary = true`. The
@@ -108,22 +108,22 @@ Uses R's RNG. `set.seed()` for reproducibility.
 `bart_block_config` exposes two Linero (2018) flags for **implicit
 variable selection** in high-p settings:
 
-- **`dart = true`** — replaces BART's uniform split-variable probabilities
+- **`dart = true`** -- replaces BART's uniform split-variable probabilities
   with a sparse Dirichlet prior. Variables with no signal have their
   split probability shrunk toward zero. Posterior-mean split frequency
   per variable gives a usable variable-importance / inclusion score
   without a separate spike-and-slab block.
-- **`aug = true`** — only active when `dart = true`. Enables the data-
+- **`aug = true`** -- only active when `dart = true`. Enables the data-
   augmentation scheme in Linero 2018 Section 4 that accelerates mixing
   of the sparse-Dirichlet concentration parameter. Adds a small
-  per-sweep cost and is not always beneficial — leave OFF by default;
+  per-sweep cost and is not always beneficial -- leave OFF by default;
   flip ON only if DART's concentration parameter is visibly slow to mix.
 
 **When to recommend this to the user:** the model is of the form
 `y = f(X) + noise` with p moderate-to-large (say p >= 10) AND the user
 indicates they care about which features matter (variable selection,
 feature importance, interpretability). DART is often a cleaner fit than
-wrapping BART inside a spike-and-slab selector — it gets sparsity "for
+wrapping BART inside a spike-and-slab selector -- it gets sparsity "for
 free" from the tree prior.
 
 **Decision-flow recipe** for the codegen skill:
@@ -136,9 +136,9 @@ free" from the tree prior.
   mixing is slow) and let the user pick. Offer `dart = FALSE` when the
   goal is pure prediction.
 - Expose `dart` and `aug` as constructor arguments to the generated
-  R wrapper **only if the user opts into DART** — otherwise hardcode
+  R wrapper **only if the user opts into DART** -- otherwise hardcode
   both to `false` inside the class body and do NOT surface them to R.
-  See `examples/BartNoise.cpp` — they are positional args 9 and 10 in
+  See `examples/BartNoise.cpp` -- they are positional args 9 and 10 in
   that reference template's constructor.
 
 All other BART hyperparameters (`ntrees`, `k`, `power`, `base`, `nu`,
@@ -156,14 +156,14 @@ The `bart_model` constructor automatically:
    sigma prior (using a pure C++ lookup table, no R function calls)
 5. Uses `sigest` as the initial sigma value
 
-`cfg.sigma_init` is NOT used to override this — `bart_block` does not
+`cfg.sigma_init` is NOT used to override this -- `bart_block` does not
 call `set_sigma` after construction. The internal OLS-based estimate
 matches `BART::wbart`'s `sigest` default exactly.
 
 ### Recommended sigma prior for BART-structured models
 
 In any model with likelihood `y ~ N(BART(X), sigma^2)`, sigma has a soft
-identifiability problem — BART's flexible f(x) can absorb signal that
+identifiability problem -- BART's flexible f(x) can absorb signal that
 should go into the noise variance, and with a weakly informative prior
 sigma can drift anywhere the under-fit bias permits. The
 default for this class of model is BART::wbart's **calibrated conjugate
@@ -181,21 +181,21 @@ has been added to the composite.
 - When parsing a user model with a BART mean and no explicit sigma prior,
   run the AskUserQuestion decision flow exactly as for any other
   parameter, but substitute this calibrated IG in place of the generic
-  Jeffreys `p(sigma) ∝ 1/sigma` scale default (the default-priors table).
+  Jeffreys `p(sigma) prop.to 1/sigma` scale default (the default-priors table).
 - Present it as option (b) "Default" and tell the user WHY
   (identifiability / under-fit absorption).
 - Offer `HalfNormal(0, 10)` or a user-specified alternative as option (c).
 - Still accept an explicit user-supplied prior verbatim.
 
-**Sampling stays uniform:** sigma is still a standard `nuts_block` — only
+**Sampling stays uniform:** sigma is still a standard `nuts_block` -- only
 the prior term in the log-density changes. Do NOT introduce a custom
 conjugate-Gibbs block for sigma; mixing closed-form conjugate draws with
 a NUTS-first generator is explicitly prohibited (see
 `skills/codegen.md` Hard Rules). The only Gibbs blocks the generator may
 use are the `*_gibbs_block` headers already shipped in
-`include/AI4BayesCode/` — see the "Gibbs blocks" sections of this catalogue
+`include/AI4BayesCode/` -- see the "Gibbs blocks" sections of this catalogue
 for the current roster.
 
-See `examples/BartNoise.cpp` for the reference template — both the
+See `examples/BartNoise.cpp` for the reference template -- both the
 `R::qchisq` calibration in the constructor and the IG log-density in the
 `nuts_block` lambda.

@@ -35,7 +35,7 @@ cfg.initial_unc = constraints::positive::unconstrain(init_natural);
 return constraints::positive::wrap(theta_unc, grad,
     [&](const arma::vec& theta_nat, arma::vec* grad_nat) {
         // Write natural-scale log p and gradient here.
-        // DO NOT include Jacobian — wrap handles it.
+        // DO NOT include Jacobian -- wrap handles it.
         return lp;
     });
 ```
@@ -77,7 +77,7 @@ leave `initial_step_size` at default 0 (auto path works fine).
 
 - Same unconstrained dimension as natural (K).
 - Auxiliary Gaussian convention: `log|J| = -0.5 * ||y||^2`.
-- Well-conditioned geometry — no step-size seeding needed.
+- Well-conditioned geometry -- no step-size seeding needed.
 
 ## joint_constraint (for joint_nuts_block per-slice constraints)
 
@@ -86,7 +86,7 @@ per-slice constraint is declared with the `joint_constraint` enum,
 NOT via the `constraints::<kind>::wrap` helpers. Supported:
 
 **15 per-slice constraint kinds are supported** (validated 2026-06-17; see
-`system_design.md` §10 "joint_nuts_block per-slice constraints (current scope)"):
+`system_design.md` Sec.10 "joint_nuts_block per-slice constraints (current scope)"):
 
 | `joint_constraint` | Semantics | dim |
 |--------------------|-----------|-----|
@@ -94,13 +94,13 @@ NOT via the `constraints::<kind>::wrap` helpers. Supported:
 | `POSITIVE`            | `nat = exp(unc)` (log transform) | preserving |
 | `LOWER_BOUNDED`       | `nat = lb + exp(unc)` | preserving |
 | `UPPER_BOUNDED`       | `nat = ub - exp(unc)` | preserving |
-| `INTERVAL`            | `nat = lb + (ub-lb)·sigmoid(unc)` | preserving |
+| `INTERVAL`            | `nat = lb + (ub-lb)*sigmoid(unc)` | preserving |
 | `ORDERED`             | ordered (cumulative-exp) | preserving |
 | `POSITIVE_ORDERED`    | positive AND ordered | preserving |
 | `UNIT_VECTOR`         | unit-norm vector | preserving |
-| `OFFSET_MULTIPLIER`   | `nat = offset + mult·unc` | preserving |
-| `SIMPLEX`             | stick-breaking (K-1 → K) | changing |
-| `SUM_TO_ZERO`         | zero-sum (K-1 → K) | changing |
+| `OFFSET_MULTIPLIER`   | `nat = offset + mult*unc` | preserving |
+| `SIMPLEX`             | stick-breaking (K-1 -> K) | changing |
+| `SUM_TO_ZERO`         | zero-sum (K-1 -> K) | changing |
 | `CHOLESKY_CORR`       | Cholesky factor of a correlation matrix | changing |
 | `CHOLESKY_FACTOR_COV` | Cholesky factor of a covariance matrix | changing |
 | `CORR_MATRIX`         | correlation matrix | changing |
@@ -113,8 +113,8 @@ scale** throughout and MUST NOT include any manual Jacobian terms (validator Che
 a dual offset scheme internally; matrix-valued kinds (`CHOLESKY_*`, `CORR_MATRIX`,
 `COV_MATRIX`) auto-enable the diagonal metric. Because all these kinds are
 supported per-slice, do NOT split a constrained parameter (simplex, cholesky,
-ordered, …) into its own block — keep it as a slice of the `joint_nuts_block`.
+ordered, ...) into its own block -- keep it as a slice of the `joint_nuts_block`.
 
 Standalone NUTS blocks keep using the full `constraints::*::wrap`
-machinery above — nothing about the `joint_constraint` enum changes
+machinery above -- nothing about the `joint_constraint` enum changes
 the API for `nuts_block`.

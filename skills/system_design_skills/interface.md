@@ -1,7 +1,7 @@
-<!-- system_design MODULE — interface contract (extracted 2026-06-21 from system_design.md §0-§2).
+<!-- system_design MODULE -- interface contract (extracted 2026-06-21 from system_design.md Sec.0-Sec.2).
      SINGLE LIVE SOURCE: edit HERE, not the monolith. system_design.md is now a thin index
-     (§N -> module).
-     Cross-refs keep the "§N" scheme, resolved via the system_design.md index. -->
+     (Sec.N -> module).
+     Cross-refs keep the "Sec.N" scheme, resolved via the system_design.md index. -->
 
 ## 0. Audience disambiguation
 
@@ -24,8 +24,8 @@ From the code-gen agent's point of view, every block is opaque:
 - Construct with `new(ClassName, args..., rng_seed, keep_history)`.
 - Advance with `m$step(n)`.
 - Read with `m$get_current()`, `m$get_history()`, `m$get_dag()`.
-- Push new state with `m$set_current(list(key = value, …))`.
-- Predict with `m$predict_at(list(X = X_new, …))`.
+- Push new state with `m$set_current(list(key = value, ...))`.
+- Predict with `m$predict_at(list(X = X_new, ...))`.
 
 That's the whole vocabulary. This file is two levels deeper than that.
 
@@ -37,7 +37,7 @@ or nested MCMC composition silently breaks.
 
 ---
 
-## 1. The non-negotiable invariant — unified stateful-module interface
+## 1. The non-negotiable invariant -- unified stateful-module interface
 
 **Every user-facing wrapper class in `examples/*.cpp` exposes the
 SAME six core R-level methods, and a 7th kernel-tuning method
@@ -64,7 +64,7 @@ readapt_NUTS (int n, bool reset = false) -> void
    * pure NUTS metric re-adaptation (mass matrix + step size +
      dual-averaging state); chain state is preserved (snapshot
      + restore around the n internal adaptation iterations);
-   * see §13 "NUTS-family" for the full contract and §24 of
+   * see Sec.13 "NUTS-family" for the full contract and Sec.24 of
      `validator.md` for the conformance check.
 ```
 
@@ -76,7 +76,7 @@ keys routed internally. The 7th method `readapt_NUTS` is a
 KERNEL-tuning method (separate category from state methods) and is
 the ONLY R-level extension allowed beyond the core six. New
 kernel-tuning methods (e.g., a future `readapt_VI`) require an
-explicit §1 amendment.
+explicit Sec.1 amendment.
 
 ### Why
 
@@ -97,13 +97,13 @@ for (iter in seq_len(n_iter)) {
 
 A new module that adds a "helpful" extra R method (`$set_X` etc.)
 breaks this loop for every downstream user. Uniformity is the whole
-point of AI4BayesCode — it is what distinguishes this library from
+point of AI4BayesCode -- it is what distinguishes this library from
 using dbarts / mcmclib / etc. directly.
 
 ### How to verify the invariant
 
 - Grep every `examples/*.cpp` for `\.method(` inside its
-  `RCPP_MODULE(…_module)`. For wrappers WITHOUT any NUTS-family
+  `RCPP_MODULE(..._module)`. For wrappers WITHOUT any NUTS-family
   child the count is **exactly 6** (core methods only). For
   wrappers WITH at least one `nuts_block` or `joint_nuts_block`
   child, the count is **exactly 7**
@@ -124,40 +124,40 @@ The invariant above is enforced by a strict three-tier split. Every
 BART-family, NUTS-family, Gibbs-family block follows it.
 
 ```
- ┌────────────────────────────────────────────────────────────┐
- │ TIER A — user-facing wrapper (examples/MyModel.cpp)         │
- │   * exposed to R via RCPP_MODULE                            │
- │   * R sees ONLY the six-method contract                     │
- │   * set_current(Rcpp::List) is a pure DISPATCHER; routes   │
- │     keys (X, y, theta, sigma, u, v, …) to Tier B setters   │
- │   * owns a `composite_block impl_` with child blocks added │
- └────────────────┬───────────────────────────────────────────┘
-                  │ C++-only calls into blocks (not R-visible)
-                  ▼
- ┌────────────────────────────────────────────────────────────┐
- │ TIER B — block layer (include/AI4BayesCode/*.hpp)              │
- │   * nuts_block, bart_block, genbart_block, *_gibbs_block,  │
- │     joint_nuts_block(_mixed), composite_block,              │
- │     poisson_multinomial_aug_block                          │
- │   * exposes FINE-GRAINED C++ setters for Tier A's use:     │
- │       nuts_block::set_current(arma::vec)                    │
- │       bart_block::set_X / set_Y / set_data                  │
- │       genbart_block::set_X / set_Y / set_offset / set_data │
- │       (name depends on the kernel; see §14 for the rules)  │
- │   * NONE of these have .method() entries — Tier B is C++    │
- │     implementation detail                                   │
- └────────────────┬───────────────────────────────────────────┘
-                  │ forward to vendored kernel (no direct Rcpp)
-                  ▼
- ┌────────────────────────────────────────────────────────────┐
- │ TIER C — vendored kernel (bart_pure_cpp/src/*.h with        │
- │             subtrees BART/, GENBART/, SOFTBART_VENDOR/,     │
- │             include/mcmclib/*.h)                            │
- │   * bart_model::set_data / set_Y / set_X / set_sigma        │
- │   * genbart::genbart_model::set_X / set_Y / set_offset      │
- │   * mcmclib::nuts internals                                 │
- │   * touched ONLY from Tier B; never from Tier A directly    │
- └────────────────────────────────────────────────────────────┘
+ +------------------------------------------------------------+
+ | TIER A -- user-facing wrapper (examples/MyModel.cpp)         |
+ |   * exposed to R via RCPP_MODULE                            |
+ |   * R sees ONLY the six-method contract                     |
+ |   * set_current(Rcpp::List) is a pure DISPATCHER; routes   |
+ |     keys (X, y, theta, sigma, u, v, ...) to Tier B setters   |
+ |   * owns a `composite_block impl_` with child blocks added |
+ +----------------+-------------------------------------------+
+                  | C++-only calls into blocks (not R-visible)
+                  v
+ +------------------------------------------------------------+
+ | TIER B -- block layer (include/AI4BayesCode/*.hpp)              |
+ |   * nuts_block, bart_block, genbart_block, *_gibbs_block,  |
+ |     joint_nuts_block(_mixed), composite_block,              |
+ |     poisson_multinomial_aug_block                          |
+ |   * exposes FINE-GRAINED C++ setters for Tier A's use:     |
+ |       nuts_block::set_current(arma::vec)                    |
+ |       bart_block::set_X / set_Y / set_data                  |
+ |       genbart_block::set_X / set_Y / set_offset / set_data |
+ |       (name depends on the kernel; see Sec.14 for the rules)  |
+ |   * NONE of these have .method() entries -- Tier B is C++    |
+ |     implementation detail                                   |
+ +----------------+-------------------------------------------+
+                  | forward to vendored kernel (no direct Rcpp)
+                  v
+ +------------------------------------------------------------+
+ | TIER C -- vendored kernel (bart_pure_cpp/src/*.h with        |
+ |             subtrees BART/, GENBART/, SOFTBART_VENDOR/,     |
+ |             include/mcmclib/*.h)                            |
+ |   * bart_model::set_data / set_Y / set_X / set_sigma        |
+ |   * genbart::genbart_model::set_X / set_Y / set_offset      |
+ |   * mcmclib::nuts internals                                 |
+ |   * touched ONLY from Tier B; never from Tier A directly    |
+ +------------------------------------------------------------+
 ```
 
 When designing a new block, update all three tiers together. Skipping

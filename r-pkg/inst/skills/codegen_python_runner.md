@@ -1,7 +1,7 @@
 ---
 name: AI4BayesCode-codegen-python-runner
 description: |
-  Python runner template for AI4BayesCode samplers — AI4BayesCode.sourceCpp
+  Python runner template for AI4BayesCode samplers -- AI4BayesCode.sourceCpp
   setup, constructor-argument reference block, run_chain_<ClassName>()
   helper with keep_history=True, Layer 3 validator wiring (R1 smoke
   check, R2 rank-normalized R-hat + ESS (AI4BayesCode numpy helpers), R3 Bayesian p-values
@@ -13,7 +13,7 @@ description: |
   Both R+Python dual-module).
 ---
 
-# AI4BayesCode codegen — Python runner + reference templates
+# AI4BayesCode codegen -- Python runner + reference templates
 
 Companion skill to `codegen.md`. Load this when writing the generated
 `.py` runner: `AI4BayesCode.sourceCpp` setup, constructor-argument
@@ -23,7 +23,7 @@ and the reference-template catalogue.
 
 For prior elicitation + block selection, see `codegen_priors.md`.
 For the C++ file emission (PYBIND11_MODULE block, type casters), see
-`codegen_cpp.md` §9 "Backend module declarations" (Python-only and
+`codegen_cpp.md` Sec.9 "Backend module declarations" (Python-only and
 dual R+Python forms).
 
 This skill mirrors `codegen_r_runner.md` for the Python backend. Where
@@ -40,9 +40,9 @@ parallel chains, `arviz` diagnostics, numpy / dict idioms).
 This skill is for the codegen agent emitting a Python runner when the
 chosen runtime backend is **Python** or **Both R+Python**. If the user
 chose R-only, load `codegen_r_runner.md` instead. If the user chose
-dual R+Python, load BOTH this file and `codegen_r_runner.md` — the
+dual R+Python, load BOTH this file and `codegen_r_runner.md` -- the
 two runners share the same .cpp file (with `#ifdef`-guarded
-RCPP_MODULE and PYBIND11_MODULE blocks per `codegen_cpp.md` §9), and
+RCPP_MODULE and PYBIND11_MODULE blocks per `codegen_cpp.md` Sec.9), and
 the runner deliverables are independent (`.R` + `.py`).
 
 ## 9. Output
@@ -50,17 +50,17 @@ the runner deliverables are independent (`.R` + `.py`).
 1. Create output folder if missing (default `./generated/<ClassName>/`).
 2. Write `<folder>/<ClassName>.cpp`. **It MUST carry BOTH the
    `@example:python` AND the `@example:R` header blocks** (per
-   `codegen_cpp.md` §5 "Header `@example` block") — the `.cpp` is ALWAYS
+   `codegen_cpp.md` Sec.5 "Header `@example` block") -- the `.cpp` is ALWAYS
    dual-module, so an R user who takes the same file must still see the R
    example via `ai4bayescode_doc()`, and a Python user the Python example via
    `AI4BayesCode.doc()`. Both blocks are the SAME toy DGP this runner uses,
-   distilled to ≤ ~8 runnable lines using each language's packaged API
-   (`AI4BayesCode.source(...)` → `Mod(...)` for Python; `new(<ClassName>,
+   distilled to <= ~8 runnable lines using each language's packaged API
+   (`AI4BayesCode.source(...)` -> `Mod(...)` for Python; `new(<ClassName>,
    ...)` for R). Write the DGP once and mirror it into BOTH header blocks so
    the runner and both doc cards cannot drift.
 3. Write the Python runner `<folder>/run_<ClassName>.py` following the
    template below and **use it to gate generation** (it carries the
-   Layer-3 R1/R2/R3 harness — same CORRECTNESS INVARIANT as the R
+   Layer-3 R1/R2/R3 harness -- same CORRECTNESS INVARIANT as the R
    side: Layer-3 always runs and must PASS regardless of the user's
    harness choice).
 4. **Deliverable depends on the "Delivered-code validation harness"
@@ -87,22 +87,22 @@ is NOT shipped in the default case.
 
 The delivered `example_<ClassName>.py` MUST contain, in order:
 
-1. **Header comment** — what the model is + a note that generation
+1. **Header comment** -- what the model is + a note that generation
    was validated by the Layer-3 harness (not shipped here). For everyday
    use, point at the built-in `diagnosis=True` option on `run_chain_<ClassName>`
    (model-independent R-hat / ESS / MCSE / summaries + trace+ACF+density via
    arviz); regenerate with the harness only if you specifically need PSIS-LOO
    (model-specific).
-2. **AI4BayesCode.sourceCpp call** — exact same form as in the runner
+2. **AI4BayesCode.sourceCpp call** -- exact same form as in the runner
    template below.
-3. **Constructor reference block** — identical to the runner.
-4. **The FULL `run_chain_<ClassName>()` body VERBATIM** (not a stub) —
+3. **Constructor reference block** -- identical to the runner.
+4. **The FULL `run_chain_<ClassName>()` body VERBATIM** (not a stub) --
    including the `diagnosis` parameter and the `AI4BayesCode.diagnose()`
    call. This is the SAME definition as in the runner template above;
    ship the whole function body so the example runs self-contained.
-5. **Synthetic data block** — produces the same fixtures the harness
+5. **Synthetic data block** -- produces the same fixtures the harness
    used so the example runs as-is.
-6. **Monolithic (non-stateful) single call** —
+6. **Monolithic (non-stateful) single call** --
    `mono = run_chain_<ClassName>(..., seed=1, n_burn=4000, n_keep=4000)`
    with a `# Monolithic chain (non-stateful use)` comment, plus the
    `diagnosis=True` variant showing `mono["diagnosis"]` (per-parameter
@@ -121,17 +121,17 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
 model = mod.<ClassName>(..., rng_seed=42, keep_history=True)
 model.step(200)                              # burn-in
 model.step(200)                              # keep
-hist = model.get_history()                   # dict of (n_keep × dim) numpy arrays
+hist = model.get_history()                   # dict of (n_keep x dim) numpy arrays
 y_rep = model.predict_at({})["y_rep"]        # posterior predictive at training X
 
 # set_current() updates the sampler statefully (e.g. an outcome
 # refreshed by other blocks) WITHOUT reinitialization. Shown
-# COMMENTED OUT — uncomment in a real stateful-composition context:
+# COMMENTED OUT -- uncomment in a real stateful-composition context:
 # model.set_current({"<a data input>": <updated value>})
 # model.step(1)                              # one iteration after set_current
 # model.get_history()
 
-# readapt_NUTS() — CONDITIONAL — emit ONLY if the wrapper's composite
+# readapt_NUTS() -- CONDITIONAL -- emit ONLY if the wrapper's composite
 # contains any NUTS-family child (nuts_block / joint_nuts_block).
 # Skip the whole block if pure BART /
 # pure Gibbs / pure VI / pure HMM / pure SBP / pure RJMCMC /
@@ -140,7 +140,7 @@ y_rep = model.predict_at({})["y_rep"]        # posterior predictive at training 
 # readapt_NUTS re-tunes the NUTS metric (mass matrix + step size +
 # dual averaging) WITHOUT advancing chain state.
 #
-# WORKFLOW RULE (system_design.md §13 hybrid-composite caveat):
+# WORKFLOW RULE (system_design.md Sec.13 hybrid-composite caveat):
 #   - Pure NUTS-family composite (no BART / no specialised Gibbs):
 #       set_current(...) -> readapt_NUTS(N) immediately is fine
 #   - Hybrid composite with BART / SoftBart / specialised Gibbs whose
@@ -151,16 +151,16 @@ y_rep = model.predict_at({})["y_rep"]        # posterior predictive at training 
 #
 # Example (uncomment in real sequential-update use):
 # model.set_current({"<data input>": <updated value>})
-# model.step(1)             # refresh derived state — hybrid composites only
+# model.step(1)             # refresh derived state -- hybrid composites only
 # model.readapt_NUTS(500)   # re-tune metric (default: reset=False)
 # model.readapt_NUTS(500, True)   # use reset=True if data change is dramatic
 ```
 
-### Python runner template — standard body (DEFAULT)
+### Python runner template -- standard body (DEFAULT)
 
 This is the DEFAULT `run_chain_<ClassName>` body. Use it unless the
 composite has a NUTS-family child whose conditional posterior shifts
-across outer Gibbs sweeps — in that case use the periodic-readapt body
+across outer Gibbs sweeps -- in that case use the periodic-readapt body
 in the next subsection instead.
 
 ```python
@@ -188,15 +188,15 @@ def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
     return out
 ```
 
-**Note — pre-slice vs. n_burn.** The standard body above pre-slices the
+**Note -- pre-slice vs. n_burn.** The standard body above pre-slices the
 history inside the runner, so it calls `AI4BayesCode.diagnose(..., n_burn=0)`
 (the draws are already burn-in-stripped). The periodic-readapt body below
-does NOT pre-slice and passes `n_burn=int(n_burn)` — mixing these up (calling
+does NOT pre-slice and passes `n_burn=int(n_burn)` -- mixing these up (calling
 `diagnose(..., n_burn=int(n_burn))` on already-sliced draws, or vice versa) is
 an easy mistake that silently drops or double-strips warmup.
 
 **Return-shape contract.** `run_chain_<ClassName>` MUST return a dict
-whose `"hist"` is a dict of numpy arrays keyed by parameter name —
+whose `"hist"` is a dict of numpy arrays keyed by parameter name --
 scalars as `(n_keep,)` 1-D arrays, vectors as `(n_keep, dim)` 2-D
 arrays. NEVER a list-of-per-step-dicts (the R2 `_stack_param` helper
 branches on `arr.ndim == 1`, so a list breaks it). This is exactly what
@@ -209,37 +209,37 @@ the rest of this skill never mentions).
 
 The constructor block must list ALL arguments the user can pass, their
 types, and brief descriptions. If hyperparameters are exposed as
-constructor arguments (see `codegen.md` §2 and `codegen_priors.md`),
+constructor arguments (see `codegen.md` Sec.2 and `codegen_priors.md`),
 document those too with their defaults. Also document what
 `run_chain_<ClassName>()` returns (which keys, each array's shape).
 
-Concrete example — the constructor block for a BART model:
+Concrete example -- the constructor block for a BART model:
 
 ```python
 # -------------------------------------------------------------------------
 #   BartNoise(
-#       X:            (N, p) float array   — predictor matrix
-#       y:            (N,)   float array   — response vector
-#       ntrees:       int    = 200         — number of trees
-#       rng_seed:     int                  — RNG seed (0 = random_device)
-#       keep_history: bool   = False       — record per-iter draws
+#       X:            (N, p) float array   -- predictor matrix
+#       y:            (N,)   float array   -- response vector
+#       ntrees:       int    = 200         -- number of trees
+#       rng_seed:     int                  -- RNG seed (0 = random_device)
+#       keep_history: bool   = False       -- record per-iter draws
 #   )
 #   NOTE: sigma is initialized internally to bart_model's OLS-based sigest.
 #         For an overdispersed start (R-hat diagnostics), call
 #         model.set_current({"sigma": ...}) AFTER construction.
 #
 #   Methods:
-#     .step(n)         — run n Gibbs sweeps (one BART + one NUTS-sigma)
+#     .step(n)         -- run n Gibbs sweeps (one BART + one NUTS-sigma)
 #     .get_current()   -> {"f_bart": (N,), "sigma": float}
-#     .set_current(d)  — overwrite sigma; f_bart is read-only
+#     .set_current(d)  -- overwrite sigma; f_bart is read-only
 #
 #   run_chain_<ClassName>() returns:
-#     out["hist"]["f_bart"] — (n_keep, N) posterior draws of f
-#     out["hist"]["sigma"]  — (n_keep,)   posterior draws of sigma
+#     out["hist"]["f_bart"] -- (n_keep, N) posterior draws of f
+#     out["hist"]["sigma"]  -- (n_keep,)   posterior draws of sigma
 # -------------------------------------------------------------------------
 ```
 
-### Modular NUTS in composite — periodic readapt schedule (CONDITIONAL)
+### Modular NUTS in composite -- periodic readapt schedule (CONDITIONAL)
 
 Beyond the sequential-update use case above, `readapt_NUTS` is ALSO
 required for modular NUTS-in-composite where a `nuts_block` samples a
@@ -256,7 +256,7 @@ If the wrapper's composite has any NUTS-family child sampling a
 parameter whose conditional posterior is shifted by a sibling block
 (Gibbs, rjmcmc, VI, etc.), runners MUST emit a periodic readapt
 schedule INSIDE the chain runner. The R-side equivalent rule is in
-`codegen_r_runner.md` "Modular NUTS in composite — periodic readapt
+`codegen_r_runner.md` "Modular NUTS in composite -- periodic readapt
 schedule".
 
 **Defaults.** `readapt_every = 500` outer iters, `readapt_n = 50`
@@ -264,13 +264,13 @@ re-adapt iters per call (~10% overhead). Tighten to
 `readapt_every = 100` if R-hat fails at 4k+4k; loosen to
 `readapt_every = 1000` if the chain mixes well and wall is critical.
 There is no published canonical value for modular NUTS-in-composite
-re-adaptation frequency — standard frameworks (Stan, PyMC, NumPyro)
+re-adaptation frequency -- standard frameworks (Stan, PyMC, NumPyro)
 use single-warmup + frozen-metric and do not address this regime; the
 defaults here are empirically calibrated.
 
 Python emit pattern (note: `readapt_every`, `readapt_n` are
 **function arguments**, not script-scope globals, so the helper stays
-self-contained — sim1 / cross-impl harnesses can vary them per
+self-contained -- sim1 / cross-impl harnesses can vary them per
 replicate without touching the function body):
 
 ```python
@@ -281,7 +281,7 @@ def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
     model = mod.<ClassName>(<data_args>, rng_seed=int(seed),
                              keep_history=True)
     t0 = time.time()
-    # Periodic readapt schedule — covers BOTH burn-in and keep, since the
+    # Periodic readapt schedule -- covers BOTH burn-in and keep, since the
     # conditional keeps shifting throughout sampling under Gibbs siblings.
     total = int(n_burn + n_keep)
     full = total // readapt_every
@@ -311,7 +311,7 @@ def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
 # correct for the single chain a runner produces, and the plot uses matplotlib.
 ```
 
-**HARD RULE — the `diagnosis=True` path is non-negotiable.** The diagnostics
+**HARD RULE -- the `diagnosis=True` path is non-negotiable.** The diagnostics
 AND the plot are a SHIPPED library function, `AI4BayesCode.diagnose(hist,
 n_burn=...)`, which returns `(summary_table, plot_fn)` where `plot_fn()` draws
 trace + autocorrelation + density with matplotlib. Every generated runner MUST
@@ -319,9 +319,9 @@ trace + autocorrelation + density with matplotlib. Every generated runner MUST
 `AI4BayesCode.diagnose()` and attach BOTH `out["diagnosis"]` (table) AND
 `out["diagnosis_plot"]` (callable). Do NOT reimplement it inline. This is
 independent of how the runner collects draws: pass whatever named dict of kept
-draws you built as `AI4BayesCode.diagnose(draws, n_burn=...)` — use
+draws you built as `AI4BayesCode.diagnose(draws, n_burn=...)` -- use
 `n_burn=0` when the draws are already burn-in-stripped (`get_history()` returns
-burn-in + keep, so pass the burn-in length there). FORBIDDEN — an inline
+burn-in + keep, so pass the burn-in length there). FORBIDDEN -- an inline
 summary-only diagnosis that drops the plot (e.g. `out["summary"] =
 az.summary(...)` with no `diagnosis_plot`): that returns a table with NO
 trace/ACF/density plot and renames the field. ALWAYS route through
@@ -331,7 +331,7 @@ trace/ACF/density plot and renames the field. ALWAYS route through
 Skip the periodic schedule (use plain `model.step(n_burn);
 model.step(n_keep)`) ONLY when the composite is pure-NUTS-on-a-fixed-
 conditional (e.g. a single `joint_nuts_block` sampling everything
-jointly with no Gibbs siblings) — in that case the conditional does
+jointly with no Gibbs siblings) -- in that case the conditional does
 not shift and the initial warmup metric stays correct.
 
 ### Python runner template
@@ -350,20 +350,20 @@ The generated `run_<ClassName>.py` must include:
 
 Follow this structure:
 
-**Path-resolution rule (mirror R skill — no runtime detection).** The
+**Path-resolution rule (mirror R skill -- no runtime detection).** The
 generated runner uses HARDCODED RELATIVE PATHS. No `inspect.stack`,
 no `__file__`-walking, no `os.getcwd` checks. The contract: the user
-runs Python from **the project root** — the directory containing both
+runs Python from **the project root** -- the directory containing both
 `AI4BayesCode/` AND the `<folder>/` where the generator wrote the
 `.cpp`. If invoked elsewhere, the user gets a clear filesystem error
 and the fix is documented.
 
 ```python
-# === run_<ClassName>.py — Layer 3 harness (R1 + R2 + R3) ===
+# === run_<ClassName>.py -- Layer 3 harness (R1 + R2 + R3) ===
 import os, sys, time
 import numpy as np
 
-# Packaged API — install once (`pip install ai4bayescode`); no checkout,
+# Packaged API -- install once (`pip install ai4bayescode`); no checkout,
 # no sys.path hack, no ai4bayescode_path. Headers travel in the package.
 import AI4BayesCode
 
@@ -382,14 +382,14 @@ mod = AI4BayesCode.source("<folder>/<ClassName>.cpp")
 #   )
 # -------------------------------------------------------------------------
 
-# (Synthetic data block — exactly matches the codegen_priors.md "Validation
-# fixture" guidance; see §6 of that skill for the shape conventions.)
+# (Synthetic data block -- exactly matches the codegen_priors.md "Validation
+# fixture" guidance; see Sec.6 of that skill for the shape conventions.)
 # ... <data setup> ...
 #
-# HIERARCHICAL / random-effects / weight-variance models — draw the scale or
+# HIERARCHICAL / random-effects / weight-variance models -- draw the scale or
 # variance hyperparameter FROM ITS PRIOR, then draw the effects at that scale;
 # do NOT hard-code the scale to an arbitrary "moderate" value (e.g. sd=0.6).
-# A fixed moderate scale can CONFLICT with a tight or heavy-tailed prior — the
+# A fixed moderate scale can CONFLICT with a tight or heavy-tailed prior -- the
 # classic case is a tiny-scale InvGamma weight-variance prior (Neal-1996 / ARD,
 # e.g. nn_rbm, s0^2=(0.05/M^2)^2 ~ 1e-6): fixed sd 0.6 makes the DATA say
 # "sigma^2 ~ 0.36" while the PRIOR insists "sigma^2 ~ 1e-6", an artificially HARD
@@ -398,9 +398,9 @@ mod = AI4BayesCode.source("<folder>/<ClassName>.cpp")
 # (SBC-style). If the model ships a reference simulator (simulate_data(seed)),
 # PREFER it over an invented DGP.
 
-# Per-chain runner helper (with periodic readapt — see § above).
+# Per-chain runner helper (with periodic readapt -- see Sec. above).
 # Signature MUST include diagnosis=False; when diagnosis=True, CALL the
-# shipped AI4BayesCode.diagnose() — do NOT write your own helper.
+# shipped AI4BayesCode.diagnose() -- do NOT write your own helper.
 def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
                           readapt_every=500, readapt_n=50, newdata=None,
                           diagnosis=False):
@@ -409,7 +409,7 @@ def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
     #       out["diagnosis"], out["diagnosis_plot"] = \
     #           AI4BayesCode.diagnose(out["hist"], n_burn=int(n_burn))
 # NOTE: ai4bayescode_diagnose (table + trace/ACF/density plot) is SHIPPED in the
-# AI4BayesCode package — there is NO helper to define here.
+# AI4BayesCode package -- there is NO helper to define here.
 
 # === R1. Smoke test ===
 m_smoke = mod.<ClassName>(<data_args>, rng_seed=42, keep_history=False)
@@ -428,10 +428,10 @@ for k, v_before in cur_before.items():
 print("R1 smoke OK")
 
 # === R2. 2-chain MCMC convergence (sequential; see _run_two_chains) ===
-# Defer to validator.md §R2 for the budget/escalation policy + the
-# Dirac spike-and-slab §R2.s exclusion rule for per-coordinate slab
+# Defer to validator.md Sec.R2 for the budget/escalation policy + the
+# Dirac spike-and-slab Sec.R2.s exclusion rule for per-coordinate slab
 # DISTRIBUTION parameters (e.g. per-j slab variance tau2_beta /
-# tau2_theta) — NOT the slab-modelled beta_j / theta_jk themselves.
+# tau2_theta) -- NOT the slab-modelled beta_j / theta_jk themselves.
 
 def _worker(args):
     seed, n_burn, n_keep = args
@@ -441,7 +441,7 @@ def _worker(args):
 n_burn = 4000; n_keep = 4000
 
 # Flip to True if this runner's composite contains a joint_nuts_block
-# (tightens the R3 BPV interval from (0.05, 0.95) to (0.02, 0.98) —
+# (tightens the R3 BPV interval from (0.05, 0.95) to (0.02, 0.98) --
 # mirrors USES_JOINT_NUTS in codegen_r_runner.md).
 USES_JOINT_NUTS = <True if composite has joint_nuts_block else False>
 
@@ -464,25 +464,25 @@ def _run_two_chains(n_burn, n_keep):
 c1, c2, total_wall_sec = _run_two_chains(n_burn, n_keep)
 
 # --- R-hat / ESS aggregation (rank-normalized, via arviz) ----------------
-# Matches validator.md §R2 and codegen_r_runner.md r2_diag(): rank-normalized
+# Matches validator.md Sec.R2 and codegen_r_runner.md r2_diag(): rank-normalized
 # R-hat is a HARD gate (< 1.05); ESS is a SOFT criterion via
-# ess_ratio = min(ESS_bulk, ESS_tail) / n_keep — >= 0.01 silent,
+# ess_ratio = min(ESS_bulk, ESS_tail) / n_keep -- >= 0.01 silent,
 # [0.005, 0.01) WARN and proceed, < 0.005 escalate. AI4BayesCode.rhat / ess_* use the
 # rank-normalized split-R-hat and bulk/tail ESS of Vehtari et al. (2021),
 # the same estimators posterior::rhat / ess_bulk / ess_tail compute R-side.
 #
-# §R2.s conditional-relevance exclusion (Dirac spike-and-slab): for per-j
+# Sec.R2.s conditional-relevance exclusion (Dirac spike-and-slab): for per-j
 # slab DISTRIBUTION parameters (per-coordinate slab variance tau2_beta /
-# tau2_theta and similar — NOT the slab-modelled beta_j / theta_jk
+# tau2_theta and similar -- NOT the slab-modelled beta_j / theta_jk
 # themselves), mask draws by inclusion indicator I_j == 1, truncate the two
 # chains to the common min retained count, then feed to AI4BayesCode.rhat. See
-# validator.md §R2.s for the precise rule and the I_j ∈ {0, 1} convention.
+# validator.md Sec.R2.s for the precise rule and the I_j  in  {0, 1} convention.
 
 def _stack_param(c1, c2, key):
     """Stack two chains' draws for one parameter into an arviz-shaped array.
 
     Returns a list of per-component (chain, draw) arrays so a vector
-    parameter (n_keep × dim) is diagnosed component-by-component, exactly
+    parameter (n_keep x dim) is diagnosed component-by-component, exactly
     like the R-side `apply(arr, 3, posterior::rhat)`.
     """
     a1 = np.asarray(c1["hist"][key]); a2 = np.asarray(c2["hist"][key])
@@ -518,7 +518,7 @@ d = r2_diag(c1, c2, n_keep)
 # Stage-2 escalation (within-attempt): re-run at 20000 + 20000 if Stage-1
 # shows max R-hat >= 1.05 OR a severely low ess_ratio (< 0.005), then
 # recompute. A slow-but-correct model gets the bigger budget BEFORE being
-# declared a failure (validator.md §R2). Do NOT hard-fail ESS at Stage 1.
+# declared a failure (validator.md Sec.R2). Do NOT hard-fail ESS at Stage 1.
 if d["rhat"] >= 1.05 or d["ess_ratio"] < 0.005:
     print("  [R2] Stage-1 inadequate -> escalating to 20000 + 20000 ...")
     n_burn = 20000; n_keep = 20000
@@ -527,11 +527,11 @@ if d["rhat"] >= 1.05 or d["ess_ratio"] < 0.005:
     assert all(np.all(np.isfinite(np.asarray(v))) for v in c2["hist"].values())
     d = r2_diag(c1, c2, n_keep)
 
-# worst rank-normalized R-hat across all parameters — drives the final gate.
+# worst rank-normalized R-hat across all parameters -- drives the final gate.
 worst_rhat = d["rhat"]
 
 # Final R2 gates: R-hat HARD (< 1.05); ESS SOFT (only ess_ratio < 0.005 at the
-# escalated budget is a FAILURE; [0.005, 0.01) only warns — legitimate for slow
+# escalated budget is a FAILURE; [0.005, 0.01) only warns -- legitimate for slow
 # GP / hierarchical models).
 assert worst_rhat < 1.05, f"R2 FAIL: worst rank-Rhat {worst_rhat:.4f} >= 1.05"
 if d["ess_ratio"] < 0.005:
@@ -541,15 +541,15 @@ if d["ess_ratio"] < 0.005:
 elif d["ess_ratio"] < 0.01:
     import warnings
     warnings.warn(
-        f"R2: worst ess_ratio {d['ess_ratio']:.4f} in [0.005, 0.01) — "
+        f"R2: worst ess_ratio {d['ess_ratio']:.4f} in [0.005, 0.01) -- "
         f"model mixes slowly, proceeding")
 
 # === R3. Posterior check ===
 # Bayesian posterior-predictive p-values on up to 6 summary stats + an OPTIONAL
-# PSIS-LOO diagnostic. See validator.md §R3 and codegen_r_runner.md §R3.
+# PSIS-LOO diagnostic. See validator.md Sec.R3 and codegen_r_runner.md Sec.R3.
 #
 # R3.a Bayesian p-values on (up to) 6 summary statistics. y_rep is the
-# posterior-predictive draw matrix (n_keep × N) from predict_at(). The p-value
+# posterior-predictive draw matrix (n_keep x N) from predict_at(). The p-value
 # for statistic T is P(T(y_rep) >= T(y_obs)) over posterior-predictive draws.
 # DIAGNOSTIC ONLY -- print, WARN on an EGREGIOUS excursion, but NEVER assert /
 # gate on it. A posterior-predictive p-value is ~Uniform(0, 1) even for a
@@ -564,7 +564,7 @@ bp_stat = {
     "q25": lambda x: np.quantile(x, 0.25),
     "q75": lambda x: np.quantile(x, 0.75),
 }
-y_rep = np.asarray(c1["pp"]["y_rep"])      # (n_keep × N)
+y_rep = np.asarray(c1["pp"]["y_rep"])      # (n_keep x N)
 pv = {nm: float(np.mean(np.array([f(row) for row in y_rep]) >= f(y_obs)))
       for nm, f in bp_stat.items()}
 print("\n  Bayesian p-values: " +
@@ -577,7 +577,7 @@ if _bpv_extreme:
         f"{_bpv_extreme}. Expected for order statistics; investigate model fit "
         f"only if a CENTRAL statistic (mean / sd) is extreme AND R-hat flags.")
 
-# R3.b PSIS-LOO (DIAGNOSTIC ONLY — NEVER gates). Pareto-k_hat measures LOO
+# R3.b PSIS-LOO (DIAGNOSTIC ONLY -- NEVER gates). Pareto-k_hat measures LOO
 # importance-weight reliability, NOT sampler correctness; GP latent-variable
 # and hierarchical-latent models routinely fail this diagnostic even with a
 # correctly sampled posterior (Vehtari, Simpson, Gelman, Yao, Gabry, JMLR
@@ -586,8 +586,8 @@ if _bpv_extreme:
 # never asserted.
 #
 # Emit the per-observation log-likelihood that matches the model's
-# observation family (Gaussian example below; replace the body — see
-# codegen_cpp.md §6a per-family templates). Build an InferenceData with a
+# observation family (Gaussian example below; replace the body -- see
+# codegen_cpp.md Sec.6a per-family templates). Build an InferenceData with a
 # log_likelihood group of shape (chain, draw, obs) and call az.loo.
 try:
     import arviz as az                          # lazy: PSIS-LOO is the ONLY arviz user
@@ -595,7 +595,7 @@ try:
     #                                             broken arviz never gates validation.
     def pointwise_loglik(hist, y):
         # ...replace with the model's per-observation log density,
-        #    shape (n_keep, N); see codegen_cpp.md §6a templates...
+        #    shape (n_keep, N); see codegen_cpp.md Sec.6a templates...
         raise NotImplementedError
     ll1 = pointwise_loglik(c1["hist"], y_obs)   # (n_keep, N)
     ll2 = pointwise_loglik(c2["hist"], y_obs)   # (n_keep, N)
@@ -619,7 +619,7 @@ try:
             f"hierarchical-latent models routinely fail this diagnostic with "
             f"correctly sampled posteriors. See Vehtari et al. (JMLR 2024).")
 except Exception as _loo_err:               # no loglik, no arviz, arviz API change, ...
-    print(f"  [R3.b] PSIS-LOO skipped ({type(_loo_err).__name__}) — "
+    print(f"  [R3.b] PSIS-LOO skipped ({type(_loo_err).__name__}) -- "
           "diagnostic only, does not gate.")
 
 # === Performance hint ===
@@ -634,15 +634,15 @@ AI4BayesCode.perf_hint(
 # === Final validation verdict (MUST be the VERY LAST line printed) ===
 # The generator greps stdout for this exact sentinel. worst_rhat is from R2 above.
 # The PASS/FAIL token uses the DEFAULT HARD gate = 1.05 (matches the assert above
-# and validator.md §R2); it MUST match the gate, else it prints FAIL while the run
+# and validator.md Sec.R2); it MUST match the gate, else it prints FAIL while the run
 # continues at 1.05 (the confusing "FAIL-but-SUCCESS"). Keep the token text EXACT.
 if worst_rhat < 1.05:
     print("AI4BAYES_VALIDATE: PASS")
 else:
     print(f"AI4BAYES_VALIDATE: FAIL maxRhat={worst_rhat:.4f}")
 # R-hat GRAY ZONE (1.01, 1.05]: PASSES the default gate but not the strict
-# Vehtari-2021 1.01 bar. Do NOT auto-escalate — follow start.md's "R-hat gray
-# zone — opt-in stricter convergence" protocol: surface the structured question
+# Vehtari-2021 1.01 bar. Do NOT auto-escalate -- follow start.md's "R-hat gray
+# zone -- opt-in stricter convergence" protocol: surface the structured question
 # (a: ship as-is at 1.05 [default] / b: extend budget 20k->40k->80k toward <1.01 /
 # c: AI-proposed structural fix / d: other). A heavy-tailed hierarchical variance
 # (InvGamma) can legitimately sit at 1.01-1.02 even when the posterior is CORRECT
@@ -661,23 +661,23 @@ intermediate quantity computed inside `step()` but not registered with
 shared_data) needs to flow into R3, generate a Python helper that
 recomputes from `get_history()` outputs and the cached `predict_at`
 result. Do NOT add `.method()` entries to `PYBIND11_MODULE` to expose
-intermediate scratch — that breaks the §1 invariant.
+intermediate scratch -- that breaks the Sec.1 invariant.
 
 **Codegen LLMs MUST NOT hallucinate history keys.** Before emitting
 `hist['<key>']` in a generated runner, verify `<key>` is in the block's
 documented `get_history()` output. If a field is only under
-`get_current()`, route it through `get_current()` per step — do NOT
+`get_current()`, route it through `get_current()` per step -- do NOT
 pretend it lives in `hist`. (Motivating bug: a runner referenced
-`hist['order_sampled_DAG']`, which does not exist — it compiled but
+`hist['order_sampled_DAG']`, which does not exist -- it compiled but
 crashed at first use.)
 
-**Known case:** `order_mcmc_block` exposes `sampled_DAG` (a p×p adjacency
+**Known case:** `order_mcmc_block` exposes `sampled_DAG` (a pxp adjacency
 matrix) ONLY via `get_current()`; its `get_history()` returns only
 `order`, `order_log_score`, and (when a Tier-A wrapper adds it) `y_rep`.
-The DAG is history-omitted because it is heavy: p=20, T=40000 ≈ 130 MB;
-p=64 (block ceiling) ≈ 1.3 GB.
+The DAG is history-omitted because it is heavy: p=20, T=40000 ~= 130 MB;
+p=64 (block ceiling) ~= 1.3 GB.
 
-**Collection-loop pattern** — step through burn-in, then collect the
+**Collection-loop pattern** -- step through burn-in, then collect the
 per-step `get_current()` field draw-by-draw, storing the result at the
 TOP LEVEL of `out` (parallel to `"hist"`, NOT inside it):
 
@@ -696,11 +696,11 @@ out = {"hist": _slice(model.get_history()),
 
 ## 9a. Model-specific Python-side preprocessing
 
-The R-skill §9a documents the SoftBart `sigma_hat` recipe (R-side
+The R-skill Sec.9a documents the SoftBart `sigma_hat` recipe (R-side
 cross-validated lasso + variance scaling). See `codegen_r_runner.md`
-§9a for the full recipe + hard rules (the math is language-agnostic).
+Sec.9a for the full recipe + hard rules (the math is language-agnostic).
 The Python translation uses `sklearn.linear_model.LassoCV`, but three
-specifics must be reproduced by hand — sklearn does NOT match `glmnet`
+specifics must be reproduced by hand -- sklearn does NOT match `glmnet`
 out of the box:
 
 1. **`LassoCV` has NO native 1-SE selection.** R's SoftBart uses
@@ -731,8 +731,8 @@ support" for the current list) all expose the same 6-method API as R
 and serve as reference templates.
 
 For backend selection rules (R-only / Python-only / dual R+Python),
-load `codegen.md` §1 and `codegen_cpp.md` §9.
+load `codegen.md` Sec.1 and `codegen_cpp.md` Sec.9.
 
 For the Layer-3 validator details (budget escalation, ESS gate, BPV
-gate, PSIS-LOO gate, Dirac spike-and-slab §R2.s exclusion rule), load
+gate, PSIS-LOO gate, Dirac spike-and-slab Sec.R2.s exclusion rule), load
 `validator.md`.

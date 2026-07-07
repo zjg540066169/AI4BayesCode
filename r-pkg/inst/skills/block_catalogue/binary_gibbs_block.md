@@ -1,7 +1,7 @@
 ## binary_gibbs_block
 
-**Reference example:** NONE shipped — library-only. The classical use
-case (continuous spike-and-slab with binary indicator γ_j) is
+**Reference example:** NONE shipped -- library-only. The classical use
+case (continuous spike-and-slab with binary indicator gamma_j) is
 intentionally covered in `examples/SpikeSlabRJMCMC.cpp` via the
 `rjmcmc_block` (Dirac spike-and-slab is the geometry the project
 targets), not via `binary_gibbs_block`. If a codegen agent needs the
@@ -15,10 +15,10 @@ Use for spike-and-slab, variable selection.
 **Target-geometry caveat:** `binary_gibbs_block` is the right tool for
 *continuous* spike-and-slab (both spike and slab have positive Gaussian
 density) and for plain binary indicators. It is **NOT** the right tool
-for **Dirac** spike-and-slab (β_j = 0 exactly when γ_j = 0) — that
+for **Dirac** spike-and-slab (beta_j = 0 exactly when gamma_j = 0) -- that
 target has a dimension-changing state space and Gibbs on it is not
-irreducible. See `skills/system_design.md` §11 and
-`skills/codegen_priors.md` §3a. For Dirac spike-and-slab, use the
+irreducible. See `skills/system_design.md` Sec.11 and
+`skills/codegen_priors.md` Sec.3a. For Dirac spike-and-slab, use the
 `rjmcmc_block` identity path (see the rjmcmc_block entry below and
 `examples/SpikeSlabRJMCMC.cpp` reference template). Alternatively,
 a continuous relaxation (tight-Gaussian-spike) with `nuts_block` on

@@ -2,19 +2,19 @@
 
 Bayesian logistic regression via Polya-Gamma data augmentation.
 Exact Gibbs: alternates PG(1, X_i' beta) auxiliary draws (library-
-internal truncated series, K=128 terms → 1e-8 relative tail bias on
-PG mean) with Gaussian β | ω update. 10-100× faster than NUTS-on-
+internal truncated series, K=128 terms -> 1e-8 relative tail bias on
+PG mean) with Gaussian beta | omega update. 10-100x faster than NUTS-on-
 logistic for p < ~1000.
 
-⚠️ **Hard scope limitation: LINEAR LOGISTIC ONLY — NOT LOGISTIC BART.**
+WARNING **Hard scope limitation: LINEAR LOGISTIC ONLY -- NOT LOGISTIC BART.**
 PG augmentation's exact-Gibbs advantage depends on the linear
 predictor `X_i' beta` being a parametric linear combination. Substituting
-a BART mean function f(X_i) breaks both (i) the Gaussian β | ω
+a BART mean function f(X_i) breaks both (i) the Gaussian beta | omega
 conjugacy and (ii) BART's tree-location identifiability (the PG-
-augmented pseudo-response κ = y - 0.5 does not anchor BART's
+augmented pseudo-response kappa = y - 0.5 does not anchor BART's
 Gaussian-observation tree scale). For logistic BART, use
 **`genbart_block` + `genbart::lik::logistic_lik`** (see
-`examples/GBartLogistic.cpp`) — the RJMCMC tree kernel handles the
+`examples/GBartLogistic.cpp`) -- the RJMCMC tree kernel handles the
 non-conjugate sigmoid likelihood directly via Laplace leaf
 proposals, with no augmentation required. Never combine `bart_block` +
 `pg_logistic_block`.

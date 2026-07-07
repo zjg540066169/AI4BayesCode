@@ -19,21 +19,21 @@ full-conditional precision `Q = kappa R + sigma2^{-1} I`; then it draws
 `name` and `kappa` under `name`+`"_kappa"`.
 
 **JUSTIFICATION (Check #16):** fixed-dim continuous Gaussian latent + strongly
-coupled scale hyperparameter (`system_design.md` §11.1). The collapsed joint
+coupled scale hyperparameter (`system_design.md` Sec.11.1). The collapsed joint
 update is the textbook remedy for the (x, kappa) mixing pathology. Check #15
 parity panel under `tests/`:
-- `test_gmrf_gaussian_joint_block.cpp` — sampled `kappa` posterior mean+sd and
+- `test_gmrf_gaussian_joint_block.cpp` -- sampled `kappa` posterior mean+sd and
   `E[x|y]` matched to a **dense fine-grid** computation of the exact posterior
-  `p(kappa|y) ∝ Gamma(kappa;a,b) p(y|kappa)` and
-  `E[x|y] = ∫ mu(kappa) p(kappa|y) dkappa`; plus two-chain Gelman-Rubin
+  `p(kappa|y) prop.to Gamma(kappa;a,b) p(y|kappa)` and
+  `E[x|y] = int mu(kappa) p(kappa|y) dkappa`; plus two-chain Gelman-Rubin
   R-hat < 1.01 on kappa from over-dispersed inits. Empirically E[kappa] within
   0.8%, sd within 2.3%, E[x] within 0.005, R-hat 1.00012. Ground truth is
-  dense linear algebra only — zero external dependency.
+  dense linear algebra only -- zero external dependency.
 
 **Scope (v1.2.1 shipped):** Gaussian observation `y ~ N(x, sigma2 I)` with
 known `sigma2`; single smoothing precision `kappa`; proper or IGMRF `R`
 (`sum_to_zero = true` for rank-deficient R). **Deferred:** non-Gaussian
-(Poisson/Binomial) likelihoods via the Taylor-GMRF proposal (Rue 2001 §quadratic
+(Poisson/Binomial) likelihoods via the Taylor-GMRF proposal (Rue 2001 Sec.quadratic
 approx), jointly-sampled regression coefficients in the mean, and unknown
 `sigma2`.
 

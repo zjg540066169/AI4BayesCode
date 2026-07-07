@@ -2,36 +2,36 @@
 
 Companion to `gmrf_precision_block` for the **non-Gaussian observation
 likelihood** case. When the latent prior is GMRF
-(`pi(x) ∝ exp{-½ x^T Q x}`, Q sparse PSD) but the observation
+(`pi(x) prop.to exp{-1/2 x^T Q x}`, Q sparse PSD) but the observation
 likelihood is NOT Gaussian (Poisson, Bernoulli, Student-t, NB,
 log-Gaussian Cox), the full conditional `p(x | y, hyperparams)` is no
 longer Gaussian and `gmrf_precision_block`'s direct conjugate draw
 does not apply. This block uses Murray 2010 Elliptical Slice Sampling
-on the IMPLICIT GMRF prior — the prior is never expanded; only sparse
+on the IMPLICIT GMRF prior -- the prior is never expanded; only sparse
 Q is factorised.
 
 **Algorithm** (per step):
 1. Build Q = Q_fn(ctx); refactor sparse Cholesky (SimplicialLLT + AMD)
 2. Sample nu ~ N(0, Q^{-1}) via Rue 2001 permuted backsolve (sample
    z ~ N(0, I), solve `L^T y_perm = z`, apply inverse permutation)
-3. ESS shrink loop: propose `x' = x cos θ + nu sin θ`, accept if
-   `log_lik(x') > log_lik(x) + log(u)`, else shrink θ-bracket
+3. ESS shrink loop: propose `x' = x cos theta + nu sin theta`, accept if
+   `log_lik(x') > log_lik(x) + log(u)`, else shrink theta-bracket
    (Murray 2010 Algorithm 1)
 
 The acceptance rate is independent of the likelihood scale (Murray
 2010 Theorem 1), so the block mixes well even when the posterior is
 sharply peaked relative to the prior. Per-sweep cost
-O(n · b_w^2 + n · n_shrink_avg) where b_w = bandwidth and n_shrink_avg
+O(n * b_w^2 + n * n_shrink_avg) where b_w = bandwidth and n_shrink_avg
 is typically 2-5 for well-conditioned posteriors.
 
 **JUSTIFICATION (Check #16):** Latent Gaussian with non-Gaussian
-observation likelihood — falls outside `gmrf_precision_block`'s
+observation likelihood -- falls outside `gmrf_precision_block`'s
 Gaussian-conditional scope. Murray 2010 ESS is the standard textbook
 algorithm for this regime (cited in Rasmussen-Williams Ch.3 GP
 classification, Banerjee-Carlin-Gelfand 2014 spatial-epidemiology
 Ch.5 for Poisson-ICAR / BYM2).
 
-**Sum-to-zero invariant**: ESS rotation `x cos θ + nu sin θ` is
+**Sum-to-zero invariant**: ESS rotation `x cos theta + nu sin theta` is
 linear; if `x_cur` and `nu` are both zero-mean, every proposal is
 zero-mean. The block enforces sum-to-zero only on `nu` post-sample
 (via the same projection as `gmrf_precision_block`) and on
@@ -42,20 +42,20 @@ across 8000 draws on N=16 ICAR).
 **Empirical correctness** (header tests, 2026-06-03):
 - T1 Pure prior recovery (N=16, 10k draws): sample var / Q^{-1}
   diag = 0.998 (essentially exact); off-diag cov match within 0.2%
-- T2 Poisson-ICAR N=16, 4 chains × 2k: R-hat max=1.026, ESS_bulk
+- T2 Poisson-ICAR N=16, 4 chains x 2k: R-hat max=1.026, ESS_bulk
   min=245, coverage 15/16 = 94%, sum-to-zero preserved to 1e-12
-- T3b Poisson-ICAR N=64, 4 chains × 10k: R-hat max=1.041,
+- T3b Poisson-ICAR N=64, 4 chains x 10k: R-hat max=1.041,
   ESS_bulk min=149, coverage 63/64 = 98%, 0.09s wall per chain
 
 **Verified convergence budgets (R-hat < 1.01, 4 chains, Poisson-ICAR fixture):**
 
 | Grid | Budget/chain | Wall/chain | R-hat max | ESS_bulk min |
 |---|---|---|---|---|
-| N=16 (4×4) | 20k | 0.06s | 1.004 | 2409 |
-| N=64 (8×8) | 50k | 0.47s | 1.006 | 915 |
+| N=16 (4x4) | 20k | 0.06s | 1.004 | 2409 |
+| N=64 (8x8) | 50k | 0.47s | 1.006 | 915 |
 
 Empirical scaling: budget grows roughly linearly with N at typical
-lattice connectivities (4-NN / 6-NN). Larger grids (N ≈ 100-200)
+lattice connectivities (4-NN / 6-NN). Larger grids (N ~= 100-200)
 may need 100k-200k iter per chain to maintain R-hat < 1.01; the user
 should pilot the convergence budget for their specific Q topology and
 likelihood family before committing to a production budget.
@@ -89,7 +89,7 @@ cfg.initial_x    = arma::vec(N, arma::fill::zeros);
 
 **Reference templates:** TBD (v1.3 roadmap). Until shipped, use the
 example recipe above and the inline pattern in `system_design.md`
-§13 GMRF-family section.
+Sec.13 GMRF-family section.
 
 **Vendored kernel:** Eigen 3.4 `Eigen/SparseCholesky` (header-only,
 MPL-2.0). Same `-I include/eigen` build flag as
@@ -97,8 +97,8 @@ MPL-2.0). Same `-I include/eigen` build flag as
 
 **Scope (v1.2 ship):**
 - Symbolic factorisation cached once (assumes Q's sparsity pattern is
-  fixed across steps; numerical values may vary — typical for
-  `Q = kappa · R` decompositions)
+  fixed across steps; numerical values may vary -- typical for
+  `Q = kappa * R` decompositions)
 - Single sum-to-zero constraint via post-hoc projection on `nu`
 - Universal `log_lik(x, ctx) -> double` user callback (any non-Gaussian
   likelihood family)

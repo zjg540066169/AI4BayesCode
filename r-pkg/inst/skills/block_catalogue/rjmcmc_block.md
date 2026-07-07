@@ -19,7 +19,7 @@ a birth-death proposal.
   `diagonal_affine_transform_1d(scale, offset)`. When set, the
   birth pipeline routes through the transform:
     u ~ propose_sample(rng, j, ctx)
-    beta_new = transform.apply_forward(u, &β_new)
+    beta_new = transform.apply_forward(u, &beta_new)
     |det J| computed by the transform (library-side, not user-side)
   MH accept ratio includes the Jacobian correctly per Green 1995.
   When NOT set (default), the identity path is used.
@@ -28,14 +28,14 @@ a birth-death proposal.
   where `Forward` is a single TEMPLATED callable struct and `Inverse`
   is a non-templated `double -> double` analytic inverse. Framework
   instantiates Forward at both `double` (for sampling) and
-  `autodiff::var` (for runtime AD computation of `|dβ/du|`). Users
+  `autodiff::var` (for runtime AD computation of `|dbeta/du|`). Users
   STILL write no Jacobian formula. See
   `include/AI4BayesCode/rjmcmc_custom_bijection.hpp` for the API and
-  `validator.md` §14 for the bijection sanity probes
+  `validator.md` Sec.14 for the bijection sanity probes
   (round-trip / Jacobian non-singularity / forward-reverse Jacobian
   inverse-pair).
 
-See `system_design.md` §10.2 for the full three-tier story (
+See `system_design.md` Sec.10.2 for the full three-tier story (
 identity / library 1D transforms / custom AD bijection).
 
 **Supported model classes:** Dirac spike-and-slab variable
@@ -44,13 +44,13 @@ prior-sampled values, mixture-component birth/death for finite
 unknown-K (non-BNP).
 
 **NOT appropriate for:**
-- BNP mixtures (DP, PY, HDP) — use the **truncated SBP** path
+- BNP mixtures (DP, PY, HDP) -- use the **truncated SBP** path
   (`stick_breaking_block` + `normal_gamma_cluster_gibbs_block` +
   `categorical_gibbs_block`); see `examples/DPGaussianMixture.cpp`
   / `examples/PYGaussianMixture.cpp` /
   `examples/DPGaussianMixture_DerivedAlpha.cpp`. **The cluster-prior
   hyperparameters MUST be data-driven weakly-informative (see the
-  CRITICAL note under `normal_gamma_cluster_gibbs_block` below) — fixed
+  CRITICAL note under `normal_gamma_cluster_gibbs_block` below) -- fixed
   hypers silently produce a wrong over-segmented posterior R-hat won't
   flag.** CRP-marginal Neal Alg 2/8 and Jain-Neal split-merge are not
   in the current scope; they remain optimisations rather than
@@ -59,45 +59,45 @@ unknown-K (non-BNP).
   `composite_block::declare_shared_history("z")` if the truncated-SBP
   partition posterior is multimodal for a given dataset).
 - Multi-dim bijections `R^n -> R^n` for `n > 1` (e.g., Stephens
-  2000 split-merge for finite mixtures with unknown K) — current scope ships
+  2000 split-merge for finite mixtures with unknown K) -- current scope ships
   the 1D-scalar case only (`templated_bijection_1d`); multi-dim
   custom bijections require a future block class.
 - Multi-coefficient block birth (birthing a cluster of related
-  coefs at once via one transform) — wait for a future multi-dim
+  coefs at once via one transform) -- wait for a future multi-dim
   transforms); the current scope is 1D-per-coefficient only.
-- HMM / Markov-structured discrete — use `hmm_block` (T10,
+- HMM / Markov-structured discrete -- use `hmm_block` (T10,
   SHIPPED 2026-04-20; see the hmm_block entry above).
 
 **Critical for good mixing:** supply `continuous_update` function
 in the config. This is typically a closed-form Gibbs draw for
 beta[j] | gamma[j]=1 under the linear conditional. Without this
 hook, beta[j] stays at its birth-time value as long as gamma[j]=1
-— posterior for beta is badly biased and sigma^2 is inflated.
+-- posterior for beta is badly biased and sigma^2 is inflated.
 
 **Reference templates:**
-- `examples/SpikeSlabRJMCMC.cpp` — canonical Dirac spike-and-slab
+- `examples/SpikeSlabRJMCMC.cpp` -- canonical Dirac spike-and-slab
   under the **Ishwaran & Rao 2005 sigma-scaled slab** form
   (`beta_j | gamma_j=1, sigma, tau ~ N(0, sigma^2 tau^2)`, so tau
   is dimensionless). 4-block composite:
-    1. `beta_gibbs_block(pi)` — Exception 3 (scalar Beta-Bernoulli
+    1. `beta_gibbs_block(pi)` -- Exception 3 (scalar Beta-Bernoulli
        conjugate); covered by library parity test Check #15.
-    2. `nuts_block(sigma)` with Jeffreys `p(sigma) ∝ 1/sigma`.
-    3. `nuts_block(tau)` with Jeffreys `p(tau) ∝ 1/tau` +
+    2. `nuts_block(sigma)` with Jeffreys `p(sigma) prop.to 1/sigma`.
+    3. `nuts_block(tau)` with Jeffreys `p(tau) prop.to 1/tau` +
        k=0 fallback to half-Normal(0, 1) pin (inside the natural-
        scale log-density).
     4. `rjmcmc_block(gamma, beta)` with hand-written Gibbs
-       `continuous_update` for `beta_j | gamma_j=1` — Exception 2
+       `continuous_update` for `beta_j | gamma_j=1` -- Exception 2
        (kernel contract); covered by per-usage parity test
        Check #15.
   `gamma_init` via marginal-OLS screening
-  (`gamma_init[argmax_j |X_j'y|] = 1`) guarantees k ≥ 1 at iter 1,
+  (`gamma_init[argmax_j |X_j'y|] = 1`) guarantees k >= 1 at iter 1,
   avoiding the improper-posterior transient on tau under Jeffreys.
-  Constructor takes only `(X, y, a_pi, b_pi, seed, keep_history)` —
+  Constructor takes only `(X, y, a_pi, b_pi, seed, keep_history)` --
   no hyperparameters on sigma/tau thanks to scale-invariant
-  Jeffreys priors. See `skills/codegen_priors.md §2a` for the variance
-  prior discipline rationale and §3a Class 2b for the Dirac
+  Jeffreys priors. See `skills/codegen_priors.md Sec.2a` for the variance
+  prior discipline rationale and Sec.3a Class 2b for the Dirac
   spike-and-slab decision tree.
-- `examples/SpikeSlabSinhBijection.cpp` — minimal demo using
+- `examples/SpikeSlabSinhBijection.cpp` -- minimal demo using
   the templated bijection path (`make_templated_bijection_1d` with
   a `sinh` forward + `asinh` inverse). Single-coefficient toy
   model with fixed hyperparameters; the whole point is to exercise
@@ -124,7 +124,7 @@ cfg.beta_init         = arma::vec(p, arma::fill::zeros);
 gamma[j] that are consistently 0 across chains can show
 numerical-noise R-hat (>1.05 or higher). Inspect per-component
 R-hat only on j with mean(gamma[,j]) > 0.01 (the "active subset"
-— j with any non-trivial inclusion probability). True-zero j
+-- j with any non-trivial inclusion probability). True-zero j
 should NOT contribute to the R-hat diagnostic.
 
 **sigma/tau cross-chain R-hat under spike-and-slab (empirical

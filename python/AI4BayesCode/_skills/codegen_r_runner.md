@@ -1,7 +1,7 @@
 ---
 name: AI4BayesCode-codegen-r-runner
 description: |
-  R runner template for AI4BayesCode samplers — ai4bayescode_sourceCpp
+  R runner template for AI4BayesCode samplers -- ai4bayescode_sourceCpp
   setup, constructor-argument reference block,
   run_chain_<ClassName>() helper with
   keep_history = TRUE, Layer 3 validator wiring (R1 smoke check, R2
@@ -12,7 +12,7 @@ description: |
   skill `codegen.md` points here for R runner emission.
 ---
 
-# AI4BayesCode codegen — R runner + reference templates
+# AI4BayesCode codegen -- R runner + reference templates
 
 Companion skill to `codegen.md`. Load this when writing the generated
 `.R` runner: ai4bayescode_sourceCpp setup, constructor-argument reference
@@ -30,25 +30,25 @@ For the C++ file emission, see `codegen_cpp.md`.
 
 1. Create output folder if missing (default `./generated/<ClassName>/`).
 2. Write `<folder>/<ClassName>.cpp`. **It MUST carry BOTH the `@example:R`
-   AND the `@example:python` header blocks** (per `codegen_cpp.md` §5 "Header
-   `@example` block") — the `.cpp` is ALWAYS dual-module, so a Python user who
+   AND the `@example:python` header blocks** (per `codegen_cpp.md` Sec.5 "Header
+   `@example` block") -- the `.cpp` is ALWAYS dual-module, so a Python user who
    takes the same file must still see the Python example via
    `AI4BayesCode.doc()`, and an R user the R example via `ai4bayescode_doc()`.
-   Both blocks are the SAME toy DGP this runner uses, distilled to ≤ ~8
+   Both blocks are the SAME toy DGP this runner uses, distilled to <= ~8
    runnable lines using each language's packaged API (`library(AI4BayesCode)`
-   → `new(<ClassName>, ...)` for R; `AI4BayesCode.source(...)` → `Mod(...)`
+   -> `new(<ClassName>, ...)` for R; `AI4BayesCode.source(...)` -> `Mod(...)`
    for Python). Write the DGP once and mirror it into BOTH header blocks so
    the runner and both doc cards cannot drift.
 3. Write the R runner `<folder>/run_<ClassName>.R` following the
    template below and **use it to gate generation** (it carries the
-   Layer-3 R1/R2/R3 harness — see the CORRECTNESS INVARIANT in
+   Layer-3 R1/R2/R3 harness -- see the CORRECTNESS INVARIANT in
    `codegen.md` "Delivered-code validation harness": Layer-3 ALWAYS
    runs and must PASS regardless of the user's harness choice).
 4. **Deliverable depends on the "Delivered-code validation harness"
    answer:**
    - **No / minimal example (default):** on validator PASS, **DELETE**
-     `run_<ClassName>.R` (it is a throwaway — same rule as the Step-2
-     smoke test and the §6b autodiff-verify file) and instead write a
+     `run_<ClassName>.R` (it is a throwaway -- same rule as the Step-2
+     smoke test and the Sec.6b autodiff-verify file) and instead write a
      minimal `<folder>/example_<ClassName>.R` (template below). The
      production `.cpp` already contains zero validation code.
    - **Yes (opt-in):** keep `run_<ClassName>.R` as the delivered
@@ -63,7 +63,7 @@ For the C++ file emission, see `codegen_cpp.md`.
 
 NOT a stripped golden-path snippet. It is **every part of the R
 runner up to (but EXCLUDING) the first chain of the two-chain
-diagnostic** — i.e. the cut point is the line
+diagnostic** -- i.e. the cut point is the line
 `c1 <- run_chain_<ClassName>(<data_args>, seed = 101L, ...)`.
 Everything before that cut is delivered; everything from that line
 onward (the 2-chain R2 diagnostic, R-hat/ESS, R3 BPV, PSIS-LOO,
@@ -71,40 +71,40 @@ the R1 smoke wiring) is the throwaway Layer-3 harness and is NOT
 shipped in the default case.
 
 The delivered `example_<ClassName>.R` MUST contain, in order, with
-the comments retained (do not strip comments — they are the
+the comments retained (do not strip comments -- they are the
 documentation a first-time user reads):
 
-1. **Header comment** — what the model is + a note that generation
+1. **Header comment** -- what the model is + a note that generation
    was validated by the full Layer-3 harness which is intentionally
    not shipped here (regenerate with the harness for diagnostics).
-2. **Compile** — the packaged API compiles the class from a bare RELATIVE
+2. **Compile** -- the packaged API compiles the class from a bare RELATIVE
    filename: `ai4bayescode_sourceCpp("<ClassName>.cpp")` (equivalently
    `ai4bayescode_source("<ClassName>.cpp")`). NEVER `AI4BayesCode_path=`, NEVER a
    `source(".../*_helpers.R")` line, NEVER an absolute `/Users/...` path (all three
    break on another machine or if the folder moves).
-   IMPORTANT — where the class binds: `ai4bayescode_sourceCpp()` /
+   IMPORTANT -- where the class binds: `ai4bayescode_sourceCpp()` /
    `ai4bayescode_source()` bind the compiled class into the CALLER'S frame
    (`env = parent.frame()`). So compile at the TOP LEVEL of the runner. If you wrap
    the compile inside a helper FUNCTION, pass `env = globalenv()` explicitly, else
    `new(<ClassName>, ...)` fails with 'object <ClassName> not found'.
-3. **Constructor reference block** — one comment line per `new()`
+3. **Constructor reference block** -- one comment line per `new()`
    argument (name, type, default/range).
-4. **The full `run_chain_<ClassName>()` definition** — verbatim the
+4. **The full `run_chain_<ClassName>()` definition** -- verbatim the
    SAME definition as in the R runner template above (data inputs as
    args, `keep_history = TRUE` inside, the `diagnosis = FALSE`
    parameter, and the `if (isTRUE(diagnosis))` block that calls the
    shipped `ai4bayescode_diagnose()` and attaches `out$diagnosis`
    + `out$diagnosis_plot`). Include the whole function body, not a stub.
    The diagnostics TABLE and the trace+ACF+density PLOT both come from
-   `ai4bayescode_diagnose()` — a SHIPPED library function. Do NOT
+   `ai4bayescode_diagnose()` -- a SHIPPED library function. Do NOT
    emit your own helper and do NOT inline a summary-only substitute (see
    the HARD RULE box after the runner template).
-5. **Simulation / toy-data code** — generate `<data_args>` (+ a
+5. **Simulation / toy-data code** -- generate `<data_args>` (+ a
    held-out `<X>_test` for the predict example), commented.
-6. **Monolithic (non-stateful) usage** — one call:
+6. **Monolithic (non-stateful) usage** -- one call:
    `mono_chain <- run_chain_<ClassName>(<data_args>, seed = 1, n_burnin = 4000, n_keep = 4000)`
    with a `# Monolithic chain (non-stateful use)` comment.
-7. **Stateful-API usage examples** — commented, in this order:
+7. **Stateful-API usage examples** -- commented, in this order:
    `new(<ClassName>, ..., keep_history = TRUE)`, `model$step()`,
    `model$get_history()`, `model$get_current()`, then
    `model$predict_at(list(<X> = <X>_test))`. The
@@ -124,12 +124,12 @@ Skeleton (parameterized; mirror this structure, fill placeholders):
 # that harness is intentionally not shipped here. For everyday use, the
 # run_chain function below has a built-in `diagnosis = TRUE` option that
 # returns model-independent diagnostics (R-hat / ESS / MCSE / posterior
-# summaries + trace+ACF+density plots) — see the diagnostics call below.
+# summaries + trace+ACF+density plots) -- see the diagnostics call below.
 # PSIS-LOO is NOT part of it (it needs a model-specific log-likelihood);
 # regenerate with the validation harness if you specifically need LOO.
 
 # Compile + load the C++ model (the class becomes available by name).
-# Packaged API — no AI4BayesCode checkout / helper sourcing needed.
+# Packaged API -- no AI4BayesCode checkout / helper sourcing needed.
 library(AI4BayesCode)
 ai4bayescode_source("./<ClassName>/<ClassName>.cpp")
 
@@ -152,18 +152,18 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep,
     #   ... return out ...
 }
 # NOTE: the diagnostics TABLE and the trace+ACF+density PLOT come from the
-# SHIPPED ai4bayescode_diagnose() — there is NO helper to emit here.
+# SHIPPED ai4bayescode_diagnose() -- there is NO helper to emit here.
 
 # Simulate a toy data set
 # <commented synthetic generation of <data_args> + a held-out X test>
 #
-# HIERARCHICAL / random-effects / weight-variance models — draw the scale or
+# HIERARCHICAL / random-effects / weight-variance models -- draw the scale or
 # variance hyperparameter FROM ITS PRIOR, then draw the effects at that scale.
 # Do NOT hard-code the scale to an arbitrary "moderate" value (e.g. sd = 0.6).
-# A fixed moderate scale can CONFLICT with a tight or heavy-tailed prior — the
+# A fixed moderate scale can CONFLICT with a tight or heavy-tailed prior -- the
 # classic case is a tiny-scale InvGamma weight-variance prior (Neal-1996 / ARD,
-# e.g. nn_rbm, where s0^2 = (0.05 / M^2)^2 ≈ 1e-6): fixed sd 0.6 makes the DATA
-# scream "σ² ≈ 0.36" while the PRIOR insists "σ² ≈ 1e-6". That prior-data
+# e.g. nn_rbm, where s0^2 = (0.05 / M^2)^2 ~= 1e-6): fixed sd 0.6 makes the DATA
+# scream "sigma^2 ~= 0.36" while the PRIOR insists "sigma^2 ~= 1e-6". That prior-data
 # conflict is an artificially HARD, poorly-mixing posterior (R-hat stuck ~1.02,
 # tiny ESS) that then gets wrongly blamed on the sampler. Prior-drawn hyper-
 # parameters keep the L3 self-test calibrated (SBC-style) and on the geometry
@@ -208,18 +208,18 @@ model$predict_at(list(<X> = <X>_test))
 ## model$step(1)          ## one iteration after set_current
 ## model$get_history()    ## 111 posterior draws
 
-## readapt_NUTS() — CONDITIONAL — emit ONLY if the wrapper's composite
+## readapt_NUTS() -- CONDITIONAL -- emit ONLY if the wrapper's composite
 ## contains any NUTS-family child (nuts_block / joint_nuts_block).
 ## Skip the whole block if pure
 ## BART / pure Gibbs / pure VI / pure HMM / pure SBP / pure
-## RJMCMC / pure slice — the method is not exposed there.
+## RJMCMC / pure slice -- the method is not exposed there.
 ##
 ## readapt_NUTS re-tunes the NUTS metric (mass matrix + step size +
 ## dual averaging) WITHOUT advancing chain state. Use after a
 ## set_current() data change in a sequential / online update
 ## workflow.
 ##
-## WORKFLOW RULE (system_design.md §13 hybrid-composite caveat):
+## WORKFLOW RULE (system_design.md Sec.13 hybrid-composite caveat):
 ##   - Pure NUTS-family composite (no BART / no specialised Gibbs):
 ##       set_current(...) -> readapt_NUTS(N) immediately is fine
 ##   - Hybrid composite with BART / SoftBart / specialised Gibbs whose
@@ -230,7 +230,7 @@ model$predict_at(list(<X> = <X>_test))
 ##
 ## Example (uncomment in real sequential-update use):
 ## model$set_current(list(<data inputs> = <updated values>))
-## model$step(1L)               ## refresh derived state — hybrid composites only
+## model$step(1L)               ## refresh derived state -- hybrid composites only
 ## model$readapt_NUTS(500L, FALSE, -1L)  ## re-tune metric (Rcpp needs ALL 3 args; reset=FALSE, max_tree_depth=-1 = configured depth)
 ## ## model$readapt_NUTS(500L, TRUE, -1L)   ## use reset=TRUE if data change is dramatic
 ```
@@ -250,7 +250,7 @@ The generated `run_<ClassName>.R` must include:
 
 Follow this structure:
 
-**Path-resolution rule (KISS principle — no runtime detection).** The
+**Path-resolution rule (KISS principle -- no runtime detection).** The
 generated runner uses HARDCODED RELATIVE PATHS that the codegen agent
 fills in at generation time. No `sys.frame(1)$ofile`, no
 `commandArgs(trailingOnly = FALSE)` parsing, no `rstudioapi` calls, no
@@ -260,7 +260,7 @@ without a CS background find the resulting code hard to read and
 debug.
 
 The contract: the runner assumes **the R session's cwd is the
-project root** — the directory that contains BOTH `AI4BayesCode/` AND
+project root** -- the directory that contains BOTH `AI4BayesCode/` AND
 the `<folder>/` where the generator wrote the `.cpp`. If the user
 invokes R from anywhere else, they get a clear filesystem error
 (`Could not find expected AI4BayesCode directory`) and the fix is
@@ -287,38 +287,38 @@ ai4bayescode_source("<folder>/<ClassName>.cpp")   # relative path; no AI4BayesCo
 #  Constructor arguments for <ClassName>
 # ===========================================================================
 #  new(<ClassName>,
-#      <arg1>,        # <type> — <description>
-#      <arg2>,        # <type> — <description>
+#      <arg1>,        # <type> -- <description>
+#      <arg2>,        # <type> -- <description>
 #      ...
-#      seed           # int   — RNG seed (0 = random)
+#      seed           # int   -- RNG seed (0 = random)
 #  )
 #
 #  Methods:
-#    $step(n)          — run n Gibbs sweeps
-#    $get_current()    — named list of current parameter draws
-#    $set_current(lst) — overwrite parameters (partial OK)
+#    $step(n)          -- run n Gibbs sweeps
+#    $get_current()    -- named list of current parameter draws
+#    $set_current(lst) -- overwrite parameters (partial OK)
 # ===========================================================================
 
 # ---- Helper: run ONE chain with history, return (hist, pp, wall_sec) -----
 # The runner uses keep_history = TRUE so validator Layer 3 (R1/R2/R3) can
 # work on the stored draws. Wall-clock time is captured for perf_hint.
 #
-# HARD RULE (naming) — everything is named after the model, i.e. the
+# HARD RULE (naming) -- everything is named after the model, i.e. the
 # Rcpp class `<ClassName>` (the same identifier used in
 # `new(<ClassName>, ...)` and `<ClassName>.cpp`). NO snake_case stems
 # anywhere. The chain helper is `run_chain_<ClassName>()` (e.g.
 # `run_chain_SpikeSlabLaplace` for `new(SpikeSlabLaplace, ...)`); the
-# delivered files are `run_<ClassName>.R` / `example_<ClassName>.R` —
+# delivered files are `run_<ClassName>.R` / `example_<ClassName>.R` --
 # all consistent with the existing `<ClassName>.cpp` convention. NOT
 # bare `run_chain()`. Rationale: a runner or example may be sourced
 # alongside others in one R session; a model-specific function name
 # prevents a later source() from clobbering an earlier `run_chain`.
 # All call sites below use the same `run_chain_<ClassName>` name.
 #
-# HARD RULE — ALL data inputs MUST be function parameters of
+# HARD RULE -- ALL data inputs MUST be function parameters of
 # run_chain_<ClassName>, NOT global-scope variables read from the
 # enclosing R session. Replace `<data_args>` below with the actual
-# argument list (e.g., `y, X` or `y, X, group, J`) — same names that
+# argument list (e.g., `y, X` or `y, X, group, J`) -- same names that
 # appear in the constructor's argument list. Do NOT close over
 # `y_obs`, `X_obs`, etc. from the script's outer scope.
 #
@@ -359,7 +359,7 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep, diagnosis
                 pp       = slice(model$predict_at(list())),  # no-input posterior predictive
                 wall_sec = as.numeric(difftime(t1, t0, units = "secs")))
     # diagnosis = TRUE attaches model-INDEPENDENT posterior diagnostics via the
-    # SHIPPED library function ai4bayescode_diagnose() — do NOT reimplement:
+    # SHIPPED library function ai4bayescode_diagnose() -- do NOT reimplement:
     #   out$diagnosis      -> per-parameter table (R-hat / ESS / MCSE / mean / sd /
     #                         median / 90% CI)
     #   out$diagnosis_plot -> trace + autocorrelation + density plot
@@ -372,9 +372,9 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep, diagnosis
 }
 
 # ======================================================================
-#  HARD RULE — the `diagnosis = TRUE` path is NON-NEGOTIABLE
+#  HARD RULE -- the `diagnosis = TRUE` path is NON-NEGOTIABLE
 # ======================================================================
-# The diagnostics AND the plot are a SHIPPED function `ai4bayescode_diagnose()` — you do
+# The diagnostics AND the plot are a SHIPPED function `ai4bayescode_diagnose()` -- you do
 # NOT write them. It is provided by `library(AI4BayesCode)`; call it UNqualified
 # (no `AI4BayesCode::`).
 # `ai4bayescode_diagnose(<named list of draws>)` returns
@@ -382,8 +382,8 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep, diagnosis
 #                   table, via posterior>,
 #        plot    = <trace + autocorrelation + density, via bayesplot, with a
 #                   base-R fallback>)
-# (PSIS-LOO is NOT included — it needs a model-specific pointwise
-# log-likelihood, codegen_cpp.md §6a.)
+# (PSIS-LOO is NOT included -- it needs a model-specific pointwise
+# log-likelihood, codegen_cpp.md Sec.6a.)
 #
 # Every generated runner MUST:
 #   (1) take a `diagnosis = FALSE` argument;
@@ -398,7 +398,7 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep, diagnosis
 #   ai4bayescode_diagnose(list(beta = beta, sigma = sigma)).
 # The contract does not depend on the field being called `hist`.
 #
-# FORBIDDEN — an inline summary-only diagnosis that drops the plot:
+# FORBIDDEN -- an inline summary-only diagnosis that drops the plot:
 #   ## WRONG: no plot, renamed field, library function not used
 #   if (diagnosis && requireNamespace("posterior", quietly = TRUE)) {
 #       out$summary <- posterior::summarise_draws(...)
@@ -407,20 +407,20 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep, diagnosis
 # out$diagnosis + out$diagnosis_plot.
 # ======================================================================
 
-# ---- Pointwise log-likelihood for LOO (see codegen_cpp.md §6a templates) ----
+# ---- Pointwise log-likelihood for LOO (see codegen_cpp.md Sec.6a templates) ----
 # EMIT THE ROW THAT MATCHES THE MODEL'S OBSERVATION LIKELIHOOD.
 # Example below is Gaussian. Replace with the family-specific body.
 pointwise_loglik <- function(hist, y) {
-    # ...see codegen_cpp.md §6a per-observation-family templates...
+    # ...see codegen_cpp.md Sec.6a per-observation-family templates...
 }
 
 # ---- Configuration ----
 # Data lives at script scope ONLY so the user can edit it without touching
-# the function body. It is PASSED INTO run_chain as arguments — never read
+# the function body. It is PASSED INTO run_chain as arguments -- never read
 # from inside run_chain. Replace the placeholders with concrete loaders
 # (`read.csv`, `data.frame(...)`, etc.). The variable names below
 # (`y_obs`, `X_obs`, ...) are conventions for the script scope only;
-# they do NOT appear inside run_chain's body — only as arguments at the
+# they do NOT appear inside run_chain's body -- only as arguments at the
 # call sites.
 n_burnin <- 4000L
 n_keep   <- 4000L
@@ -461,8 +461,8 @@ stopifnot(all(sapply(c1$hist, function(x) all(is.finite(x)))))
 stopifnot(all(sapply(c2$hist, function(x) all(is.finite(x)))))
 
 # ---- Layer 3 R2: 2-chain R-hat + ESS (rank-normalized), Stage-1 -> Stage-2 ---
-# Matches validator.md §R2: R-hat is a HARD gate (< 1.05); ESS is a SOFT
-# criterion via ess_ratio = min(ESS)/n_keep — >= 0.01 silent, [0.005,0.01) WARN
+# Matches validator.md Sec.R2: R-hat is a HARD gate (< 1.05); ESS is a SOFT
+# criterion via ess_ratio = min(ESS)/n_keep -- >= 0.01 silent, [0.005,0.01) WARN
 # and proceed, < 0.005 escalate. A slow-but-correct model gets the 20k+20k budget
 # BEFORE being declared a failure. Do NOT hard-fail ESS at the 4k stage.
 suppressPackageStartupMessages(library(posterior))
@@ -499,13 +499,13 @@ if (d$rhat >= 1.05 || d$ess_ratio < 0.005) {
 }
 
 # Final gates: R-hat HARD; ESS SOFT (only ess_ratio < 0.005 at the escalated
-# budget is a FAILURE; [0.005, 0.01) only warns — legitimate for slow GP/hier).
+# budget is a FAILURE; [0.005, 0.01) only warns -- legitimate for slow GP/hier).
 stopifnot(d$rhat < 1.05)
 if (d$ess_ratio < 0.005) {
     stop(sprintf("R2 FAIL: worst ess_ratio %.4f < 0.005 even at the escalated budget",
                  d$ess_ratio))
 } else if (d$ess_ratio < 0.01) {
-    warning(sprintf("R2: worst ess_ratio %.4f in [0.005, 0.01) — model mixes slowly, proceeding",
+    warning(sprintf("R2: worst ess_ratio %.4f in [0.005, 0.01) -- model mixes slowly, proceeding",
                     d$ess_ratio))
 }
 
@@ -514,18 +514,18 @@ if (d$ess_ratio < 0.005) {
 # worst rank-normalized R-hat from r2_diag() above. Emit it verbatim.
 max_rhat <- d$rhat
 # The PASS/FAIL token uses the DEFAULT HARD gate = 1.05 (matches the stopifnot
-# above and validator.md §R2). It MUST match the gate: a stricter 1.01 threshold
-# here would print FAIL while the run continues at 1.05 — the confusing
+# above and validator.md Sec.R2). It MUST match the gate: a stricter 1.01 threshold
+# here would print FAIL while the run continues at 1.05 -- the confusing
 # "FAIL-but-SUCCESS" seen in practice. Keep the token text EXACT (the harness
 # greps for it).
 if (max_rhat < 1.05) cat("AI4BAYES_VALIDATE: PASS\n") else cat(sprintf("AI4BAYES_VALIDATE: FAIL maxRhat=%.4f\n", max_rhat))
 # R-hat GRAY ZONE (1.01, 1.05]: the run PASSES the default gate but not the strict
 # Vehtari-2021 1.01 bar. Do NOT auto-escalate. Instead follow start.md's "R-hat
-# gray zone — opt-in stricter convergence" protocol: surface the structured
+# gray zone -- opt-in stricter convergence" protocol: surface the structured
 # question (a: ship as-is at 1.05 [default] / b: extend chain budget 20k->40k->80k
 # toward <1.01 / c: AI-proposed structural fix / d: other). A heavy-tailed
 # hierarchical variance (InvGamma) can legitimately sit at 1.01-1.02 even when the
-# posterior is CORRECT (predictive matches a Stan/reference cross-check) — there,
+# posterior is CORRECT (predictive matches a Stan/reference cross-check) -- there,
 # option (b) or a higher joint_nuts `max_tree_depth` (10-12) is the remedy, NOT a
 # different model. Emitting this line is what SIGNALS the gray zone to the agent.
 if (max_rhat >= 1.01)
@@ -554,7 +554,7 @@ if (length(.bpv_extreme))
     warning(sprintf("[R3.a] Bayesian p-value(s) near 0/1 (DIAGNOSTIC, NOT a failure): %s. Expected for order statistics; investigate model fit only if a CENTRAL statistic (mean/sd) is extreme AND R-hat flags.",
                     paste(sprintf("%s=%.3f", names(.bpv_extreme), .bpv_extreme), collapse = ", ")))
 
-# R3.b PSIS-LOO (DIAGNOSTIC ONLY — does NOT fail R3).
+# R3.b PSIS-LOO (DIAGNOSTIC ONLY -- does NOT fail R3).
 # Pareto-k_hat measures LOO importance-weight reliability, NOT sampler
 # correctness. GP latent-variable and hierarchical-latent models are
 # known to fail this diagnostic even when the posterior is correctly
@@ -580,9 +580,9 @@ if (pct_k_lo < 50 || pct_k_hi >= 10) {
         pct_k_lo, pct_k_hi))
 }
 
-# ---- Post-run performance hint (see codegen_cpp.md §4a) -----------------
+# ---- Post-run performance hint (see codegen_cpp.md Sec.4a) -----------------
 # `total_wall_sec` was accumulated across Stage 1 (and Stage 2 if it ran)
-# in the R2 parallel block — it is the actual elapsed wall time. Do NOT
+# in the R2 parallel block -- it is the actual elapsed wall time. Do NOT
 # use `c1$wall_sec + c2$wall_sec`, which double-counts under parallel
 # execution.
 ai4bayescode_perf_hint(
@@ -597,7 +597,7 @@ ai4bayescode_perf_hint(
 # pred <- model$predict_at(list(X = X_test))  # see wrapper's predict_at doc
 ```
 
-### Modular NUTS in composite — periodic readapt schedule (CONDITIONAL)
+### Modular NUTS in composite -- periodic readapt schedule (CONDITIONAL)
 
 **When this section applies.** The wrapper's composite contains any
 NUTS-family child (`nuts_block`, `joint_nuts_block`)
@@ -607,7 +607,7 @@ when sigma^2, other regression coefficients, hyperparameters, or
 RJMCMC inclusion indicators update in a sibling block). If the
 composite is pure-NUTS-on-a-fixed-conditional (a single
 `joint_nuts_block` sampling everything jointly with no Gibbs siblings),
-use the standard `run_chain_<ClassName>` template above instead — the
+use the standard `run_chain_<ClassName>` template above instead -- the
 initial warmup metric stays correct and a periodic schedule only adds
 overhead.
 
@@ -619,7 +619,7 @@ metric becomes mis-tuned for the new conditional. This manifests as
 the **stuck-fast pattern**: R-hat above 2, ESS in single digits, and
 the chain values bit-identical across hundreds of `step()` calls. The
 shipped solution is to periodically call `readapt_NUTS(n)` between
-`step()` chunks — this re-tunes the metric WITHOUT advancing chain
+`step()` chunks -- this re-tunes the metric WITHOUT advancing chain
 state.
 
 **Defaults.** `readapt_every = 500L` outer iters,
@@ -627,14 +627,14 @@ state.
 to `readapt_every = 100L` if R-hat fails at 4k+4k; loosen to
 `readapt_every = 1000L` if the chain mixes well and wall is critical.
 There is no published canonical value for modular NUTS-in-composite
-re-adaptation frequency — standard frameworks (Stan, PyMC, NumPyro)
+re-adaptation frequency -- standard frameworks (Stan, PyMC, NumPyro)
 use single-warmup + frozen-metric and do not address this regime; the
 defaults here are empirically calibrated.
 
 **Replacement `run_chain_<ClassName>` body** (replaces the two
 `model$step(...)` calls in the standard template above; everything
-else — wall timing, slicing burn-in, `get_history()`, `predict_at()`,
-return shape — is identical):
+else -- wall timing, slicing burn-in, `get_history()`, `predict_at()`,
+return shape -- is identical):
 
 ```r
 run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep,
@@ -642,7 +642,7 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep,
                                   readapt_n     = 50L) {
     model <- new(<ClassName>, <data_args>, as.integer(seed), TRUE)
     t0 <- Sys.time()
-    # Periodic readapt schedule — covers BOTH burn-in and keep, since the
+    # Periodic readapt schedule -- covers BOTH burn-in and keep, since the
     # conditional keeps shifting throughout sampling under Gibbs siblings.
     total <- as.integer(n_burnin + n_keep)
     full  <- total %/% readapt_every
@@ -678,10 +678,10 @@ hidden state.
 
 **Default assumption** (what the template above bakes in): every
 parameter the user cares about lives in `get_history()`. Most blocks
-honour this. A few **do not** — they expose certain per-step states
+honour this. A few **do not** -- they expose certain per-step states
 ONLY through `get_current()`, never through history, because storing
 the state every step under `keep_history = TRUE` would dominate
-memory (see `system_design.md` §9 "memory grows linearly with
+memory (see `system_design.md` Sec.9 "memory grows linearly with
 iteration count").
 
 **Codegen LLMs MUST NOT hallucinate history fields.** Before
@@ -689,10 +689,10 @@ emitting `hist$<key>` in a generated runner, verify that `<key>` is
 in the block's documented `get_history()` output. If the block's
 header lists a field only under `current_named_outputs()` /
 `get_current()` (not under `get_history()`), the runner MUST route
-that field through `get_current()` per step — NOT pretend it lives
+that field through `get_current()` per step -- NOT pretend it lives
 in `hist`. Hallucinating non-existent history keys is the bug class
 that motivated this section (a generated `water_bif_runner.R` once
-referenced `hist$order_sampled_DAG`, which does not exist — the
+referenced `hist$order_sampled_DAG`, which does not exist -- the
 runner compiled but the dependent function would crash at first
 call).
 
@@ -700,23 +700,23 @@ call).
 
 | Block | Field exposed only via `get_current()` | Per-step size | Why history-omitted |
 |---|---|---|---|
-| `order_mcmc_block` | `sampled_DAG` (p × p adjacency) | p² ints / step | p=20, T=40000 ≈ 130 MB; p=64 (block ceiling) ≈ 1.3 GB. Most users only need `order_log_score` R-hat or edge marginals (computable from `get_current()` on demand). |
+| `order_mcmc_block` | `sampled_DAG` (p x p adjacency) | p^2 ints / step | p=20, T=40000 ~= 130 MB; p=64 (block ceiling) ~= 1.3 GB. Most users only need `order_log_score` R-hat or edge marginals (computable from `get_current()` on demand). |
 
 `order_mcmc_block::get_history()` (verbatim) returns ONLY:
 
-- `order` (T × p)
-- `order_log_score` (T × 1)
-- `y_rep` (T × N·p)   ← only when the Tier-A wrapper adds a `y_rep`
+- `order` (T x p)
+- `order_log_score` (T x 1)
+- `y_rep` (T x N*p)   <- only when the Tier-A wrapper adds a `y_rep`
    refresher; for a bare `order_mcmc_block` it is absent.
 
 The sampled DAG is **NEVER** in history.
 
-**Canonical pattern for collecting per-draw DAGs** — used in
+**Canonical pattern for collecting per-draw DAGs** -- used in
 `tests/audit_OrderMCMCBN_vs_BiDAG.R` line 116-122, and in the v1.2
 `examples/OrderMCMCBN.cpp` companion runner:
 
 ```r
-# Inside run_chain_<ClassName>() — collect DAGs in a step-by-step
+# Inside run_chain_<ClassName>() -- collect DAGs in a step-by-step
 # loop AFTER burn-in, while still letting get_history() track the
 # cheap state (order + log_score + y_rep).
 model$step(n_burnin)
@@ -737,8 +737,8 @@ The `dags` field is at top-level (parallel to `hist`), NOT inside
 a cpp-side history field.
 
 **Performance.** Step-by-step adds one Rcpp boundary crossing per
-iteration (~1-10 μs) plus an n²-int memcpy. For p=20, T=40000 that
-is < 1 s extra wall time and ≈ 130 MB memory. Document the memory
+iteration (~1-10 mus) plus an n^2-int memcpy. For p=20, T=40000 that
+is < 1 s extra wall time and ~= 130 MB memory. Document the memory
 cost in the wrapper header so users don't OOM themselves at larger
 p.
 
@@ -749,7 +749,7 @@ the entry in the Tier-A wrapper's header comment.
 
 ---
 
-**Concrete example** — what the constructor block looks like for a BART
+**Concrete example** -- what the constructor block looks like for a BART
 model:
 
 ```r
@@ -757,20 +757,20 @@ model:
 #  Constructor arguments for BartNoise
 # ===========================================================================
 #  new(BartNoise,
-#      X,              # NumericMatrix (N x p) — predictor matrix
-#      y,              # NumericVector (N)     — response vector
-#      ntrees,         # int                  — number of trees (default 200)
-#      seed,           # int                  — RNG seed (0 = random)
-#      keep_history    # logical              — record every draw (default FALSE)
+#      X,              # NumericMatrix (N x p) -- predictor matrix
+#      y,              # NumericVector (N)     -- response vector
+#      ntrees,         # int                  -- number of trees (default 200)
+#      seed,           # int                  -- RNG seed (0 = random)
+#      keep_history    # logical              -- record every draw (default FALSE)
 #  )
 #  NOTE: sigma is initialized internally to bart_model's OLS-based sigest.
 #        If you want an overdispersed start for R-hat diagnostics, call
 #        model$set_current(list(sigma = ...)) AFTER construction.
 #
 #  Methods:
-#    $step(n)           — run n Gibbs sweeps (one BART + one NUTS-sigma)
-#    $get_current()     — list(f_bart = <N-vec>, sigma = <scalar>)
-#    $set_current(lst)  — overwrite sigma; f_bart is read-only
+#    $step(n)           -- run n Gibbs sweeps (one BART + one NUTS-sigma)
+#    $get_current()     -- list(f_bart = <N-vec>, sigma = <scalar>)
+#    $set_current(lst)  -- overwrite sigma; f_bart is read-only
 #
 #  Notes:
 #    - sigma prior: InverseGamma calibrated from OLS residuals (automatic)
@@ -779,14 +779,14 @@ model:
 # ===========================================================================
 #
 #  run_chain_<ClassName>() returns:
-#    $f_bart  — matrix (n_keep x N) of posterior draws of f
-#    $sigma   — vector (n_keep) of posterior draws of sigma
+#    $f_bart  -- matrix (n_keep x N) of posterior draws of f
+#    $sigma   -- vector (n_keep) of posterior draws of sigma
 # ===========================================================================
 ```
 
 The constructor block must list ALL arguments the user can pass, their
 types, and brief descriptions. If hyperparameters are exposed as
-constructor arguments (see `codegen.md §2` and `codegen_priors.md`),
+constructor arguments (see `codegen.md Sec.2` and `codegen_priors.md`),
 document those too with their defaults.
 
 The `run_chain_<ClassName>()` helper must always return a **named list
@@ -801,19 +801,19 @@ and overdispersed initial values via `set_current()`, then compute
 
 ---
 
-## 9a. Model-specific R-side preprocessing — SoftBart `sigma_hat` recipe
+## 9a. Model-specific R-side preprocessing -- SoftBart `sigma_hat` recipe
 
 When the wrapper is `SoftBartNoise` (or any future SoftBart-derived
 example), the R-side runner MUST compute `sigma_hat` exactly as the
 SoftBart R package does (Linero & Yang 2018) and pass it to the C++
 constructor. The C++ kernel (`bart_pure_cpp/src/softbart_model.h`) accepts
 `sigma_hat` but its default of `-1.0` falls back to `sd(Y)`, which is
-the wrong scale for the half-Cauchy prior `σ ~ Cauchy_+(0, σ̂)`.
+the wrong scale for the half-Cauchy prior `sigma ~ Cauchy_+(0, sigma-hat)`.
 
 ### Why R-side, not C++ side
 
-Computing σ̂ requires `glmnet::cv.glmnet`. Putting that call in the C++
-constructor would force a Tier-C → R callback (architectural smell) and
+Computing sigma-hat requires `glmnet::cv.glmnet`. Putting that call in the C++
+constructor would force a Tier-C -> R callback (architectural smell) and
 would block a future Python port. The SoftBart R package itself does
 this in R; mirror that boundary.
 
@@ -836,7 +836,7 @@ softbart_unnormalize <- function(z, a, b) (z + 0.5) * (b - a) + a
 
 # 2. Compute sigma_hat via cv.glmnet on the NORMALIZED Y. The package
 #    uses lambda.1se (more regularized than lambda.min) and the in-sample
-#    RMSE at that lambda — not lambda.min, not df-adjusted sd. These
+#    RMSE at that lambda -- not lambda.min, not df-adjusted sd. These
 #    specifics matter; the package's prior calibration depends on both.
 softbart_sigma_hat <- function(X, y_norm, weights = rep(1, length(y_norm))) {
     stopifnot(is.matrix(X) || is.data.frame(X))
@@ -867,15 +867,15 @@ y_rep      <- softbart_unnormalize(y_rep_norm, norm_info$a, norm_info$b)
 ### Hard rules for SoftBart R-side runners
 
 1. **NEVER** let `sigma_hat` fall back to the C++ default. Always
-   compute the lasso σ̂ in R and pass it explicitly.
+   compute the lasso sigma-hat in R and pass it explicitly.
 2. **`s = "lambda.1se"`** (the default in SoftBart's `predict_glmnet`),
    not `"lambda.min"`. The 1se rule gives a sparser, more regularized
-   fit; σ̂ is therefore larger and the half-Cauchy prior is wider —
+   fit; sigma-hat is therefore larger and the half-Cauchy prior is wider --
    matching the package's calibration.
 3. **`sqrt(mean(residuals^2))`** (denominator N), not `sd(residuals)`
    (denominator N-1). Small but real difference; the package uses RMSE.
 4. **`alpha = 1`** (lasso, not ridge or elastic net).
-5. **Apply `normalize_bart(Y)` BEFORE `cv.glmnet`**, not after. σ̂ is
+5. **Apply `normalize_bart(Y)` BEFORE `cv.glmnet`**, not after. sigma-hat is
    computed on the [-0.5, 0.5]-scaled response so it's on the same
    scale the C++ kernel sees during MCMC. Save `(a, b) = (min(y), max(y))`
    so predictions can be un-normalized.
@@ -885,15 +885,15 @@ y_rep      <- softbart_unnormalize(y_rep_norm, norm_info$a, norm_info$b)
    transforming via `(z + 0.5) * (b - a) + a` before reporting.
 7. **`weights = rep(1, length(y))`** by default. If the wrapper
    eventually supports heteroscedastic weights, pass them through to
-   `cv.glmnet` as well so the σ̂ matches the kernel's weighted draw.
+   `cv.glmnet` as well so the sigma-hat matches the kernel's weighted draw.
 
 ### Python port note
 
 When the Python version is built, the same 3-step recipe applies on the
 Python side via `sklearn.linear_model.LassoCV` (cross-validated lasso
 with default 1-SE rule via `selection='1se'` not natively available;
-implement the 1-SE selection manually from `cv.glmnet`-style mean ±
-SE per λ). The C++ kernel side does not change.
+implement the 1-SE selection manually from `cv.glmnet`-style mean +/-
+SE per lambda). The C++ kernel side does not change.
 
 ### Status
 
@@ -907,22 +907,22 @@ uses this preprocessing.
 ## 10. Reference templates
 
 Modular (codegen default):
-- `examples/GaussianLocationScale.cpp` — real + positive blocks (Jeffreys sigma)
-- `examples/BetaBernoulli.cpp` — interval block (binary y_rep refresher)
-- `examples/DirichletSimplex.cpp` — simplex block (Multinomial y_rep)
-- `examples/DirichletSparse.cpp` — simplex + positive (Multinomial y_rep)
-- `examples/DirichletHierarchical.cpp` — 3-block hierarchical (Dirichlet y_rep)
-- `examples/BartNoise.cpp` — Gaussian BART (CRAN BART R package backfitting) + NUTS on sigma (Gaussian y_rep)
-- `examples/GBartPoisson.cpp` — genBART Poisson regression via RJMCMC
+- `examples/GaussianLocationScale.cpp` -- real + positive blocks (Jeffreys sigma)
+- `examples/BetaBernoulli.cpp` -- interval block (binary y_rep refresher)
+- `examples/DirichletSimplex.cpp` -- simplex block (Multinomial y_rep)
+- `examples/DirichletSparse.cpp` -- simplex + positive (Multinomial y_rep)
+- `examples/DirichletHierarchical.cpp` -- 3-block hierarchical (Dirichlet y_rep)
+- `examples/BartNoise.cpp` -- Gaussian BART (CRAN BART R package backfitting) + NUTS on sigma (Gaussian y_rep)
+- `examples/GBartPoisson.cpp` -- genBART Poisson regression via RJMCMC
   (Linero 2022).
-- `examples/GBartLogistic.cpp` — genBART Bernoulli classification via
+- `examples/GBartLogistic.cpp` -- genBART Bernoulli classification via
   `logistic_lik` directly (no augmentation needed).
-- `examples/GBartMultinomial.cpp` — genBART multi-class logistic BART
+- `examples/GBartMultinomial.cpp` -- genBART multi-class logistic BART
   via C-1 coupled `genbart_block(poisson_lik, offset=log_phi_aug)` +
   `poisson_multinomial_aug_block`. Handles C >= 2; for binary prefer
   the simpler `GBartLogistic`.
-- `examples/GBartHeteroscedastic.cpp` — genBART heteroscedastic Normal
-  with mean = variance = exp(r(x)). Linero 2022 §4.2 showcase.
+- `examples/GBartHeteroscedastic.cpp` -- genBART heteroscedastic Normal
+  with mean = variance = exp(r(x)). Linero 2022 Sec.4.2 showcase.
 - For genBART variants NOT shipped as standalone examples (negative
   binomial, AFT survival, beta, gamma-shape, beta-binomial), compose
   from `examples/GBartPoisson.cpp` as the skeleton + the matching
@@ -930,39 +930,39 @@ Modular (codegen default):
   The remaining wrapper code (constructor, set_current dispatcher,
   predict_at, RCPP_MODULE) is structurally identical; only the
   likelihood subclass and any nuisance-parameter NUTS block change.
-- `examples/ARDLasso.cpp` — **LEGACY** self-contained conjugate Gibbs;
+- `examples/ARDLasso.cpp` -- **LEGACY** self-contained conjugate Gibbs;
   Check #17 exception documented (don't follow this pattern for new code)
-- `examples/SpikeSlabRJMCMC.cpp` — Dirac spike-and-slab via rjmcmc_block +
-  double-Jeffreys + σ²τ² Ishwaran-Rao slab (Class 2b reference template)
-- `examples/LogisticRegression.cpp` — Bayesian logistic regression via
+- `examples/SpikeSlabRJMCMC.cpp` -- Dirac spike-and-slab via rjmcmc_block +
+  double-Jeffreys + sigma^2tau^2 Ishwaran-Rao slab (Class 2b reference template)
+- `examples/LogisticRegression.cpp` -- Bayesian logistic regression via
   `pg_logistic_block` (Polya-Gamma augmentation; linear predictor only)
-- `examples/HMMGaussian2State.cpp` — 2-state Gaussian-emission HMM via
+- `examples/HMMGaussian2State.cpp` -- 2-state Gaussian-emission HMM via
   `hmm_block` (forward-backward)
-- `examples/GPRegression.cpp` — multi-D GP regression with Gaussian
+- `examples/GPRegression.cpp` -- multi-D GP regression with Gaussian
   observation likelihood. **Marginal-likelihood architecture**: f is
   integrated out analytically; the chain samples only
   (amplitude, lengthscale, sigma) jointly via `joint_nuts_block`
-  from the 3-dim marginal posterior `y ~ N(0, K + σ² I)` with
-  analytic gradient (Rasmussen & Williams §5.5). half-Normal(0, sd(y))
+  from the 3-dim marginal posterior `y ~ N(0, K + sigma^2 I)` with
+  analytic gradient (Rasmussen & Williams Sec.5.5). half-Normal(0, sd(y))
   on amp, InverseGamma(5, s_med) on ell, Jeffreys on sigma.
-- `examples/GPClassification.cpp` — multi-D GP binary classification
+- `examples/GPClassification.cpp` -- multi-D GP binary classification
   with Bernoulli-logit likelihood. **Whitened parameterization**
   (Murray & Adams 2010): the latent is `z ~ N(0, I)`, recovered as
-  `f = L(amp, ell) · z` whenever the likelihood is evaluated. ESS
+  `f = L(amp, ell) * z` whenever the likelihood is evaluated. ESS
   samples z with prior `L_identity`; one
-  `joint_nuts_block({amp, ell})` (POSITIVE × 2) samples the
+  `joint_nuts_block({amp, ell})` (POSITIVE x 2) samples the
   hyperparameters jointly under a shared mass matrix and includes the
   Bernoulli-logit likelihood `sum y_i f_i - softplus(f_i)` at proposed
   `(amp, ell)`. Joint sampling is the default because the `(amp, ell)`
   posterior has a banana-shaped ridge that modular NUTS slow-mixes
   along. half-Normal(0, 1) on amp, InverseGamma(5, s_med) on ell.
   No sigma block.
-- `examples/GPTimeSeries.cpp` — 1-D time-series GP via celerite
+- `examples/GPTimeSeries.cpp` -- 1-D time-series GP via celerite
   O(N) Cholesky + `univariate_slice_sampling_block` for amp, tau,
   sigma on celerite-marginalized likelihood. Latent f marginalized
   out (conjugate Gaussian-Gaussian); predict_at uses
   `celerite_gp_block::predict_mean_var`.
-- `examples/DPGaussianMixture.cpp` — Dirichlet-Process Gaussian
+- `examples/DPGaussianMixture.cpp` -- Dirichlet-Process Gaussian
   mixture via the truncated stick-breaking representation
   (Ishwaran-James 2001). Composes `categorical_gibbs_block` (z) +
   `stick_breaking_block` (pi, DP a_fn / b_fn) +
@@ -970,43 +970,43 @@ Modular (codegen default):
   Normal-Gamma) + `nuts_block` on log(alpha). Default K_trunc =
   max(20, ceil(N / 5)). DP concentration alpha ~ Gamma(a_alpha,
   b_alpha). Audit: `tests_autodiff/audit_dp_gaussian_4chain.R`.
-- `examples/PYGaussianMixture.cpp` — Pitman-Yor variant. Identical
+- `examples/PYGaussianMixture.cpp` -- Pitman-Yor variant. Identical
   composition; only stick_breaking_block's a_fn / b_fn change to
   the PY weights (a_k = 1 + n_k - discount, b_k = alpha + (k+1) *
   discount + tail). discount FIXED at construction in v0 (sampling
   it requires an interval(0, 1) constraint; trivially added via separate
   `nuts_block` + interval constraint when needed).
-- `examples/DPGaussianMixture_DerivedAlpha.cpp` — DP mixture where
+- `examples/DPGaussianMixture_DerivedAlpha.cpp` -- DP mixture where
   alpha = exp(phi) is REGISTERED as a deterministic refresher of
   phi; phi has Normal(0, 1) prior and is sampled by `nuts_block`.
   Demonstrates the alpha-as-derived composition pattern; downstream
   blocks read alpha from ctx unchanged. Reference for the user's
   use case "alpha = complex_function(phi)".
-- `examples/FiniteGaussianMixture.cpp` — **Finite-K** Gaussian mixture
-  (NOT BNP). K is FIXED at construction; symmetric Dirichlet(α/K) prior
-  on π, sampled exactly via `dirichlet_gibbs_block` (this is the FIRST
+- `examples/FiniteGaussianMixture.cpp` -- **Finite-K** Gaussian mixture
+  (NOT BNP). K is FIXED at construction; symmetric Dirichlet(alpha/K) prior
+  on pi, sampled exactly via `dirichlet_gibbs_block` (this is the FIRST
   shipped reference example using that block). Use when K is known
   (or chosen via model selection); for unknown K use the DP variant
-  but understand its prior–data tradeoff (see the DP block notes in
+  but understand its prior-data tradeoff (see the DP block notes in
   `block_catalogue/index.md`).
-  4-chain audit recovers truth μ within 0.21 σ on the 6-cluster
-  N=600 fixture (R-hat 1.0004) — proves the shared infrastructure
+  4-chain audit recovers truth mu within 0.21 sigma on the 6-cluster
+  N=600 fixture (R-hat 1.0004) -- proves the shared infrastructure
   is unbiased when given correct K.
-- `examples/HDPGaussianMixture.cpp` — **Hierarchical DP** Gaussian
+- `examples/HDPGaussianMixture.cpp` -- **Hierarchical DP** Gaussian
   mixture in TRUNCATED form. G groups, T atom slots, atoms shared
-  across groups. Composes `stick_breaking_block` (top-level β) +
-  G × `dirichlet_gibbs_block` (per-group π_j) + `niw_cluster_gibbs_block`
+  across groups. Composes `stick_breaking_block` (top-level beta) +
+  G x `dirichlet_gibbs_block` (per-group pi_j) + `niw_cluster_gibbs_block`
   (full-cov atoms) + `categorical_gibbs_block` (z, group-aware).
-  V0 uses a HEURISTIC β update on combined counts (not the rigorous
+  V0 uses a HEURISTIC beta update on combined counts (not the rigorous
   Antoniak-table CRF; documented prominently in the example header).
   4-chain audit recovers K_active mode = 3 on a 3-group / 3-atom fixture.
 
-Joint (opt-in via coupling analysis in `codegen_cpp.md §4a`):
-- `examples/IRT1PL_joint.cpp` — joint (theta, b) + separate sigma_b
+Joint (opt-in via coupling analysis in `codegen_cpp.md Sec.4a`):
+- `examples/IRT1PL_joint.cpp` -- joint (theta, b) + separate sigma_b
   (shift-invariance coupling)
-- `examples/HierarchicalLM_joint.cpp` — joint (alpha, beta, u) + separate
+- `examples/HierarchicalLM_joint.cpp` -- joint (alpha, beta, u) + separate
   sigma, tau (additive linear mean + random effect)
-- `examples/LinearRegJointMixed.cpp` — joint (alpha, beta, sigma) with
+- `examples/LinearRegJointMixed.cpp` -- joint (alpha, beta, sigma) with
   `joint_nuts_block` (REAL + POSITIVE per-slice)
 
 Copy structure, change only model-specific parts (log-density body,

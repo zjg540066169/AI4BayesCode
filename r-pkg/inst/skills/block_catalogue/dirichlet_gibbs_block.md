@@ -2,8 +2,8 @@
 
 **Reference example:** `examples/FiniteGaussianMixture.cpp` (shipped
 2026-05-03) uses `dirichlet_gibbs_block` for the symmetric Dirichlet
-posterior on the K-mixing-weight vector π. The DirichletSimplex
-example uses `nuts_block` + `constraints::simplex::wrap` instead — that
+posterior on the K-mixing-weight vector pi. The DirichletSimplex
+example uses `nuts_block` + `constraints::simplex::wrap` instead -- that
 is the more general option for non-conjugate factors on the simplex.
 `dirichlet_gibbs_block` is also the right choice for the "A rows / pi"
 of a full-Bayesian HMM (mentioned in `HMMGaussian2State.cpp`'s header
@@ -39,7 +39,7 @@ explores the flat/unidentified tail of the unconstrained stick-
 breaking coordinate, and on the natural scale both chains produce
 "effectively zero" values (e.g. 1e-6 in one chain, 1e-10 in another)
 that give a legitimate R-hat of 2+ because *between-chain variance /
-within-chain variance is numerically large* — even though both chains
+within-chain variance is numerically large* -- even though both chains
 agree the component is 0. Always report per-component R-hat, not just
 the max; the max is dominated by unidentified / data-less components
 in sparse-Dirichlet settings.

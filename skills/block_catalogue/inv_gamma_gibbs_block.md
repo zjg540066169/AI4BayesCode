@@ -1,24 +1,24 @@
 ## inv_gamma_gibbs_block
 
-**Reference example:** NONE shipped, and none planned — this block is
+**Reference example:** NONE shipped, and none planned -- this block is
 intentionally library-only because it is DISCOURAGED as default (see
 below). The preferred pattern for scale parameters is Jeffreys on
 `nuts_block` with inline k=0 half-Normal(0,1) fallback; see
 `examples/SpikeSlabRJMCMC.cpp` tau block for the reference template.
 
-⚠️ **STRONGLY DISCOURAGED AS DEFAULT.** See `codegen_priors.md` §2a "Variance
+WARNING **STRONGLY DISCOURAGED AS DEFAULT.** See `codegen_priors.md` Sec.2a "Variance
 / scale parameter prior discipline (Gelman 2006)": the default prior
-for variance/scale is Jeffreys `p(sigma) ∝ 1/sigma` implemented via
+for variance/scale is Jeffreys `p(sigma) prop.to 1/sigma` implemented via
 `nuts_block` + `constraints::positive::wrap`, NOT InverseGamma.
-`Gamma(ε, ε)` as "noninformative" is the specific prior Gelman 2006
+`Gamma(epsilon, epsilon)` as "noninformative" is the specific prior Gelman 2006
 Bayesian Analysis 1(3):515-533 refuted.
 
 **Valid use cases** (both require explicit documented justification
 inline per Check #16):
-- Exception 3 with genuinely heavy-tail-pathological NUTS conditional —
+- Exception 3 with genuinely heavy-tail-pathological NUTS conditional --
   but first try the Jeffreys + k=0 half-Normal(0, 1) fallback
-  pattern (`codegen_priors.md §2a`), which implements weakly-informative on
-  natural scale without the IG(ε, ε) critique. If even that pattern
+  pattern (`codegen_priors.md Sec.2a`), which implements weakly-informative on
+  natural scale without the IG(epsilon, epsilon) critique. If even that pattern
   fails to mix, only then consider IG with documented justification.
 - INFORMATIVE IG prior where the hyperparameters come from external
   knowledge (e.g., BART's calibrated IG via `sigest`, where the prior
@@ -26,7 +26,7 @@ inline per Check #16):
 
 **If you are tempted to use this block, first reconsider whether your
 goal is actually better served by `nuts_block` with Jeffreys
-`p(sigma) ∝ 1/sigma` on the natural scale.** Most of the time, yes.
+`p(sigma) prop.to 1/sigma` on the natural scale.** Most of the time, yes.
 The pattern in `examples/SpikeSlabRJMCMC.cpp` is the canonical
 template:
 - sigma: `nuts_block` with Jeffreys prior
@@ -58,7 +58,7 @@ cfg.params_fn     = [N](const block_context& ctx) {
 g ~ Gamma(shape, 1/rate) internally and inverts.
 
 **When to use:** any scalar with a closed-form InverseGamma
-conditional — sigma^2 in Gaussian regression, tau^2 in a slab prior,
+conditional -- sigma^2 in Gaussian regression, tau^2 in a slab prior,
 any scale parameter with conjugate InvGamma prior. Do NOT use for
 vector-valued positive parameters; that's `nuts_block` with
 `constraints::positive::wrap` territory.

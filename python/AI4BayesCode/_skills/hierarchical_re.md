@@ -13,11 +13,11 @@ description: |
   log-density and gradient structure, dense-metric escalation
   rule, crossed-effects (multiple hierarchies), and a
   validator checklist. NO new blocks are required for any
-  Gaussian-RE model — `joint_nuts_block` already in the
+  Gaussian-RE model -- `joint_nuts_block` already in the
   library handles every case described here.
 ---
 
-# Hierarchical random effects — codegen recipe
+# Hierarchical random effects -- codegen recipe
 
 ## 1. When this skill applies
 
@@ -39,18 +39,18 @@ Pattern names you will see in prompts:
 - "exchangeable" group effects
 - "multilevel model"
 - "hospital effect" / "subject effect" / "school effect" / etc.
-- "crossed effects" (apply this skill TWICE — see §6)
+- "crossed effects" (apply this skill TWICE -- see Sec.6)
 
 Concrete examples in this benchmark:
 - `radon_variable_intercept_centered` (1 RE level, 1 fixed slope)
 - `radon_hierarchical_intercept_centered` (1 RE level, 2 fixed slopes)
 - `radon_hierarchical_intercept_noncentered` (same model, prompt
-  explicitly notes NC — but the codegen rule below is NC regardless)
-- `pilots` (CROSSED effects: groups + scenarios — see §6)
+  explicitly notes NC -- but the codegen rule below is NC regardless)
+- `pilots` (CROSSED effects: groups + scenarios -- see Sec.6)
 - `seeds_model`, `surgical_model` (binomial likelihood; same recipe
-  applies — see §7)
+  applies -- see Sec.7)
 
-## 2. The funnel geometry — why naive composition silently fails
+## 2. The funnel geometry -- why naive composition silently fails
 
 The naive composition is to assign one `nuts_block` per parameter:
 
@@ -84,17 +84,17 @@ Betancourt-Girolami 2015):
 
 The "noncentered" variant fails just as badly as the centered one,
 because **the funnel returns when alpha_raw and sigma_alpha are in
-separate Gibbs blocks** — the conditional `alpha_raw | sigma_alpha`
+separate Gibbs blocks** -- the conditional `alpha_raw | sigma_alpha`
 still has `sigma_alpha`-dependent geometry under the data likelihood
-(the inverse funnel; Betancourt-Girolami §3.3). Block separation IS
+(the inverse funnel; Betancourt-Girolami Sec.3.3). Block separation IS
 the bug, not the parameterization choice.
 
 ## 3. The MANDATORY rule
 
-For any hierarchical model matching §1, the wrapper MUST:
+For any hierarchical model matching Sec.1, the wrapper MUST:
 
 1. Use a **single `joint_nuts_block`** block targeting all of
-   `(mu, sigma_alpha, sigma_y, alpha_raw[1..J], beta)` together —
+   `(mu, sigma_alpha, sigma_y, alpha_raw[1..J], beta)` together --
    never split these across multiple blocks.
 2. Use the **non-centered reparameterization**:
    `alpha_j = mu + sigma_alpha * alpha_raw_j`,
@@ -136,7 +136,7 @@ for `mu`, `sigma_alpha`, `sigma_y`, or any subset of `alpha_raw`.
 The user supplies `joint_nuts_block_config::log_density_grad`
 on the **natural-scale** concatenated vector. The block applies
 per-slice constraint transforms internally (log for positive,
-identity for real) and adds `log|J|` for each — your function ONLY
+identity for real) and adds `log|J|` for each -- your function ONLY
 writes the natural-scale density and natural-scale gradient.
 
 ```cpp
@@ -200,10 +200,10 @@ cfg.log_density_grad = [&, J, P, group_idx_key, y_key, x_key,
             -0.5 * sigma_alpha * sigma_alpha
             / (sigma_alpha_prior_scale * sigma_alpha_prior_scale);
     } else {
-        // Jeffreys: log p ∝ -log(sigma_alpha). NB: positive_constraint adds
+        // Jeffreys: log p prop.to -log(sigma_alpha). NB: positive_constraint adds
         // +log(sigma_alpha) Jacobian, so the natural-scale log_p is just
         // -log(sigma_alpha). Total target on unconstrained scale = 0
-        // contribution from the prior — Jeffreys cancels.
+        // contribution from the prior -- Jeffreys cancels.
         log_prior_sigma_alpha = -std::log(sigma_alpha);
     }
 
@@ -308,9 +308,9 @@ cfg.log_density_grad = [&, J, P, group_idx_key, y_key, x_key,
 **Check #12 (autodiff gradient verification) is REQUIRED** for this
 hand-coded gradient. Before shipping, the codegen agent writes
 `tests_autodiff/verify_<wrapper>.cpp` with a templated `autodiff::var`
-version of the same density and verifies max_diff < 1e-8 on 5–20
+version of the same density and verifies max_diff < 1e-8 on 5-20
 random `(mu, sigma_alpha, sigma_y, alpha_raw, beta)` points, then
-deletes the verify file. See `validator.md §12`.
+deletes the verify file. See `validator.md Sec.12`.
 
 ## 6. Crossed effects (pilots-style)
 
@@ -326,12 +326,12 @@ Use TWO `joint_nuts_block` instances:
 
 - **Block 1** (slice ordering): `(mu_a, sigma_a, sigma_y, a_raw[G])`
 - **Block 2** (slice ordering): `(mu_b, sigma_b, b_raw[S])`
-  — Block 2 reads `sigma_y` from `ctx`, treats it as a constant
+  -- Block 2 reads `sigma_y` from `ctx`, treats it as a constant
   during its own NUTS trajectory.
 
 Composite Gibbs sweep:
-1. Block 1 steps → updates `(mu_a, sigma_a, sigma_y, a_raw)`.
-2. Block 2 steps → reads new `sigma_y` from ctx, updates
+1. Block 1 steps -> updates `(mu_a, sigma_a, sigma_y, a_raw)`.
+2. Block 2 steps -> reads new `sigma_y` from ctx, updates
    `(mu_b, sigma_b, b_raw)` against current `sigma_y`.
 
 Both blocks compute their own residuals using the OTHER hierarchy's
@@ -343,7 +343,7 @@ This is correct under the standard Gibbs-on-conditional argument:
 each block targets its own conditional given the other block's
 current state. **DO NOT** put both hierarchies into ONE
 `joint_nuts_block` with all `(mu_a, sigma_a, mu_b, sigma_b,
-sigma_y, a_raw, b_raw)` jointly — the joint dim becomes
+sigma_y, a_raw, b_raw)` jointly -- the joint dim becomes
 `3 + G + S`, a needlessly large block that would likely need the
 dense metric. Two-block Gibbs avoids that and is mathematically
 equivalent because the two RE structures are conditionally
@@ -351,13 +351,13 @@ independent given `sigma_y`.
 
 ## 7. Non-Gaussian likelihoods (binomial, Poisson, etc.)
 
-The recipe in §3–5 generalizes: replace the Gaussian log-likelihood
+The recipe in Sec.3-5 generalizes: replace the Gaussian log-likelihood
 with the appropriate family. For example, binomial:
 
 ```
 y_n ~ Binomial(n_n, p_n)
 logit(p_n) = alpha_{g(n)} + (X * beta)_n
-alpha_j    = mu + sigma_alpha * alpha_raw_j  (NC, same as §3)
+alpha_j    = mu + sigma_alpha * alpha_raw_j  (NC, same as Sec.3)
 ```
 
 The joint slice now has NO `sigma_y`:
@@ -371,7 +371,7 @@ slice 3: beta               dim = P, type = real
 Log-likelihood becomes
 `log p(y | alpha, beta) = sum_n [y_n * eta_n - n_n * log1p(exp(eta_n))]`
 where `eta_n = alpha_{g(n)} + (X * beta)_n`. Gradient is hand-computable
-and structurally identical to §5 (replace `resid_n / sigma_y^2` with
+and structurally identical to Sec.5 (replace `resid_n / sigma_y^2` with
 the binomial residual `y_n - n_n * sigmoid(eta_n)`).
 
 For Poisson `y_n ~ Poisson(exp(eta_n))`, the residual becomes
@@ -399,8 +399,8 @@ and add a Check #18 inline justification:
 ```
 
 Common signals that dense metric MAY be needed (escalate via Check #18 only when
-diagnostics confirm — start diagonal, measure, do NOT gate on dimension):
-- large `J` (dense is frequently needed, but confirm via R-hat — not automatic)
+diagnostics confirm -- start diagonal, measure, do NOT gate on dimension):
+- large `J` (dense is frequently needed, but confirm via R-hat -- not automatic)
 - Highly variable group sizes (some `n_j` >> others, creating
   scale heterogeneity within `alpha_raw`)
 - Heavy-tail random effects where `sigma_alpha_prior_scale` is
@@ -413,7 +413,7 @@ Before declaring a hierarchical wrapper complete, verify:
 - [ ] Single `joint_nuts_block` (or two for crossed effects);
       NO separate `nuts_block` for any of
       `(mu_alpha, sigma_alpha, sigma_y, alpha_raw, beta)`.
-- [ ] Slice ordering matches §4 (or §6 for crossed).
+- [ ] Slice ordering matches Sec.4 (or Sec.6 for crossed).
 - [ ] `alpha_raw` is the sampled parameter; `alpha = mu + sigma_alpha
       * alpha_raw` is computed deterministically in the wrapper after
       each step and written to `shared_data["alpha"]`.
@@ -425,16 +425,16 @@ Before declaring a hierarchical wrapper complete, verify:
       Check #18 justification.
 - [ ] Cross-impl rhat against Stan reference (sim1) < 1.05 on
       `(mu_alpha, sigma_alpha, sigma_y, alpha)` with appropriate
-      relabeling (none needed — alpha_raw + recovered alpha are
+      relabeling (none needed -- alpha_raw + recovered alpha are
       identifiable; no label switching at the group-effect level).
 
 ## 10. Anti-patterns to reject in review
 
-These are the top failure modes that produced cov_AI ≈ 0 on the
+These are the top failure modes that produced cov_AI ~= 0 on the
 broken radon and surgical models. Reject these patterns at review:
 
 1. `nuts_block(sigma_alpha)` and `nuts_block(alpha)` as separate
-   children. The funnel is between these two — they MUST be in
+   children. The funnel is between these two -- they MUST be in
    the same joint block.
 2. `categorical_gibbs` or any other Gibbs sampling on the group
    index `g(n)`. The group index is a fixed observed feature, NOT
@@ -457,7 +457,7 @@ broken radon and surgical models. Reject these patterns at review:
 This skill exists because the code-gen agent's natural choice
 ("one nuts_block per parameter, that's the default in
 codegen_cpp.md") silently produces a wrong sampler for hierarchical
-models. The correct answer is in the library — `joint_nuts_block`
-and the NC reparameterization are both shipped — but the agent has
+models. The correct answer is in the library -- `joint_nuts_block`
+and the NC reparameterization are both shipped -- but the agent has
 to be TOLD to use them as the default for this pattern. That's
 what this skill does.

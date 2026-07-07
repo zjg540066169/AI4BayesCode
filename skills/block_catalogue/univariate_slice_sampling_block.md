@@ -17,7 +17,7 @@ cannot:
   marginal log-likelihood via `celerite_marginal_likelihood.hpp`)
 - gradient prohibitively expensive relative to lp eval.
 
-See `skills/codegen_priors.md` §2b.1 for the decision tree.
+See `skills/codegen_priors.md` Sec.2b.1 for the decision tree.
 
 **Reference example**: `examples/GPTimeSeries.cpp` (using slice sampling:
 hyperparameters amp/tau/sigma sampled via slice on celerite's

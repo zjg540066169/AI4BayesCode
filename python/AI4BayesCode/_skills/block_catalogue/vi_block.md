@@ -1,4 +1,4 @@
-## vi_block (abstract base — NOT used directly)
+## vi_block (abstract base -- NOT used directly)
 
 Abstract base for the VI family. Derives from `block_sampler` and
 overrides `engine_kind() == engine_kind_t::VI`. Two concrete

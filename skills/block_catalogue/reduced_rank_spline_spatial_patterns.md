@@ -39,13 +39,13 @@ posterior, where rho is the cross-block correlation; for HSGP/spline/
 ICAR rho is large enough that this dominates the wall time.
 
 **Pattern check before writing the cpp** (metric is a Check #18 escalation,
-MEASURED — there is no "Check #11.7"):
+MEASURED -- there is no "Check #11.7"):
 - Joint-block dim >= 5 with at least one POSITIVE scalar
   AND a basis-coefficient or latent vector?
   -> use `joint_nuts_block` (real-only), log-transform the POSITIVE scalars
      (manually add log|J|); START DIAGONAL and escalate to
      `use_dense_metric = true` (Check #18) ONLY if R2/R3 shows diagonal is
-     inadequate — do NOT gate dense on the dimension.
+     inadequate -- do NOT gate dense on the dimension.
 - Joint-block dim < 5, all POSITIVE, no latent vector?
   -> `joint_nuts_block` with identity metric is fine
      (this is what `GPRegression.cpp` and `GPClassification.cpp` do

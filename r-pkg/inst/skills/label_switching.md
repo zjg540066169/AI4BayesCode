@@ -22,12 +22,12 @@ cross-implementation R-hat meaningless.
 
 | Family | Label-switching risk |
 |--------|---------------------|
-| Gaussian / Poisson / any finite mixture | Yes — unless ordered constraint enforced |
-| Hidden Markov Model (HMM) | Yes — hidden states are exchangeable |
-| LDA / topic model | Yes — topics are exchangeable |
-| Dirichlet process mixture | Yes — exchangeable clusters |
-| Changepoint model (Poisson/Gaussian with K segments ordered in time) | **No** — segments are identified by position |
-| Regression / hierarchical with named groups | No — groups are fixed |
+| Gaussian / Poisson / any finite mixture | Yes -- unless ordered constraint enforced |
+| Hidden Markov Model (HMM) | Yes -- hidden states are exchangeable |
+| LDA / topic model | Yes -- topics are exchangeable |
+| Dirichlet process mixture | Yes -- exchangeable clusters |
+| Changepoint model (Poisson/Gaussian with K segments ordered in time) | **No** -- segments are identified by position |
+| Regression / hierarchical with named groups | No -- groups are fixed |
 
 **Key diagnostic**: if `<id>.txt` says "K components", "K latent states",
 or "K topics" and the **reference implementation** does not impose an
@@ -35,11 +35,11 @@ ordering constraint, assume label switching applies. Reference type
 matters here:
 
 - **Stan reference** (`<id>.stan`): check `parameters` block for
-  `ordered[K] mu` or `mu[1] < mu[2]`-style constraint; if absent → label
+  `ordered[K] mu` or `mu[1] < mu[2]`-style constraint; if absent -> label
   switching applies.
 - **R-package reference** (`<id>.r` calls e.g. `bayesm::rmixGibbs`,
   `mixtools::normalmixEM`, NIMBLE mixtures): nearly all R-package
-  mixture fitters are unconstrained — assume label switching applies
+  mixture fitters are unconstrained -- assume label switching applies
   unless the package's docs explicitly say otherwise.
 - **R-package reference for non-mixture models** (e.g.,
   `BART::wbart`, `SoftBart::softbart`): no exchangeable components,
@@ -54,12 +54,12 @@ For all label-switching-affected models in this benchmark:
 - **AI4BayesCode** PREFERS not to structurally constrain the sampler. By
   default the generated sampler explores the unconstrained, exchangeable target
   and is free to visit all K! symmetric modes (correct and maximally mixing);
-  label switching is resolved **POST-HOC** — draws are relabeled in the
+  label switching is resolved **POST-HOC** -- draws are relabeled in the
   analysis / diagnostics layer (simple-sort / Stephens 2000 / Hungarian,
-  §3-§5) and convergence is judged on **label-invariant** (order-statistic)
+  Sec.3-Sec.5) and convergence is judged on **label-invariant** (order-statistic)
   R-hat. An in-sampler ordering constraint / canonicalizer is a
-  NOT-RECOMMENDED fallback (discouraged, not forbidden — it mixes badly and can
-  bias the natural-scale posterior, `codegen_cpp.md` §205); some models
+  NOT-RECOMMENDED fallback (discouraged, not forbidden -- it mixes badly and can
+  bias the natural-scale posterior, `codegen_cpp.md` Sec.205); some models
   legitimately need it, so reach for it only when post-hoc resolution won't do.
 - **Reference** (Stan or R-package) typically also has no constraint by
   default. Each reference draw can use any permutation.
@@ -72,18 +72,18 @@ If a side DOES carry an ordering constraint (Stan's `ordered[K] mu`, or an R
 package that internally orders components after the Gibbs sweep), that side is
 already canonical and only the other side needs relabeling.
 
-The recipes in §3-§5 below show Stan-reference syntax (most existing
+The recipes in Sec.3-Sec.5 below show Stan-reference syntax (most existing
 benchmark models use Stan); the **same logic applies to R-package
-references** — only the draw-extraction line changes:
+references** -- only the draw-extraction line changes:
 
 | Reference type | Draw extraction line in `align_REF_draws` |
 |---|---|
 | Stan (`cmdstanr`) | `d <- posterior::as_draws_matrix(stan_fit$draws())` |
 | `bayesm::rmixGibbs` | extract `$compdraws[[k]]$mu`, etc., from the package's nested-list output and stack |
-| `mixtools::normalmixEM` | `fit$mu`, `fit$sigma`, `fit$lambda` (point estimates only — EM, not MCMC; not suitable as a reference for label-switching cross-impl) |
+| `mixtools::normalmixEM` | `fit$mu`, `fit$sigma`, `fit$lambda` (point estimates only -- EM, not MCMC; not suitable as a reference for label-switching cross-impl) |
 | Other | check the package's `?<fitter>` Value section for the draw structure |
 
-Once draws are extracted into the same matrix shape (n_keep × K),
+Once draws are extracted into the same matrix shape (n_keep x K),
 the per-draw permutation (Stephens or simple-sort) is identical
 regardless of reference type.
 
@@ -93,7 +93,7 @@ regardless of reference type.
 
 When the convention is **ascending by key parameter** (e.g. `mu[1] < mu[2]`
 for a Gaussian mixture), per-draw sorting of reference draws is both
-correct and fast. Use this when K ≤ 3 and the model imposes an ascending
+correct and fast. Use this when K <= 3 and the model imposes an ascending
 ordering on AI.
 
 **Naming convention.** The function name should track the reference type:
@@ -174,9 +174,9 @@ suppressPackageStartupMessages({
 })
 ```
 
-### Step 1 — Compute per-draw allocation probabilities
+### Step 1 -- Compute per-draw allocation probabilities
 
-`stephens()` needs an `[iter × N × K]` array of allocation probabilities.
+`stephens()` needs an `[iter x N x K]` array of allocation probabilities.
 
 #### Gaussian mixture
 
@@ -206,7 +206,7 @@ Same as above but replace `dnorm` with `dpois`.
 #### LDA / topic model
 
 For LDA the per-token topic-assignment posterior is
-`p(z_n = k | doc_n, w_n, theta_d, phi_d) ∝ theta_d[doc_n, k] * phi_d[k, w_n]`.
+`p(z_n = k | doc_n, w_n, theta_d, phi_d) prop.to theta_d[doc_n, k] * phi_d[k, w_n]`.
 
 ```r
 compute_alloc_probs_lda <- function(theta_arr, phi_arr, doc, w, K) {
@@ -226,9 +226,9 @@ compute_alloc_probs_lda <- function(theta_arr, phi_arr, doc, w, K) {
 
 #### HMM
 
-Use the **forward–backward algorithm** to get smoothing probabilities
+Use the **forward-backward algorithm** to get smoothing probabilities
 `gamma[t, k] = p(z_t = k | y_1..T, theta)`. The result is an
-`[iter × T × K]` array where T plays the role of N.
+`[iter x T x K]` array where T plays the role of N.
 
 ```r
 compute_alloc_probs_hmm <- function(draws, y) {
@@ -260,7 +260,7 @@ compute_alloc_probs_hmm <- function(draws, y) {
 }
 ```
 
-### Step 2 — Run Stephens on pooled chains
+### Step 2 -- Run Stephens on pooled chains
 
 ```r
 # ai_draws, ref_draws: aligned output from align_AI_draws / align_Stan_draws
@@ -288,7 +288,7 @@ for (nm in label_switching_params) {
 }
 ```
 
-### Step 3 — Hungarian match to truth
+### Step 3 -- Hungarian match to truth
 
 After Stephens, both chains share an internal labeling that need not
 match the DGP truth. Apply a Hungarian match so coverage is computed
@@ -362,27 +362,27 @@ worker <- function(r) {
 
 ```
 Does the model have K exchangeable components / states / topics?
-│
-├── No  → no relabeling needed; use standard sim1 template
-│
-└── Yes → Does AI4BayesCode enforce an ascending ordering constraint
+|
++-- No  -> no relabeling needed; use standard sim1 template
+|
++-- Yes -> Does AI4BayesCode enforce an ascending ordering constraint
           (mu[1] < mu[2] < ... < mu[K])?
-          │
-          ├── No  → Stephens pipeline (§4) for both chains
-          │
-          └── Yes → Are components well-separated in the key parameter?
-                    │
-                    ├── Yes, K ≤ 3  → simple sort shortcut (§3) for Stan;
-                    │                  AI draws are already ordered; no
-                    │                  Stephens needed. Hungarian match to
-                    │                  truth is automatic because truth is
-                    │                  sorted by the same key.
-                    │
-                    └── Possibly overlapping or K > 3
-                                     → Stephens pipeline (§4) for Stan;
+          |
+          +-- No  -> Stephens pipeline (Sec.4) for both chains
+          |
+          +-- Yes -> Are components well-separated in the key parameter?
+                    |
+                    +-- Yes, K <= 3  -> simple sort shortcut (Sec.3) for Stan;
+                    |                  AI draws are already ordered; no
+                    |                  Stephens needed. Hungarian match to
+                    |                  truth is automatic because truth is
+                    |                  sorted by the same key.
+                    |
+                    +-- Possibly overlapping or K > 3
+                                     -> Stephens pipeline (Sec.4) for Stan;
                                        AI draws can skip Stephens since
                                        they are already structured;
-                                       run Hungarian match (§4 Step 3)
+                                       run Hungarian match (Sec.4 Step 3)
                                        using the key parameter
 ```
 
@@ -404,36 +404,36 @@ Does the model have K exchangeable components / states / topics?
 |-------|---|-----------------|----------|
 | `normal_mixture` | 2 | Yes (Stan); No (AI: mu ordered) | Simple sort on Stan draws; truth sorted ascending |
 | `normal_mixture_k` | 3 | Yes (Stan); No (AI: mu ordered) | Simple sort on Stan draws; truth sorted ascending |
-| `poisson_changepoint` | 1 cp → 2 segments | No — segments identified by time | No relabeling |
-| `poisson_k_changepoint` | K_cp+1 segments | No — ordered by changepoint position | No relabeling |
-| HMM (if added) | K states | Yes | Stephens with forward–backward alloc probs |
-| LDA / topic model | K topics | Yes | **Stephens with per-token topic-assignment posterior + Hungarian to truth.** Simple sort is NOT sufficient even at K=2 when the AI sampler is z-augmented (slow-mixing): the per-draw sort matches the wrong labels often enough to inflate cross-impl rhat. At K ≥ 3, simple sort completely fails (K! permutations); Stephens is mandatory. |
+| `poisson_changepoint` | 1 cp -> 2 segments | No -- segments identified by time | No relabeling |
+| `poisson_k_changepoint` | K_cp+1 segments | No -- ordered by changepoint position | No relabeling |
+| HMM (if added) | K states | Yes | Stephens with forward-backward alloc probs |
+| LDA / topic model | K topics | Yes | **Stephens with per-token topic-assignment posterior + Hungarian to truth.** Simple sort is NOT sufficient even at K=2 when the AI sampler is z-augmented (slow-mixing): the per-draw sort matches the wrong labels often enough to inflate cross-impl rhat. At K >= 3, simple sort completely fails (K! permutations); Stephens is mandatory. |
 
 ---
 
 ## 9. Pitfalls
 
-1. **Applying permutation only to some parameters** — if `mu` is relabeled
+1. **Applying permutation only to some parameters** -- if `mu` is relabeled
    but `sigma` or `theta` are not, the alignment is inconsistent and R-hat
    will be inflated. Always relabel ALL K-dependent parameters together.
 
-2. **Using different label conventions for AI and Stan** — Stephens resolves
+2. **Using different label conventions for AI and Stan** -- Stephens resolves
    within-chain label switching jointly by pooling both chains. If you run
    Stephens on each chain independently, there is no guarantee the two
    chains end up with the same labeling, and cross-impl R-hat will still be
    inflated.
 
-3. **Confusing component ordering with time ordering** — in a K-segment
+3. **Confusing component ordering with time ordering** -- in a K-segment
    changepoint model, segment 1 is always the earliest in time, not the one
-   with the smallest rate. Do NOT sort these by lambda — that would destroy
+   with the smallest rate. Do NOT sort these by lambda -- that would destroy
    the temporal alignment.
 
-4. **sim1 convergence with label switching** — even after relabeling,
+4. **sim1 convergence with label switching** -- even after relabeling,
    if two components are very close in parameter space, ESS for those
    components will be low because the sampler mixes slowly. This is a
    posterior geometry issue, not a relabeling failure.
 
-5. **Hungarian match sensitivity** — `clue::solve_LSAP` uses absolute
+5. **Hungarian match sensitivity** -- `clue::solve_LSAP` uses absolute
    difference in the key parameter as the cost. If two truth components have
    the same key value (degenerate case), the Hungarian assignment may be
    arbitrary. This rarely happens with DGP draws from a continuous prior,

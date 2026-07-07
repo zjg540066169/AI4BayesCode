@@ -21,24 +21,24 @@ called n times per tree update). **It is a LAST RESORT, not a default.**
 The recurring failure mode: the AI sees a "non-standard" BART model and jumps
 straight to `genbart_block` + a custom likelihood. **Do not.** First ask *"is
 there a GAUSSIAN working representation of the tree function `f`?"* and walk this
-reduction ladder — each rung keeps you in fast conjugate `bart_block`:
+reduction ladder -- each rung keeps you in fast conjugate `bart_block`:
 
 1. **Gaussian response, constant noise** -> `bart_block` directly.
-2. **Latent-Gaussian / augmentable likelihood** — a data augmentation makes the
+2. **Latent-Gaussian / augmentable likelihood** -- a data augmentation makes the
    conditional Gaussian in `f` (e.g. probit via Albert-Chib) -> the augmentation
    block + `bart_block` (`probit_aug_block` + `bart_block(binary=true)`).
-3. **Additive / multiplicative combination of ensembles** — VC-BART,
+3. **Additive / multiplicative combination of ensembles** -- VC-BART,
    varying-coefficient, additive-BART -> one `bart_block` per ensemble via Gibbs
    backfitting; `weights_key` carries any per-obs covariate multiplier `x_ij`
    (see the `bart_block` card "Composite / varying-coefficient BART via
    BACKFITTING").
-4. **Known per-observation weights / variances** — heteroscedastic with KNOWN
+4. **Known per-observation weights / variances** -- heteroscedastic with KNOWN
    `v_i`, meta-analysis with known SEs -> `bart_block` + `weights_key`
    (`w_i = 1/sqrt(v_i)`).
-5. **Conditional-on-the-other-blocks is Gaussian in `f`** — set the Gaussian
+5. **Conditional-on-the-other-blocks is Gaussian in `f`** -- set the Gaussian
    working response each sweep via `working_response_key` + `bart_block`.
 
-**Use `genbart_block` ONLY when EVERY rung fails** — the likelihood is genuinely
+**Use `genbart_block` ONLY when EVERY rung fails** -- the likelihood is genuinely
 non-Gaussian in `f` with no augmentation / weighting / backfitting reduction:
 Logistic / Poisson / NB / AFT / Beta / Gamma_shape / Beta-Binomial /
 unknown-variance heteroscedastic / user-supplied. (For those, `genbart_block` +
@@ -48,15 +48,15 @@ the matching `genbart::lik::*` is correct and expected.)
 
 | Likelihood class | Response | Nuisance param(s) | Reference example |
 |---|---|---|---|
-| `normal_lik(sigma_init, nu, lambda)`      | y ∈ ℝ, Normal                 | sigma              | (Linero 2022 §4.1 regression; use BartNoise for the tuned CRAN BART R package alternative) |
-| `logistic_lik()`                          | y ∈ {0,1}, Bernoulli-sigmoid  | —                  | `examples/GBartLogistic.cpp` |
-| `poisson_lik()`                           | y ∈ ℕ, Poisson-log-link       | —                  | `examples/GBartPoisson.cpp`  |
-| `negative_binomial_lik(kappa_init)`       | y ∈ ℕ, NB(mu, kappa)           | kappa (RW-MH)      | (compose from `GBartPoisson.cpp` + this likelihood header) |
-| `heteroscedastic_lik(phi_init, a0, b0)`    | y ∈ ℝ, mean=variance=exp(r)   | phi (Gamma Gibbs)  | `examples/GBartHeteroscedastic.cpp` |
+| `normal_lik(sigma_init, nu, lambda)`      | y  in  R, Normal                 | sigma              | (Linero 2022 Sec.4.1 regression; use BartNoise for the tuned CRAN BART R package alternative) |
+| `logistic_lik()`                          | y  in  {0,1}, Bernoulli-sigmoid  | --                  | `examples/GBartLogistic.cpp` |
+| `poisson_lik()`                           | y  in  N, Poisson-log-link       | --                  | `examples/GBartPoisson.cpp`  |
+| `negative_binomial_lik(kappa_init)`       | y  in  N, NB(mu, kappa)           | kappa (RW-MH)      | (compose from `GBartPoisson.cpp` + this likelihood header) |
+| `heteroscedastic_lik(phi_init, a0, b0)`    | y  in  R, mean=variance=exp(r)   | phi (Gamma Gibbs)  | `examples/GBartHeteroscedastic.cpp` |
 | `aft_log_logistic_lik(sigma_init, ...)`   | y_log = log time + censoring  | sigma (RW-MH)      | (compose from `GBartPoisson.cpp` + this likelihood header) |
 | `aft_generalized_gamma_lik(...)`           | log time + censoring          | 2 nuisances        | (planned) |
 | `gamma_shape_lik(...)`                    | y > 0, Gamma with shape r(x)   | rate (nuisance)    | (planned) |
-| `beta_lik(phi_init, ...)`                 | y ∈ (0,1), Beta               | phi (RW-MH)        | (planned) |
+| `beta_lik(phi_init, ...)`                 | y  in  (0,1), Beta               | phi (RW-MH)        | (planned) |
 | `beta_binomial_lik(...)`                  | overdispersed counts          | rho (RW-MH)        | (planned) |
 
 Beyond these, users can write custom likelihoods: subclass
@@ -83,7 +83,7 @@ cfg.y_key       = "";            // empty = fixed training data; non-
                                  // empty = refresh Y from shared_data
                                  // each sweep (nested MCMC use case)
 cfg.offset_key  = "";            // similarly for offset
-// cfg.hypers default to Linero 2022 §3.3 (adaptive half-Cauchy on
+// cfg.hypers default to Linero 2022 Sec.3.3 (adaptive half-Cauchy on
 // sigma_mu with c = 1/sqrt(ntrees); DART off).
 ```
 
@@ -121,7 +121,7 @@ stream used by stochastic refreshers.
 ### Performance
 
 End-to-end 4-chain diagnostics on `GBartPoisson(N=200, p=3, ntrees=200)`:
-per-sweep wall time ~0.01 s; 4 × (4000 burnin + 10000 keep) sequential
+per-sweep wall time ~0.01 s; 4 x (4000 burnin + 10000 keep) sequential
 total ~441 s; max Rhat = 1.004; all 200 per-obs R-hat < 1.05 and
 ESS_bulk > 400.
 

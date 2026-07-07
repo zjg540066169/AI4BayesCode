@@ -25,7 +25,7 @@ each u_j under the configured u_keys[j-1].
 The gamma-trick augmentation is classical (predates BART):
 **Baker 1994** (Statistician 43(4):495-504), **Forster 2010**
 (Stat. Meth. 7(3):210-224), **Walker 2011**, **Caron & Doucet 2012**.
-**Murray 2021** (JASA 116(534):756-769 §3.1) introduced the C-1
+**Murray 2021** (JASA 116(534):756-769 Sec.3.1) introduced the C-1
 reference-category identified multinomial parameterization for tree
 ensembles. This implementation preserves that architecture but uses
 Linero 2022's RJMCMC tree kernel (via `genbart_block`) as the

@@ -1,7 +1,7 @@
 ## beta_gibbs_block
 
 Exact draw from Beta(alpha, beta) via the Gamma trick. Use when the full
-conditional is exactly Beta — typically mixing proportions in
+conditional is exactly Beta -- typically mixing proportions in
 spike-and-slab, or probabilities in Beta-Binomial models.
 
 ```cpp
