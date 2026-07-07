@@ -356,18 +356,32 @@ public:
         sc.max_parents = cfg_.max_parents;
         sc.candidate_top_C = cfg_.candidate_top_C;
         sc.family_top_F = cfg_.family_cache_F;
-        sc.gamma_prune_nats = cfg_.gamma_prune_nats;
+        // gamma-prune (drop families > gamma nats below a node's GLOBAL-best
+        // family) is UNSAFE for BOTH modes. Order and partition MCMC each
+        // restrict a node to the parents available in the current order /
+        // partition and marginalise over those predecessor subsets. When a
+        // node's global-best family uses a parent that is NOT a predecessor,
+        // every predecessor-admissible family can sit > gamma below it and be
+        // pruned -- forcing that node toward near-empty parents. In order mode
+        // this is a SILENT, systematically-too-low score (it does NOT surface as
+        // a bad R-hat within one implementation); in partition mode it is a
+        // spurious -inf from the ">= 1 parent in the adjacent element"
+        // constraint. The effect is masked for BDeu on weak/realistic data
+        // (small per-family score range) but CATASTROPHIC for BGe on correlated
+        // data and near-deterministic BDeu (large range) -- there it disagrees
+        // with a BiDAG cross-check by hundreds of nats (gap grows with n). BiDAG
+        // uses NO such threshold: only candidate restriction (startspace / plus1)
+        // + a parent-count hardlimit. So we disable gamma-prune here and keep
+        // only the top-C / top-F bounds (BiDAG's startspace / hardlimit
+        // analogues) for order-mode scalability. Verified: gamma=inf makes order
+        // mode match BiDAG::orderMCMC EXACTLY across the bge/bde/n sweep.
+        sc.gamma_prune_nats = std::numeric_limits<double>::infinity();
         if (cfg_.method == order_mcmc_block_config::method_t::partition) {
-            // Partition MCMC needs the FULL family set. Its ">= 1 parent in the
-            // adjacent partition element" constraint can be STARVED by the FK
-            // top-C / top-F / gamma-pruning heuristic (which is safe for order
-            // MCMC where any predecessor subset is permissible): if every cached
-            // family carrying a required parent is pruned, that node's partition
-            // score is a spurious -inf. So use the exact, unpruned cache in
-            // partition mode (this bounds partition mode to roughly n <= 20).
+            // Partition MCMC additionally needs the FULL family set (top-C /
+            // top-F unpruned too), else the required-parent constraint above can
+            // still be starved. This bounds partition mode to roughly n <= 20.
             sc.candidate_top_C  = (n_ > 1) ? (n_ - 1) : 1;
             sc.family_top_F     = std::numeric_limits<std::size_t>::max();
-            sc.gamma_prune_nats = std::numeric_limits<double>::infinity();
         }
         if (use_bge) {
             bge_scorer_config gcfg;
