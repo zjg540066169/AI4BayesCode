@@ -37,6 +37,10 @@
  *      recovers a 3-node chain BN's edges with P(true skeleton edge) > 0.5.
  *  R9  Edge case n=2 (smallest non-trivial BN): construct + 200 steps
  *      without error, order is always a valid permutation of {0,1}.
+ *  R10 Degenerate n=1 (single node, no possible edges): BOTH order and
+ *      partition modes complete 200 steps without hanging and report the
+ *      lone node with no parents. Regression guard for the n=1 infinite-loop
+ *      (any-pair swap / partition move proposals) fixed in the block.
  *================================================================================*/
 
 #include "AI4BayesCode/order_mcmc_block.hpp"
@@ -586,6 +590,37 @@ static void R9_n2_edge_case() {
           + ", perm_ok = " + std::to_string(int(perm_ok)));
 }
 
+// n=1 degenerate: a single node has one order and no possible edges. Every
+// move proposal is degenerate (any-pair swap loops drawing b != a from {0};
+// partition split/join/swap/relocation index empty lists) and MUST be guarded
+// or step() spins forever. Both modes must complete and report the node with
+// no parents. (Regression guard for the n=1 hang fixed in order_mcmc_block.hpp
+// / partition_state.hpp.)
+static void R10_n1_degenerate() {
+    std::printf("\n--- R10: n=1 single-node BN (order + partition) runs without hanging ---\n");
+    const std::size_t n = 1, N = 100;
+    const arma::imat D = sim_chain_data(N, n, 7u);
+    const arma::uvec cards(n, arma::fill::value(2));
+    for (int mode = 0; mode < 2; ++mode) {
+        bool ok = true;
+        try {
+            auto cfg = make_cfg(D, cards, 1.0, 1, 1, 4, 10.0, 0.5, 9u);
+            cfg.method = mode ? order_mcmc_block_config::method_t::partition
+                              : order_mcmc_block_config::method_t::order;
+            order_mcmc_block blk(cfg);
+            block_context ctx; blk.set_context(ctx);
+            std::mt19937_64 rng(2044u);
+            for (std::size_t s = 0; s < 200; ++s) {
+                blk.step(rng);
+                const auto& dag = blk.sampled_dag();
+                if (dag.size() != 1 || dag[0] != 0ULL) { ok = false; break; }
+            }
+        } catch (const std::exception& e) { std::printf("    exception: %s\n", e.what()); ok = false; }
+        check(ok, std::string("R10 n=1 ") + (mode ? "partition" : "order")
+                  + " completes 200 steps, single node has no parents");
+    }
+}
+
 } // anonymous namespace
 
 int main() {
@@ -599,6 +634,7 @@ int main() {
     R7_post_conv_stability();
     R8_card4_chain_recovery();
     R9_n2_edge_case();
+    R10_n1_degenerate();
     std::printf("\n====== Summary: %d PASS / %d FAIL ======\n",
                 G_RES.passed, G_RES.failed);
     return (G_RES.failed == 0) ? 0 : 1;

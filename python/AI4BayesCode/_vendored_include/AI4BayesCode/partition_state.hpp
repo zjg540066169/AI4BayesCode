@@ -461,6 +461,12 @@ inline void partition_mcmc_step(partition_chain& c, const score_cache& cache,
                                 double p_edgerev = 0.07,
                                 double p_splitjoin = 0.37,
                                 double p_swap = 0.27) {
+    // n <= 1: a single node is its own partition with no possible edges, so no
+    // split/join/swap/single-node/edge-reversal move exists — every proposal
+    // would either loop drawing a distinct second node (swap: while(b==a)) or
+    // index an empty arc / neighbour list (size()-1 underflow). The chain is
+    // already at its unique stationary state; nothing to do.
+    if (c.state.permy.size() <= 1) return;
     std::uniform_real_distribution<double> U(0.0, 1.0);
     const double u = U(rng);
     if (u < p_stay) return;                                   // stay still

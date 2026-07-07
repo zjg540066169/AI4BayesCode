@@ -481,37 +481,43 @@ public:
         }
 
         // ----- Propose (order mode) -----
-        std::uniform_real_distribution<double> U01(0.0, 1.0);
-        std::size_t a = 0, b = 0;
-        if (U01(rng) < cfg_.prob_adjacent_swap) {
-            // Move 2: swap adjacent positions.
-            std::uniform_int_distribution<std::size_t> Up(0, n_ - 2);
-            a = Up(rng); b = a + 1;
-        } else {
-            // Move 1: swap any two positions.
-            std::uniform_int_distribution<std::size_t> Up(0, n_ - 1);
-            a = Up(rng);
-            do { b = Up(rng); } while (b == a);
-            if (a > b) std::swap(a, b);
-        }
+        // Degenerate n <= 1 has a single order and no possible edges, so no
+        // swap move exists: the any-pair move would loop forever drawing
+        // b != a from {0}, and the adjacent-swap range (n-2) underflows for
+        // size_t n == 1. Skip the proposal and just resample the trivial DAG.
+        if (n_ >= 2) {
+            std::uniform_real_distribution<double> U01(0.0, 1.0);
+            std::size_t a = 0, b = 0;
+            if (U01(rng) < cfg_.prob_adjacent_swap) {
+                // Move 2: swap adjacent positions.
+                std::uniform_int_distribution<std::size_t> Up(0, n_ - 2);
+                a = Up(rng); b = a + 1;
+            } else {
+                // Move 1: swap any two positions.
+                std::uniform_int_distribution<std::size_t> Up(0, n_ - 1);
+                a = Up(rng);
+                do { b = Up(rng); } while (b == a);
+                if (a > b) std::swap(a, b);
+            }
 
-        // ----- Compute proposed log score (incremental) -----
-        // FK §4.2: only positions in [a, b] of the proposed order have
-        // changed predecessor sets, so we recompute only those nodes.
-        // For simplicity in v1, recompute full score.
-        std::swap(order_state_[a], order_state_[b]);
-        const double proposed_log_score =
-            cache_->order_log_score(order_as_vec_());
-
-        // ----- Accept / reject -----
-        const double log_alpha = proposed_log_score - current_log_score_;
-        if (std::log(U01(rng)) < log_alpha) {
-            // Accept.
-            current_log_score_ = proposed_log_score;
-            current_natural_ = arma::conv_to<arma::vec>::from(order_state_);
-        } else {
-            // Reject — revert swap.
+            // ----- Compute proposed log score (incremental) -----
+            // FK §4.2: only positions in [a, b] of the proposed order have
+            // changed predecessor sets, so we recompute only those nodes.
+            // For simplicity in v1, recompute full score.
             std::swap(order_state_[a], order_state_[b]);
+            const double proposed_log_score =
+                cache_->order_log_score(order_as_vec_());
+
+            // ----- Accept / reject -----
+            const double log_alpha = proposed_log_score - current_log_score_;
+            if (std::log(U01(rng)) < log_alpha) {
+                // Accept.
+                current_log_score_ = proposed_log_score;
+                current_natural_ = arma::conv_to<arma::vec>::from(order_state_);
+            } else {
+                // Reject — revert swap.
+                std::swap(order_state_[a], order_state_[b]);
+            }
         }
 
         // Sample a DAG from the current order (per FK §3.2 Prop 3.1).
