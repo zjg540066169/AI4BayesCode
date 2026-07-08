@@ -380,29 +380,51 @@ For Poisson `y_n ~ Poisson(exp(eta_n))`, the residual becomes
 This covers `surgical_model` (binomial RE), `seeds_model` (binomial RE
 with interaction terms), and any GLMM with a single hierarchy.
 
-## 8. Dense metric escalation (Check #18)
+## 8. Metric escalation (Check #18)
 
-If 2-chain rhat > 1.05 at full 20k+20k budget on the joint posterior
-even with the rule above:
+Escalate the metric when EITHER signal shows the diagonal metric is inadequate
+at the 20k+20k budget -- MEASURE, do NOT predict from dimension or model family:
+
+- 2-chain rhat > 1.05 on the joint posterior (diagonal cannot converge), OR
+- LOW ess_ratio EVEN WHEN R-hat PASSES (ess_ratio = min-ESS / n_keep in the
+  WARN/FAIL zone the runner already flags, < ~0.01). A diagonal metric can reach
+  rhat < 1.05 at 20k draws while being an order of magnitude LESS EFFICIENT than
+  dense on a correlated geometry. R-hat is BLIND to this -- it only needs enough
+  draws to converge; ess_ratio measures the per-draw efficiency that R-hat and
+  E-BFMI miss.
+
+Low per-draw ess_ratio is usually a GEOMETRY / metric problem, not a draw-count
+problem -- so on low ess_ratio, try the DENSE metric FIRST, before adding draws
+(more draws do NOT raise ess_ratio if the metric is the wrong shape).
+
+ESCALATE BY MEASUREMENT, keep only if it helps (do NOT enable dense blindly):
+1. Set `cfg.use_dense_metric = true` and re-run the 2-chain diagnostic.
+2. If ess_ratio materially improves (>= ~2-3x) -> KEEP dense + add the Check #18
+   justification below.
+3. If it does NOT improve (or dense diverges / is much slower) -> REVERT to
+   diagonal. The inefficiency is NOT a rotated-metric problem; the real fix is a
+   reparameterization (NC for a residual funnel) or a specialized block
+   (`gmrf_precision_block` / `gmrf_whitened_ess_block` for spatial ICAR / CAR;
+   whitened ESS for dense GP latents). A speculative dense metric can be SLOWER
+   and can FAIL on some geometries -- that is why this is measure-then-keep.
 
 ```cpp
 cfg.use_dense_metric = true;
+// JUSTIFICATION (Check #18): diagonal gave rhat = <r> / ess_ratio = <e> at
+// 20k+20k; dense raised ess_ratio <old> -> <new> (MEASURED), capturing the
+// (<param_a>, <param_b>) cross-correlation [name the correlated geometry].
 ```
 
-and add a Check #18 inline justification:
-
-```cpp
-// JUSTIFICATION (Check #18): hierarchical funnel residual after NC
-// reparameterization, J=<n>, observed rhat = <r> at full budget on
-// diagonal metric. Dense metric required to capture (mu_alpha,
-// alpha_raw) cross-correlation in the data-rich-group regime.
-```
-
-Common signals that dense metric MAY be needed (escalate via Check #18 only when
-diagnostics confirm -- start diagonal, measure, do NOT gate on dimension):
-- large `J` (dense is frequently needed, but confirm via R-hat -- not automatic)
-- Highly variable group sizes (some `n_j` >> others, creating
-  scale heterogeneity within `alpha_raw`)
+Geometries where the diagonal metric is frequently inefficient (still CONFIRM by
+the ESS / R-hat measurement above -- do NOT gate on dimension or family):
+- large `J` hierarchical RE (`mu_alpha` <-> `alpha_raw` cross-correlation in the
+  data-rich-group regime)
+- spatial correlation (ICAR / CAR / BYM latent -- neighbors are correlated by
+  construction; prefer a specialized `gmrf_*` block, and if the latent is kept in
+  a `joint_nuts_block` the dense metric is usually needed)
+- GP / HSGP / spline latents (already flagged dense-required in `codegen_cpp.md`)
+- Highly variable group sizes (some `n_j` >> others -- scale heterogeneity
+  within `alpha_raw`)
 - Heavy-tail random effects where `sigma_alpha_prior_scale` is
   large and the chain visits the tail
 
