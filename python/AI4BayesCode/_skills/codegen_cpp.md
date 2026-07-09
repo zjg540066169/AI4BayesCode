@@ -884,6 +884,26 @@ double lp = arma::dot(y, eta) - arma::accu(arma::log1p(arma::exp(arma::abs(eta))
 if (grad_nat) *grad_nat = X.t() * (y - p_hat);
 ```
 
+### Log-densities: stay stable in the DEGENERATE LIMIT
+
+A weakly-identified param with a flat limit (NegBin kappa->inf = Poisson; t nu->inf
+= Normal) lets a chain wander up that tail; if the closed form subtracts two huge
+intermediates there, catastrophic cancellation -> garbage lp/grad -> the chain
+FREEZES (sd->0, one dead chain). Passes a nominal-point Check #12, dies only on
+weakly-identified data. Keep every term BOUNDED in the limit. NegBin y~NB(mu,kappa):
+naive `kappa*log(kappa)-(y+kappa)*log(kappa+mu)` (two ~1e70 terms -> O(mu)) = noise.
+Stable (same density):
+
+```cpp
+double s = 0.0;                    // = lgamma(y+kappa)-lgamma(kappa)-y*log(kappa+mu)
+for (int i = 0; i < y_int; ++i) s += std::log1p((double(i) - mu) / (kappa + mu));
+double lp = s - lgamma(y + 1.0) + y*std::log(mu) - kappa*std::log1p(mu / kappa);
+// d lp/d kappa (lik) = sum_{i<y} 1/(kappa+i) - log1p(mu/kappa) + (mu-y)/(kappa+mu)
+```
+
+Prefer log1p/log1mexp, an lgamma-diff as a Pochhammer sum. Do NOT clamp the param
+to "fix" it -- a clamp truncates the posterior = bias.
+
 ### Why this isn't dangerous (despite "BLAS feels risky")
 
 Three reasons the BLAS form is at least as safe as the loop form for
@@ -1517,6 +1537,14 @@ above). Tolerance: `< 1e-5` (FD precision ceiling with `h = 1e-5`).
 Both verification mechanisms catch the main bug class (arithmetic errors in
 the hand-written gradient): FD confirms grad matches numerical
 derivative of lp; AD confirms grad matches reverse-mode autodiff.
+
+### Verify at EXTREME params, not just a nominal point
+
+Check #12 at one nominal draw misses a density that cancels only in a degenerate
+tail (above). Also eval lp+grad at stressed points: each POSITIVE param at its limit
+(dispersion/precision/df = 1e6, 1e12) -- lp must stay FINITE and match the limit
+model (NB->Poisson, t->Normal), FD/AD still agreeing; each INTERVAL param near both
+edges. A non-finite lp or FD/AD mismatch = unstable there; rewrite (don't clamp).
 
 ### At generation time, the AI runs
 
