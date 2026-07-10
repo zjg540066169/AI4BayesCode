@@ -1545,6 +1545,22 @@ autodiff-able (e.g. through a general eigendecomposition), EITHER hand-derive it
 (eigenvalue gradients ARE analytic: `d lambda / dA = w v^T / (w^T v)`) OR sample
 that block gradient-free (slice / RW-Metropolis / ESS) -- never FD-in-NUTS.
 
+### Symmetric PSD inputs to arma: enforce symmetry EXPLICITLY
+
+"Mathematically symmetric" != "bit-exact symmetric". User-supplied matrices arrive
+with O(eps) asymmetry; accumulating N of them grows it to N*eps; `arma::chol` /
+`inv_sympd` / `solve_sympd` then spam "given matrix is not symmetric" per call
+(cosmetically loud, not a bug -- arma still uses one triangle). Before every such
+call, symmetrize:
+
+```cpp
+arma::mat Sym = 0.5 * (M + M.t());
+arma::chol(L, Sym, "lower");
+```
+
+Do NOT gate on `is_symmetric(tol)` -- it returns true on that same eps asymmetry,
+so the conditional fix branch is never taken. Symmetrize unconditionally.
+
 ### Verify at EXTREME params, not just a nominal point
 
 Check #12 at one nominal draw misses a density that cancels only in a degenerate
