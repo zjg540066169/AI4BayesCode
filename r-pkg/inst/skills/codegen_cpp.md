@@ -1538,6 +1538,13 @@ Both verification mechanisms catch the main bug class (arithmetic errors in
 the hand-written gradient): FD confirms grad matches numerical
 derivative of lp; AD confirms grad matches reverse-mode autodiff.
 
+**FD is VERIFICATION-ONLY -- NEVER assign it to `cfg.log_density_grad`.** An FD
+gradient costs 2*D density evals per leapfrog and destroys NUTS's cheap-gradient
+premise (easily 100x+ slower). If a block's gradient is neither analytic nor
+autodiff-able (e.g. through a general eigendecomposition), EITHER hand-derive it
+(eigenvalue gradients ARE analytic: `d lambda / dA = w v^T / (w^T v)`) OR sample
+that block gradient-free (slice / RW-Metropolis / ESS) -- never FD-in-NUTS.
+
 ### Verify at EXTREME params, not just a nominal point
 
 Check #12 at one nominal draw misses a density that cancels only in a degenerate
