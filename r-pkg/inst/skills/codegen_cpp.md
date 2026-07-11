@@ -1545,6 +1545,14 @@ autodiff-able (e.g. through a general eigendecomposition), EITHER hand-derive it
 (eigenvalue gradients ARE analytic: `d lambda / dA = w v^T / (w^T v)`) OR sample
 that block gradient-free (slice / RW-Metropolis / ESS) -- never FD-in-NUTS.
 
+**"Partial FD" is still FD-in-NUTS.** Splitting "analytic for slot A + FD for slot
+B" inside one joint_nuts_block still costs 2*k density evals per leapfrog for the
+k FD slots -- same NUTS-cost blowup. FACTOR the model instead: non-smooth slots
+-> a gradient-free CHILD block (slice / RW-Metropolis / ESS); smooth slots ->
+NUTS with analytic gradient. "Eigenvalue non-smooth at collisions" is not a pass
+-- collisions are measure-zero; the spectral-radius (dominant eigenvalue)
+gradient is well-defined a.s.
+
 ### Symmetric PSD inputs to arma: enforce symmetry EXPLICITLY
 
 "Mathematically symmetric" != "bit-exact symmetric". User-supplied matrices arrive
