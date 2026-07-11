@@ -93,7 +93,7 @@
 # define ARMA_DONT_USE_WRAPPER
 #endif
 
-#if defined(AI4BAYESCODE_RCPP_MODULE) || defined(AI4BAYESCODE_PYBIND_MODULE)
+#ifdef AI4BAYESCODE_RCPP_MODULE
 #  include <RcppArmadillo.h>
 #else
 #  include <armadillo>
