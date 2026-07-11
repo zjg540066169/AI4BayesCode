@@ -48,7 +48,7 @@
 //   censor <- 8; delta <- as.integer(T <= censor); t_obs <- pmin(T, censor)
 //   # Fit with 4 parallel chains + convergence diagnosis.
 //   run <- ai4bayescode_run_chains(
-//       ctor  = function(seed) new(PehSurvival, t_obs, delta, edges, 0.01, 0.01, seed, TRUE),
+//       model_ctor = function(seed) new(PehSurvival, t_obs, delta, edges, 0.01, 0.01, seed, TRUE),
 //       n_chains = 4, n_burn = 3000, n_keep = 5000)
 //   diag <- ai4bayescode_diagnose(run)
 //   print(diag$summary)   # posterior mean lambda_k, R-hat, ESS
@@ -67,8 +67,8 @@
 //       else:      T[i] = edges[k] + (Ht[i]-cumH[k])/lam_true[k]
 //   censor = 8.0; delta = (T <= censor).astype(float); t_obs = np.minimum(T, censor)
 //   run = ai.run_chains(
-//       lambda seed: PehSurvival(t_obs, delta, edges, 0.01, 0.01, seed, True),
-//       n_chains=4, n_burn=3000, n_keep=5000)
+//       factory = lambda seed: PehSurvival(t_obs, delta, edges, 0.01, 0.01, seed, True),
+//       seeds = (101, 202, 303, 404), n_burn=3000, n_keep=5000)
 //   diag = ai.diagnose(run); print(diag['summary'])
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS

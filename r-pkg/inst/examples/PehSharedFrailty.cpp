@@ -59,8 +59,8 @@
 //             else       edges[k]   + (Hb - cumH[k])   / lambda_true[k] }
 //   censor <- 20; delta <- as.integer(T <= censor); t_obs <- pmin(T, censor)
 //   run <- ai4bayescode_run_chains(
-//       ctor = function(seed) new(PehSharedFrailty, t_obs, delta, as.numeric(z), G,
-//                                 edges, theta, 0.01, 0.01, seed, TRUE),
+//       model_ctor = function(seed) new(PehSharedFrailty, t_obs, delta, as.numeric(z), G,
+//                                       edges, theta, 0.01, 0.01, seed, TRUE),
 //       n_chains = 4, n_burn = 3000, n_keep = 5000)
 //   print(ai4bayescode_diagnose(run)$summary)
 
@@ -81,9 +81,9 @@
 //       else:      T[i] = edges[k] + (Hb - cumH[k]) / lam_true[k]
 //   censor = 20.; delta = (T <= censor).astype(float); t_obs = np.minimum(T, censor)
 //   run = ai.run_chains(
-//       lambda seed: PehSharedFrailty(t_obs, delta, z.astype(float), G, edges,
-//                                     theta, 0.01, 0.01, seed, True),
-//       n_chains=4, n_burn=3000, n_keep=5000)
+//       factory = lambda seed: PehSharedFrailty(t_obs, delta, z.astype(float), G, edges,
+//                                               theta, 0.01, 0.01, seed, True),
+//       seeds = (101, 202, 303, 404), n_burn=3000, n_keep=5000)
 //   print(ai.diagnose(run)['summary'])
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
