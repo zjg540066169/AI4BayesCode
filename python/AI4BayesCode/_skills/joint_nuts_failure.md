@@ -146,6 +146,62 @@ mis-stepped. A diagonal-mass (`adapt_mass`) workaround rescued *this* model
 (Mh) -- it is a per-model band-aid, not a fix. **The real fix is joint + NCR**
 (this mode): it removes the funnel geometry at the source, model-independently.
 
+### Form C -- STATE-SPACE / random-walk / Markov innovation funnel
+
+Same Mode-1 funnel geometry, index `t` (time) instead of `j` (level). The shared
+scale is an INNOVATION variance / SD; the "children" are `T` time-indexed states
+linked by a Markov recurrence. Detection patterns (fire on ANY t-indexed Markov
+prior, not just j-indexed exchangeable hierarchical):
+
+    mu_t     ~ Normal(mu_{t-1},                        sigma_level)   (level RW)
+    mu_t     ~ Normal(mu_{t-1} + gamma_t,              sigma_level)   (level + trend)
+    gamma_t  ~ Normal(gamma_{t-1},                     sigma_trend)   (trend RW)
+    s_t      ~ Normal(-sum_{h=1..P-1} s_{t-h},         sigma_seas)    (period-P sum-to-zero seasonal)
+    x_t      ~ Normal(phi * x_{t-1},                   sigma)         (AR(1))
+
+Variance-parameterized versions (`sigma^2 ~ InvGamma`) stack Form C with Form B --
+treat as Form C for the reparam decision and Form B for the `sqrt()` in the
+log-density.
+
+**Same Mode-1 escalation applies -- Level 1 NCR is REQUIRED, not optional.**
+Reparam the INNOVATION on the raw scale, then materialise the state
+deterministically from the Markov recurrence:
+
+    // level RW
+    mu_raw_t   ~ Normal(0, 1)                  for t = 2..n            // sampled
+    mu_t       = mu_{t-1} + sigma_level * mu_raw_t                     // deterministic
+
+    // sum-to-zero seasonal (denote S_t = s_t + sum_{h=1..P-1} s_{t-h})
+    S_raw_t    ~ Normal(0, 1)                  for t = P..n            // sampled
+    S_t        = sigma_seas * S_raw_t
+    s_t        = S_t - sum_{h=1..P-1} s_{t-h}                          // recurrence
+
+### Why dense metric alone is NOT sufficient here
+
+A centered state-space joint block has TWO stacked pathologies -- diagonal metric
+fails on both, dense fails on the second:
+
+1. **State-state RIDGE.** Adjacent states are near-perfectly correlated when the
+   innovation SD is smaller than the observation SD -- the posterior lies on a
+   near-linear ridge in `(state_1, ..., state_T)` space. Diagonal metric cannot
+   rotate to the ridge direction; **dense metric CAN**.
+2. **Sigma-state FUNNEL.** The shared innovation SD forms a Neal funnel with the
+   T states (same geometry as Form A / B). Dense metric assumes LOCAL-Gaussian
+   geometry; the funnel is intrinsically non-Gaussian, so **dense metric does NOT
+   fix this**.
+
+Reference implementations that use dense metric + centered states (e.g. the
+standard "dense_e" recipe on a random-walk or seasonal DLM) still report many
+divergences at long T or tight signal, precisely because the funnel remains.
+NCR of every scale-governed state is the one fix that removes the funnel at the
+source. **Best combined fix**: `cfg.use_dense_metric = true` AND NCR every
+innovation-scale-governed state -- Check #18 dense escalation without NCR does
+NOT clear Check #24(a).
+
+**Check #24(a) FAIL rule**: a centered `state_t ~ Normal(prev_state_expr,
+sigma^2)` under `joint_nuts_block` is a HARD FAIL regardless of the metric --
+the codegen agent MUST rewrite as NCR before shipping, same as Form A / B.
+
 ---
 
 ## Failure Mode 2 -- Multi-modal / label-switching (partially detectable)
