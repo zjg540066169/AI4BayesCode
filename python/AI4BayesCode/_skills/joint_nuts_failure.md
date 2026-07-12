@@ -204,6 +204,181 @@ the codegen agent MUST rewrite as NCR before shipping, same as Form A / B.
 
 ---
 
+## Mode-1 EXTENSIONS -- variants that still bite joint_nuts_block
+
+All variants below reduce to Form A / B / C geometry (shared scale governs a
+vector of Gaussian children) with the same NCR fix. Listed to close DETECTION
+gaps. Patterns fully handled by a shipped specialized block (DP concentration
+via `stick_breaking_block`; DP cluster atoms via `normal_gamma_cluster_gibbs_block`;
+CAR/ICAR/BYM2/GP/1-D-GP via `gmrf_precision_block`/`gmrf_whitened_ess_block`/
+`elliptical_slice_sampling_block`/`celerite_gp_block` -- see `codegen_cpp.md`
+Sec.4a routing table; Dirac spike-slab via `examples/SpikeSlabRJMCMC.cpp` --
+see `codegen_priors.md` Sec.3a Class 2b) are OUT of scope -- they never reach
+`joint_nuts_block`.
+
+**META-RULE.** When multiple scales exist at DIFFERENT LEVELS, NCR must be
+applied at EVERY level -- common auto-gen bug is fixing only the deepest.
+**Anti-rule:** do NOT NCR any level whose per-group data is strongly informative
+(see base Mode-1 caveat above); centered wins there, partial NCR is the general form.
+
+### Form-A extensions (same NCR as A, different detection signature)
+
+- **A.1 IRT 2PL.** `theta_i ~ N(0, sigma_theta)` is Form-A over persons; anchor
+  `sigma_theta := 1` (standard 2PL identification -- rotation-invariance,
+  same trick as Form E) then NCR both hierarchies `log a_j ~ N(mu_a, sigma_a)`
+  and `b_j ~ N(mu_b, sigma_b)`. Do NOT combine with `a_1 := 1` -- over-identifies.
+  Ref: Curtis 2010 JSS 36 CS1; Fox 2010 "Bayesian Item Response Modeling" Ch.4.
+
+- **A.2 Nested / stacked hierarchies** (radon-style).
+  `alpha_j ~ N(gamma, sigma_alpha)` AND `gamma ~ N(mu_0, sigma_gamma)`.
+  Two stacked Form-A funnels. Ref: Gelman-Hill 2007 Ch.12 (radon);
+  Papaspiliopoulos-Roberts-Skold 2007 Stat.Sci. 22(1):59-73 (partial NCR).
+
+- **A.3 Crossed random effects** (subject x item).
+  `s_i ~ N(0, sigma_s)` AND `t_j ~ N(0, sigma_t)` -- two orthogonal Form-A
+  funnels. Two-joint_nuts_block Gibbs recipe: `hierarchical_re.md` Sec.6.
+  Ref: Sorensen-Hohenstein-Vasishth 2016 arXiv:1506.06201 ("Correlated varying
+  intercepts, varying slopes" section / Listing 8).
+
+- **A.4 Measurement error / latent covariates** (classical `W = X + u` OR
+  Berkson `X = W + u`). `X_i ~ N(mu_x, tau_x^2)`, `u ~ N(0, tau_u^2)`.
+  NCR: `X_i = mu_x + tau_x * z_i`, `z_i ~ N(0,1)`.
+  Ref: Richardson-Gilks 1993 Am.J.Epi. 138(6):430-442; Carroll et al. 2006
+  "Measurement Error in Nonlinear Models" Ch.9.
+
+### Form-C extensions (same NCR as C, different detection or twist)
+
+- **C.1 Stochastic volatility.** `y_t | h_t ~ N(0, exp(h_t/2))`,
+  `h_t ~ N(mu + phi*(h_{t-1} - mu), sigma_eta)`. `exp(h/2)` observation
+  SHARPENS the pinch. NCR the innovation.
+  Ref: Kim-Shephard-Chib 1998 RES 65(3):361-393; Stan User's Guide "Time-series
+  models" > "Stochastic volatility".
+
+- **C.2 AR(1) stationary initial state.**
+  `h_1 ~ N(mu, sigma / sqrt(1 - phi^2))` is a THIRD funnel over `(sigma, phi, h_1)`.
+  Standard Form-C NCR on `t >= 2` innovations misses `h_1`; reparam it too:
+  `h_1 = mu + sigma/sqrt(1-phi^2) * h_std_1`, `h_std_1 ~ N(0,1)`.
+  Ref: Stan User's Guide "Time-series models" > "Autoregressive models"
+  (stationary initialization).
+
+- **C.3 Poisson state-space (temporal).**
+  `y_t ~ Poisson(exp(lambda_t))`, `lambda_t ~ N(lambda_{t-1}, sigma_lambda)`.
+  Form-C on log-rate; log-link sharpens the pinch (cf. C.1). Same NCR as C.
+  **Route disambiguation**: `t`-indexed Markov recurrence -> apply here;
+  spatial LGCP (neighborhood prior on `f_i`) -> `gmrf_whitened_ess_block`, NOT
+  this fix.
+
+- **C.4 RW2 / P-spline innovation.**
+  `d_t := f_t - 2*f_{t-1} + f_{t-2} ~ N(0, sigma_f)`. NCR on the SECOND
+  DIFFERENCE `d_t = sigma_f * d_std_t`, NOT on states `f_t` directly
+  (sigma_f enters the intrinsic precision, not the states). When used as
+  a pure GMRF smoother -> `gmrf_precision_block` (out of scope here).
+  Ref: Lang-Brezger 2004 JCGS 13(1):183-212; Rue-Held 2005 Ch.3.4.
+
+- **C.5 Parallel Form-C (BSTS local-linear-trend).**
+  `mu_t ~ N(mu_{t-1} + delta_{t-1}, sigma_mu)`; `delta_t ~ N(delta_{t-1}, sigma_delta)`.
+  Two innovation scales govern different innovation vectors -- NCR BOTH.
+
+- **C.6 Panel state-space (Form A x Form C).**
+  `mu_{j,t} ~ N(mu_{j,t-1}, sigma_j)` AND `sigma_j ~ HalfNormal(0, tau)`.
+
+### Form D -- Multivariate hierarchical (LKJ / Wishart)
+
+`b_g ~ MVN(0, Sigma)` -- each `tau_k` stacks a Form-A funnel against `b_{g,k}`
+across G. NCR (Cholesky): `z_g ~ N(0, I_K)`; `b_g = diag(tau) * L * z_g`.
+Full config: `codegen_cpp.md Sec.4a` "Multivariate hierarchical" row.
+
+- **Detection.** `MVN(0, Sigma)` with `Sigma = diag(tau) L L^T diag(tau)`
+  (LKJ + scale) -> Cholesky NCR above. `Sigma ~ Inv-Wishart(nu, S_0)` ->
+  decompose to `L * L^T` via Bartlett and NCR the diagonal scales; do NOT
+  sample raw `Sigma` inside `joint_nuts_block` (see Barnard-McCulloch-Meng 2000
+  for LKJ preference).
+
+- **D.1 Multivariate DLM / MSV.** Form D per time step: `eta_t ~ MVN(0, Sigma)`,
+  `t = 1..T`. `eta_t = diag(tau) * L * z_t`, `z_t ~ MVN(0, I_K)`. Never
+  instantiate Sigma.
+
+- **D.2 NLME / population PK.** Form D + nonlinear likelihood (ODE, algebraic).
+  Same D fix; nonlinearity sharpens the pinch as in C.1.
+  Ref: Wakefield 1996 JASA 91(433):62-75; Margossian-Zhang-Gillespie 2022
+  CPT:PSP 11(9):1151-1169 (Stan+Torsten).
+
+Refs: BDA3 Ch.15; Barnard-McCulloch-Meng 2000 Statistica Sinica 10:1281-1311;
+LKJ 2009 J.Multivar.Anal. 100(9):1989-2001.
+
+### Form E -- Factor / ARD / CFA loading-scale funnel
+
+`y_i = W * z_i + eps`, `z_i ~ N(0, I_K)`, `W_{d,k} ~ N(0, tau_k^2)` with
+`tau_k ~ HalfCauchy` (ARD column scale). K stacked column funnels.
+
+**Disambiguation vs Form G**: Form E is coefficients W in a BILINEAR term
+(`y = W z + eps`, W multiplies a LATENT factor) -- rotation-invariant.
+Form G is coefficients beta in a LINEAR predictor (`y ~ X beta`, beta multiplies
+OBSERVED covariates) -- no rotation invariance.
+
+**NCR.** `omega_{d,k} ~ N(0,1)`; `W_{d,k} = tau_k * omega_{d,k}`.
+Rotation invariance `(W, z) <-> (W A, A^{-1} z)` is a SEPARATE Mode-2-family
+issue -- fix by lower-triangular `W` with positive diagonal (or for CFA,
+anchor `psi := 1`), only if the user model doesn't already impose it.
+
+Refs: Bishop 1999 NIPS 11:382-388 (Bayesian PCA); Ghosh-Dunson 2009
+JCGS 18(2):306-320; Piironen-Vehtari 2017 EJS 11(2):5018-5051 Sec.3 (ARD).
+
+### Form F -- HSGP reduced-rank GP
+
+CAR/ICAR/BYM2/GP/1-D-GP are routed to specialized blocks -- see the section
+preamble. HSGP is the one latent-Gaussian family that legitimately reaches
+`joint_nuts_block` (no shipped specialized block).
+
+Spectral basis expansion:
+`f(x) = sum_{j=1..M} sqrt(S_j(sigma_f, ell)) * beta_j * phi_j(x)`.
+**Detection cue**: Laplacian-Dirichlet eigenfunction basis on `[-L, L]`,
+`M`-truncation, `beta_j ~ N(0,1)` on spectral coefficients.
+
+**NCR pre-baked**: `beta_j ~ N(0, 1)`; amplitude and lengthscale enter
+MULTIPLICATIVELY at likelihood evaluation via `sqrt(S_j(sigma_f, ell))`, not
+as variance of `beta`.
+
+**Config**: `sub_params = {(sigma_f, 1, POSITIVE), (ell, 1, POSITIVE), (beta, M, REAL)}`;
+`use_dense_metric = true` (amplitude/lengthscale banana ridge).
+
+Ref: Riutort-Mayol et al. 2023 Stat.Comput. 33(1) Sec.3.3;
+Solin-Sarkka 2020 Stat.Comput. 30(2).
+
+### Form G -- Global-local shrinkage / horseshoe family
+
+`beta_j ~ N(0, tau^2 * lambda_j^2)`, `tau ~ HalfCauchy(0, tau_0)` (global),
+`lambda_j ~ HalfCauchy(0, 1)` (local). TWO nested Form-A funnels: `(tau, beta)`
+globally and `(lambda_j, beta_j)` locally. Half-Cauchy tails give common neck
+at the origin -- reported to freeze NUTS under any step size when centered.
+
+**NCR.** `z_j ~ N(0, 1)`; `beta_j := tau * lambda_j * z_j`. Priors unchanged.
+
+**Family generalizes** (same `z_j`; substitute the family-specific product):
+Regularized/Finnish HS (`sd = tau * lambda_tilde_j`), HS+ (`sd = tau * lambda_j`,
+NCR every scale-parent recursively), R2D2 (`sd = sigma * sqrt(W * phi_j)`),
+Dirichlet-Laplace (`sd = tau * phi_j * sqrt(psi_j)`), Bayesian LASSO
+(`sd = sigma * tau_j`).
+
+- **G.1 Normal-Gamma prior** (PARTIAL NCR).
+  Detection: `psi_j ~ Gamma(lambda, gamma^2/2)`, `beta_j ~ N(0, psi_j)`,
+  `gamma^2 ~ Gamma(...)` (Griffin-Brown 2010 Bayesian Anal. 5(1):171-188).
+  Non-center Normal ONLY: `beta_j = sqrt(psi_j) * z_j`. The `(gamma^2, psi_j)`
+  Gamma-Gamma parent STAYS CENTERED (non-centering destabilises).
+
+- **G.2 Continuous spike-and-slab.**
+  `gamma_j` continuous (relaxed inclusion): standard Form-G NCR
+  `beta_j = tau * sqrt(gamma_j + (1-gamma_j)*v0) * z_j`.
+  Dirac `gamma_j` -> out of scope (see preamble; use `SpikeSlabRJMCMC.cpp`).
+
+Refs: Carvalho-Polson-Scott 2010 Biometrika 97(2):465-480; Piironen-Vehtari
+2017 EJS 11(2):5018-5051 Sec.3 + App.C (Stan code, family compendium);
+Bhadra et al. 2017 Bayesian Anal. 12(4):1105-1131 (HS+); Zhang et al. 2022
+JASA 117(538):862-874 (R2D2); Bhattacharya et al. 2015 JASA 110(512):1479-1490
+(DL); Ishwaran-Rao 2005 AoS 33(2):730-773 (spike-slab).
+
+---
+
 ## Failure Mode 2 -- Multi-modal / label-switching (partially detectable)
 
 ### Symptom
