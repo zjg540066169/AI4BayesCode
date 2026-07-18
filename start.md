@@ -252,6 +252,37 @@ Other verification convergence-tuning is NOT that case.
 
 ---
 
+## 0.5. Repeat requests in the same session -- START FROM THIS FILE, EVERY TIME
+
+If the user asks for ANOTHER model (codegen) OR another block (block_design)
+after any prior task completed in the same session, treat it as a fresh
+invocation: re-open `AI4BayesCode/start.md` FROM THE TOP and walk through
+it. This is on purpose:
+
+1. The first thing this file does is ROUTE (Mode routing gate: codegen vs
+   block_design). The user's next request may be a DIFFERENT flow than the
+   last one -- do NOT assume "still in codegen" just because the previous
+   generation was codegen. Re-route explicitly, even if the user did not
+   say "block design" -- ask the routing question again.
+2. After routing, re-enter the chosen flow's INTAKE from scratch and re-run
+   every gate the flow prescribes. Prior block choices, priors, warmup
+   settings, and validation passes carry NO discount forward -- the new
+   task has a different posterior / a different block class / a different
+   funnel mode / a different constraint boundary.
+
+Signals a new request is starting: any of "another model", "one more",
+"same style but ...", "similar to the last but ...", "and now for X", OR
+a new model / block description appearing after a `SUCCESS` STATUS on a
+prior task.
+
+Discipline scales AGAINST context prominence decay: the further into the
+session, the MORE strictly this applies. If skill content earlier in this
+session was auto-compacted and you cannot fully recall the flow, STOP and
+ask the user to re-invoke via the codegen entry (or block_design entry)
+-- do NOT proceed on vague recall.
+
+---
+
 ## 1. Token discipline -- phase-by-phase load schedule
 
 **Do NOT read all of `skills/*.md` upfront.** Reading them all
