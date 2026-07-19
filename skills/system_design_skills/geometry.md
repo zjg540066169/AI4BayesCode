@@ -202,10 +202,14 @@ Each needs a specialized block.
   data + BDeu only; documented FK Sec.4.1 induced-structure-prior
   bias within Markov equivalence classes (the algorithm finds the
   correct **skeleton** but may flip directions within an
-  equivalence class). Kuipers-Moffa 2017 partition MCMC,
-  BGe Gaussian score, mixed conditional-Gaussian BN, and tempered
-  chains are deferred to v1.2.1 -- see the project roadmap (deferred
-  to v1.2.1).
+  equivalence class). Kuipers-Moffa 2017 partition MCMC and BGe
+  Gaussian score SHIPPED 2026-07-06 (`cfg.method = partition`,
+  `cfg.continuous_data`; default byte-identical to order + BDe;
+  exact-enum n<=8 + BiDAG cross-check verified). Mixed
+  conditional-Gaussian BN remains deferred. Tempered chains are
+  out of scope by design principle (target-changing kernels break
+  the compositional invariant -- every kernel must target the
+  same joint).
 
 ### 11.3 The validator cannot catch geometry violations
 

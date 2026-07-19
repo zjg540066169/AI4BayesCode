@@ -424,5 +424,25 @@ Validator **Check #21 (VI block contract conformance) + Check #22
 diagnostic (k-hat < 0.7)** are all mandatory before ship -- see Sec.18 for
 the diagnostic and the full VI architecture.
 
+### Survival-family -- lifetime / time-to-event primitives (SHIPPED 2026-07-10)
+
+Three composable Gibbs blocks for piecewise-exponential-hazard (PEH)
+survival models with right / interval censoring and shared frailty.
+All three share the Gibbs-family convention (Tier B `set_current(arma::vec)`
+writes current draw; Tier A dispatcher routes `list(key = value)`); no
+gradient, no NUTS.
+
+| Block | Role | Algorithm |
+|---|---|---|
+| `piecewise_exponential_gibbs_block` | log-hazard rates lambda_k on user break-points | Gamma-Poisson conjugate (Kalbfleisch 1978; Ibrahim/Chen/Sinha 2001 Sec.3.2) |
+| `interval_censored_survival_augmentation_block` | event-time augmentation for interval-censored subjects | Tanner-Wong 1987, exact inverse-CDF truncated PEH (Sinha-Chen-Ghosh 1999; Lin-Wang 2010) |
+| `frailty_gamma_gibbs_block` | per-group multiplicative frailty w_g > 0 | Gamma-Gamma conjugate (Clayton 1991; Ibrahim Sec.4.3) |
+
+Reference compositions: `examples/PehSurvival.cpp` (right-censored)
+and `examples/PehSharedFrailty.cpp` (right + interval + shared frailty).
+Each block verified via `tests_autodiff/block_tests/test_*_block.cpp`
+with hand-computed fixtures, sample mean / variance vs analytic within
+5% / 15% tolerance.
+
 ---
 
