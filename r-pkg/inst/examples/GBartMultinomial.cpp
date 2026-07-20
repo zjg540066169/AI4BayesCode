@@ -136,6 +136,7 @@
 // GPL genBART kernel).
 #include "AI4BayesCode/poisson_multinomial_aug_block.hpp"
 #include "AI4BayesCode/genbart_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -195,7 +196,8 @@ const char* const kTreeSep = "\n===GBARTCLASS===\n";
 //  state_map / history_map, ai4b::stop.
 // ============================================================================
 
-class GBartMultinomial {
+class GBartMultinomial : public AI4BayesCode::kernel_control_mixin<GBartMultinomial> {
+    friend class AI4BayesCode::kernel_control_mixin<GBartMultinomial>;
 public:
     GBartMultinomial(const arma::mat& X,
                      const arma::vec& y,
@@ -751,7 +753,8 @@ RCPP_MODULE(GBartMultinomial_module) {
                 "(log_phi_aug, r_1..r_{C-1}, each n_draws x N).")
         .method("get_tree_history", &GBartMultinomial::get_tree_history,
                 "Return per-class serialized BART forests (latest per "
-                "class, or per-draw when keep_tree=TRUE).");
+                "class, or per-draw when keep_tree=TRUE).")
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(GBartMultinomial);
 }
 #endif
 
@@ -781,7 +784,8 @@ PYBIND11_MODULE(GBartMultinomial, m) {
         .def("predict_at",       &GBartMultinomial::predict_at, pybind11::arg("new_data"))
         .def("get_dag",          &GBartMultinomial::get_dag)
         .def("get_history",      &GBartMultinomial::get_history)
-        .def("get_tree_history", &GBartMultinomial::get_tree_history);
+        .def("get_tree_history", &GBartMultinomial::get_tree_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(GBartMultinomial);
 }
 #endif
 

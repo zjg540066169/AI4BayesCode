@@ -117,6 +117,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/structured_categorical_vi_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -140,7 +141,8 @@ using AI4BayesCode::structured_categorical_vi_block_config;
 //    - h_in             : arma::mat,   n_nodes × K external field
 //    - clique_list      : std::vector<std::vector<int>>, 1-based node indices
 // ============================================================================
-class StructuredPottsVI {
+class StructuredPottsVI : public AI4BayesCode::kernel_control_mixin<StructuredPottsVI> {
+    friend class AI4BayesCode::kernel_control_mixin<StructuredPottsVI>;
 public:
     StructuredPottsVI(int n_nodes, int K,
                        const arma::mat& edges_mat,
@@ -437,7 +439,8 @@ RCPP_MODULE(StructuredPottsVI_module) {
                 "Draw n_draws fresh q-samples. Pass list(n_draws=N). "
                 "Returns list(z_samples = n_draws × n integer matrix).")
         .method("get_dag",     &StructuredPottsVI::get_dag)
-        .method("get_history", &StructuredPottsVI::get_history);
+        .method("get_history", &StructuredPottsVI::get_history)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(StructuredPottsVI);
 }
 #endif // AI4BAYESCODE_RCPP_MODULE
 
@@ -466,7 +469,8 @@ PYBIND11_MODULE(StructuredPottsVI, m) {
         .def("set_current",  &StructuredPottsVI::set_current, pybind11::arg("params"))
         .def("predict_at",   &StructuredPottsVI::predict_at,  pybind11::arg("new_data"))
         .def("get_dag",      &StructuredPottsVI::get_dag)
-        .def("get_history",  &StructuredPottsVI::get_history);
+        .def("get_history",  &StructuredPottsVI::get_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(StructuredPottsVI);
 }
 #endif // AI4BAYESCODE_PYBIND_MODULE
 

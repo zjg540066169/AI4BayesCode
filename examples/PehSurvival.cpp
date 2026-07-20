@@ -104,6 +104,7 @@ using AI4BayesCode::piecewise_exponential_gibbs_block;
 using AI4BayesCode::piecewise_exponential_gibbs_block_config;
 
 class PehSurvival : public AI4BayesCode::kernel_control_mixin<PehSurvival> {
+    friend class AI4BayesCode::kernel_control_mixin<PehSurvival>;
 public:
     PehSurvival(const arma::vec& t, const arma::vec& delta, const arma::vec& edges,
                 double a0, double b0, int rng_seed, bool keep_history = false)

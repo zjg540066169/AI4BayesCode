@@ -92,6 +92,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -154,7 +155,8 @@ double dirichlet_joint_log_density(const arma::vec& theta_cat,
 //  User-facing class exposed to R.
 // ============================================================================
 
-class DirichletSimplex {
+class DirichletSimplex : public AI4BayesCode::kernel_control_mixin<DirichletSimplex> {
+    friend class AI4BayesCode::kernel_control_mixin<DirichletSimplex>;
 public:
     DirichletSimplex(const arma::vec& y_counts,
                        const arma::vec& alpha,
@@ -355,7 +357,8 @@ RCPP_MODULE(DirichletSimplex_module) {
         .method("predict_at",   &DirichletSimplex::predict_at)
         .method("get_dag",      &DirichletSimplex::get_dag)
         .method("get_history",  &DirichletSimplex::get_history)
-        .method("readapt_NUTS", &DirichletSimplex::readapt_NUTS);
+        .method("readapt_NUTS", &DirichletSimplex::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(DirichletSimplex);
 }
 #endif
 
@@ -378,7 +381,8 @@ PYBIND11_MODULE(DirichletSimplex, m) {
         .def("get_dag",      &DirichletSimplex::get_dag)
         .def("get_history",  &DirichletSimplex::get_history)
         .def("readapt_NUTS", &DirichletSimplex::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(DirichletSimplex);
 }
 #endif
 

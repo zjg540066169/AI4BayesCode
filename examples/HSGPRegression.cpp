@@ -316,6 +316,7 @@ double joint_log_density(const arma::vec& theta_cat,
 // ============================================================================
 
 class HSGPRegression : public AI4BayesCode::kernel_control_mixin<HSGPRegression> {
+    friend class AI4BayesCode::kernel_control_mixin<HSGPRegression>;
 public:
     HSGPRegression(const arma::vec& y,
                    const arma::vec& x,

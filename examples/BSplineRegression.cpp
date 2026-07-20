@@ -229,6 +229,7 @@ double joint_log_density(const arma::vec& theta_cat,
 }  // anonymous namespace
 
 class BSplineRegression : public AI4BayesCode::kernel_control_mixin<BSplineRegression> {
+    friend class AI4BayesCode::kernel_control_mixin<BSplineRegression>;
 public:
     BSplineRegression(const arma::vec& y,
                       const arma::mat& Bsp,

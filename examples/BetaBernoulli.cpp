@@ -132,6 +132,7 @@ double p_log_density(const arma::vec& p_nat,
 } // anonymous namespace
 
 class BetaBernoulli : public AI4BayesCode::kernel_control_mixin<BetaBernoulli> {
+    friend class AI4BayesCode::kernel_control_mixin<BetaBernoulli>;
 public:
     BetaBernoulli(const arma::vec& y, double a, double b, int rng_seed,
                   bool keep_history = false)

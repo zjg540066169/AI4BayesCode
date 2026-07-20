@@ -133,6 +133,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -294,7 +295,8 @@ double joint_theta_zb_sigma_log_density(const arma::vec& theta_cat,
 //  User-facing class exposed to R.
 // ============================================================================
 
-class IRT1PL_joint {
+class IRT1PL_joint : public AI4BayesCode::kernel_control_mixin<IRT1PL_joint> {
+    friend class AI4BayesCode::kernel_control_mixin<IRT1PL_joint>;
 public:
     IRT1PL_joint(const arma::mat& Y_input,
                    const arma::vec& theta_init,
@@ -642,7 +644,8 @@ RCPP_MODULE(IRT1PL_joint_module) {
         .method("predict_at",      &IRT1PL_joint::predict_at)
         .method("get_dag",         &IRT1PL_joint::get_dag)
         .method("get_history",     &IRT1PL_joint::get_history)
-        .method("readapt_NUTS",    &IRT1PL_joint::readapt_NUTS);
+        .method("readapt_NUTS",    &IRT1PL_joint::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(IRT1PL_joint);
 }
 #endif
 
@@ -672,7 +675,8 @@ PYBIND11_MODULE(IRT1PL_joint, m) {
         .def("get_dag",         &IRT1PL_joint::get_dag)
         .def("get_history",     &IRT1PL_joint::get_history)
         .def("readapt_NUTS",    &IRT1PL_joint::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(IRT1PL_joint);
 }
 #endif
 

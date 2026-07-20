@@ -133,6 +133,7 @@ namespace constraints = AI4BayesCode::constraints;
 //  User-facing class. Backend-neutral: arma containers, state_map/history_map.
 // ============================================================================
 class VCBart : public AI4BayesCode::kernel_control_mixin<VCBart> {
+    friend class AI4BayesCode::kernel_control_mixin<VCBart>;
 public:
     VCBart(const arma::mat& X,      // N x p predictors
            const arma::mat& Z,      // N x q effect modifiers

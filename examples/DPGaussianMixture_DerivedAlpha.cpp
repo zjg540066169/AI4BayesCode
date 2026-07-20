@@ -269,6 +269,7 @@ double phi_natural_log_density(const arma::vec& phi_nat,
 }  // anonymous namespace
 
 class DPGaussianMixture_DerivedAlpha : public AI4BayesCode::kernel_control_mixin<DPGaussianMixture_DerivedAlpha> {
+    friend class AI4BayesCode::kernel_control_mixin<DPGaussianMixture_DerivedAlpha>;
 public:
     // Data-driven weakly-informative Normal-Gamma hypers (see CRITICAL
     // note in skills/block_catalogue/index.md; verified on DPGaussianMixture).

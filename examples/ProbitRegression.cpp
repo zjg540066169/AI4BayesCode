@@ -188,6 +188,7 @@ double beta_log_density(const arma::vec& beta,
 }  // anonymous namespace
 
 class ProbitRegression : public AI4BayesCode::kernel_control_mixin<ProbitRegression> {
+    friend class AI4BayesCode::kernel_control_mixin<ProbitRegression>;
 public:
     ProbitRegression(const arma::mat& X,
                      const arma::vec& y,

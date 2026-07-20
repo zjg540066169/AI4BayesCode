@@ -86,6 +86,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -155,7 +156,8 @@ double location_scale_joint_log_density(const arma::vec& theta_cat,
 
 } // anonymous namespace
 
-class GaussianLocationScale {
+class GaussianLocationScale : public AI4BayesCode::kernel_control_mixin<GaussianLocationScale> {
+    friend class AI4BayesCode::kernel_control_mixin<GaussianLocationScale>;
 public:
     GaussianLocationScale(const arma::vec& y,
                                int    rng_seed,
@@ -326,7 +328,8 @@ RCPP_MODULE(GaussianLocationScale_module) {
         .method("predict_at",   &GaussianLocationScale::predict_at)
         .method("get_dag",      &GaussianLocationScale::get_dag)
         .method("get_history",  &GaussianLocationScale::get_history)
-        .method("readapt_NUTS", &GaussianLocationScale::readapt_NUTS);
+        .method("readapt_NUTS", &GaussianLocationScale::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(GaussianLocationScale);
 }
 #endif
 
@@ -347,7 +350,8 @@ PYBIND11_MODULE(GaussianLocationScale, m) {
         .def("get_dag",      &GaussianLocationScale::get_dag)
         .def("get_history",  &GaussianLocationScale::get_history)
         .def("readapt_NUTS", &GaussianLocationScale::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(GaussianLocationScale);
 }
 #endif
 

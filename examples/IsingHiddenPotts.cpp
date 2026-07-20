@@ -140,6 +140,7 @@ using AI4BayesCode::ising_cluster_block_config;
 using AI4BayesCode::make_2d_lattice_edges;
 
 class IsingHiddenPotts : public AI4BayesCode::kernel_control_mixin<IsingHiddenPotts> {
+    friend class AI4BayesCode::kernel_control_mixin<IsingHiddenPotts>;
 public:
     IsingHiddenPotts(int L, double beta, double delta,
                      double mu0, double mu1, double sigma,

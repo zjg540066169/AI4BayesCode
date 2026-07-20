@@ -142,6 +142,7 @@ using AI4BayesCode::structured_categorical_vi_block_config;
 //    - clique_list      : std::vector<std::vector<int>>, 1-based node indices
 // ============================================================================
 class StructuredPottsVI : public AI4BayesCode::kernel_control_mixin<StructuredPottsVI> {
+    friend class AI4BayesCode::kernel_control_mixin<StructuredPottsVI>;
 public:
     StructuredPottsVI(int n_nodes, int K,
                        const arma::mat& edges_mat,

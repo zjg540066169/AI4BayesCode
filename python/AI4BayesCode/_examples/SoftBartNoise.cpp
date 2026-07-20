@@ -119,6 +119,7 @@
 
 // SoftBart block (Rcpp-free, transitively pulls in the GPL SoftBart kernel)
 #include "AI4BayesCode/softbart_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -179,7 +180,8 @@ double sigma_natural_log_density(const arma::vec& sigma_nat,
 //  state_map / history_map, ai4b::stop.
 // ============================================================================
 
-class SoftBartNoise {
+class SoftBartNoise : public AI4BayesCode::kernel_control_mixin<SoftBartNoise> {
+    friend class AI4BayesCode::kernel_control_mixin<SoftBartNoise>;
 public:
     SoftBartNoise(const arma::mat& X,
                   const arma::vec& y,
@@ -673,7 +675,8 @@ RCPP_MODULE(SoftBartNoise_module) {
         .method("get_tree_history", &SoftBartNoise::get_tree_history,
                 "Return per-draw serialized SoftBart forests (one per "
                 "stored draw when keep_tree=TRUE; else the current forest).")
-        .method("readapt_NUTS", &SoftBartNoise::readapt_NUTS);
+        .method("readapt_NUTS", &SoftBartNoise::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(SoftBartNoise);
 }
 #endif
 
@@ -710,7 +713,8 @@ PYBIND11_MODULE(SoftBartNoise, m) {
         .def("get_history",     &SoftBartNoise::get_history)
         .def("get_tree_history", &SoftBartNoise::get_tree_history)
         .def("readapt_NUTS",    &SoftBartNoise::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(SoftBartNoise);
 }
 #endif
 

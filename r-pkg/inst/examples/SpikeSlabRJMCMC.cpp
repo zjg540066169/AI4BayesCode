@@ -137,6 +137,7 @@
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/rjmcmc_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -436,7 +437,8 @@ double spike_slab_continuous_update(std::mt19937_64& rng,
 //  SpikeSlabRJMCMC -- user-facing wrapper class
 // ============================================================================
 
-class SpikeSlabRJMCMC {
+class SpikeSlabRJMCMC : public AI4BayesCode::kernel_control_mixin<SpikeSlabRJMCMC> {
+    friend class AI4BayesCode::kernel_control_mixin<SpikeSlabRJMCMC>;
 public:
     SpikeSlabRJMCMC(const arma::mat& X,
                     const arma::vec& y,
@@ -1015,7 +1017,8 @@ RCPP_MODULE(SpikeSlabRJMCMC_module) {
         .method("predict_at",  &SpikeSlabRJMCMC::predict_at)
         .method("get_dag",     &SpikeSlabRJMCMC::get_dag)
         .method("get_history", &SpikeSlabRJMCMC::get_history)
-        .method("readapt_NUTS", &SpikeSlabRJMCMC::readapt_NUTS);
+        .method("readapt_NUTS", &SpikeSlabRJMCMC::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(SpikeSlabRJMCMC);
 }
 #endif
 
@@ -1172,6 +1175,7 @@ PYBIND11_MODULE(SpikeSlabRJMCMC, m) {
         .def("get_dag",      &SpikeSlabRJMCMC::get_dag)
         .def("get_history",  &SpikeSlabRJMCMC::get_history)
         .def("readapt_NUTS", &SpikeSlabRJMCMC::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(SpikeSlabRJMCMC);
 }
 #endif

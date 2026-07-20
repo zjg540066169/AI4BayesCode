@@ -127,6 +127,7 @@ using AI4BayesCode::ising_cluster_block_config;
 using AI4BayesCode::make_2d_lattice_edges;
 
 class IsingPrior : public AI4BayesCode::kernel_control_mixin<IsingPrior> {
+    friend class AI4BayesCode::kernel_control_mixin<IsingPrior>;
 public:
     IsingPrior(int L_x, int L_y, int Q, double beta,
                 bool periodic, bool eight_nn,

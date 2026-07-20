@@ -144,6 +144,7 @@ inline double safe_sigmoid(double x) {
 // ============================================================================
 
 class GBartLogistic : public AI4BayesCode::kernel_control_mixin<GBartLogistic> {
+    friend class AI4BayesCode::kernel_control_mixin<GBartLogistic>;
 public:
     GBartLogistic(const arma::mat& X,
                   const arma::vec& y,

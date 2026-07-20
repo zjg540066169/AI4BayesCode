@@ -126,6 +126,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/ising_cluster_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -138,7 +139,8 @@ using AI4BayesCode::ising_cluster_block;
 using AI4BayesCode::ising_cluster_block_config;
 using AI4BayesCode::make_2d_lattice_edges;
 
-class IsingHiddenPotts {
+class IsingHiddenPotts : public AI4BayesCode::kernel_control_mixin<IsingHiddenPotts> {
+    friend class AI4BayesCode::kernel_control_mixin<IsingHiddenPotts>;
 public:
     IsingHiddenPotts(int L, double beta, double delta,
                      double mu0, double mu1, double sigma,
@@ -289,7 +291,8 @@ RCPP_MODULE(IsingHiddenPotts_module) {
                 "Returns empty list — no sampled observation model. "
                 "Pass an empty list; non-empty input is rejected.")
         .method("get_dag",     &IsingHiddenPotts::get_dag)
-        .method("get_history", &IsingHiddenPotts::get_history);
+        .method("get_history", &IsingHiddenPotts::get_history)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(IsingHiddenPotts);
 }
 #endif
 
@@ -315,7 +318,8 @@ PYBIND11_MODULE(IsingHiddenPotts, m) {
         .def("set_current", &IsingHiddenPotts::set_current, pybind11::arg("params"))
         .def("predict_at",  &IsingHiddenPotts::predict_at, pybind11::arg("new_data"))
         .def("get_dag",     &IsingHiddenPotts::get_dag)
-        .def("get_history", &IsingHiddenPotts::get_history);
+        .def("get_history", &IsingHiddenPotts::get_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(IsingHiddenPotts);
 }
 #endif
 

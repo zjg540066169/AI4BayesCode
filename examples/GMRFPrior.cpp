@@ -143,6 +143,7 @@ build_graph_laplacian(std::size_t n, const arma::umat& edges) {
 }
 
 class GMRFPrior : public AI4BayesCode::kernel_control_mixin<GMRFPrior> {
+    friend class AI4BayesCode::kernel_control_mixin<GMRFPrior>;
 public:
     GMRFPrior(int L_x, int L_y, double kappa,
               bool periodic, bool eight_nn,

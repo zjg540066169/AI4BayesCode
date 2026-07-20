@@ -155,6 +155,7 @@ double s_theta_joint_log_density(const arma::vec& x,
 } // anonymous namespace
 
 class DirichletSparse : public AI4BayesCode::kernel_control_mixin<DirichletSparse> {
+    friend class AI4BayesCode::kernel_control_mixin<DirichletSparse>;
 public:
     DirichletSparse(const arma::vec& y_counts,
                          int    rng_seed,

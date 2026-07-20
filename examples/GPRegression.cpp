@@ -242,6 +242,7 @@ double median_pairwise_distance(const arma::mat& X) {
 // ============================================================================
 
 class GPRegression : public AI4BayesCode::kernel_control_mixin<GPRegression> {
+    friend class AI4BayesCode::kernel_control_mixin<GPRegression>;
 public:
     GPRegression(const arma::mat& X,
                  const arma::vec& y,

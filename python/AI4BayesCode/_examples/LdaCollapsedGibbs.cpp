@@ -159,6 +159,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/lda_collapsed_gibbs_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -176,7 +177,8 @@ using AI4BayesCode::lda_collapsed_gibbs_block_config;
 //  Tier A wrapper class
 // ============================================================================
 
-class LdaCollapsedGibbs {
+class LdaCollapsedGibbs : public AI4BayesCode::kernel_control_mixin<LdaCollapsedGibbs> {
+    friend class AI4BayesCode::kernel_control_mixin<LdaCollapsedGibbs>;
 public:
     /// @param w        length-N integer-encoded word ids (1..V)
     /// @param doc      length-N integer-encoded doc ids (1..M)
@@ -592,7 +594,8 @@ RCPP_MODULE(LdaCollapsedGibbs_module) {
                 "Posterior predictive y_rep at training tokens. Empty "
                 "list only.")
         .method("get_dag",     &LdaCollapsedGibbs::get_dag)
-        .method("get_history", &LdaCollapsedGibbs::get_history);
+        .method("get_history", &LdaCollapsedGibbs::get_history)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(LdaCollapsedGibbs);
 }
 #endif
 
@@ -625,7 +628,8 @@ PYBIND11_MODULE(LdaCollapsedGibbs, m) {
         .def("set_current", &LdaCollapsedGibbs::set_current, pybind11::arg("params"))
         .def("predict_at",  &LdaCollapsedGibbs::predict_at, pybind11::arg("new_data"))
         .def("get_dag",     &LdaCollapsedGibbs::get_dag)
-        .def("get_history", &LdaCollapsedGibbs::get_history);
+        .def("get_history", &LdaCollapsedGibbs::get_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(LdaCollapsedGibbs);
 }
 #endif
 

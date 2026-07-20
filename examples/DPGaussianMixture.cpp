@@ -289,6 +289,7 @@ double alpha_natural_log_density(const arma::vec& alpha_nat,
 // ============================================================================
 
 class DPGaussianMixture : public AI4BayesCode::kernel_control_mixin<DPGaussianMixture> {
+    friend class AI4BayesCode::kernel_control_mixin<DPGaussianMixture>;
 public:
     // ---- Data-driven weakly-informative hyperparameters ---------------
     //  Computed from y so the conjugate Normal-Gamma cluster prior is

@@ -121,6 +121,7 @@
 #include "AI4BayesCode/univariate_slice_sampling_block.hpp"
 #include "AI4BayesCode/celerite_marginal_likelihood.hpp"
 #include "AI4BayesCode/celerite_gp_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -218,7 +219,8 @@ double sigma_slice_log_density(const arma::vec& sigma_unc,
 // User-facing class
 // ============================================================================
 
-class GPTimeSeries {
+class GPTimeSeries : public AI4BayesCode::kernel_control_mixin<GPTimeSeries> {
+    friend class AI4BayesCode::kernel_control_mixin<GPTimeSeries>;
 public:
     GPTimeSeries(const arma::vec& t,
                  const arma::vec& y,
@@ -627,7 +629,8 @@ RCPP_MODULE(GPTimeSeries_module) {
         .method("set_current", &GPTimeSeries::set_current)
         .method("predict_at",  &GPTimeSeries::predict_at)
         .method("get_dag",     &GPTimeSeries::get_dag)
-        .method("get_history", &GPTimeSeries::get_history);
+        .method("get_history", &GPTimeSeries::get_history)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(GPTimeSeries);
 }
 #endif
 
@@ -647,7 +650,8 @@ PYBIND11_MODULE(GPTimeSeries, m) {
         .def("set_current", &GPTimeSeries::set_current, pybind11::arg("params"))
         .def("predict_at",  &GPTimeSeries::predict_at,  pybind11::arg("new_data"))
         .def("get_dag",     &GPTimeSeries::get_dag)
-        .def("get_history", &GPTimeSeries::get_history);
+        .def("get_history", &GPTimeSeries::get_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(GPTimeSeries);
 }
 #endif
 

@@ -67,7 +67,8 @@ make_reg_block(const std::string& name,
                const arma::mat& X,
                const arma::vec& y,
                double tau_prior,
-               const arma::vec& init_cat_natural) {
+               const arma::vec& init_cat_natural,
+               bool use_dense = false) {
     const std::size_t p = X.n_cols;
     const std::size_t n = X.n_rows;
 
@@ -83,6 +84,7 @@ make_reg_block(const std::string& name,
                                                              // sigma on natural
     cfg.sub_params = { sp_beta, sp_log_sigma };
     cfg.initial_cat = init_cat_natural;
+    if (use_dense) cfg.use_dense_metric = true;
 
     // Log density on the NATURAL scale (beta, sigma).  Chain rule for the
     // POSITIVE constraint on sigma is applied inside joint_nuts_block via
@@ -230,12 +232,205 @@ static void F2_slot_freeze() {
     comp.unfreeze_all();
 }
 
+// ---- F3: readapt_NUTS on a wrapper with a frozen slot ----------------------
+// Verifies that the freeze wrap I added to readapt() in f1900e6 correctly
+// leaves the DA state tuned for the CONDITIONAL (not joint) target. If the
+// wrap were missing, readapt would tune DA against the joint posterior;
+// then subsequent frozen sampling would show biased beta marginals.
+static void F3_readapt_frozen() {
+    std::printf("\n--- F3: readapt_NUTS on wrapper with frozen slot ---\n");
+    const std::size_t n = 100, p = 3;
+    std::mt19937_64 rng(20260721001ULL);
+    std::normal_distribution<double> norm(0.0, 1.0);
+    arma::mat X(n, p);
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j < p; ++j) X(i, j) = norm(rng);
+    arma::vec beta_true{1.0, -0.5, 0.3};
+    arma::vec y = X * beta_true + arma::randn(n);
+
+    arma::vec init_nat = arma::zeros(p + 1);  init_nat[p] = 1.0;
+    auto blk = make_reg_block("theta", X, y, 100.0, init_nat);
+
+    composite_block comp("F3_wrapper");
+    comp.add_child(std::move(blk));
+
+    // Warmup + freeze log_sigma at 1.
+    for (int i = 0; i < 500; ++i) comp.step(rng);
+    arma::vec fix = comp.current();
+    fix[p] = 1.0;
+    comp.set_current(fix);
+    comp.freeze({"log_sigma"});
+
+    // Snapshot state and step-size persistence BEFORE readapt.
+    arma::vec pre_readapt = comp.current();
+
+    // Call readapt_NUTS. State should be preserved bitwise; DA state re-tunes.
+    // Without the freeze wrap in readapt(), DA would see the JOINT posterior
+    // (log_sigma unfixed inside readapt). With the wrap, DA sees the
+    // conditional target -- posterior recovery after this call must still
+    // work.
+    std::mt19937_64 readapt_rng(20260721010ULL);
+    comp.readapt_NUTS(500, /*reset=*/false, readapt_rng);
+
+    // Check #23-style chain state preservation.
+    arma::vec post_readapt = comp.current();
+    bool bit_identical = true;
+    for (std::size_t k = 0; k < pre_readapt.n_elem; ++k) {
+        if (post_readapt[k] != pre_readapt[k]) { bit_identical = false; break; }
+    }
+    check(bit_identical, "F3.a chain state bitwise unchanged after readapt on frozen wrapper");
+    check(post_readapt[p] == 1.0, "F3.b sigma slot still at frozen value after readapt");
+
+    // Sample MORE with the (now re-tuned) DA state and check posterior
+    // still matches the conditional-on-sigma=1 solution. If readapt had
+    // tuned on the joint (missing freeze wrap), the DA state would be off
+    // and posterior recovery would drift.
+    const int N_KEEP = 3000;
+    arma::mat beta_hist(N_KEEP, p);
+    for (int i = 0; i < N_KEEP; ++i) {
+        comp.step(rng);
+        arma::vec cur = comp.current();
+        for (std::size_t j = 0; j < p; ++j) beta_hist(i, j) = cur[j];
+    }
+    // sigma still frozen at 1
+    arma::vec final_state = comp.current();
+    check(final_state[p] == 1.0, "F3.c sigma still 1.0 after 3000 post-readapt steps");
+
+    // Empirical vs analytic
+    arma::vec beta_mean = arma::mean(beta_hist, 0).t();
+    arma::mat post_prec = X.t() * X + arma::eye(p, p) / 10000.0;
+    arma::vec beta_ana = arma::solve(post_prec, X.t() * y);
+    double max_err = arma::max(arma::abs(beta_mean - beta_ana));
+    check(max_err < 0.05,
+          "F3.d empirical beta post-readapt still matches analytic conditional",
+          "max_err=" + std::to_string(max_err));
+
+    comp.unfreeze_all();
+}
+
+// ---- F4: dense metric + slot freeze end-to-end ----------------------------
+// F2 exercises identity metric; F4 flips use_dense_metric = true. This walks
+// through adapt_dense_metric_ pilot + slot freeze active during the pilot.
+static void F4_dense_metric_frozen() {
+    std::printf("\n--- F4: dense metric + slot freeze end-to-end ---\n");
+    const std::size_t n = 100, p = 3;
+    std::mt19937_64 rng(20260721002ULL);
+    std::normal_distribution<double> norm(0.0, 1.0);
+    arma::mat X(n, p);
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j < p; ++j) X(i, j) = norm(rng);
+    // Add some correlation to X columns -- makes joint (beta, log_sigma)
+    // posterior have real cross-couplings and dense metric matter.
+    for (std::size_t i = 0; i < n; ++i) X(i, 1) += 0.7 * X(i, 0);
+    arma::vec beta_true{1.0, -0.5, 0.3};
+    arma::vec y = X * beta_true + arma::randn(n);
+
+    arma::vec init_nat = arma::zeros(p + 1);  init_nat[p] = 1.0;
+    auto blk = make_reg_block("theta", X, y, 100.0, init_nat, /*use_dense=*/true);
+    // Dense metric enabled via config (make_reg_block use_dense=true).
+
+    composite_block comp("F4_wrapper");
+    comp.add_child(std::move(blk));
+
+    // Warmup with dense metric (fires adapt_dense_metric_ pilot).
+    for (int i = 0; i < 500; ++i) comp.step(rng);
+
+    // Freeze log_sigma at 1 and sample under dense metric.
+    arma::vec fix = comp.current();
+    fix[p] = 1.0;
+    comp.set_current(fix);
+    comp.freeze({"log_sigma"});
+
+    const int N_KEEP = 3000;
+    arma::mat beta_hist(N_KEEP, p);
+    for (int i = 0; i < N_KEEP; ++i) {
+        comp.step(rng);
+        arma::vec cur = comp.current();
+        for (std::size_t j = 0; j < p; ++j) beta_hist(i, j) = cur[j];
+    }
+
+    arma::vec final_state = comp.current();
+    check(final_state[p] == 1.0, "F4.a sigma slot preserved under dense metric + freeze");
+
+    arma::vec beta_mean = arma::mean(beta_hist, 0).t();
+    arma::mat post_prec = X.t() * X + arma::eye(p, p) / 10000.0;
+    arma::vec beta_ana = arma::solve(post_prec, X.t() * y);
+    double max_err = arma::max(arma::abs(beta_mean - beta_ana));
+    check(max_err < 0.08,
+          "F4.b beta posterior recovery under dense metric matches analytic (loose tol)",
+          "max_err=" + std::to_string(max_err));
+
+    comp.unfreeze_all();
+}
+
+// ---- F5: freeze BEFORE first step (adapt_dense_metric_ pilot sees freeze) --
+// Verifies the freeze wrap in adapt_dense_metric_ correctly runs the pilot
+// on the CONDITIONAL target (frozen slot pinned) rather than the joint.
+// Otherwise Sigma_reg would reflect joint covariance -> mass matrix wrong
+// for conditional sampling -> posterior recovery drifts.
+static void F5_freeze_before_first_step() {
+    std::printf("\n--- F5: freeze BEFORE first step ---\n");
+    const std::size_t n = 100, p = 3;
+    std::mt19937_64 rng(20260721003ULL);
+    std::normal_distribution<double> norm(0.0, 1.0);
+    arma::mat X(n, p);
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j < p; ++j) X(i, j) = norm(rng);
+    arma::vec beta_true{1.0, -0.5, 0.3};
+    arma::vec y = X * beta_true + arma::randn(n);
+
+    // init sigma at 1 (log_sigma = 0)
+    arma::vec init_nat = arma::zeros(p + 1);  init_nat[p] = 1.0;
+    auto blk = make_reg_block("theta", X, y, 100.0, init_nat, /*use_dense=*/true);
+
+    composite_block comp("F5_wrapper");
+    comp.add_child(std::move(blk));
+
+    // Freeze log_sigma BEFORE the first step.
+    comp.freeze({"log_sigma"});
+    // get_frozen returns canonical dot-path form ("<block>.<slot>") per
+    // DESIGN_NOTES Sec.10.b/c ordering.
+    auto fr = comp.get_frozen();
+    check(fr.size() == 1 && fr[0] == std::string("theta.log_sigma"),
+          "F5.a frozen before first step (dot-path canonical form)");
+
+    // Now sample; first step() triggers adapt_dense_metric_ pilot which
+    // should see the frozen wrap.
+    for (int i = 0; i < 500; ++i) comp.step(rng);
+
+    const int N_KEEP = 3000;
+    arma::mat beta_hist(N_KEEP, p);
+    for (int i = 0; i < N_KEEP; ++i) {
+        comp.step(rng);
+        arma::vec cur = comp.current();
+        for (std::size_t j = 0; j < p; ++j) beta_hist(i, j) = cur[j];
+    }
+
+    arma::vec final_state = comp.current();
+    check(std::abs(final_state[p] - 1.0) < 1e-12,
+          "F5.b sigma slot preserved at 1.0 through pilot + sampling",
+          "sigma=" + std::to_string(final_state[p]));
+
+    arma::vec beta_mean = arma::mean(beta_hist, 0).t();
+    arma::mat post_prec = X.t() * X + arma::eye(p, p) / 10000.0;
+    arma::vec beta_ana = arma::solve(post_prec, X.t() * y);
+    double max_err = arma::max(arma::abs(beta_mean - beta_ana));
+    check(max_err < 0.08,
+          "F5.c beta posterior recovers when pilot ran with freeze already active",
+          "max_err=" + std::to_string(max_err));
+
+    comp.unfreeze_all();
+}
+
 } // namespace
 
 int main() {
     std::printf("=== joint_nuts_block slot-freeze acceptance test ===\n");
     F1_whole_block_freeze();
     F2_slot_freeze();
+    F3_readapt_frozen();
+    F4_dense_metric_frozen();
+    F5_freeze_before_first_step();
     std::printf("\n=== SUMMARY: %d passed, %d failed ===\n",
                 G_RES.passed, G_RES.failed);
     return G_RES.failed == 0 ? 0 : 1;

@@ -289,6 +289,7 @@ icar_joint_log_density(const arma::vec& theta_cat,
 }  // anonymous namespace
 
 class ICARSpatialGMRF : public AI4BayesCode::kernel_control_mixin<ICARSpatialGMRF> {
+    friend class AI4BayesCode::kernel_control_mixin<ICARSpatialGMRF>;
 public:
     ICARSpatialGMRF(const arma::vec& y,
                          const arma::vec& node_idx_1based,   // 1-based node index

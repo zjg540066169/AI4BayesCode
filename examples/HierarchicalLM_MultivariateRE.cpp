@@ -407,6 +407,7 @@ double R_chol_log_density(const arma::vec& L_nat,
 }  // anonymous namespace
 
 class HierarchicalLM_MultivariateRE : public AI4BayesCode::kernel_control_mixin<HierarchicalLM_MultivariateRE> {
+    friend class AI4BayesCode::kernel_control_mixin<HierarchicalLM_MultivariateRE>;
 public:
     HierarchicalLM_MultivariateRE(const arma::vec& y_obs,
                                   const arma::mat& X_fixed,

@@ -220,6 +220,7 @@ double sigma_slice_log_density(const arma::vec& sigma_unc,
 // ============================================================================
 
 class GPTimeSeries : public AI4BayesCode::kernel_control_mixin<GPTimeSeries> {
+    friend class AI4BayesCode::kernel_control_mixin<GPTimeSeries>;
 public:
     GPTimeSeries(const arma::vec& t,
                  const arma::vec& y,

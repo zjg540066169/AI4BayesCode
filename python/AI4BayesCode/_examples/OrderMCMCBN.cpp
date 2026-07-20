@@ -128,6 +128,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/order_mcmc_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -145,7 +146,8 @@ using AI4BayesCode::order_mcmc_block_config;
 //  history_map); the constructor uses arma types only.
 // ============================================================================
 
-class OrderMCMCBN {
+class OrderMCMCBN : public AI4BayesCode::kernel_control_mixin<OrderMCMCBN> {
+    friend class AI4BayesCode::kernel_control_mixin<OrderMCMCBN>;
 public:
     OrderMCMCBN(const arma::mat& data,            // N x n, integer-valued
                 const arma::vec& cardinalities,   // length n, r_i per variable
@@ -374,7 +376,8 @@ RCPP_MODULE(OrderMCMCBN_module) {
                 "v1: stub returning current sampled_DAG (1 x n² matrix). "
                 "Full posterior-predictive simulation deferred to v1.2.1.")
         .method("get_dag",     &OrderMCMCBN::get_dag)
-        .method("get_history", &OrderMCMCBN::get_history);
+        .method("get_history", &OrderMCMCBN::get_history)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(OrderMCMCBN);
 }
 #endif
 
@@ -406,7 +409,8 @@ PYBIND11_MODULE(OrderMCMCBN, m) {
         .def("set_current", &OrderMCMCBN::set_current, pybind11::arg("params"))
         .def("predict_at",  &OrderMCMCBN::predict_at,  pybind11::arg("new_data"))
         .def("get_dag",     &OrderMCMCBN::get_dag)
-        .def("get_history", &OrderMCMCBN::get_history);
+        .def("get_history", &OrderMCMCBN::get_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(OrderMCMCBN);
 }
 #endif
 

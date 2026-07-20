@@ -110,6 +110,7 @@
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -227,7 +228,8 @@ double joint_log_density(const arma::vec& theta_cat,
 
 }  // anonymous namespace
 
-class BSplineRegression {
+class BSplineRegression : public AI4BayesCode::kernel_control_mixin<BSplineRegression> {
+    friend class AI4BayesCode::kernel_control_mixin<BSplineRegression>;
 public:
     BSplineRegression(const arma::vec& y,
                       const arma::mat& Bsp,
@@ -494,7 +496,8 @@ RCPP_MODULE(BSplineRegression_module) {
         .method("predict_at",  &BSplineRegression::predict_at)
         .method("get_dag",     &BSplineRegression::get_dag)
         .method("get_history", &BSplineRegression::get_history)
-        .method("readapt_NUTS", &BSplineRegression::readapt_NUTS);
+        .method("readapt_NUTS", &BSplineRegression::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(BSplineRegression);
 }
 #endif
 
@@ -520,7 +523,8 @@ PYBIND11_MODULE(BSplineRegression_module, m) {
         .def("get_dag",     &BSplineRegression::get_dag)
         .def("get_history", &BSplineRegression::get_history)
         .def("readapt_NUTS", &BSplineRegression::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(BSplineRegression);
 }
 #endif
 

@@ -197,6 +197,7 @@ const char* const kTreeSep = "\n===GBARTCLASS===\n";
 // ============================================================================
 
 class GBartMultinomial : public AI4BayesCode::kernel_control_mixin<GBartMultinomial> {
+    friend class AI4BayesCode::kernel_control_mixin<GBartMultinomial>;
 public:
     GBartMultinomial(const arma::mat& X,
                      const arma::vec& y,

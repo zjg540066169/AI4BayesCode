@@ -191,6 +191,7 @@ double sigma_natural_log_density(const arma::vec& sigma_nat,
 // ============================================================================
 
 class BartNoise : public AI4BayesCode::kernel_control_mixin<BartNoise> {
+    friend class AI4BayesCode::kernel_control_mixin<BartNoise>;
 public:
     BartNoise(const arma::mat& X,
               const arma::vec& y,

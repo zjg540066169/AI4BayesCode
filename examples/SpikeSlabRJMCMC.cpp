@@ -438,6 +438,7 @@ double spike_slab_continuous_update(std::mt19937_64& rng,
 // ============================================================================
 
 class SpikeSlabRJMCMC : public AI4BayesCode::kernel_control_mixin<SpikeSlabRJMCMC> {
+    friend class AI4BayesCode::kernel_control_mixin<SpikeSlabRJMCMC>;
 public:
     SpikeSlabRJMCMC(const arma::mat& X,
                     const arma::vec& y,

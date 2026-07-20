@@ -106,6 +106,7 @@
 #include "AI4BayesCode/piecewise_exponential_gibbs_block.hpp"
 #include "AI4BayesCode/frailty_gamma_gibbs_block.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -120,7 +121,8 @@ using AI4BayesCode::piecewise_exponential_gibbs_block_config;
 using AI4BayesCode::frailty_gamma_gibbs_block;
 using AI4BayesCode::frailty_gamma_gibbs_block_config;
 
-class PehSharedFrailty {
+class PehSharedFrailty : public AI4BayesCode::kernel_control_mixin<PehSharedFrailty> {
+    friend class AI4BayesCode::kernel_control_mixin<PehSharedFrailty>;
 public:
     PehSharedFrailty(const arma::vec& t, const arma::vec& delta,
                      const arma::vec& z, int G,
@@ -281,7 +283,8 @@ RCPP_MODULE(PehSharedFrailty_module) {
         .method("set_current", &PehSharedFrailty::set_current)
         .method("predict_at",  &PehSharedFrailty::predict_at)
         .method("get_dag",     &PehSharedFrailty::get_dag)
-        .method("get_history", &PehSharedFrailty::get_history);
+        .method("get_history", &PehSharedFrailty::get_history)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(PehSharedFrailty);
 }
 #endif
 
@@ -304,7 +307,8 @@ PYBIND11_MODULE(PehSharedFrailty, m) {
         .def("set_current", &PehSharedFrailty::set_current, pybind11::arg("params"))
         .def("predict_at",  &PehSharedFrailty::predict_at,  pybind11::arg("new_data"))
         .def("get_dag",     &PehSharedFrailty::get_dag)
-        .def("get_history", &PehSharedFrailty::get_history);
+        .def("get_history", &PehSharedFrailty::get_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(PehSharedFrailty);
 }
 #endif
 

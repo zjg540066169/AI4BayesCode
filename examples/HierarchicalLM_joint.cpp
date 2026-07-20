@@ -263,6 +263,7 @@ double ncr_joint_log_density(const arma::vec& theta_cat,
 } // anonymous namespace
 
 class HierarchicalLM_joint : public AI4BayesCode::kernel_control_mixin<HierarchicalLM_joint> {
+    friend class AI4BayesCode::kernel_control_mixin<HierarchicalLM_joint>;
 public:
     HierarchicalLM_joint(const arma::vec& y,
                             const arma::mat& X,

@@ -123,6 +123,7 @@ using AI4BayesCode::mean_field_categorical_vi_block_config;
 // ============================================================================
 
 class CategoricalIsingChainVI : public AI4BayesCode::kernel_control_mixin<CategoricalIsingChainVI> {
+    friend class AI4BayesCode::kernel_control_mixin<CategoricalIsingChainVI>;
 public:
     CategoricalIsingChainVI(int n_nodes, int K, double beta,
                               const arma::vec& h_input,

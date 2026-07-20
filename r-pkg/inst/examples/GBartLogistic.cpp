@@ -114,6 +114,7 @@
 
 // genBART block (Rcpp-free, transitively pulls in the GPL genBART kernel)
 #include "AI4BayesCode/genbart_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -142,7 +143,8 @@ inline double safe_sigmoid(double x) {
 //  state_map / history_map, ai4b::stop.
 // ============================================================================
 
-class GBartLogistic {
+class GBartLogistic : public AI4BayesCode::kernel_control_mixin<GBartLogistic> {
+    friend class AI4BayesCode::kernel_control_mixin<GBartLogistic>;
 public:
     GBartLogistic(const arma::mat& X,
                   const arma::vec& y,
@@ -501,7 +503,8 @@ RCPP_MODULE(GBartLogistic_module) {
                 "(r [n_draws x N]).")
         .method("get_tree_history", &GBartLogistic::get_tree_history,
                 "Return per-draw serialized genBART forests (one per stored "
-                "draw when keep_tree=TRUE; else the current forest).");
+                "draw when keep_tree=TRUE; else the current forest).")
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(GBartLogistic);
 }
 #endif
 
@@ -545,7 +548,8 @@ PYBIND11_MODULE(GBartLogistic, m) {
         .def("predict_at",       &GBartLogistic::predict_at, pybind11::arg("new_data"))
         .def("get_dag",          &GBartLogistic::get_dag)
         .def("get_history",      &GBartLogistic::get_history)
-        .def("get_tree_history", &GBartLogistic::get_tree_history);
+        .def("get_tree_history", &GBartLogistic::get_tree_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(GBartLogistic);
 }
 #endif
 

@@ -81,6 +81,7 @@ public:
         freeze_names_impl_(names, quiet);
     }
 
+    /// 1-arg form: unfreeze specific names OR NULL = unfreeze all.
     void unfreeze_names(Rcpp::Nullable<Rcpp::CharacterVector> names) {
         auto self = static_cast<Derived*>(this);
         if (names.isNull()) {
@@ -95,6 +96,14 @@ public:
         }
         auto warnings = self->impl_->unfreeze(v);
         for (const auto& w : warnings) Rcpp::warning(w);
+    }
+
+    /// 0-arg form: unfreeze all. Rcpp modules IGNORE C++ default args, so
+    /// the no-arg case needs its own explicit method; both overloads are
+    /// bound as "unfreeze" via the RCPP macro.
+    void unfreeze_names_all() {
+        auto self = static_cast<Derived*>(this);
+        self->impl_->unfreeze_all();
     }
 
     Rcpp::CharacterVector get_frozen_names() const {
@@ -166,6 +175,12 @@ public:
 // from R.
 
 #ifdef AI4BAYESCODE_RCPP_MODULE
+// All four .method() entries CAST the function pointer to a
+// derived-class member-function type. Required because the mixin
+// forwarders are inherited from `kernel_control_mixin<CLASSNAME>` base;
+// Rcpp's class_<T>::method template can't resolve a
+// pointer-to-base-member against class_<Derived>. Explicit derived-
+// class cast makes both sides match.
 #define AI4BAYESCODE_BIND_KERNEL_CONTROL(CLASSNAME)                       \
     .method("freeze",                                                     \
             (void (CLASSNAME::*)(const Rcpp::CharacterVector&))           \
@@ -176,10 +191,16 @@ public:
                 &CLASSNAME::freeze_names_quiet,                           \
             "Fix sub-kernel(s); quiet=TRUE suppresses redundant-refreeze warning") \
     .method("unfreeze",                                                   \
-            &CLASSNAME::unfreeze_names,                                   \
-            "Release sub-kernel(s); no arg / NULL = all")                 \
+            (void (CLASSNAME::*)())                                       \
+                &CLASSNAME::unfreeze_names_all,                           \
+            "Release ALL frozen sub-kernels (no-arg form)")               \
+    .method("unfreeze",                                                   \
+            (void (CLASSNAME::*)(Rcpp::Nullable<Rcpp::CharacterVector>))  \
+                &CLASSNAME::unfreeze_names,                               \
+            "Release specific sub-kernel(s); NULL = all")                 \
     .method("get_frozen",                                                 \
-            &CLASSNAME::get_frozen_names,                                 \
+            (Rcpp::CharacterVector (CLASSNAME::*)() const)                \
+                &CLASSNAME::get_frozen_names,                             \
             "List currently-frozen block names (DFS pre-order)")
 #endif // AI4BAYESCODE_RCPP_MODULE
 

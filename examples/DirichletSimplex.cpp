@@ -156,6 +156,7 @@ double dirichlet_joint_log_density(const arma::vec& theta_cat,
 // ============================================================================
 
 class DirichletSimplex : public AI4BayesCode::kernel_control_mixin<DirichletSimplex> {
+    friend class AI4BayesCode::kernel_control_mixin<DirichletSimplex>;
 public:
     DirichletSimplex(const arma::vec& y_counts,
                        const arma::vec& alpha,

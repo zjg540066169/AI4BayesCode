@@ -122,6 +122,7 @@ using AI4BayesCode::frailty_gamma_gibbs_block;
 using AI4BayesCode::frailty_gamma_gibbs_block_config;
 
 class PehSharedFrailty : public AI4BayesCode::kernel_control_mixin<PehSharedFrailty> {
+    friend class AI4BayesCode::kernel_control_mixin<PehSharedFrailty>;
 public:
     PehSharedFrailty(const arma::vec& t, const arma::vec& delta,
                      const arma::vec& z, int G,

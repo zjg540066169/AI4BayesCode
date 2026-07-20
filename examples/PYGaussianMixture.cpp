@@ -353,6 +353,7 @@ double alpha_natural_log_density(const arma::vec& alpha_nat,
 // ============================================================================
 
 class PYGaussianMixture : public AI4BayesCode::kernel_control_mixin<PYGaussianMixture> {
+    friend class AI4BayesCode::kernel_control_mixin<PYGaussianMixture>;
 public:
     // Data-driven weakly-informative Normal-Gamma hypers (see CRITICAL
     // note in skills/block_catalogue/index.md; verified on DPGaussianMixture).

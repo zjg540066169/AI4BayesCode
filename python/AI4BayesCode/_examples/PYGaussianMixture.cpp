@@ -182,6 +182,7 @@
 #include "AI4BayesCode/stick_breaking_block.hpp"
 #include "AI4BayesCode/normal_gamma_cluster_gibbs_block.hpp"
 #include "AI4BayesCode/bnp_utils.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -351,7 +352,8 @@ double alpha_natural_log_density(const arma::vec& alpha_nat,
 //  Tier A wrapper class
 // ============================================================================
 
-class PYGaussianMixture {
+class PYGaussianMixture : public AI4BayesCode::kernel_control_mixin<PYGaussianMixture> {
+    friend class AI4BayesCode::kernel_control_mixin<PYGaussianMixture>;
 public:
     // Data-driven weakly-informative Normal-Gamma hypers (see CRITICAL
     // note in skills/block_catalogue/index.md; verified on DPGaussianMixture).
@@ -892,7 +894,8 @@ RCPP_MODULE(PYGaussianMixture_module) {
                 "Posterior predictive y_rep at training X. Empty list only.")
         .method("get_dag",     &PYGaussianMixture::get_dag)
         .method("get_history", &PYGaussianMixture::get_history)
-        .method("readapt_NUTS", &PYGaussianMixture::readapt_NUTS);
+        .method("readapt_NUTS", &PYGaussianMixture::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(PYGaussianMixture);
 }
 #endif
 
@@ -934,7 +937,8 @@ PYBIND11_MODULE(PYGaussianMixture, m) {
         .def("get_dag",      &PYGaussianMixture::get_dag)
         .def("get_history",  &PYGaussianMixture::get_history)
         .def("readapt_NUTS", &PYGaussianMixture::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(PYGaussianMixture);
 }
 #endif
 

@@ -162,6 +162,7 @@ struct AsinhInverse {
 //  standard backend-neutral method surface so it builds in BOTH R and Python.
 // ============================================================================
 class SpikeSlabSinhBijection : public AI4BayesCode::kernel_control_mixin<SpikeSlabSinhBijection> {
+    friend class AI4BayesCode::kernel_control_mixin<SpikeSlabSinhBijection>;
 public:
     SpikeSlabSinhBijection(const arma::vec& y,
                            const arma::vec& x,

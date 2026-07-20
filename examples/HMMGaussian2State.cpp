@@ -120,6 +120,7 @@ using AI4BayesCode::hmm_block;
 using AI4BayesCode::hmm_block_config;
 
 class HMMGaussian2State : public AI4BayesCode::kernel_control_mixin<HMMGaussian2State> {
+    friend class AI4BayesCode::kernel_control_mixin<HMMGaussian2State>;
 public:
     HMMGaussian2State(const arma::vec& y,
                       const arma::vec& A_flat_row_major,  // length 4 (2x2)

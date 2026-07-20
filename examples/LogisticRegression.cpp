@@ -120,6 +120,7 @@ using AI4BayesCode::pg_logistic_block;
 using AI4BayesCode::pg_logistic_block_config;
 
 class LogisticRegression : public AI4BayesCode::kernel_control_mixin<LogisticRegression> {
+    friend class AI4BayesCode::kernel_control_mixin<LogisticRegression>;
 public:
     LogisticRegression(const arma::mat& X,
                        const arma::vec& y,

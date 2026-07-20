@@ -90,6 +90,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -153,7 +154,8 @@ double s_theta_joint_log_density(const arma::vec& x,
 
 } // anonymous namespace
 
-class DirichletSparse {
+class DirichletSparse : public AI4BayesCode::kernel_control_mixin<DirichletSparse> {
+    friend class AI4BayesCode::kernel_control_mixin<DirichletSparse>;
 public:
     DirichletSparse(const arma::vec& y_counts,
                          int    rng_seed,
@@ -348,7 +350,8 @@ RCPP_MODULE(DirichletSparse_module) {
         .method("predict_at",  &DirichletSparse::predict_at)
         .method("get_dag",     &DirichletSparse::get_dag)
         .method("get_history", &DirichletSparse::get_history)
-        .method("readapt_NUTS",&DirichletSparse::readapt_NUTS);
+        .method("readapt_NUTS",&DirichletSparse::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(DirichletSparse);
 }
 #endif
 
@@ -369,7 +372,8 @@ PYBIND11_MODULE(DirichletSparse, m) {
         .def("get_dag",      &DirichletSparse::get_dag)
         .def("get_history",  &DirichletSparse::get_history)
         .def("readapt_NUTS", &DirichletSparse::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(DirichletSparse);
 }
 #endif
 

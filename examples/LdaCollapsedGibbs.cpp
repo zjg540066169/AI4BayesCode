@@ -178,6 +178,7 @@ using AI4BayesCode::lda_collapsed_gibbs_block_config;
 // ============================================================================
 
 class LdaCollapsedGibbs : public AI4BayesCode::kernel_control_mixin<LdaCollapsedGibbs> {
+    friend class AI4BayesCode::kernel_control_mixin<LdaCollapsedGibbs>;
 public:
     /// @param w        length-N integer-encoded word ids (1..V)
     /// @param doc      length-N integer-encoded doc ids (1..M)

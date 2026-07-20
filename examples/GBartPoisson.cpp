@@ -136,6 +136,7 @@ using AI4BayesCode::genbart_block_config;
 // ============================================================================
 
 class GBartPoisson : public AI4BayesCode::kernel_control_mixin<GBartPoisson> {
+    friend class AI4BayesCode::kernel_control_mixin<GBartPoisson>;
 public:
     GBartPoisson(const arma::mat& X,
                  const arma::vec& y,

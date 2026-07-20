@@ -195,6 +195,7 @@ inline double diag_normal_log_density(const double* y, const double* mu,
 // ============================================================================
 
 class FiniteGaussianMixture : public AI4BayesCode::kernel_control_mixin<FiniteGaussianMixture> {
+    friend class AI4BayesCode::kernel_control_mixin<FiniteGaussianMixture>;
 public:
     // Data-driven weakly-informative Normal-Gamma hypers (see CRITICAL
     // note in skills/block_catalogue/index.md; verified on DPGaussianMixture).

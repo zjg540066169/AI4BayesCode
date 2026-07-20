@@ -217,6 +217,7 @@ double amp_ell_joint_log_density(const arma::vec& theta_cat,
 // ============================================================================
 
 class GPClassification : public AI4BayesCode::kernel_control_mixin<GPClassification> {
+    friend class AI4BayesCode::kernel_control_mixin<GPClassification>;
 public:
     GPClassification(const arma::mat& X,
                           const arma::vec& y,

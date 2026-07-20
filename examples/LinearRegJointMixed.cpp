@@ -198,6 +198,7 @@ double joint_log_density(const arma::vec& cat_nat,
 } // anonymous namespace
 
 class LinearRegJointMixed : public AI4BayesCode::kernel_control_mixin<LinearRegJointMixed> {
+    friend class AI4BayesCode::kernel_control_mixin<LinearRegJointMixed>;
 public:
     LinearRegJointMixed(const arma::vec& y,
                           const arma::mat& X,

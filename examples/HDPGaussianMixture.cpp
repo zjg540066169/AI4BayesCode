@@ -241,6 +241,7 @@ inline double full_normal_log_density(const double* y, const double* mu,
 }  // anonymous namespace
 
 class HDPGaussianMixture : public AI4BayesCode::kernel_control_mixin<HDPGaussianMixture> {
+    friend class AI4BayesCode::kernel_control_mixin<HDPGaussianMixture>;
 public:
     HDPGaussianMixture(const arma::mat& y,
                        const arma::vec& group_idx,  // length N, values 0..G-1

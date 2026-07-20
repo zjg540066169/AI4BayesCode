@@ -147,6 +147,7 @@ using AI4BayesCode::order_mcmc_block_config;
 // ============================================================================
 
 class OrderMCMCBN : public AI4BayesCode::kernel_control_mixin<OrderMCMCBN> {
+    friend class AI4BayesCode::kernel_control_mixin<OrderMCMCBN>;
 public:
     OrderMCMCBN(const arma::mat& data,            // N x n, integer-valued
                 const arma::vec& cardinalities,   // length n, r_i per variable

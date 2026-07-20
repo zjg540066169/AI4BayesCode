@@ -157,6 +157,7 @@ double location_scale_joint_log_density(const arma::vec& theta_cat,
 } // anonymous namespace
 
 class GaussianLocationScale : public AI4BayesCode::kernel_control_mixin<GaussianLocationScale> {
+    friend class AI4BayesCode::kernel_control_mixin<GaussianLocationScale>;
 public:
     GaussianLocationScale(const arma::vec& y,
                                int    rng_seed,

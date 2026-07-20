@@ -251,6 +251,7 @@ double s_kappa_theta_joint_log_density(const arma::vec& x,
 // ============================================================================
 
 class DirichletHierarchical : public AI4BayesCode::kernel_control_mixin<DirichletHierarchical> {
+    friend class AI4BayesCode::kernel_control_mixin<DirichletHierarchical>;
 public:
     DirichletHierarchical(const arma::mat& S_obs,  // K x P matrix of data
                                double beta_a,

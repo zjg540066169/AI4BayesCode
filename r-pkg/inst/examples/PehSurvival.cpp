@@ -90,6 +90,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/piecewise_exponential_gibbs_block.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -102,7 +103,8 @@ using AI4BayesCode::composite_block;
 using AI4BayesCode::piecewise_exponential_gibbs_block;
 using AI4BayesCode::piecewise_exponential_gibbs_block_config;
 
-class PehSurvival {
+class PehSurvival : public AI4BayesCode::kernel_control_mixin<PehSurvival> {
+    friend class AI4BayesCode::kernel_control_mixin<PehSurvival>;
 public:
     PehSurvival(const arma::vec& t, const arma::vec& delta, const arma::vec& edges,
                 double a0, double b0, int rng_seed, bool keep_history = false)
@@ -220,7 +222,8 @@ RCPP_MODULE(PehSurvival_module) {
         .method("set_current", &PehSurvival::set_current)
         .method("predict_at",  &PehSurvival::predict_at)
         .method("get_dag",     &PehSurvival::get_dag)
-        .method("get_history", &PehSurvival::get_history);
+        .method("get_history", &PehSurvival::get_history)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(PehSurvival);
 }
 #endif
 
@@ -242,7 +245,8 @@ PYBIND11_MODULE(PehSurvival, m) {
         .def("set_current", &PehSurvival::set_current, pybind11::arg("params"))
         .def("predict_at",  &PehSurvival::predict_at,  pybind11::arg("new_data"))
         .def("get_dag",     &PehSurvival::get_dag)
-        .def("get_history", &PehSurvival::get_history);
+        .def("get_history", &PehSurvival::get_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(PehSurvival);
 }
 #endif
 

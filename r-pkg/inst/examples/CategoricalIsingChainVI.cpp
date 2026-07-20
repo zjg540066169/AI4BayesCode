@@ -102,6 +102,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/mean_field_categorical_vi_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -121,7 +122,8 @@ using AI4BayesCode::mean_field_categorical_vi_block_config;
 //  module below.
 // ============================================================================
 
-class CategoricalIsingChainVI {
+class CategoricalIsingChainVI : public AI4BayesCode::kernel_control_mixin<CategoricalIsingChainVI> {
+    friend class AI4BayesCode::kernel_control_mixin<CategoricalIsingChainVI>;
 public:
     CategoricalIsingChainVI(int n_nodes, int K, double beta,
                               const arma::vec& h_input,
@@ -397,7 +399,8 @@ RCPP_MODULE(CategoricalIsingChainVI_module) {
                 "N=100). Returns list(z_samples = n_draws × n integer "
                 "matrix).")
         .method("get_dag",     &CategoricalIsingChainVI::get_dag)
-        .method("get_history", &CategoricalIsingChainVI::get_history);
+        .method("get_history", &CategoricalIsingChainVI::get_history)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(CategoricalIsingChainVI);
 }
 #endif // AI4BAYESCODE_RCPP_MODULE
 
@@ -424,7 +427,8 @@ PYBIND11_MODULE(CategoricalIsingChainVI, m) {
         .def("set_current", &CategoricalIsingChainVI::set_current, pybind11::arg("params"))
         .def("predict_at",  &CategoricalIsingChainVI::predict_at,  pybind11::arg("new_data"))
         .def("get_dag",     &CategoricalIsingChainVI::get_dag)
-        .def("get_history", &CategoricalIsingChainVI::get_history);
+        .def("get_history", &CategoricalIsingChainVI::get_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(CategoricalIsingChainVI);
 }
 #endif // AI4BAYESCODE_PYBIND_MODULE
 

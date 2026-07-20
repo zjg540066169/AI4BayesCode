@@ -296,6 +296,7 @@ double joint_theta_zb_sigma_log_density(const arma::vec& theta_cat,
 // ============================================================================
 
 class IRT1PL_joint : public AI4BayesCode::kernel_control_mixin<IRT1PL_joint> {
+    friend class AI4BayesCode::kernel_control_mixin<IRT1PL_joint>;
 public:
     IRT1PL_joint(const arma::mat& Y_input,
                    const arma::vec& theta_init,

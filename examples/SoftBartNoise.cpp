@@ -181,6 +181,7 @@ double sigma_natural_log_density(const arma::vec& sigma_nat,
 // ============================================================================
 
 class SoftBartNoise : public AI4BayesCode::kernel_control_mixin<SoftBartNoise> {
+    friend class AI4BayesCode::kernel_control_mixin<SoftBartNoise>;
 public:
     SoftBartNoise(const arma::mat& X,
                   const arma::vec& y,

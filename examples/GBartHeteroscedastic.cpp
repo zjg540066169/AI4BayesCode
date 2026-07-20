@@ -129,6 +129,7 @@ using AI4BayesCode::genbart_block_config;
 // ============================================================================
 
 class GBartHeteroscedastic : public AI4BayesCode::kernel_control_mixin<GBartHeteroscedastic> {
+    friend class AI4BayesCode::kernel_control_mixin<GBartHeteroscedastic>;
 public:
     GBartHeteroscedastic(const arma::mat& X,
                          const arma::vec& y,

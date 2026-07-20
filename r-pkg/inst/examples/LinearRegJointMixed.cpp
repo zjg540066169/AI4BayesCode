@@ -83,6 +83,7 @@
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -196,7 +197,8 @@ double joint_log_density(const arma::vec& cat_nat,
 
 } // anonymous namespace
 
-class LinearRegJointMixed {
+class LinearRegJointMixed : public AI4BayesCode::kernel_control_mixin<LinearRegJointMixed> {
+    friend class AI4BayesCode::kernel_control_mixin<LinearRegJointMixed>;
 public:
     LinearRegJointMixed(const arma::vec& y,
                           const arma::mat& X,
@@ -483,7 +485,8 @@ RCPP_MODULE(LinearRegJointMixed_module) {
         .method("get_history",  &LinearRegJointMixed::get_history)
         .method("predict_at",   &LinearRegJointMixed::predict_at)
         .method("get_dag",      &LinearRegJointMixed::get_dag)
-        .method("readapt_NUTS", &LinearRegJointMixed::readapt_NUTS);
+        .method("readapt_NUTS", &LinearRegJointMixed::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(LinearRegJointMixed);
 }
 #endif
 
@@ -507,7 +510,8 @@ PYBIND11_MODULE(LinearRegJointMixed, m) {
         .def("get_dag",     &LinearRegJointMixed::get_dag)
         .def("get_history", &LinearRegJointMixed::get_history)
         .def("readapt_NUTS", &LinearRegJointMixed::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(LinearRegJointMixed);
 }
 #endif
 

@@ -301,6 +301,7 @@ double sir_joint_log_density(const arma::vec& theta_cat,
 } // anonymous namespace
 
 class ODE_SIR : public AI4BayesCode::kernel_control_mixin<ODE_SIR> {
+    friend class AI4BayesCode::kernel_control_mixin<ODE_SIR>;
 public:
     ODE_SIR(double S0, double I0, double R0,
                   const arma::vec& t_obs,
