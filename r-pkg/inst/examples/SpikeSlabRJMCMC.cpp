@@ -70,16 +70,22 @@
 //  Order: rjmcmc_block runs LAST so pi, sigma, tau read from ctx are
 //  the freshest draws from the current sweep.
 //
-//  k=0 guard (Ishwaran-Rao 2005 §3.1 warm-start)
-//  ----------------------------------------------
+//  Warm-start init (Ishwaran-Rao 2005 §3.1)
+//  ----------------------------------------
 //  Under Jeffreys on tau with sigma-scaled slab, the conditional
-//  posterior of tau at sum_active gamma = 0 is the improper prior
-//  itself. To avoid the chain wandering in that state, gamma_init
-//  is set by marginal-OLS screening: j_init = argmax_j |X_j' y|, and
-//  gamma_init[j_init] = 1. This ensures k >= 1 from iteration 1.
-//  If the chain subsequently visits k=0 (rare), NUTS takes a random
-//  walk on log(tau) for that single sweep (Jeffreys + Jacobian = 0
-//  on eta-scale) until a gamma_j=1 move is accepted.
+//  posterior of tau at sum_active gamma = 0 is improper, and even
+//  at k=1 with a small OLS coefficient the tau conditional is very
+//  flat -- so flat that NUTS's first-call step-size adaptation
+//  converges to an epsilon that becomes catastrophic once the joint
+//  chain settles into the true (larger sum_b2) active set. Both
+//  issues are ruled out by initializing at the top-k_screen most-
+//  correlated predictors: idx = argsort_top_k |X_j'y|, gamma_init
+//  set on those indices, beta_init = joint OLS on that subset.
+//  k_screen = min(3, p). This ensures (i) k >= 1 from iteration 1
+//  and (ii) tau's first-call warmup adapts against a representative
+//  posterior geometry. If the chain subsequently visits k=0 (rare),
+//  the tau_natural_log_density k=0 guard falls back to half-Normal(0,1)
+//  until a gamma_j=1 move is accepted.
 // ============================================================================
 
 // @example:R
@@ -139,11 +145,13 @@
 #include "AI4BayesCode/rjmcmc_block.hpp"
 #include "AI4BayesCode/kernel_control_mixin.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <random>
+#include <utility>
 #include <vector>
 
 using AI4BayesCode::block_context;
@@ -477,35 +485,66 @@ public:
         impl_->data().set("a_pi", arma::vec{a_pi_prior});
         impl_->data().set("b_pi", arma::vec{b_pi_prior});
 
-        // ---- Marginal-OLS screening for gamma_init guard --------------
-        // k=0 is a pathological state under Jeffreys on tau (conditional
-        // becomes improper). Initialize with the single most-correlated
-        // predictor active (Ishwaran & Rao 2005 §3.1 warm-start).
-        std::size_t j_screen = 0;
-        double best_xty = 0.0;
+        // ---- Marginal-OLS screening for gamma_init / beta_init --------
+        // Two failure modes are ruled out here:
+        //
+        //   (1) k=0 is a pathological state under Jeffreys on tau (its
+        //       conditional becomes improper -- see the k=0 guard in
+        //       tau_natural_log_density above). At least ONE predictor
+        //       must be active from iteration 1.
+        //
+        //   (2) The tau block's NUTS step size is adapted ONCE on the
+        //       first call to step(), against a FROZEN context
+        //       (gamma_init, beta_init, sigma_init). If that context is
+        //       degenerate (top-1 active with a small OLS coefficient
+        //       -> tiny sum_b2 -> very flat tau conditional), dual
+        //       averaging converges to an epsilon that becomes
+        //       CATASTROPHIC once the joint chain moves into the true
+        //       active set (where sum_b2 is large, k is 2-3, and the
+        //       tau conditional is tight). The runtime symptom is tau
+        //       wedging at its post-warmup value forever, because every
+        //       subsequent NUTS trajectory either diverges or U-turns
+        //       instantly. This is the exact "step-size adapted for the
+        //       wrong conditional" failure mode called out in
+        //       nuts_block.hpp's `n_warmup_per_step` note.
+        //
+        // Fix: screen the top-k_screen predictors by |X_j' y| and
+        // initialize their beta via JOINT OLS on that subset. This
+        // gives tau's first-call warmup a REPRESENTATIVE (k, sum_b2)
+        // context close to the true active set, so the adapted epsilon
+        // stays well-scaled after the chain equilibrates.
+        const std::size_t k_screen = std::min<std::size_t>(3, p);
+        std::vector<std::pair<double, std::size_t>> xty_abs(p);
         for (std::size_t j = 0; j < p; ++j) {
             double xty = 0.0;
-            for (std::size_t i = 0; i < N; ++i)
-                xty += X(i, j) * y[i];
-            if (std::abs(xty) > best_xty) {
-                best_xty = std::abs(xty);
-                j_screen = j;
-            }
+            for (std::size_t i = 0; i < N; ++i) xty += X(i, j) * y[i];
+            xty_abs[j] = {std::abs(xty), j};
         }
+        std::partial_sort(
+            xty_abs.begin(), xty_abs.begin() + k_screen, xty_abs.end(),
+            [](const std::pair<double, std::size_t>& a,
+               const std::pair<double, std::size_t>& b) {
+                return a.first > b.first;
+            });
 
         arma::vec gamma_init(p, arma::fill::zeros);
         arma::vec beta_init (p, arma::fill::zeros);
-        gamma_init[j_screen] = 1.0;
-        // beta_init on the screened index: OLS estimate restricted to j_screen:
-        // beta_j = (X_j'y) / (X_j'X_j).
-        double xtx_screen = 0.0;
-        for (std::size_t i = 0; i < N; ++i)
-            xtx_screen += X(i, j_screen) * X(i, j_screen);
-        if (xtx_screen > 0.0) {
-            double xty_screen = 0.0;
-            for (std::size_t i = 0; i < N; ++i)
-                xty_screen += X(i, j_screen) * y[i];
-            beta_init[j_screen] = xty_screen / xtx_screen;
+        arma::uvec idx(k_screen);
+        for (std::size_t r = 0; r < k_screen; ++r) {
+            idx[r] = xty_abs[r].second;
+            gamma_init[idx[r]] = 1.0;
+        }
+        // Joint OLS on the screened active subset. arma::solve returns
+        // false on rank-deficient designs; in that case we leave
+        // beta_init = 0. That triggers the sum_b2 == 0 half-Normal(0,1)
+        // branch in tau_natural_log_density on the first call (safe
+        // fallback), and self-corrects on the first rjmcmc sweep that
+        // draws nonzero beta_j (xtx > 0 guarantees this).
+        arma::mat Xs = X.cols(idx);
+        arma::vec bs;
+        if (arma::solve(bs, Xs, y)) {
+            for (std::size_t r = 0; r < k_screen; ++r)
+                beta_init[idx[r]] = bs[r];
         }
 
         const double ybar = arma::mean(y);
