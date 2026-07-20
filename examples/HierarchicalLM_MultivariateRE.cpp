@@ -162,6 +162,7 @@
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -405,7 +406,7 @@ double R_chol_log_density(const arma::vec& L_nat,
 
 }  // anonymous namespace
 
-class HierarchicalLM_MultivariateRE {
+class HierarchicalLM_MultivariateRE : public AI4BayesCode::kernel_control_mixin<HierarchicalLM_MultivariateRE> {
 public:
     HierarchicalLM_MultivariateRE(const arma::vec& y_obs,
                                   const arma::mat& X_fixed,
@@ -860,7 +861,8 @@ RCPP_MODULE(HierarchicalLM_MultivariateRE_module) {
         .method("predict_at",  &HierarchicalLM_MultivariateRE::predict_at)
         .method("get_dag",     &HierarchicalLM_MultivariateRE::get_dag)
         .method("get_history", &HierarchicalLM_MultivariateRE::get_history)
-        .method("readapt_NUTS", &HierarchicalLM_MultivariateRE::readapt_NUTS);
+        .method("readapt_NUTS", &HierarchicalLM_MultivariateRE::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(HierarchicalLM_MultivariateRE);
 }
 #endif
 
@@ -887,7 +889,8 @@ PYBIND11_MODULE(HierarchicalLM_MultivariateRE, m) {
         .def("get_dag",      &HierarchicalLM_MultivariateRE::get_dag)
         .def("get_history",  &HierarchicalLM_MultivariateRE::get_history)
         .def("readapt_NUTS", &HierarchicalLM_MultivariateRE::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(HierarchicalLM_MultivariateRE);
 }
 #endif
 

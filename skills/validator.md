@@ -8,21 +8,15 @@ description: |
 
 # AI4BayesCode code validator
 
-> **HEADER PATCH IN FLIGHT (2026-07-19) -- Check #26 is FORWARD-LOOKING.**
-> Check #26 (kernel-control conformance) tests the presence of
-> `freeze / unfreeze / get_frozen` methods bound via the
-> `AI4BAYESCODE_BIND_KERNEL_CONTROL` macro from
-> `include/AI4BayesCode/kernel_control_mixin.hpp`. That header + the
-> underlying `block_sampler` / `composite_block` / `joint_nuts_block`
-> implementations SHIP IN A SEPARATE FOLLOW-UP PATCH. Until that patch
-> lands, Check #26 is DISABLED -- do NOT run its (a)/(b)/(c)/(d)
-> sub-checks against generated code (they will fail structurally because
-> the required header + methods do not yet exist). Layer-3 R2.f (frozen
-> parameter exclusion) is also inert until then, since no wrapper will
-> have any frozen parameter to exclude. All other checks (#1-#25 +
-> Layer-3 R1 / R2 non-.f / R3) run as before. See
-> `DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md` for the migration
-> timeline.
+> **KERNEL-CONTROL SHIPPED (2026-07-20).** Check #26 (kernel-control
+> conformance) is now LIVE. The `freeze / unfreeze / get_frozen` methods,
+> the `AI4BAYESCODE_BIND_KERNEL_CONTROL` macro, the base class hooks in
+> `block_sampler.hpp`, the composite dispatch in `composite_block.hpp`,
+> and the `joint_nuts_block` slot-level override (Approach B per
+> DESIGN_NOTES Sec.10.a) are all shipped. 42/43 examples migrated
+> (ARDLasso remains hand-Gibbs; not yet mixin-enrolled). Layer-3 R2.f
+> (frozen-parameter exclusion) is active for any wrapper that freezes
+> at least one child.
 
 Validation of a generated sampler proceeds in **three** layers, from
 cheapest to most expensive. Sub-steps within Layer 3 share the same

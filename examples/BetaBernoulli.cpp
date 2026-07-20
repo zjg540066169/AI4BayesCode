@@ -73,6 +73,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -130,7 +131,7 @@ double p_log_density(const arma::vec& p_nat,
 
 } // anonymous namespace
 
-class BetaBernoulli {
+class BetaBernoulli : public AI4BayesCode::kernel_control_mixin<BetaBernoulli> {
 public:
     BetaBernoulli(const arma::vec& y, double a, double b, int rng_seed,
                   bool keep_history = false)
@@ -334,7 +335,8 @@ RCPP_MODULE(BetaBernoulli_module) {
         .method("predict_at",  &BetaBernoulli::predict_at)
         .method("get_dag",     &BetaBernoulli::get_dag)
         .method("get_history", &BetaBernoulli::get_history)
-        .method("readapt_NUTS", &BetaBernoulli::readapt_NUTS);
+        .method("readapt_NUTS", &BetaBernoulli::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(BetaBernoulli);
 }
 #endif
 
@@ -358,7 +360,8 @@ PYBIND11_MODULE(BetaBernoulli, m) {
         .def("get_dag",     &BetaBernoulli::get_dag)
         .def("get_history", &BetaBernoulli::get_history)
         .def("readapt_NUTS", &BetaBernoulli::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(BetaBernoulli);
 }
 #endif
 

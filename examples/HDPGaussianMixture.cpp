@@ -193,6 +193,7 @@
 #include "AI4BayesCode/niw_cluster_gibbs_block.hpp"
 #include "AI4BayesCode/stick_breaking_block.hpp"
 #include "AI4BayesCode/bnp_utils.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -239,7 +240,7 @@ inline double full_normal_log_density(const double* y, const double* mu,
 
 }  // anonymous namespace
 
-class HDPGaussianMixture {
+class HDPGaussianMixture : public AI4BayesCode::kernel_control_mixin<HDPGaussianMixture> {
 public:
     HDPGaussianMixture(const arma::mat& y,
                        const arma::vec& group_idx,  // length N, values 0..G-1
@@ -832,7 +833,8 @@ RCPP_MODULE(HDPGaussianMixture_module) {
         .method("predict_at",  &HDPGaussianMixture::predict_at,
                 "Posterior predictive y_rep at training X. Empty list only.")
         .method("get_dag",     &HDPGaussianMixture::get_dag)
-        .method("get_history", &HDPGaussianMixture::get_history);
+        .method("get_history", &HDPGaussianMixture::get_history)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(HDPGaussianMixture);
 }
 #endif
 
@@ -863,7 +865,8 @@ PYBIND11_MODULE(HDPGaussianMixture, m) {
         .def("predict_at",  &HDPGaussianMixture::predict_at,
              pybind11::arg("new_data"))
         .def("get_dag",     &HDPGaussianMixture::get_dag)
-        .def("get_history", &HDPGaussianMixture::get_history);
+        .def("get_history", &HDPGaussianMixture::get_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(HDPGaussianMixture);
 }
 #endif
 

@@ -106,6 +106,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/gmrf_precision_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 #include "AI4BayesCode/ising_cluster_block.hpp"  // reuse make_2d_lattice_edges
 
 #include <cmath>
@@ -141,7 +142,7 @@ build_graph_laplacian(std::size_t n, const arma::umat& edges) {
     return L;
 }
 
-class GMRFPrior {
+class GMRFPrior : public AI4BayesCode::kernel_control_mixin<GMRFPrior> {
 public:
     GMRFPrior(int L_x, int L_y, double kappa,
               bool periodic, bool eight_nn,
@@ -290,7 +291,8 @@ RCPP_MODULE(GMRFPrior_module) {
                 "Returns empty list — GMRFPrior has no observation model. "
                 "Pass an empty list; non-empty input is rejected.")
         .method("get_dag",     &GMRFPrior::get_dag)
-        .method("get_history", &GMRFPrior::get_history);
+        .method("get_history", &GMRFPrior::get_history)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(GMRFPrior);
 }
 #endif
 
@@ -313,7 +315,8 @@ PYBIND11_MODULE(GMRFPrior, m) {
         .def("set_current", &GMRFPrior::set_current, pybind11::arg("params"))
         .def("predict_at",  &GMRFPrior::predict_at,  pybind11::arg("new_data"))
         .def("get_dag",     &GMRFPrior::get_dag)
-        .def("get_history", &GMRFPrior::get_history);
+        .def("get_history", &GMRFPrior::get_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(GMRFPrior);
 }
 #endif
 

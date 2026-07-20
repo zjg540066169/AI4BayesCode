@@ -152,6 +152,7 @@
 #include "AI4BayesCode/stick_breaking_block.hpp"
 #include "AI4BayesCode/normal_gamma_cluster_gibbs_block.hpp"
 #include "AI4BayesCode/bnp_utils.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -267,7 +268,7 @@ double phi_natural_log_density(const arma::vec& phi_nat,
 
 }  // anonymous namespace
 
-class DPGaussianMixture_DerivedAlpha {
+class DPGaussianMixture_DerivedAlpha : public AI4BayesCode::kernel_control_mixin<DPGaussianMixture_DerivedAlpha> {
 public:
     // Data-driven weakly-informative Normal-Gamma hypers (see CRITICAL
     // note in skills/block_catalogue/index.md; verified on DPGaussianMixture).
@@ -779,7 +780,8 @@ RCPP_MODULE(DPGaussianMixture_DerivedAlpha_module) {
                 "Posterior predictive y_rep at training X.")
         .method("get_dag",     &DPGaussianMixture_DerivedAlpha::get_dag)
         .method("get_history", &DPGaussianMixture_DerivedAlpha::get_history)
-        .method("readapt_NUTS", &DPGaussianMixture_DerivedAlpha::readapt_NUTS);
+        .method("readapt_NUTS", &DPGaussianMixture_DerivedAlpha::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(DPGaussianMixture_DerivedAlpha);
 }
 #endif
 
@@ -820,7 +822,8 @@ PYBIND11_MODULE(DPGaussianMixture_DerivedAlpha, m) {
         .def("get_dag",      &DPGaussianMixture_DerivedAlpha::get_dag)
         .def("get_history",  &DPGaussianMixture_DerivedAlpha::get_history)
         .def("readapt_NUTS", &DPGaussianMixture_DerivedAlpha::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(DPGaussianMixture_DerivedAlpha);
 }
 #endif
 

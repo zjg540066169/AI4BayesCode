@@ -107,6 +107,7 @@
 
 // BART block (Rcpp-free, transitively pulls in the GPL BART kernel)
 #include "AI4BayesCode/bart_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -131,7 +132,7 @@ namespace constraints = AI4BayesCode::constraints;
 // ============================================================================
 //  User-facing class. Backend-neutral: arma containers, state_map/history_map.
 // ============================================================================
-class VCBart {
+class VCBart : public AI4BayesCode::kernel_control_mixin<VCBart> {
 public:
     VCBart(const arma::mat& X,      // N x p predictors
            const arma::mat& Z,      // N x q effect modifiers
@@ -426,7 +427,8 @@ RCPP_MODULE(VCBart_module) {
                 "X = as.vector(X_new)) (flattened column-major).")
         .method("get_dag",      &VCBart::get_dag,     "Predict DAG as edge list.")
         .method("get_history",  &VCBart::get_history, "History as named matrices.")
-        .method("readapt_NUTS", &VCBart::readapt_NUTS);
+        .method("readapt_NUTS", &VCBart::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(VCBart);
 }
 #endif
 
@@ -459,7 +461,8 @@ PYBIND11_MODULE(VCBart, m) {
         .def("get_dag",      &VCBart::get_dag)
         .def("get_history",  &VCBart::get_history)
         .def("readapt_NUTS", &VCBart::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(VCBart);
 }
 #endif
 

@@ -112,6 +112,7 @@
 
 #include "AI4BayesCode/probit_aug_block.hpp"
 #include "AI4BayesCode/nuts_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -186,7 +187,7 @@ double beta_log_density(const arma::vec& beta,
 
 }  // anonymous namespace
 
-class ProbitRegression {
+class ProbitRegression : public AI4BayesCode::kernel_control_mixin<ProbitRegression> {
 public:
     ProbitRegression(const arma::mat& X,
                      const arma::vec& y,
@@ -530,7 +531,8 @@ RCPP_MODULE(ProbitRegression_module) {
         .method("predict_at",  &ProbitRegression::predict_at)
         .method("get_dag",     &ProbitRegression::get_dag)
         .method("get_history", &ProbitRegression::get_history)
-        .method("readapt_NUTS", &ProbitRegression::readapt_NUTS);
+        .method("readapt_NUTS", &ProbitRegression::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(ProbitRegression);
 }
 #endif
 
@@ -557,7 +559,8 @@ PYBIND11_MODULE(ProbitRegression, m) {
         .def("get_dag",     &ProbitRegression::get_dag)
         .def("get_history", &ProbitRegression::get_history)
         .def("readapt_NUTS", &ProbitRegression::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(ProbitRegression);
 }
 #endif
 

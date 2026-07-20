@@ -113,6 +113,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/ising_cluster_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -125,7 +126,7 @@ using AI4BayesCode::ising_cluster_block;
 using AI4BayesCode::ising_cluster_block_config;
 using AI4BayesCode::make_2d_lattice_edges;
 
-class IsingPrior {
+class IsingPrior : public AI4BayesCode::kernel_control_mixin<IsingPrior> {
 public:
     IsingPrior(int L_x, int L_y, int Q, double beta,
                 bool periodic, bool eight_nn,
@@ -278,7 +279,8 @@ RCPP_MODULE(IsingPrior_module) {
                 "Returns empty list — IsingPrior has no observation model. "
                 "Pass an empty list; non-empty input is rejected.")
         .method("get_dag",     &IsingPrior::get_dag)
-        .method("get_history", &IsingPrior::get_history);
+        .method("get_history", &IsingPrior::get_history)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(IsingPrior);
 }
 #endif
 
@@ -302,7 +304,8 @@ PYBIND11_MODULE(IsingPrior, m) {
         .def("set_current", &IsingPrior::set_current, pybind11::arg("params"))
         .def("predict_at",  &IsingPrior::predict_at, pybind11::arg("new_data"))
         .def("get_dag",     &IsingPrior::get_dag)
-        .def("get_history", &IsingPrior::get_history);
+        .def("get_history", &IsingPrior::get_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(IsingPrior);
 }
 #endif
 

@@ -107,6 +107,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/pg_logistic_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -118,7 +119,7 @@ using AI4BayesCode::composite_block;
 using AI4BayesCode::pg_logistic_block;
 using AI4BayesCode::pg_logistic_block_config;
 
-class LogisticRegression {
+class LogisticRegression : public AI4BayesCode::kernel_control_mixin<LogisticRegression> {
 public:
     LogisticRegression(const arma::mat& X,
                        const arma::vec& y,
@@ -412,7 +413,8 @@ RCPP_MODULE(LogisticRegression_module) {
         .method("set_current", &LogisticRegression::set_current)
         .method("predict_at",  &LogisticRegression::predict_at)
         .method("get_dag",     &LogisticRegression::get_dag)
-        .method("get_history", &LogisticRegression::get_history);
+        .method("get_history", &LogisticRegression::get_history)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(LogisticRegression);
 }
 #endif
 
@@ -435,7 +437,8 @@ PYBIND11_MODULE(LogisticRegression, m) {
         .def("set_current", &LogisticRegression::set_current, pybind11::arg("params"))
         .def("predict_at",  &LogisticRegression::predict_at, pybind11::arg("new_data"))
         .def("get_dag",     &LogisticRegression::get_dag)
-        .def("get_history", &LogisticRegression::get_history);
+        .def("get_history", &LogisticRegression::get_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(LogisticRegression);
 }
 #endif
 

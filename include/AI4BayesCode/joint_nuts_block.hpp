@@ -575,13 +575,45 @@ public:
         ns.n_keep_draws   = cfg_.n_draws_per_step;
         ns.n_adapt_draws  = n_warmup;
 
+        // Snapshot frozen slot values in the unconstrained space (Approach B
+        // from DESIGN_NOTES Sec.10.a). When any slot is frozen, the adapter
+        // wrap OVERRIDES the theta values on frozen dims with the snapshot
+        // and ZEROES the gradient on those dims, so mcmclib sees a target
+        // that is CONSTANT in the frozen coordinates. Combined with the
+        // block-diagonal mass matrix (built by build_precond_ when frozen
+        // dims are non-empty), theta_z's dynamics fully decouple from
+        // theta_f, and theta_f's marginal is exactly the conditional
+        // posterior given theta_z_snap.
+        const bool any_frozen = frozen_unc_idx_.n_elem > 0;
+        arma::vec theta_frozen_snap;
+        if (any_frozen) {
+            theta_frozen_snap = theta_cat_.elem(frozen_unc_idx_);
+        }
+
         // Per-slice transform + Jacobian (identity fast-path when all-real),
         // dim asserts, and the natural-scale oracle call all live in eval_unc_.
-        auto adapter = [this](
+        auto adapter = [this, any_frozen, &theta_frozen_snap](
                             const mcmc::ColVec_t& theta_in,
                             mcmc::ColVec_t* grad_out,
                             void* /*unused*/) -> mcmc::fp_t {
-            return static_cast<mcmc::fp_t>(eval_unc_(theta_in, grad_out));
+            if (!any_frozen) {
+                return static_cast<mcmc::fp_t>(eval_unc_(theta_in, grad_out));
+            }
+            // FROZEN path: override frozen dims with snapshot BEFORE the
+            // user's log-density sees them. This makes U_wrap(theta) =
+            // U(theta_f, theta_z_snap) -- constant in theta_z per Sec.10.a.
+            arma::vec theta_eff(theta_in.n_elem);
+            for (arma::uword i = 0; i < theta_in.n_elem; ++i) theta_eff[i] = theta_in[i];
+            theta_eff.elem(frozen_unc_idx_) = theta_frozen_snap;
+            double lp = eval_unc_(theta_eff, grad_out);
+            // Zero gradient on frozen dims so leapfrog leaves them alone
+            // even numerically (they wouldn't move anyway under M_z = I +
+            // grad_z = 0, but explicit zeroing keeps mcmclib's U-turn and
+            // cache invariants exactly on the free-dim manifold).
+            if (grad_out != nullptr && grad_out->n_elem == theta_in.n_elem) {
+                grad_out->elem(frozen_unc_idx_).zeros();
+            }
+            return static_cast<mcmc::fp_t>(lp);
         };
 
         // Snapshot the pre-warmup state for the metric-escape guard below. Only
@@ -676,6 +708,15 @@ public:
         }
 
         theta_cat_ = draws_out.row(draws_out.n_rows - 1).t();
+        // Approach B restore: after mcmc::nuts returns, the frozen dims of
+        // theta_cat_ contain wherever the (mass=I, grad=0) Brownian drift
+        // took them. This is HARMLESS to the free-dim distribution (proof
+        // in Sec.10.a), but we restore the snapshot so downstream
+        // rebuild_named_outputs_() / current_named_outputs() / history all
+        // see the pinned value.
+        if (any_frozen) {
+            theta_cat_.elem(frozen_unc_idx_) = theta_frozen_snap;
+        }
         rebuild_named_outputs_();
 
         if (keep_history_) {
@@ -839,22 +880,27 @@ public:
 
     // ---- Kernel-control freeze API (slot-level, interface.md Sec.1) -----
     //
-    // joint_nuts_block exposes its sub-parameter names via subnames() so
-    // composite_block::freeze("<slot_name>") resolves correctly. WHOLE-BLOCK
-    // freeze (composite calls this->freeze() with no arg) is inherited from
-    // block_sampler and works via composite's is_frozen() check in step().
+    // Slot-level freeze IMPLEMENTED via "Approach B" from DESIGN_NOTES
+    // Sec.10.a + subagent-A analysis 2026-07-20: non-invasive to mcmclib.
     //
-    // SLOT-LEVEL freeze (composite calls freeze_sub("<slot_name>")) is
-    // deliberately REJECTED in v1 with a clear error message and remediation
-    // guidance. A correct implementation requires integrator-level surgery
-    // (zero momentum on frozen slot dims at trajectory start + zero gradient
-    // on frozen slot dims inside the log_p wrapper + Welford covariance
-    // skip on frozen rows/cols); this is a kernel patch that must ship with
-    // its own thorough testing. Rushing it in a doc-layer patch would risk
-    // silent-wrong posteriors -- the exact class of bug the whole kernel-
-    // control effort is trying to prevent. See DESIGN_NOTES Sec.10.a for
-    // the target design; validator Check #26(c) test at "if the composite
-    // includes any joint_nuts_block..." currently exercises whole-block only.
+    // Detailed balance argument (Neal HMC + Girolami RMHMC style):
+    //   Let theta = (theta_f, theta_z) where _z is frozen at theta_z_snap.
+    //   The step() adapter wraps user's log-density so mcmclib sees
+    //     U_wrap(theta_f, theta_z) := U(theta_f, theta_z_snap)
+    //   which is CONSTANT in theta_z; the gradient masking zeros grad_z.
+    //   The mass matrix is block-diagonalized (see build_precond_) so
+    //   M_{f,z} = M_{z,f} = 0 and M_{z,z} = I. Under this metric + potential:
+    //     * theta_z's dynamics decouple from theta_f (grad_z = 0, no
+    //       off-diagonal in M inverse).
+    //     * theta_z drifts freely under identity mass; theta_f's marginal
+    //       stationary distribution is exactly p(theta_f | theta_z = snap).
+    //     * After mcmc::nuts returns, we restore theta_cat_[frozen] =
+    //       theta_z_snap. This is a projection that doesn't perturb the
+    //       theta_f marginal (proof: samples of theta_f from any joint
+    //       of the form pi(theta_f) x q(theta_z) marginalize to pi(theta_f)).
+    // Result: exact conditional posterior on the free slots. No approximation.
+    //
+    // Sub-name API + storage.
     std::vector<std::string> subnames() const override {
         std::vector<std::string> out;
         out.reserve(cfg_.sub_params.size());
@@ -863,32 +909,48 @@ public:
     }
 
     void freeze_sub(const std::string& sub) override {
-        throw std::runtime_error(
-            "joint_nuts_block slot-level freeze not yet implemented (slot='"
-            + sub + "' in block '" + cfg_.name + "').\n"
-            "  This v1 exposes the slot-level API but the underlying "
-            "integrator + Welford + constraint chain-rule masking for a "
-            "single slot within the joint dynamics is deferred to a "
-            "dedicated kernel patch (see DESIGN_NOTES_FREEZE_UNFREEZE_"
-            "2026-07-19.md Sec.10.a for the target design).\n"
-            "  Two workarounds available today:\n"
-            "  (1) If the slot to be frozen is not tightly correlated with "
-            "the other slots, split the joint_nuts_block into a separate "
-            "nuts_block for that slot; freeze then works via the standard "
-            "whole-block path.\n"
-            "  (2) If tight correlation makes (1) infeasible, freeze the "
-            "WHOLE joint_nuts_block via `m$freeze(\"" + cfg_.name + "\")` "
-            "at the cost of the other slots stopping too.");
+        // Validate: sub must match one of the block's slot names.
+        std::size_t hit = static_cast<std::size_t>(-1);
+        for (std::size_t s = 0; s < cfg_.sub_params.size(); ++s) {
+            if (cfg_.sub_params[s].name == sub) { hit = s; break; }
+        }
+        if (hit == static_cast<std::size_t>(-1)) {
+            std::string valid;
+            for (const auto& sp : cfg_.sub_params) {
+                valid += (valid.empty() ? "" : ", ") + sp.name;
+            }
+            throw std::runtime_error(
+                "joint_nuts_block '" + cfg_.name +
+                "': freeze_sub unknown slot '" + sub +
+                "'; valid slot names: " + valid);
+        }
+        frozen_slots_.insert(sub);
+        rebuild_frozen_unc_idx_();
     }
 
     void unfreeze_sub(const std::string& sub) override {
-        (void)sub;
-        // No-op: freeze_sub always throws, so nothing is ever in a
-        // slot-frozen state that unfreeze_sub would need to release.
+        auto it = frozen_slots_.find(sub);
+        if (it != frozen_slots_.end()) {
+            frozen_slots_.erase(it);
+            rebuild_frozen_unc_idx_();
+        }
     }
 
     std::vector<std::string> frozen_subnames() const override {
-        return {};   // per freeze_sub above: no slot is ever frozen in v1
+        // Return in slot_specs_ order for stable get_frozen ordering.
+        std::vector<std::string> out;
+        for (const auto& sp : cfg_.sub_params) {
+            if (frozen_slots_.count(sp.name)) out.push_back(sp.name);
+        }
+        return out;
+    }
+
+    /// Whole-block unfreeze also clears slot-frozen state for consistency
+    /// (parallels rjmcmc_block's unfreeze override).
+    void unfreeze() override {
+        block_sampler::unfreeze();
+        frozen_slots_.clear();
+        frozen_unc_idx_.reset();
     }
 
     // ---- Kernel-tuning interface (readapt) ------------------------------
@@ -1808,6 +1870,31 @@ private:
         ns.n_burnin_draws = saved_burnin;
         ns.n_keep_draws   = saved_keep;
         ns.n_adapt_draws  = saved_adapt;
+    }
+
+    // Kernel-control slot-freeze state (DESIGN_NOTES Sec.10.a Approach B).
+    // frozen_slots_ is the source of truth (set by freeze_sub / cleared by
+    // unfreeze_sub); frozen_unc_idx_ is the derived index vector of positions
+    // in theta_cat_ that are frozen, rebuilt by rebuild_frozen_unc_idx_.
+    std::unordered_set<std::string> frozen_slots_;
+    arma::uvec                      frozen_unc_idx_;   // empty when no slot frozen
+
+    void rebuild_frozen_unc_idx_() {
+        std::vector<arma::uword> ids;
+        for (std::size_t s = 0; s < cfg_.sub_params.size(); ++s) {
+            if (!frozen_slots_.count(cfg_.sub_params[s].name)) continue;
+            const std::size_t off = unc_offsets_.empty()
+                                        ? offsets_[s]
+                                        : unc_offsets_[s];
+            const std::size_t d   = unc_dims_.empty()
+                                        ? cfg_.sub_params[s].dim
+                                        : unc_dims_[s];
+            for (std::size_t k = 0; k < d; ++k)
+                ids.push_back(static_cast<arma::uword>(off + k));
+        }
+        if (ids.empty()) { frozen_unc_idx_.reset(); return; }
+        frozen_unc_idx_.set_size(ids.size());
+        for (std::size_t i = 0; i < ids.size(); ++i) frozen_unc_idx_[i] = ids[i];
     }
 
     joint_nuts_block_config cfg_;

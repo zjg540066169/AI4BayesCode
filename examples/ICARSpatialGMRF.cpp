@@ -114,6 +114,7 @@
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/gmrf_precision_block.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -287,7 +288,7 @@ icar_joint_log_density(const arma::vec& theta_cat,
 
 }  // anonymous namespace
 
-class ICARSpatialGMRF {
+class ICARSpatialGMRF : public AI4BayesCode::kernel_control_mixin<ICARSpatialGMRF> {
 public:
     ICARSpatialGMRF(const arma::vec& y,
                          const arma::vec& node_idx_1based,   // 1-based node index
@@ -591,7 +592,7 @@ RCPP_MODULE(ICARSpatialGMRF_module) {
                 "Re-tune NUTS dual-averaging state for the joint hyperparam "
                 "block. Chain state preserved. Args: n (internal iters), "
                 "reset (bool; reinit DA state).")
-        ;
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(ICARSpatialGMRF);
 }
 #endif
 
@@ -617,7 +618,8 @@ PYBIND11_MODULE(ICARSpatialGMRF, m) {
         .def("get_dag",      &ICARSpatialGMRF::get_dag)
         .def("get_history",  &ICARSpatialGMRF::get_history)
         .def("readapt_NUTS", &ICARSpatialGMRF::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(ICARSpatialGMRF);
 }
 #endif
 

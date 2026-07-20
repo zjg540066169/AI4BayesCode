@@ -117,6 +117,7 @@
 
 // genBART block (Rcpp-free, transitively pulls in the GPL genBART kernel)
 #include "AI4BayesCode/genbart_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -134,7 +135,7 @@ using AI4BayesCode::genbart_block_config;
 //  state_map / history_map, ai4b::stop.
 // ============================================================================
 
-class GBartPoisson {
+class GBartPoisson : public AI4BayesCode::kernel_control_mixin<GBartPoisson> {
 public:
     GBartPoisson(const arma::mat& X,
                  const arma::vec& y,
@@ -535,7 +536,8 @@ RCPP_MODULE(GBartPoisson_module) {
                 "(r [n_draws x N]).")
         .method("get_tree_history", &GBartPoisson::get_tree_history,
                 "Return per-draw serialized BART forests (one per stored "
-                "draw when keep_tree=TRUE; else the current forest).");
+                "draw when keep_tree=TRUE; else the current forest).")
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(GBartPoisson);
 }
 #endif
 
@@ -564,7 +566,8 @@ PYBIND11_MODULE(GBartPoisson, m) {
         .def("predict_at",       &GBartPoisson::predict_at, pybind11::arg("new_data"))
         .def("get_dag",          &GBartPoisson::get_dag)
         .def("get_history",      &GBartPoisson::get_history)
-        .def("get_tree_history", &GBartPoisson::get_tree_history);
+        .def("get_tree_history", &GBartPoisson::get_tree_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(GBartPoisson);
 }
 #endif
 

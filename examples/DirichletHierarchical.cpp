@@ -114,6 +114,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -249,7 +250,7 @@ double s_kappa_theta_joint_log_density(const arma::vec& x,
 //  User-facing class exposed to R.
 // ============================================================================
 
-class DirichletHierarchical {
+class DirichletHierarchical : public AI4BayesCode::kernel_control_mixin<DirichletHierarchical> {
 public:
     DirichletHierarchical(const arma::mat& S_obs,  // K x P matrix of data
                                double beta_a,
@@ -549,7 +550,8 @@ RCPP_MODULE(DirichletHierarchical_module) {
                 "Return the predict DAG.")
         .method("get_history", &DirichletHierarchical::get_history,
                 "History of [s, kappa, theta] draws.")
-        .method("readapt_NUTS", &DirichletHierarchical::readapt_NUTS);
+        .method("readapt_NUTS", &DirichletHierarchical::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(DirichletHierarchical);
 }
 #endif
 
@@ -572,7 +574,8 @@ PYBIND11_MODULE(DirichletHierarchical, m) {
         .def("get_dag",      &DirichletHierarchical::get_dag)
         .def("get_history",  &DirichletHierarchical::get_history)
         .def("readapt_NUTS", &DirichletHierarchical::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(DirichletHierarchical);
 }
 #endif
 

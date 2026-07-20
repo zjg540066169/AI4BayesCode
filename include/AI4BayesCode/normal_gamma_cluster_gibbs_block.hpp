@@ -313,12 +313,16 @@ public:
                         cfg_.a_lambda_0, 1.0 / cfg_.b_lambda_0);
                     double lam = gam(rng);
                     if (!(lam > 0.0)) lam = 1e-300;
-                    lambda_[idx] = lam;
+                    // Kernel-control sub-key freeze (DESIGN_NOTES Sec.10.a):
+                    // if lambda_frozen_, skip lambda update; use existing value.
+                    if (!lambda_frozen_) lambda_[idx] = lam;
+                    const double lam_use = lambda_frozen_ ? lambda_[idx] : lam;
                     // mu_kd | lambda_kd ~ N(mu_0_d, 1 / (kappa_0 * lambda_kd))
                     // sd = 1 / sqrt(kappa_0 * lambda_kd)
                     const double sd = 1.0 /
-                        std::sqrt(cfg_.kappa_0 * lam);
-                    mu_[idx] = cfg_.mu_0[j] + sd * stdnorm(rng);
+                        std::sqrt(cfg_.kappa_0 * lam_use);
+                    if (!mu_frozen_)
+                        mu_[idx] = cfg_.mu_0[j] + sd * stdnorm(rng);
                 } else {
                     // Posterior draw with sufficient statistics.
                     const double mean_y =
@@ -348,10 +352,14 @@ public:
                     std::gamma_distribution<double> gam(a_n, 1.0 / b_n);
                     double lam = gam(rng);
                     if (!(lam > 0.0)) lam = 1e-300;
-                    lambda_[idx] = lam;
+                    // Kernel-control sub-key freeze (DESIGN_NOTES Sec.10.a):
+                    // if lambda_frozen_, skip lambda update; use existing value.
+                    if (!lambda_frozen_) lambda_[idx] = lam;
+                    const double lam_use = lambda_frozen_ ? lambda_[idx] : lam;
                     // mu_kd | lambda_kd ~ N(mu_n, 1 / (kappa_n * lambda_kd))
-                    const double sd = 1.0 / std::sqrt(kappa_n * lam);
-                    mu_[idx] = mu_n + sd * stdnorm(rng);
+                    const double sd = 1.0 / std::sqrt(kappa_n * lam_use);
+                    if (!mu_frozen_)
+                        mu_[idx] = mu_n + sd * stdnorm(rng);
                 }
             }
         }
@@ -386,6 +394,40 @@ public:
     }
 
     const std::string& name() const noexcept override { return cfg_.name; }
+
+    // Kernel-control sub-key freeze API (DESIGN_NOTES Sec.10 + subagent-B
+    // block-family audit). Two sub-names -- the block's cfg_.mu_name and
+    // cfg_.lambda_name. Freezing "<mu_name>" holds cluster means fixed while
+    // precisions sample from their (data-dependent) conditional; freezing
+    // "<lambda_name>" holds cluster precisions fixed while means sample.
+    // Composite dot-path form: "<block_name>.<mu_name>" also works.
+    std::vector<std::string> subnames() const override {
+        return {cfg_.mu_name, cfg_.lambda_name};
+    }
+    void freeze_sub(const std::string& sub) override {
+        if (sub == cfg_.mu_name)          mu_frozen_ = true;
+        else if (sub == cfg_.lambda_name) lambda_frozen_ = true;
+        else throw std::runtime_error(
+            "normal_gamma_cluster_gibbs_block '" + cfg_.name +
+            "': freeze_sub unknown sub-name '" + sub +
+            "'; valid: '" + cfg_.mu_name + "', '" + cfg_.lambda_name + "'");
+    }
+    void unfreeze_sub(const std::string& sub) override {
+        if (sub == cfg_.mu_name)          mu_frozen_ = false;
+        else if (sub == cfg_.lambda_name) lambda_frozen_ = false;
+        // unknown = no-op (permissive)
+    }
+    std::vector<std::string> frozen_subnames() const override {
+        std::vector<std::string> out;
+        if (mu_frozen_)     out.push_back(cfg_.mu_name);
+        if (lambda_frozen_) out.push_back(cfg_.lambda_name);
+        return out;
+    }
+    void unfreeze() override {
+        block_sampler::unfreeze();
+        mu_frozen_ = false;
+        lambda_frozen_ = false;
+    }
 
     std::size_t dim() const noexcept override {
         return 2 * cfg_.K_trunc * cfg_.d;
@@ -431,6 +473,12 @@ private:
             current_[flat + i] = lambda_[i];
         }
     }
+
+    // Kernel-control sub-key freeze flags (DESIGN_NOTES Sec.10 + subagent-B).
+    // Whole-block freeze goes via is_frozen_ in base class; these additionally
+    // gate the mu-update and lambda-update inside step().
+    bool                                    mu_frozen_     = false;
+    bool                                    lambda_frozen_ = false;
 
     normal_gamma_cluster_gibbs_block_config cfg_;
     arma::vec                               mu_;

@@ -124,6 +124,7 @@
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/elliptical_slice_sampling_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 // Vendored libgp kernel subsystem (BSD-3). Unity header includes both
 // headers and .cc sources so Rcpp::sourceCpp picks everything up.
@@ -240,7 +241,7 @@ double median_pairwise_distance(const arma::mat& X) {
 // User-facing class exposed to R.
 // ============================================================================
 
-class GPRegression {
+class GPRegression : public AI4BayesCode::kernel_control_mixin<GPRegression> {
 public:
     GPRegression(const arma::mat& X,
                  const arma::vec& y,
@@ -927,7 +928,8 @@ RCPP_MODULE(GPRegression_module) {
         .method("predict_at",  &GPRegression::predict_at)
         .method("get_dag",     &GPRegression::get_dag)
         .method("get_history", &GPRegression::get_history)
-        .method("readapt_NUTS", &GPRegression::readapt_NUTS);
+        .method("readapt_NUTS", &GPRegression::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(GPRegression);
 }
 #endif
 
@@ -949,7 +951,8 @@ PYBIND11_MODULE(GPRegression, m) {
         .def("get_dag",      &GPRegression::get_dag)
         .def("get_history",  &GPRegression::get_history)
         .def("readapt_NUTS", &GPRegression::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(GPRegression);
 }
 #endif
 

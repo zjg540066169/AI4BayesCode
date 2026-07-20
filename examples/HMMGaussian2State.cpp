@@ -107,6 +107,7 @@
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/hmm_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -118,7 +119,7 @@ using AI4BayesCode::composite_block;
 using AI4BayesCode::hmm_block;
 using AI4BayesCode::hmm_block_config;
 
-class HMMGaussian2State {
+class HMMGaussian2State : public AI4BayesCode::kernel_control_mixin<HMMGaussian2State> {
 public:
     HMMGaussian2State(const arma::vec& y,
                       const arma::vec& A_flat_row_major,  // length 4 (2x2)
@@ -350,7 +351,8 @@ RCPP_MODULE(HMMGaussian2State_module) {
         .method("predict_at",  &HMMGaussian2State::predict_at,
                 "Posterior predictive y_rep given current z sequence.")
         .method("get_dag",     &HMMGaussian2State::get_dag)
-        .method("get_history", &HMMGaussian2State::get_history);
+        .method("get_history", &HMMGaussian2State::get_history)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(HMMGaussian2State);
 }
 #endif
 
@@ -376,7 +378,8 @@ PYBIND11_MODULE(HMMGaussian2State, m) {
         .def("predict_at",  &HMMGaussian2State::predict_at,
              pybind11::arg("new_data"))
         .def("get_dag",     &HMMGaussian2State::get_dag)
-        .def("get_history", &HMMGaussian2State::get_history);
+        .def("get_history", &HMMGaussian2State::get_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(HMMGaussian2State);
 }
 #endif
 

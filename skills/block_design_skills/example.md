@@ -11,15 +11,12 @@
 # codegen_cpp.md (Sec. "Class shape", "Header @example block", "Authoring order"); the canonical worked
 # file to copy verbatim for SHAPE = examples/GaussianLocationScale.cpp.
 #
-# HEADER PATCH IN FLIGHT (2026-07-19): the kernel-control category
-# (freeze / unfreeze / get_frozen) described in codegen_cpp.md and referenced below is a
-# FORWARD-LOOKING contract. The required header include/AI4BayesCode/kernel_control_mixin.hpp
-# SHIPS IN A SEPARATE FOLLOW-UP PATCH. Until that patch lands, DO NOT emit the mixin inheritance
-# or the AI4BAYESCODE_BIND_KERNEL_CONTROL / AI4BAYESCODE_PYBIND_KERNEL_CONTROL macros here --
-# they will fail to compile. Emit core-6 + conditional readapt_NUTS only. Downstream users of
-# examples generated in the interim who call m$freeze(...) will see an R error like
-# "no method for 'freeze'" -- expected, will disappear once the header patch lands.
-# See DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md for migration timeline.
+# KERNEL-CONTROL SHIPPED (2026-07-20): the freeze / unfreeze / get_frozen
+# category, the AI4BayesCode::kernel_control_mixin<Derived> CRTP mixin, and both
+# binding macros (AI4BAYESCODE_BIND_KERNEL_CONTROL / AI4BAYESCODE_PYBIND_KERNEL_CONTROL)
+# are all live. New example wrappers MUST inherit the mixin + emit both macros
+# as the last clause of their RCPP_MODULE / PYBIND11_MODULE class-fluent-chains.
+# See codegen_cpp.md wrapper template for the exact placement.
 
 ## !!! GATE CHECK FIRST -- did the user accept the example gate? !!!
 

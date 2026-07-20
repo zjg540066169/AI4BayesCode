@@ -145,6 +145,7 @@
 #include "AI4BayesCode/dirichlet_gibbs_block.hpp"
 #include "AI4BayesCode/normal_gamma_cluster_gibbs_block.hpp"
 #include "AI4BayesCode/bnp_utils.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -193,7 +194,7 @@ inline double diag_normal_log_density(const double* y, const double* mu,
 //   The standalone demo at the end of this file drives the class directly.)
 // ============================================================================
 
-class FiniteGaussianMixture {
+class FiniteGaussianMixture : public AI4BayesCode::kernel_control_mixin<FiniteGaussianMixture> {
 public:
     // Data-driven weakly-informative Normal-Gamma hypers (see CRITICAL
     // note in skills/block_catalogue/index.md; verified on DPGaussianMixture).
@@ -661,7 +662,8 @@ RCPP_MODULE(FiniteGaussianMixture_module) {
         .method("predict_at",  &FiniteGaussianMixture::predict_at,
                 "Posterior predictive y_rep at training X. Empty list only.")
         .method("get_dag",     &FiniteGaussianMixture::get_dag)
-        .method("get_history", &FiniteGaussianMixture::get_history);
+        .method("get_history", &FiniteGaussianMixture::get_history)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(FiniteGaussianMixture);
 }
 #endif
 
@@ -701,7 +703,8 @@ PYBIND11_MODULE(FiniteGaussianMixture, m) {
         .def("predict_at",  &FiniteGaussianMixture::predict_at,
              pybind11::arg("new_data"))
         .def("get_dag",     &FiniteGaussianMixture::get_dag)
-        .def("get_history", &FiniteGaussianMixture::get_history);
+        .def("get_history", &FiniteGaussianMixture::get_history)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(FiniteGaussianMixture);
 }
 #endif
 

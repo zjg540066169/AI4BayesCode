@@ -120,6 +120,7 @@
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/ode_rk45.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -299,7 +300,7 @@ double sir_joint_log_density(const arma::vec& theta_cat,
 
 } // anonymous namespace
 
-class ODE_SIR {
+class ODE_SIR : public AI4BayesCode::kernel_control_mixin<ODE_SIR> {
 public:
     ODE_SIR(double S0, double I0, double R0,
                   const arma::vec& t_obs,
@@ -578,7 +579,8 @@ RCPP_MODULE(ODE_SIR_module) {
         .method("predict_at",   &ODE_SIR::predict_at)
         .method("get_dag",      &ODE_SIR::get_dag)
         .method("get_history",  &ODE_SIR::get_history)
-        .method("readapt_NUTS", &ODE_SIR::readapt_NUTS);
+        .method("readapt_NUTS", &ODE_SIR::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(ODE_SIR);
 }
 #endif  // AI4BAYESCODE_RCPP_MODULE
 
@@ -607,7 +609,8 @@ PYBIND11_MODULE(ODE_SIR, m) {
         .def("get_dag",      &ODE_SIR::get_dag)
         .def("get_history",  &ODE_SIR::get_history)
         .def("readapt_NUTS", &ODE_SIR::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(ODE_SIR);
 }
 #endif  // AI4BAYESCODE_PYBIND_MODULE
 

@@ -104,6 +104,7 @@
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/elliptical_slice_sampling_block.hpp"
+#include "AI4BayesCode/kernel_control_mixin.hpp"
 
 // Vendored libgp kernel subsystem (BSD-3).
 #include "libgp_kernels_unity.h"
@@ -215,7 +216,7 @@ double amp_ell_joint_log_density(const arma::vec& theta_cat,
 // User-facing class
 // ============================================================================
 
-class GPClassification {
+class GPClassification : public AI4BayesCode::kernel_control_mixin<GPClassification> {
 public:
     GPClassification(const arma::mat& X,
                           const arma::vec& y,
@@ -798,7 +799,8 @@ RCPP_MODULE(GPClassification_module) {
         .method("predict_at",   &GPClassification::predict_at)
         .method("get_dag",      &GPClassification::get_dag)
         .method("get_history",  &GPClassification::get_history)
-        .method("readapt_NUTS", &GPClassification::readapt_NUTS);
+        .method("readapt_NUTS", &GPClassification::readapt_NUTS)
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(GPClassification);
 }
 #endif
 
@@ -820,7 +822,8 @@ PYBIND11_MODULE(GPClassification, m) {
         .def("get_dag",      &GPClassification::get_dag)
         .def("get_history",  &GPClassification::get_history)
         .def("readapt_NUTS", &GPClassification::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1);
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        AI4BAYESCODE_PYBIND_KERNEL_CONTROL(GPClassification);
 }
 #endif
 

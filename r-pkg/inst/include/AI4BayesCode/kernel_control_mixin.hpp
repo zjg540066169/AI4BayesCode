@@ -188,22 +188,36 @@ public:
 // pybind11 supports C++ default arguments natively, so the single-def
 // covers both call shapes (`m.freeze(names)` and
 // `m.freeze(names, quiet=True)`).
+//
+// USAGE: this macro emits `.def(...)` clauses INSIDE the pybind11::class_
+// fluent chain (mirrors the RCPP macro). Callsite:
+//
+//     pybind11::class_<CLASSNAME>(m, "CLASSNAME")
+//         .def(...)                             // existing methods
+//         ...
+//         .def("get_history", &CLASSNAME::get_history)   // no ; here
+//         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(CLASSNAME); // macro + ;
+//
+// The macro takes ONLY the class name (not the module var) because
+// member-function pointers are bound via class_<T>::def(), not module::def().
+// (A previous version incorrectly used `M.def(...)` on the module, which
+// pybind11 rejects for pointer-to-member functions.)
 
 #ifdef AI4BAYESCODE_PYBIND_MODULE
-#define AI4BAYESCODE_PYBIND_KERNEL_CONTROL(M, CLASSNAME)                  \
-    M.def("freeze",                                                       \
-          &CLASSNAME::py_freeze,                                          \
-          pybind11::arg("names"),                                         \
-          pybind11::arg("quiet") = false,                                 \
-          "Fix sub-kernel(s) at current value; quiet=True suppresses "    \
-          "redundant-refreeze warning")                                   \
-     .def("unfreeze",                                                     \
-          &CLASSNAME::py_unfreeze,                                        \
-          pybind11::arg("names") = pybind11::none(),                      \
-          "Release sub-kernel(s); no arg / None = all")                   \
-     .def("get_frozen",                                                   \
-          &CLASSNAME::py_get_frozen,                                      \
-          "List currently-frozen block names (DFS pre-order)")
+#define AI4BAYESCODE_PYBIND_KERNEL_CONTROL(CLASSNAME)                     \
+    .def("freeze",                                                        \
+         &CLASSNAME::py_freeze,                                           \
+         pybind11::arg("names"),                                          \
+         pybind11::arg("quiet") = false,                                  \
+         "Fix sub-kernel(s) at current value; quiet=True suppresses "     \
+         "redundant-refreeze warning")                                    \
+    .def("unfreeze",                                                      \
+         &CLASSNAME::py_unfreeze,                                         \
+         pybind11::arg("names") = pybind11::none(),                       \
+         "Release sub-kernel(s); no arg / None = all")                    \
+    .def("get_frozen",                                                    \
+         &CLASSNAME::py_get_frozen,                                       \
+         "List currently-frozen block names (DFS pre-order)")
 #endif // AI4BAYESCODE_PYBIND_MODULE
 
 #endif // AI4BAYESCODE_KERNEL_CONTROL_MIXIN_HPP

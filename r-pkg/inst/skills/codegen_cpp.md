@@ -15,19 +15,16 @@ description: |
   guidance.
 ---
 
-> **HEADER PATCH IN FLIGHT (2026-07-19):** The kernel-control category
-> (`freeze / unfreeze / get_frozen`) documented in this skill is a
-> FORWARD-LOOKING contract. The required header
-> `include/AI4BayesCode/kernel_control_mixin.hpp` and its base-class
-> hooks (`block_sampler::is_frozen_`, `composite_block::freeze/unfreeze/
-> get_frozen`, `joint_nuts_block` slot-level override) SHIP IN A
-> SEPARATE FOLLOW-UP PATCH. Until that patch lands, code generated per
-> this skill's mixin + macro template WILL FAIL TO COMPILE. See
-> `DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md` for the migration
-> timeline. During the interval, do NOT emit the mixin inheritance or
-> the `AI4BAYESCODE_BIND_KERNEL_CONTROL` macro (emit the core-6 only,
-> plus conditional `readapt_NUTS`); users lose the freeze feature until
-> the header patch lands.
+> **KERNEL-CONTROL SHIPPED (2026-07-20).** The `freeze / unfreeze /
+> get_frozen` category and the `AI4BAYESCODE_BIND_KERNEL_CONTROL` /
+> `AI4BAYESCODE_PYBIND_KERNEL_CONTROL` macros are live. New wrappers
+> MUST inherit `AI4BayesCode::kernel_control_mixin<Derived>` (CRTP) and
+> emit both macros as the last clause of their RCPP_MODULE and
+> PYBIND11_MODULE class_-fluent-chains respectively (see the templates
+> below). The pybind macro's signature is `AI4BAYESCODE_PYBIND_KERNEL_CONTROL(CLASSNAME)`
+> -- takes only the class name (not the module var) because it emits
+> `.def(...)` inside the class_-fluent-chain, not `M.def(...)` on the
+> module (a previous draft version was wrong; see DESIGN_NOTES Sec.10 macro def).
 
 # AI4BayesCode codegen -- C++ file emission
 
@@ -2439,7 +2436,7 @@ PYBIND11_MODULE(<ClassName>, m) {
     // ALWAYS -- kernel-control category (interface.md Sec.1).
     // The macro emits `.def("freeze", ...)`, `.def("unfreeze", ...)`,
     // `.def("get_frozen", ...)` bound to the mixin's forwarders.
-    AI4BAYESCODE_PYBIND_KERNEL_CONTROL(m, ClassName);
+    AI4BAYESCODE_PYBIND_KERNEL_CONTROL(ClassName);
 }
 #endif
 ```
