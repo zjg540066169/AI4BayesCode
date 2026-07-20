@@ -361,6 +361,46 @@ public:
     }
 
     void step(std::mt19937_64& rng) override {
+        // Refuse partial sub-key freeze (2026-07-20).
+        //
+        // The reversible-jump birth/death move modifies (gamma_j, beta_j)
+        // ATOMICALLY: a birth writes a new beta AND flips gamma 0->1; a
+        // death writes beta=0 AND flips gamma 1->0. Freezing only one of
+        // the two sub-keys does NOT preserve pinning under the joint
+        // proposal -- e.g. with only "gamma" frozen the (B) trans-dim
+        // sweep is skipped but active betas continue to sample via
+        // continuous_update (or the (A) RW), and vice versa the paired
+        // move still fires around the frozen slot in the other direction
+        // depending on which sub-flag was set. In either single-flag
+        // configuration the composite of (frozen sub-key + still-active
+        // joint move) is a semantically ill-defined kernel that violates
+        // the user's stated "pin this coordinate" intent.
+        //
+        // Enforcement is a step-guard (option (c) in the design notes):
+        // freeze_sub() itself does NOT raise, because the composite may
+        // call freeze_sub("gamma") and freeze_sub("beta") in sequence
+        // when the user passes freeze({"<name>.gamma", "<name>.beta"});
+        // instead we require both flags to be equal at step time. If
+        // exactly one is set, throw with a clear, actionable message.
+        // Whole-block freeze routes through is_frozen_ and the composite
+        // skips step() entirely (see composite_block::step), so this
+        // check never fires in that case.
+        if (gamma_frozen_ != beta_frozen_) {
+            throw std::runtime_error(
+                "rjmcmc_block '" + cfg_.name +
+                "': rjmcmc joint move requires either freezing both "
+                "sub-keys (gamma AND beta) simultaneously or freezing "
+                "the whole rjmcmc_block; single sub-key freeze does "
+                "not preserve pinning under joint proposals "
+                "(currently frozen: " +
+                (gamma_frozen_ ? std::string("'") + cfg_.gamma_key + "'"
+                               : std::string("'") + cfg_.beta_key + "'") +
+                "). Fix: pass freeze({\"" + cfg_.name + "." + cfg_.gamma_key +
+                "\", \"" + cfg_.name + "." + cfg_.beta_key +
+                "\"}) to freeze both sub-keys, or freeze({\"" + cfg_.name +
+                "\"}) to freeze the whole block.");
+        }
+
         // Random permutation of indices for this sweep.
         std::vector<std::size_t> order(cfg_.p);
         std::iota(order.begin(), order.end(), 0);
@@ -663,11 +703,19 @@ public:
     //
     // rjmcmc_block exposes two sub-keys -- gamma_key (trans-dim sweep) and
     // beta_key (continuous_update on active betas). Composite calls
-    // freeze_sub(sub) with either name to disable that sub-update in
-    // subsequent step() calls; the whole-block freeze() (inherited from
-    // base) atomically disables both. See DESIGN_NOTES Sec.10.d for the
-    // ".beta" freeze semantic hazard (birth-proposed betas never refresh
-    // and active-beta vector length can still change under gamma sweep).
+    // freeze_sub(sub) with either name to record the intent; whole-block
+    // freeze() (inherited from base) atomically disables both.
+    //
+    // PARTIAL SUB-KEY FREEZE IS REFUSED (2026-07-20). Because the
+    // trans-dim birth/death move updates (gamma, beta) atomically, a
+    // single-sub-key freeze does not preserve pinning under the joint
+    // proposal (previously documented as an intrinsic hazard). The block
+    // now REQUIRES either (a) both sub-keys frozen simultaneously via
+    // freeze({"<name>.<gamma_key>", "<name>.<beta_key>"}) or (b) the
+    // whole block frozen via freeze({"<name>"}). freeze_sub() records
+    // the flag but step() refuses to run when exactly one flag is set
+    // (see the step-guard at the top of step() for the enforcement path
+    // and the user-facing error message).
 
     std::vector<std::string> subnames() const override {
         return {cfg_.gamma_key, cfg_.beta_key};

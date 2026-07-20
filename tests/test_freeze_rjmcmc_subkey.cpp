@@ -1,13 +1,32 @@
 /*================================================================================
  *  rjmcmc_block sub-key freeze acceptance test (Batch O, 2026-07-20).
  *
- *  Verifies DESIGN_NOTES Sec.10.d: freeze("<name>.gamma") pins the trans-dim
- *  gamma sweep, freeze("<name>.beta") pins the continuous_update. Whole-block
- *  freeze (via block name alone) pins both atomically.
+ *  Verifies the sub-key freeze contract on rjmcmc_block:
  *
- *  Uses a MINIMAL rjmcmc_block config with trivial callbacks (uniform prior on
- *  gamma, standard-normal slab on beta) -- enough to exercise the sub-key
- *  gates in step() without duplicating the full SpikeSlabRJMCMC scaffolding.
+ *    R1  whole-block freeze via `freeze("<name>")` pins both sub-updates
+ *        (bitwise-identical state through repeated step()s).
+ *
+ *    R2  single sub-key freeze of `<name>.gamma` alone is REFUSED at
+ *        step() time -- rjmcmc's joint birth/death move updates
+ *        (gamma, beta) atomically, so pinning only one sub-key does
+ *        not preserve intent. step() throws std::runtime_error with
+ *        the canonical message.
+ *
+ *    R3  single sub-key freeze of `<name>.beta` alone is REFUSED at
+ *        step() time -- same rationale as R2 (mirror direction).
+ *
+ *    R4  dual sub-key freeze (`<name>.gamma` AND `<name>.beta`
+ *        simultaneously) is ACCEPTED and pins the full state
+ *        (bitwise-identical through repeated step()s).
+ *
+ *    R5  freeze / get_frozen / unfreeze / re-freeze round trip using
+ *        the whole-block name (which fits the "must refuse partial
+ *        sub-key freeze" rule).
+ *
+ *  Uses a MINIMAL rjmcmc_block config with trivial callbacks (uniform prior
+ *  on gamma, standard-normal slab on beta) -- enough to exercise the
+ *  gates + step-guard in step() without duplicating the full
+ *  SpikeSlabRJMCMC scaffolding.
  *================================================================================*/
 
 #include "AI4BayesCode/composite_block.hpp"
@@ -18,6 +37,7 @@
 #include <cstdio>
 #include <memory>
 #include <random>
+#include <stdexcept>
 #include <string>
 
 namespace {
@@ -74,6 +94,11 @@ static rjmcmc_block_config make_trivial_rj(std::size_t p, const arma::vec& gamma
     return cfg;
 }
 
+// Substring check helper for exception messages.
+static bool msg_contains(const std::string& msg, const std::string& needle) {
+    return msg.find(needle) != std::string::npos;
+}
+
 static void R1_whole_block_freeze() {
     std::printf("\n--- R1: whole-block freeze on rjmcmc_block ---\n");
     const std::size_t p = 5;
@@ -101,8 +126,8 @@ static void R1_whole_block_freeze() {
     comp.unfreeze_all();
 }
 
-static void R2_gamma_frozen() {
-    std::printf("\n--- R2: gamma sub-key freeze -- membership pinned, beta samples ---\n");
+static void R2_gamma_alone_refused() {
+    std::printf("\n--- R2: single-sub-key freeze of gamma alone is REFUSED ---\n");
     const std::size_t p = 6;
     std::mt19937_64 rng(20260720002ULL);
     arma::vec gi(p); arma::vec bi(p);
@@ -115,130 +140,92 @@ static void R2_gamma_frozen() {
     comp.add_child(std::make_unique<rjmcmc_block>(make_trivial_rj(p, gi, bi)));
     for (int i = 0; i < 50; ++i) comp.step(rng);
 
-    // Freeze gamma sub-key via dot-path: "rj.gamma_k"
+    // freeze("rj.gamma_k") -- the freeze API call itself succeeds; the
+    // refuse happens at the next step() call.
     auto warns = comp.freeze({"rj.gamma_k"});
-    check(warns.empty(), "R2.a rj.gamma_k freeze no warnings");
-    check(comp.get_frozen() == std::vector<std::string>{"rj.gamma_k"},
-          "R2.b get_frozen == {rj.gamma_k} dot-path form");
+    check(warns.empty(), "R2.a rj.gamma_k freeze -- no warnings from freeze() itself");
 
-    // Snapshot gamma vector.
-    arma::vec cur_pre = comp.current();
-    arma::vec gamma_pre = cur_pre.subvec(0, p - 1);   // first p entries
-    arma::vec beta_pre  = cur_pre.subvec(p, 2*p - 1);
-
-    for (int i = 0; i < 500; ++i) comp.step(rng);
-
-    arma::vec cur_after = comp.current();
-    arma::vec gamma_after = cur_after.subvec(0, p - 1);
-    arma::vec beta_after  = cur_after.subvec(p, 2*p - 1);
-
-    bool gamma_identical = true;
-    for (std::size_t j = 0; j < p; ++j)
-        if (gamma_after[j] != gamma_pre[j]) { gamma_identical = false; break; }
-    check(gamma_identical, "R2.c gamma vector unchanged (active-set pinned)");
-
-    // Beta should have MOVED at ACTIVE positions (continuous_update fires
-    // every step). At INACTIVE (gamma=0) positions beta stays 0.
-    bool active_moved = false;
-    for (std::size_t j = 0; j < p; ++j) {
-        if (gamma_pre[j] > 0.5 && beta_after[j] != beta_pre[j]) {
-            active_moved = true;
-        }
+    // step() must throw a std::runtime_error with the canonical message.
+    bool threw = false;
+    std::string caught;
+    try {
+        comp.step(rng);
+    } catch (const std::runtime_error& e) {
+        threw = true;
+        caught = e.what();
+    } catch (...) {
+        // wrong type
     }
-    check(active_moved, "R2.d at least one active beta moved (continuous_update fired)");
+    check(threw, "R2.b step() raised std::runtime_error on gamma-only freeze");
+    check(msg_contains(caught,
+              "rjmcmc joint move requires either freezing both sub-keys "
+              "(gamma AND beta) simultaneously or freezing the whole "
+              "rjmcmc_block; single sub-key freeze does not preserve "
+              "pinning under joint proposals"),
+          "R2.c error message contains canonical refuse text",
+          std::string("got: ") + caught);
+    check(msg_contains(caught, "'gamma_k'"),
+          "R2.d error message names the currently-frozen sub-key ('gamma_k')",
+          std::string("got: ") + caught);
+    check(msg_contains(caught, "rj"),
+          "R2.e error message names the block ('rj')",
+          std::string("got: ") + caught);
 
-    // Inactive betas MUST stay 0 (coupling invariant).
-    bool inactive_zero = true;
-    for (std::size_t j = 0; j < p; ++j) {
-        if (gamma_pre[j] < 0.5 && std::abs(beta_after[j]) > 1e-12) {
-            inactive_zero = false;
-        }
-    }
-    check(inactive_zero, "R2.e inactive positions still have beta==0");
-
+    // Cleanup: unfreeze so the block is usable again by subsequent steps
+    // (not that we need them here, but keeps the composite in a valid
+    // state for future test additions).
     comp.unfreeze_all();
-    check(comp.get_frozen().empty(), "R2.f unfreeze_all clears");
+    check(comp.get_frozen().empty(), "R2.f unfreeze_all clears the offending flag");
 }
 
-static void R3_beta_frozen() {
-    std::printf("\n--- R3: beta sub-key freeze -- continuous_update off, gamma sweep on ---\n");
-    // Use keep_history=true to track per-step beta, then verify: for at
-    // least one position that had CONTINUOUS gamma=1 across all steps,
-    // its beta value never changed. This correctly excludes death-birth
-    // cycles (which would change beta via the birth proposal, per
-    // DESIGN_NOTES Sec.10.d .beta hazard). With only 5 positions but a
-    // 50/50 prior across many steps, statistically SOME position stays
-    // continuously alive.
+static void R3_beta_alone_refused() {
+    std::printf("\n--- R3: single-sub-key freeze of beta alone is REFUSED ---\n");
     const std::size_t p = 4;
     std::mt19937_64 rng(20260720003ULL);
     arma::vec gi(p); arma::vec bi(p);
-    for (std::size_t j = 0; j < p; ++j) {
-        gi[j] = 1.0;
-        bi[j] = 0.5;
-    }
+    for (std::size_t j = 0; j < p; ++j) { gi[j] = 1.0; bi[j] = 0.5; }
 
     composite_block comp("R3_wrapper");
     comp.add_child(std::make_unique<rjmcmc_block>(make_trivial_rj(p, gi, bi)));
-    comp.set_keep_history(true);
     for (int i = 0; i < 30; ++i) comp.step(rng);
 
     auto warns = comp.freeze({"rj.beta_k"});
-    check(warns.empty(), "R3.a rj.beta_k freeze no warnings");
+    check(warns.empty(), "R3.a rj.beta_k freeze -- no warnings from freeze() itself");
 
-    arma::vec cur_pre = comp.current();
-    arma::vec beta_pre = cur_pre.subvec(p, 2*p - 1);
-    comp.clear_history();
-
-    const int N_STEP = 40;
-    for (int i = 0; i < N_STEP; ++i) comp.step(rng);
-
-    // Pull per-step history to find a position that stayed gamma=1 through
-    // all N_STEP steps. On that position, beta must equal beta_pre after
-    // the run (continuous_update was frozen so beta only changes via
-    // birth-after-death, which requires gamma to have flipped).
-    auto hist = comp.get_history();
-    // hist keys: "gamma_k" and "beta_k" -- see current_named_outputs
-    auto it_g = hist.find("gamma_k"); auto it_b = hist.find("beta_k");
-    check(it_g != hist.end() && it_b != hist.end(),
-          "R3.pre.a gamma_k + beta_k in history",
-          "hist_keys_missing");
-    if (it_g == hist.end() || it_b == hist.end()) { comp.unfreeze_all(); return; }
-    const arma::mat& G = it_g->second;   // (N_STEP, p)
-    const arma::mat& B = it_b->second;   // (N_STEP, p)
-
-    bool found = false;
-    for (std::size_t j = 0; j < p; ++j) {
-        bool always_active = true;
-        for (arma::uword i = 0; i < G.n_rows; ++i) {
-            if (G(i, j) < 0.5) { always_active = false; break; }
-        }
-        if (!always_active) continue;
-        // beta on this always-active position should match beta_pre for
-        // every recorded step
-        bool beta_stable = true;
-        for (arma::uword i = 0; i < B.n_rows; ++i) {
-            if (B(i, j) != beta_pre[j]) { beta_stable = false; break; }
-        }
-        if (beta_stable) { found = true; break; }
+    bool threw = false;
+    std::string caught;
+    try {
+        comp.step(rng);
+    } catch (const std::runtime_error& e) {
+        threw = true;
+        caught = e.what();
+    } catch (...) {
+        // wrong type
     }
-    // R3.b intrinsic-hazard note (DESIGN_NOTES Sec.10.d):
-    // Under Bernoulli(0.5) prior every position dies within ~2 steps and
-    // is reborn with a fresh beta from the prior. So "always active" is
-    // vanishingly rare -- the invariant fires only for positions that
-    // stay alive continuously, which needs a sticky-gamma prior we do not
-    // use here to keep the trivial_rj simple. R2 + R4 + the impl reading
-    // (the `if (!beta_frozen_) { ... }` gate in rjmcmc_block::step)
-    // together verify the mechanism; R3.b is DOCUMENTATION of the hazard,
-    // not a hard-fail assertion.
-    check(true, "R3.b (documented hazard) beta stability requires sticky-gamma prior");
-    if (found) std::printf("    (found a stable position -- exceptional; trivial_rj kill rate was ~0)\n");
+    check(threw, "R3.b step() raised std::runtime_error on beta-only freeze");
+    check(msg_contains(caught,
+              "rjmcmc joint move requires either freezing both sub-keys "
+              "(gamma AND beta) simultaneously or freezing the whole "
+              "rjmcmc_block; single sub-key freeze does not preserve "
+              "pinning under joint proposals"),
+          "R3.c error message contains canonical refuse text",
+          std::string("got: ") + caught);
+    check(msg_contains(caught, "'beta_k'"),
+          "R3.d error message names the currently-frozen sub-key ('beta_k')",
+          std::string("got: ") + caught);
 
     comp.unfreeze_all();
-    comp.set_keep_history(false);
+    check(comp.get_frozen().empty(), "R3.e unfreeze_all clears the offending flag");
+
+    // R3.f: after unfreeze the block runs normally again.
+    bool step_ok = true;
+    try { for (int i = 0; i < 10; ++i) comp.step(rng); }
+    catch (...) { step_ok = false; }
+    check(step_ok, "R3.f step() runs normally again after unfreeze_all");
 }
 
-static void R4_both_subkey_frozen() {
-    std::printf("\n--- R4: both sub-keys frozen -- everything pinned ---\n");
+static void R4_both_subkey_frozen_accepted() {
+    std::printf("\n--- R4: BOTH sub-keys frozen simultaneously is ACCEPTED and pins ---\n");
     const std::size_t p = 4;
     std::mt19937_64 rng(20260720004ULL);
     arma::vec gi(p); arma::vec bi(p);
@@ -248,23 +235,34 @@ static void R4_both_subkey_frozen() {
     comp.add_child(std::make_unique<rjmcmc_block>(make_trivial_rj(p, gi, bi)));
     for (int i = 0; i < 30; ++i) comp.step(rng);
 
-    comp.freeze({"rj.gamma_k", "rj.beta_k"});
-    check(comp.get_frozen().size() == 2, "R4.a two sub-keys frozen");
+    // Freeze both in a single freeze() call -- composite dispatches
+    // freeze_sub for each in sequence; step-guard sees both flags set at
+    // step time and permits the sweep body (which then no-ops per j).
+    auto warns = comp.freeze({"rj.gamma_k", "rj.beta_k"});
+    check(warns.empty(), "R4.a dual sub-key freeze -- no warnings");
+    check(comp.get_frozen().size() == 2, "R4.b two sub-keys are frozen");
 
     arma::vec snap = comp.current();
-    for (int i = 0; i < 200; ++i) comp.step(rng);
-    arma::vec after = comp.current();
 
+    bool step_ok = true;
+    try { for (int i = 0; i < 200; ++i) comp.step(rng); }
+    catch (const std::exception& e) {
+        step_ok = false;
+        std::printf("    unexpected throw: %s\n", e.what());
+    }
+    check(step_ok, "R4.c step() runs without throwing when BOTH sub-keys frozen");
+
+    arma::vec after = comp.current();
     bool identical = true;
     for (std::size_t k = 0; k < snap.n_elem; ++k)
         if (after[k] != snap[k]) { identical = false; break; }
-    check(identical, "R4.b state bitwise identical when both sub-keys frozen");
+    check(identical, "R4.d state bitwise identical when both sub-keys frozen");
 
     comp.unfreeze_all();
 }
 
 static void R5_round_trip() {
-    std::printf("\n--- R5: freeze(get_frozen(), quiet=TRUE) round-trip ---\n");
+    std::printf("\n--- R5: freeze / get_frozen / unfreeze / refreeze round-trip ---\n");
     const std::size_t p = 3;
     std::mt19937_64 rng(20260720005ULL);
     arma::vec gi(p); arma::vec bi(p);
@@ -273,18 +271,35 @@ static void R5_round_trip() {
     composite_block comp("R5_wrapper");
     comp.add_child(std::make_unique<rjmcmc_block>(make_trivial_rj(p, gi, bi)));
 
-    comp.freeze({"rj.gamma_k"});
+    // (a) round-trip on whole-block freeze
+    comp.freeze({"rj"});
     auto saved = comp.get_frozen();
-    check(saved == std::vector<std::string>{"rj.gamma_k"}, "R5.a get_frozen returns dot-path");
+    check(saved == std::vector<std::string>{"rj"},
+          "R5.a get_frozen returns {rj} (whole block)");
 
     comp.unfreeze_all();
     check(comp.get_frozen().empty(), "R5.b unfreeze_all clears");
 
-    // Re-freeze from saved list with quiet=TRUE -- MUST not warn even if
-    // some names were already frozen (they aren't after unfreeze_all).
     auto warns = comp.freeze(saved, /*quiet=*/true);
     check(warns.empty(), "R5.c refreeze from saved with quiet=TRUE emits no warnings");
     check(comp.get_frozen() == saved, "R5.d get_frozen matches saved list");
+    comp.unfreeze_all();
+
+    // (b) round-trip on dual sub-key freeze (both must be listed)
+    comp.freeze({"rj.gamma_k", "rj.beta_k"});
+    auto saved2 = comp.get_frozen();
+    check(saved2.size() == 2, "R5.e get_frozen returns two dot-paths for dual freeze");
+
+    comp.unfreeze_all();
+    auto warns2 = comp.freeze(saved2, /*quiet=*/true);
+    check(warns2.empty(), "R5.f refreeze dual sub-key from saved -- no warnings");
+    check(comp.get_frozen() == saved2, "R5.g dual sub-key round-trip preserved");
+
+    // step() must still work under dual-freeze after round-trip
+    bool step_ok = true;
+    try { for (int i = 0; i < 20; ++i) comp.step(rng); }
+    catch (...) { step_ok = false; }
+    check(step_ok, "R5.h step() runs under refrozen dual sub-key");
 
     comp.unfreeze_all();
 }
@@ -294,9 +309,9 @@ static void R5_round_trip() {
 int main() {
     std::printf("=== rjmcmc_block sub-key freeze acceptance test ===\n");
     R1_whole_block_freeze();
-    R2_gamma_frozen();
-    R3_beta_frozen();
-    R4_both_subkey_frozen();
+    R2_gamma_alone_refused();
+    R3_beta_alone_refused();
+    R4_both_subkey_frozen_accepted();
     R5_round_trip();
     std::printf("\n=== SUMMARY: %d passed, %d failed ===\n",
                 G_RES.passed, G_RES.failed);

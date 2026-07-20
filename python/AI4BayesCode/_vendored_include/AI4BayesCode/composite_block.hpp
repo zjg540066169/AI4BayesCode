@@ -467,11 +467,13 @@ private:
         // Try sub-name match across joint / rjmcmc children.
         int match_ct = 0;
         block_sampler* matched = nullptr;
+        std::vector<std::string> matched_dotpaths;
         for (auto& c : children_) {
             auto subs = c->subnames();
             if (std::find(subs.begin(), subs.end(), name) != subs.end()) {
                 ++match_ct;
                 matched = c.get();
+                matched_dotpaths.push_back(c->name() + "." + name);
             }
         }
         if (match_ct == 1) {
@@ -493,10 +495,14 @@ private:
             return;
         }
         if (match_ct > 1) {
+            std::string cands;
+            for (std::size_t i = 0; i < matched_dotpaths.size(); ++i) {
+                if (i) cands += ", ";
+                cands += matched_dotpaths[i];
+            }
             throw std::runtime_error(
-                "sub-name '" + name + "' is ambiguous; matches multiple "
-                "joint blocks. Use dot-path form '<block_name>." + name +
-                "' to disambiguate.");
+                "sub-name '" + name + "' is ambiguous: matches slots [" +
+                cands + "]; use dot-path to disambiguate");
         }
 
         // Try dot-path descent.
@@ -564,11 +570,13 @@ private:
         // Sub-name.
         int match_ct = 0;
         block_sampler* matched = nullptr;
+        std::vector<std::string> matched_dotpaths;
         for (auto& c : children_) {
             auto subs = c->subnames();
             if (std::find(subs.begin(), subs.end(), name) != subs.end()) {
                 ++match_ct;
                 matched = c.get();
+                matched_dotpaths.push_back(c->name() + "." + name);
             }
         }
         if (match_ct == 1) {
@@ -582,9 +590,14 @@ private:
             return;
         }
         if (match_ct > 1) {
+            std::string cands;
+            for (std::size_t i = 0; i < matched_dotpaths.size(); ++i) {
+                if (i) cands += ", ";
+                cands += matched_dotpaths[i];
+            }
             throw std::runtime_error(
-                "sub-name '" + name + "' is ambiguous; matches multiple "
-                "joint blocks. Use dot-path form '<block_name>." + name + "'.");
+                "sub-name '" + name + "' is ambiguous: matches slots [" +
+                cands + "]; use dot-path to disambiguate");
         }
 
         // Dot-path descent.

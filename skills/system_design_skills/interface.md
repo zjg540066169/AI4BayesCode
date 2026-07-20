@@ -195,6 +195,41 @@ using dbarts / mcmclib / etc. directly.
   presence + whitelist/blacklist gate + refreeze warning + stale-derived
   warning.
 
+**Freeze name resolution -- resolver step order.** `composite_block`
+resolves each name passed to `freeze(...)` in this fixed order (see
+`include/AI4BayesCode/composite_block.hpp`, `freeze_one_`):
+
+  1. **Direct child match.** If any child's `name()` equals the argument,
+     that child is frozen (whole-block). This step WINS OUTRIGHT -- if a
+     sibling exposes a slot with the same string, the direct child match
+     still fires and no shadow warning is emitted. `get_frozen()` reports
+     the bare block name in this case.
+  2. **Bare-name slot fallback via `subnames()`.** Otherwise, every
+     freeze-capable child is queried via `subnames()` (joint / rjmcmc /
+     other multi-slot blocks). If EXACTLY ONE child exposes a slot with
+     that name, the resolver rewrites the request to canonical
+     `<child>.<slot>` and delegates to `freeze_sub`. If TWO OR MORE
+     children match, the resolver raises `std::runtime_error` with the
+     enumerated-candidates format:
+     ```
+     sub-name 'X' is ambiguous: matches slots [child_A.X, child_B.X, ...];
+     use dot-path to disambiguate
+     ```
+     (The candidate list is in child declaration order.) `get_frozen()`
+     reports the canonical `<child>.<slot>` dot-path on success.
+  3. **Explicit dot-path descent.** If the argument contains `.`, split
+     on the first dot and recurse into the matching child (nested
+     composite) or freeze the named sub-parameter (joint / rjmcmc leaf).
+     This is the disambiguation escape for step-2 ambiguity.
+  4. **Zero match.** If none of steps 1-3 resolve, the resolver raises
+     `std::runtime_error` with the message
+     `"name '<name>' does not resolve to any child (direct, slot, or
+     dot-path); valid names include: ..."`.
+
+Test coverage: `tests/test_composite_bare_name_slot_fallback.cpp` locks
+in all four cases (unique-slot fallback, ambiguity with enumerated
+candidates, direct-child priority, zero-match error).
+
 ---
 
 ## 2. Three-tier architecture
