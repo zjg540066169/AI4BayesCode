@@ -270,7 +270,7 @@ Before any PR touching Tier A / B / C lands:
       schedule are all explicitly rejected as defaults. See Sec.18.7
       and `validator.md Sec.22`.
 - [ ] **Check #23 (readapt_NUTS state-preservation + RNG separation).**
-      If the change adds or modifies the `readapt_NUTS` 7th method on
+      If the change adds or modifies the `readapt_NUTS` kernel-control method on
       any wrapper (i.e., wrapper containing NUTS-family child): verify
       (a) snapshot-before / restore-after pattern present in
       `readapt_NUTS` body, (b) only `readapt_rng_` consumed inside

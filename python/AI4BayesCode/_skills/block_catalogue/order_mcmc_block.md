@@ -96,8 +96,9 @@ target as the reference.**
 wrapper (`new(OrderMCMCBN, D, cardinalities, bdeu_alpha,
 max_parents, candidate_top_C, family_cache_F, gamma_prune_nats,
 prob_adjacent_swap, initial_order, rng_seed, keep_history)`)
-with the six-method R contract (step / get_current /
-set_current / predict_at / get_dag / get_history).
+with the core-6 R state contract (step / get_current /
+set_current / predict_at / get_dag / get_history) plus the kernel-control
+category (freeze / unfreeze / get_frozen) per interface.md Sec.1.
 
 **Scope (v1.2 ship):**
 - **Discrete data only** with per-column cardinality vector (BDeu

@@ -1994,7 +1994,7 @@ The canonical, copy-this reference is `examples/GaussianLocationScale.cpp`
 `joint_nuts_block` child, the wrapper MUST ALSO expose a conditional 7th
 method `void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1);`
 and carry a 3rd RNG member `mutable std::mt19937_64 readapt_rng_;` (seeded
-once in the ctor init list). See Sec.9 "Conditional 7th method `readapt_NUTS`"
+once in the ctor init list). See Sec.9 "Conditional kernel-control method `readapt_NUTS`"
 below for the exact wrapper-class additions and the
 `examples/GaussianLocationScale.cpp` reference (lines ~158, ~288, ~296).
 
@@ -2299,7 +2299,7 @@ your backend at the tail of the `.cpp`.
 
 ### Tail template -- choose based on Sec.1 Q0 "Runtime backend"
 
-#### Conditional 7th method `readapt_NUTS` (NUTS-family composites only)
+#### Conditional kernel-control method `readapt_NUTS` (NUTS-family composites only)
 
 **Rule:** if the wrapper's composite contains at least one
 `nuts_block` or `joint_nuts_block`
@@ -2336,7 +2336,7 @@ readapt_rng_(rng_seed == 0
                            ^ 0xBF58476D1CE4E5B9ULL}),
 
 // Add to private member declarations, after predict_rng_
-mutable std::mt19937_64 readapt_rng_;   // readapt_NUTS only (7th method)
+mutable std::mt19937_64 readapt_rng_;   // readapt_NUTS only (kernel-control method)
 
 // Add to the wrapper's public method section (before private:)
 /// 7th R-level method: re-tune NUTS metric (mass matrix + step size +

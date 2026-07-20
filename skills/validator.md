@@ -1923,6 +1923,81 @@ stopifnot(identical(before, after))    # slot pinned, whole block not frozen
 m$unfreeze()
 ```
 
+If the composite includes any `rjmcmc_block`, ALSO test sub-key freeze
+(v1 feature per DESIGN_NOTES Sec.10.d):
+
+```r
+# rjmcmc_block("<rj_name>", gamma_key = "<gamma_key>", beta_key = "<beta_key>")
+# NOTE: rjmcmc_block writes TWO named entries into shared_data (and hence the
+# wrapper's get_current() map): one at gamma_key, one at beta_key. They are
+# NOT nested under the block name. See DESIGN_NOTES Sec.6 rjmcmc row for the
+# get_current() shape spec.
+m$freeze("<rj_name>.gamma")            # freeze ONLY the trans-dim sweep
+stopifnot("<rj_name>.gamma" %in% m$get_frozen())
+# active betas still sample via continuous_update
+gamma_before <- m$get_current()[["<gamma_key>"]]
+m$step(10L)
+gamma_after  <- m$get_current()[["<gamma_key>"]]
+stopifnot(identical(gamma_before, gamma_after))   # active-set unchanged
+# beta may have changed via continuous_update
+m$unfreeze()
+```
+
+If the composite has nested composite children, ALSO test dot-path
+descent (v1 feature per DESIGN_NOTES Sec.10.c):
+
+```r
+# outer composite has a child that is itself a composite named "inner"
+m$freeze("inner.<inner_leaf>")
+stopifnot("inner.<inner_leaf>" %in% m$get_frozen())   # dot-path preserved
+m$step(1L)
+# inner leaf's value unchanged; sibling children continue to sample
+m$unfreeze()
+```
+
+Also test the `quiet=TRUE` refreeze path (v1 feature per DESIGN_NOTES
+Sec.10.b) -- verifies checkpoint restore does not spam warnings:
+
+```r
+m$freeze("<whitelist_block_name>")
+w <- withCallingHandlers(
+    m$freeze("<whitelist_block_name>", quiet = TRUE),   # already frozen
+    warning = function(w) stop("quiet=TRUE should suppress refreeze warning"))
+# unknown-name error still fires even with quiet=TRUE
+res <- tryCatch(m$freeze("this_block_does_not_exist", quiet = TRUE),
+                error = identity)
+stopifnot(inherits(res, "error"))
+m$unfreeze()
+```
+
+Also test the checkpoint restore round-trip closure (v1 feature per
+DESIGN_NOTES Sec.10.b + Sec.10.c ordering + Sec.10.d sub-key preservation):
+
+```r
+# Freeze a mix of forms first (slot + rjmcmc sub-key + nested dot-path
+# if the composite supports them; use whatever's available in the wrapper)
+targets <- character(0)
+if (any(sapply(m$get_dag()$blocks, function(b) b$family == "joint_nuts")))
+    targets <- c(targets, "<slot_name>")
+if (any(sapply(m$get_dag()$blocks, function(b) b$family == "rjmcmc")))
+    targets <- c(targets, "<rj_name>.gamma")
+targets <- c(targets, "<whitelist_block_name>")
+m$freeze(targets)
+
+# Snapshot get_frozen output (dot-paths preserved; DFS pre-order per Sec.10.b/c)
+saved <- m$get_frozen()
+stopifnot(setequal(saved, targets))
+
+# Simulate checkpoint restore: unfreeze all, then refreeze from saved
+m$unfreeze()
+stopifnot(length(m$get_frozen()) == 0L)
+w <- withCallingHandlers(
+    m$freeze(saved, quiet = TRUE),
+    warning = function(w) stop("round-trip freeze should be warning-free with quiet=TRUE"))
+stopifnot(setequal(m$get_frozen(), saved))     # closure: get_frozen -> freeze -> get_frozen
+m$unfreeze()
+```
+
 **(d) Stale-derived warning -- static grep.** For any wrapper whose
 composite has a deterministic refresher (`register_refresher(key, fn)`)
 that reads a whitelisted block's `name()`, the runner should include a

@@ -25,18 +25,32 @@ WHITELIST/BLACKLIST admission varies:
 | `*_gibbs_block` (dirichlet / beta / binary / categorical / survival trio) | `step()` skipped; last draw held in shared_data | uniform; no derived-state hazard |
 | `gmrf_precision_block` / `gmrf_whitened_ess_block` | `step()` skipped; latent `x` held at last draw | mild derived state via `Q_fn(ctx)` -- if a hyperparam feeding Q moves while `x` is frozen, the effective conditional on `x` still makes sense (Gibbs-condition-on-x variant) |
 | `stick_breaking_block` / `normal_gamma_cluster_gibbs_block` | `step()` skipped; stick lengths / cluster params held | valid conditional; alpha etc. still sample |
-| `rjmcmc_block` | **whole-block only.** Freezing atomically suppresses BOTH the trans-dim gamma sweep AND the `continuous_update` beta refresh -- they live inside the same `step()`. To sample active betas conditional on frozen gamma: use two composites, or wait for v1.1 sub-key fix API. `dim()` is compile-time-fixed at 2p so composite concatenation stays type-stable through freeze/unfreeze. | see DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md Sec.6 |
+| `rjmcmc_block` | **v1 supports BOTH whole-block AND sub-key** (sub-key scope-bumped 2026-07-19). Whole-block via `freeze("<name>")` atomically suppresses BOTH the trans-dim gamma sweep AND the `continuous_update` beta refresh. Sub-key via dot-path: `freeze("<name>.gamma")` freezes ONLY the gamma sweep (active betas continue to sample); `freeze("<name>.beta")` freezes ONLY the beta refresh (gamma sweep continues). Enables post-model-selection inference (fix active-set at MAP, keep sampling active betas). `dim()` compile-time-fixed at 2p keeps concatenation type-stable through any freeze/unfreeze. See DESIGN_NOTES Sec.6 + Sec.10.d. | The rjmcmc_block override on `freeze()` accepts local sub-keys `"gamma"` / `"beta"` (routed from composite dot-path resolver Sec.10.c). |
 
 **BLACKLIST (freeze -> Rcpp::stop with reason):**
 
 | Family | Reason |
 |---|---|
-| `bart_block` | `set_current(arma::vec)` is `Rcpp::stop` -- no invertibility. Freezing means "hold current forest" but user cannot inject a specific forest state. Additionally: frozen BART leaves `f_bart` in shared_data stale under any subsequent `set_current(X = X_new)`, causing downstream sigma NUTS to adapt on stale residuals. Silent bias. Error string: `"freezing bart_block not supported (forest is non-invertible + derived-state hazard on subsequent set_current(X=...) updates)"`. |
-| `genbart_block` | Same class as `bart_block`. Error string: `"freezing genbart_block not supported (forest is non-invertible + derived-state hazard); same rationale as bart_block"`. |
-| `hmm_block` | Latent state sequence z frozen while emission parameters sample yields mismatched conditioning (Baum-Welch forward pass depends on emissions). Silent bias. Error string: `"freezing hmm_block not supported (latent state sequence conditioning breaks when emission parameters sample)"`. |
+| `bart_block` | `set_current(arma::vec)` is `Rcpp::stop` -- no invertibility. Freezing means "hold current forest" but user cannot inject a specific forest state. Additionally: frozen BART leaves `f_bart` in shared_data stale under any subsequent `set_current(X = X_new)`, causing downstream sigma NUTS to adapt on stale residuals. Silent bias. Canonical error string (matches DESIGN_NOTES Sec.6): `"freezing bart_block not supported (forest is non-invertible + derived-state hazard on subsequent set_current(X=...) updates); use predict_at for held-out prediction, drop the BART child from composite for ablation"`. |
+| `genbart_block` | Same class as `bart_block`. Canonical error string (matches DESIGN_NOTES Sec.6): `"freezing genbart_block not supported (forest is non-invertible + derived-state hazard); same rationale as bart_block"`. |
+| `hmm_block` | Latent state sequence z frozen while emission parameters sample yields mismatched conditioning (Baum-Welch forward pass depends on emissions). Silent bias. Canonical error string (matches DESIGN_NOTES Sec.6): `"freezing hmm_block not supported (latent state sequence conditioning breaks when emission parameters sample); model the HMM inside a two-composite pattern with the emission-freeze at the outer level"`. |
 | `vi_block` subclasses | Sec.18.4 invariant: composite writes `current_sample(rng)` (fresh q-draw) to shared_data each step, NOT `current()` (q-mean). Freezing VI breaks the hybrid q-sample stream -> MCMC siblings silently underestimate posterior variance. Error string: `"freezing VI blocks not supported (breaks q-sample stream invariant); freeze the entire VI wrapper at composite level instead"`. |
 
 **All FOUR error strings above contain the substring `"not supported"` verbatim** -- validator Check #26(b) uses `grepl("not supported", ...)` as a uniform blacklist-error test.
+
+**Composite-of-composite (nested wrappers).** freeze/unfreeze accept
+dot-path names for descending into nested composite children:
+`m$freeze("outer_composite_child.inner_leaf_block")` walks
+`composite_block` -> child (itself a composite) -> child's leaf. See
+DESIGN_NOTES Sec.10.c for the exact resolution rules; get_frozen()
+returns dot-path names for nested frozen children so round-trip via
+`freeze(get_frozen(), quiet=TRUE)` works uniformly across depths.
+
+**`quiet=TRUE` for batch refreeze.** `freeze(names, quiet=TRUE)`
+suppresses the redundant-refreeze warning path (unknown-name /
+blacklist errors still fire). Use for checkpoint restore where the
+saved `frozen` set is expected to overlap the current frozen set.
+See DESIGN_NOTES Sec.10.b.
 
 Validator Check #26 tests presence + gate + refreeze warning + stale-derived warning.
 

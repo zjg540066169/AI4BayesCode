@@ -17,8 +17,11 @@ see `examples/SoftBartNoise.cpp` for a worked example.
 **For nested MCMC**: `BartNoise::set_current(Rcpp::List)` already
 accepts any subset of `{X, y, sigma}` and routes them into the block
 -- use this when composing BART inside an outer Gibbs. No other R
-methods are exposed; the unified six-method interface is the whole
-API. (System-design agents modifying `bart_block` itself should read
+state methods are exposed; the unified core-6 state contract + the
+kernel-control category (freeze / unfreeze / get_frozen + readapt_NUTS
+iff any NUTS-family sibling in the composite) + the BART tree-serialization
+carve-out (get_tree / set_tree / get_tree_history) is the whole API
+per interface.md Sec.1. (System-design agents modifying `bart_block` itself should read
 `skills/system_design.md`; code-generation agents do NOT need
 to -- see the top of `skills/codegen.md`.)
 

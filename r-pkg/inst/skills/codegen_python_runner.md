@@ -178,6 +178,20 @@ y_rep = model.predict_at({})["y_rep"]        # posterior predictive at training 
 # model.step(1)              # sigma stays 1.0; beta continues to sample
 # model.get_frozen()         # -> ["sigma"]
 # model.unfreeze(["sigma"])  # sigma resumes sampling
+
+# OR one-line ctor helper (equivalent to init + set_current + freeze):
+# model = AI4BayesCode.new_frozen(mod.<ClassName>, <data_args>, rng_seed=42,
+#                                 keep_history=True,
+#                                 fixed={"sigma": 1.0})
+
+# Advanced names (all valid in freeze / unfreeze / ctor helper's fixed keys):
+#   "<slot_name>"                          -- joint_nuts_block slot-level freeze (Sec.10.a)
+#   "<outer>.<inner_leaf>"                 -- nested composite dot-path (Sec.10.c)
+#   "<rjmcmc_name>.gamma" / ".beta"        -- rjmcmc sub-key freeze (Sec.10.d)
+
+# Batch refreeze on checkpoint restore -- use quiet=True to skip
+# redundant-refreeze warnings:
+# model.freeze(saved_frozen_names, quiet=True)
 ```
 
 ### Python runner template -- standard body (DEFAULT)

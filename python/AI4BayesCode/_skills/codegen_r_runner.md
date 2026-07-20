@@ -257,6 +257,20 @@ model$predict_at(list(<X> = <X>_test))
 ## model$step(1L)               ## sigma stays 1; beta continues to sample
 ## model$get_frozen()           ## -> "sigma"
 ## model$unfreeze("sigma")      ## sigma resumes sampling
+
+## OR one-line ctor helper (equivalent to new + set_current + freeze):
+## model <- ai4bayescode_new_frozen(<ClassName>, <data_args>, rng_seed = 42L,
+##                                  keep_history = TRUE,
+##                                  fixed = list(sigma = 1))
+
+## Advanced names (all valid in freeze / unfreeze / ctor helper's `fixed` names):
+##   "<slot_name>"                          -- joint_nuts_block slot-level freeze (Sec.10.a)
+##   "<outer>.<inner_leaf>"                 -- nested composite dot-path (Sec.10.c)
+##   "<rjmcmc_name>.gamma" / ".beta"        -- rjmcmc sub-key freeze (Sec.10.d)
+
+## Batch refreeze on checkpoint restore -- use quiet=TRUE to skip
+## redundant-refreeze warnings:
+## model$freeze(saved_frozen_names, quiet = TRUE)
 ```
 
 The example must run as-is on the synthetic shapes generated in the
