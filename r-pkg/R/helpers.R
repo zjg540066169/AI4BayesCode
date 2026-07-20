@@ -830,4 +830,35 @@ ai4bayescode_rhat_summary <- function(run, keys = NULL, drop_burn = 0,
     out
 }
 
+# ----------------------------------------------------------------------------
+# ai4bayescode_new_frozen  (DESIGN_NOTES Sec.10.e)
+#
+# Ctor helper: construct a wrapper and immediately set + freeze the sub-
+# kernels listed in `fixed`, in one call. See AI4BayesCode_helpers.R for
+# the full docstring.
+# ----------------------------------------------------------------------------
+#' @export
+ai4bayescode_new_frozen <- function(module_class, ...,
+                                    fixed = list(),
+                                    quiet_freeze = TRUE) {
+    if (length(fixed) > 0L) {
+        nms <- names(fixed)
+        if (is.null(nms) || any(nms == "")) {
+            stop("ai4bayescode_new_frozen(): `fixed` must be a NAMED list")
+        }
+        dot_names <- grepl("\\.", nms, fixed = TRUE)
+        if (any(dot_names)) {
+            stop(sprintf(
+                "ai4bayescode_new_frozen(): dot-path names not allowed in `fixed` (%s). Use post-construction m$set_current(...) at the correct composite level + m$freeze(<dot.path>) instead.",
+                paste(nms[dot_names], collapse = ", ")))
+        }
+    }
+    m <- methods::new(module_class, ...)
+    if (length(fixed) > 0L) {
+        m$set_current(fixed)
+        m$freeze(names(fixed), quiet = isTRUE(quiet_freeze))
+    }
+    m
+}
+
 

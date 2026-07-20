@@ -193,6 +193,16 @@ public:
         for (auto& child : children_) {
             const std::string& cname = child->name();
 
+            // Kernel-control freeze (interface.md Sec.1 + DESIGN_NOTES Sec.10):
+            // if the child (or any of its slots / sub-keys) is frozen, skip
+            // its step() and skip the write-back + refresher. shared_data
+            // retains the last set_current / last-step value for this key,
+            // which is what "hold at last value" means. Note: joint_nuts_block
+            // slot-level freeze is INTERNAL to the child (step() still fires,
+            // integrator zeros momentum on frozen slots); is_frozen() here
+            // means WHOLE-BLOCK freeze only.
+            if (child->is_frozen()) continue;
+
             // 1. Project shared_data into the child's context.
             block_context ctx = data_.build_context_for(cname);
 
@@ -309,6 +319,10 @@ public:
         if (n == 0) return;
         for (auto& child : children_) {
             if (!child->supports_readapt()) continue;
+            // Kernel-control freeze also skips readapt (interface.md Sec.1 +
+            // Check #23 amendment): a frozen NUTS child has no need to
+            // re-tune its metric because it is not sampling.
+            if (child->is_frozen()) continue;
             // Project current shared_data into the child's context, so
             // the n adaptation iterations evaluate log p AT the current
             // composite state.
@@ -322,7 +336,7 @@ public:
 
     /// True iff at least one child supports readapt (i.e., this
     /// composite contains any NUTS-family block). User-facing wrappers
-    /// check this to decide whether to expose the 7th method
+    /// check this to decide whether to expose the kernel-control method
     /// `readapt_NUTS` in their RCPP_MODULE.
     bool any_child_supports_readapt() const noexcept {
         for (const auto& c : children_) {
@@ -330,6 +344,340 @@ public:
         }
         return false;
     }
+
+    // ---- Kernel-control freeze API (interface.md Sec.1) ----------------
+    //
+    // Composite-level dispatch for freeze / unfreeze / get_frozen. Name
+    // resolution follows DESIGN_NOTES Sec.10.c:
+    //
+    //   1. Malformed check (empty / leading dot / trailing dot / double dot)
+    //   2. Flat child name -> whole-block freeze on that child
+    //   3. Sub-name (joint slot / rjmcmc sub-key) -> if UNAMBIGUOUS across
+    //      children, dispatch via child->freeze_sub(); if AMBIGUOUS (multiple
+    //      matches), Rcpp::stop with dot-path disambiguation hint.
+    //   4. Dot-path "prefix.suffix" -> if prefix is a nested composite child,
+    //      recurse into it with suffix; if prefix is a joint/rjmcmc child,
+    //      dispatch child->freeze_sub(suffix).
+    //   5. Blacklist family (child->supports_freeze() == false) at any level
+    //      -> throw with the child's freeze_not_supported_reason().
+    //
+    // Returns a vector of ADVISORY warning strings the R/pybind boundary
+    // should emit (via Rcpp::warning / Python UserWarning). Errors throw
+    // std::runtime_error / std::invalid_argument, which the boundary
+    // converts to Rcpp::stop / RuntimeError.
+    //
+    // See DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md Sec.10.a/b/c/d for
+    // the full contract.
+
+    // Bring the base class's 0-arg freeze() / unfreeze() overloads into
+    // this scope so composite_block's name-taking overloads don't hide
+    // them.  The 0-arg forms are used by composite_block::freeze_one_
+    // itself when it calls child->freeze() after routing.
+    using block_sampler::freeze;
+    using block_sampler::unfreeze;
+
+    /**
+     * Freeze the sub-kernels named in @p names. Errors throw; warnings
+     * are returned for the boundary to emit unless @p quiet is true (in
+     * which case both refreeze and stale-derived warnings are suppressed
+     * -- typical for checkpoint restore).
+     */
+    std::vector<std::string>
+    freeze(const std::vector<std::string>& names, bool quiet = false) {
+        std::vector<std::string> warnings;
+        for (const auto& n : names) freeze_one_(n, quiet, warnings);
+        return warnings;
+    }
+
+    /**
+     * Unfreeze the sub-kernels named in @p names. Errors throw; warnings
+     * for names that are not currently frozen are returned (never
+     * suppressed -- unfreeze has no quiet form).
+     */
+    std::vector<std::string>
+    unfreeze(const std::vector<std::string>& names) {
+        std::vector<std::string> warnings;
+        for (const auto& n : names) unfreeze_one_(n, warnings);
+        return warnings;
+    }
+
+    /**
+     * Unfreeze ALL currently-frozen sub-kernels (invoked when the user
+     * calls unfreeze() with no arg from the R/Python layer).
+     */
+    void unfreeze_all() {
+        for (auto& c : children_) {
+            c->unfreeze();
+            for (const auto& s : c->frozen_subnames()) c->unfreeze_sub(s);
+            // Recurse into nested composites
+            if (auto* comp = dynamic_cast<composite_block*>(c.get())) {
+                comp->unfreeze_all();
+            }
+        }
+    }
+
+    /**
+     * List currently-frozen names in canonical form, DFS pre-order:
+     *   - Whole-frozen child: "<child_name>"
+     *   - Slot / sub-key frozen: "<child_name>.<sub_name>"
+     *   - Nested composite: recurse and prepend "<child_name>."
+     */
+    std::vector<std::string> get_frozen() const {
+        std::vector<std::string> out;
+        for (const auto& c : children_) {
+            const std::string& cn = c->name();
+            if (c->is_frozen()) {
+                if (!cn.empty()) out.push_back(cn);
+                continue;   // whole-block frozen shadows sub-name / recurse
+            }
+            for (const auto& sub : c->frozen_subnames()) {
+                out.push_back(cn.empty() ? sub : cn + "." + sub);
+            }
+            if (auto* comp = dynamic_cast<const composite_block*>(c.get())) {
+                for (const auto& inner : comp->get_frozen()) {
+                    out.push_back(cn.empty() ? inner : cn + "." + inner);
+                }
+            }
+        }
+        return out;
+    }
+
+private:
+    void freeze_one_(const std::string& name, bool quiet,
+                     std::vector<std::string>& warnings) {
+        validate_name_shape_(name);
+
+        // Try flat child match first.
+        for (auto& c : children_) {
+            if (c->name() == name) {
+                if (!c->supports_freeze()) {
+                    throw std::runtime_error(c->freeze_not_supported_reason());
+                }
+                if (c->is_frozen()) {
+                    if (!quiet) warnings.push_back(
+                        "block '" + name + "' already frozen; freeze is idempotent");
+                } else {
+                    c->freeze();
+                }
+                emit_stale_derived_warning_(name, quiet, warnings);
+                return;
+            }
+        }
+
+        // Try sub-name match across joint / rjmcmc children.
+        int match_ct = 0;
+        block_sampler* matched = nullptr;
+        for (auto& c : children_) {
+            auto subs = c->subnames();
+            if (std::find(subs.begin(), subs.end(), name) != subs.end()) {
+                ++match_ct;
+                matched = c.get();
+            }
+        }
+        if (match_ct == 1) {
+            if (!matched->supports_freeze()) {
+                throw std::runtime_error(matched->freeze_not_supported_reason());
+            }
+            auto fs = matched->frozen_subnames();
+            const bool already = std::find(fs.begin(), fs.end(), name) != fs.end();
+            if (already) {
+                if (!quiet) warnings.push_back(
+                    "sub-name '" + name + "' already frozen; freeze is idempotent");
+            } else {
+                matched->freeze_sub(name);
+            }
+            // NO stale-derived warning for sub-name freeze: the block's
+            // step() still fires (only the sub-update is skipped), so
+            // shared_data write-back + refreshers keyed on the block
+            // name still run each sweep -- derived keys are NOT stale.
+            return;
+        }
+        if (match_ct > 1) {
+            throw std::runtime_error(
+                "sub-name '" + name + "' is ambiguous; matches multiple "
+                "joint blocks. Use dot-path form '<block_name>." + name +
+                "' to disambiguate.");
+        }
+
+        // Try dot-path descent.
+        auto dot = name.find('.');
+        if (dot != std::string::npos) {
+            std::string prefix = name.substr(0, dot);
+            std::string suffix = name.substr(dot + 1);
+            for (auto& c : children_) {
+                if (c->name() != prefix) continue;
+                if (!c->supports_freeze()) {
+                    throw std::runtime_error(c->freeze_not_supported_reason());
+                }
+                // Nested composite: recurse.
+                if (auto* comp = dynamic_cast<composite_block*>(c.get())) {
+                    auto inner = comp->freeze({suffix}, quiet);
+                    for (auto& w : inner) warnings.push_back(w);
+                    return;
+                }
+                // Joint / rjmcmc sub-name.
+                auto subs = c->subnames();
+                if (std::find(subs.begin(), subs.end(), suffix) == subs.end()) {
+                    throw std::runtime_error(
+                        "child '" + prefix + "' does not support sub-name '" +
+                        suffix + "' (valid sub-names: " + join_(subs) + ")");
+                }
+                auto fs = c->frozen_subnames();
+                const bool already =
+                    std::find(fs.begin(), fs.end(), suffix) != fs.end();
+                if (already) {
+                    if (!quiet) warnings.push_back(
+                        "sub-name '" + name + "' already frozen; freeze is idempotent");
+                } else {
+                    c->freeze_sub(suffix);
+                }
+                // Sub-name freeze: no stale-derived warning (see freeze_one_
+                // sub-name branch above for rationale -- block's step()
+                // still fires, refreshers run each sweep).
+                return;
+            }
+        }
+
+        throw std::runtime_error(
+            "name '" + name + "' does not resolve to any child (direct, "
+            "slot, or dot-path); valid names include: " +
+            join_(valid_freeze_names_()));
+    }
+
+    void unfreeze_one_(const std::string& name,
+                       std::vector<std::string>& warnings) {
+        validate_name_shape_(name);
+
+        // Flat child.
+        for (auto& c : children_) {
+            if (c->name() == name) {
+                if (!c->is_frozen()) {
+                    warnings.push_back(
+                        "block '" + name + "' was not frozen; unfreeze is idempotent");
+                    return;
+                }
+                c->unfreeze();
+                return;
+            }
+        }
+
+        // Sub-name.
+        int match_ct = 0;
+        block_sampler* matched = nullptr;
+        for (auto& c : children_) {
+            auto subs = c->subnames();
+            if (std::find(subs.begin(), subs.end(), name) != subs.end()) {
+                ++match_ct;
+                matched = c.get();
+            }
+        }
+        if (match_ct == 1) {
+            auto fs = matched->frozen_subnames();
+            if (std::find(fs.begin(), fs.end(), name) == fs.end()) {
+                warnings.push_back(
+                    "sub-name '" + name + "' was not frozen; unfreeze is idempotent");
+                return;
+            }
+            matched->unfreeze_sub(name);
+            return;
+        }
+        if (match_ct > 1) {
+            throw std::runtime_error(
+                "sub-name '" + name + "' is ambiguous; matches multiple "
+                "joint blocks. Use dot-path form '<block_name>." + name + "'.");
+        }
+
+        // Dot-path descent.
+        auto dot = name.find('.');
+        if (dot != std::string::npos) {
+            std::string prefix = name.substr(0, dot);
+            std::string suffix = name.substr(dot + 1);
+            for (auto& c : children_) {
+                if (c->name() != prefix) continue;
+                if (auto* comp = dynamic_cast<composite_block*>(c.get())) {
+                    auto inner = comp->unfreeze({suffix});
+                    for (auto& w : inner) warnings.push_back(w);
+                    return;
+                }
+                auto subs = c->subnames();
+                if (std::find(subs.begin(), subs.end(), suffix) == subs.end()) {
+                    throw std::runtime_error(
+                        "child '" + prefix + "' does not support sub-name '" +
+                        suffix + "'");
+                }
+                auto fs = c->frozen_subnames();
+                if (std::find(fs.begin(), fs.end(), suffix) == fs.end()) {
+                    warnings.push_back(
+                        "sub-name '" + name + "' was not frozen; unfreeze is idempotent");
+                    return;
+                }
+                c->unfreeze_sub(suffix);
+                return;
+            }
+        }
+
+        throw std::runtime_error(
+            "name '" + name + "' does not resolve to any child");
+    }
+
+    static void validate_name_shape_(const std::string& name) {
+        if (name.empty()) {
+            throw std::invalid_argument("freeze: empty name");
+        }
+        if (name.front() == '.') {
+            throw std::invalid_argument(
+                "malformed name '" + name + "': empty prefix before dot");
+        }
+        if (name.back() == '.') {
+            throw std::invalid_argument(
+                "malformed name '" + name + "': empty suffix after dot");
+        }
+        if (name.find("..") != std::string::npos) {
+            throw std::invalid_argument(
+                "malformed name '" + name + "': empty component between dots");
+        }
+    }
+
+    // Emit a stale-derived-state warning if the frozen block name appears
+    // as an upstream key in any refresher's dependency set. This is the
+    // Sec.9 hazard: freezing an upstream block leaves its derived key
+    // stale under subsequent set_current updates.
+    void emit_stale_derived_warning_(const std::string& block_name,
+                                     bool quiet,
+                                     std::vector<std::string>& warnings) const {
+        if (quiet) return;
+        const auto& invals = data_.invalidates();
+        auto it = invals.find(block_name);
+        if (it == invals.end() || it->second.empty()) return;
+        std::string derived;
+        for (const auto& k : it->second) {
+            derived += (derived.empty() ? "" : ", ") + k;
+        }
+        warnings.push_back(
+            "freezing '" + block_name + "' will hold derived key(s) [" +
+            derived + "] stale under subsequent set_current updates to "
+            "upstream data; downstream siblings may sample on unrefreshed "
+            "values");
+    }
+
+    std::vector<std::string> valid_freeze_names_() const {
+        std::vector<std::string> out;
+        for (const auto& c : children_) {
+            if (!c->name().empty()) out.push_back(c->name());
+            for (const auto& s : c->subnames()) {
+                out.push_back(c->name().empty() ? s : c->name() + "." + s);
+            }
+        }
+        return out;
+    }
+
+    static std::string join_(const std::vector<std::string>& v) {
+        std::string out;
+        for (const auto& s : v) out += (out.empty() ? "" : ", ") + s;
+        return out;
+    }
+
+public:
 
     // ---- Predict-at (const, no state mutation) -------------------------
 

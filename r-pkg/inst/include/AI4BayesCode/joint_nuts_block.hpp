@@ -837,6 +837,60 @@ public:
         }
     }
 
+    // ---- Kernel-control freeze API (slot-level, interface.md Sec.1) -----
+    //
+    // joint_nuts_block exposes its sub-parameter names via subnames() so
+    // composite_block::freeze("<slot_name>") resolves correctly. WHOLE-BLOCK
+    // freeze (composite calls this->freeze() with no arg) is inherited from
+    // block_sampler and works via composite's is_frozen() check in step().
+    //
+    // SLOT-LEVEL freeze (composite calls freeze_sub("<slot_name>")) is
+    // deliberately REJECTED in v1 with a clear error message and remediation
+    // guidance. A correct implementation requires integrator-level surgery
+    // (zero momentum on frozen slot dims at trajectory start + zero gradient
+    // on frozen slot dims inside the log_p wrapper + Welford covariance
+    // skip on frozen rows/cols); this is a kernel patch that must ship with
+    // its own thorough testing. Rushing it in a doc-layer patch would risk
+    // silent-wrong posteriors -- the exact class of bug the whole kernel-
+    // control effort is trying to prevent. See DESIGN_NOTES Sec.10.a for
+    // the target design; validator Check #26(c) test at "if the composite
+    // includes any joint_nuts_block..." currently exercises whole-block only.
+    std::vector<std::string> subnames() const override {
+        std::vector<std::string> out;
+        out.reserve(cfg_.sub_params.size());
+        for (const auto& sp : cfg_.sub_params) out.push_back(sp.name);
+        return out;
+    }
+
+    void freeze_sub(const std::string& sub) override {
+        throw std::runtime_error(
+            "joint_nuts_block slot-level freeze not yet implemented (slot='"
+            + sub + "' in block '" + cfg_.name + "').\n"
+            "  This v1 exposes the slot-level API but the underlying "
+            "integrator + Welford + constraint chain-rule masking for a "
+            "single slot within the joint dynamics is deferred to a "
+            "dedicated kernel patch (see DESIGN_NOTES_FREEZE_UNFREEZE_"
+            "2026-07-19.md Sec.10.a for the target design).\n"
+            "  Two workarounds available today:\n"
+            "  (1) If the slot to be frozen is not tightly correlated with "
+            "the other slots, split the joint_nuts_block into a separate "
+            "nuts_block for that slot; freeze then works via the standard "
+            "whole-block path.\n"
+            "  (2) If tight correlation makes (1) infeasible, freeze the "
+            "WHOLE joint_nuts_block via `m$freeze(\"" + cfg_.name + "\")` "
+            "at the cost of the other slots stopping too.");
+    }
+
+    void unfreeze_sub(const std::string& sub) override {
+        (void)sub;
+        // No-op: freeze_sub always throws, so nothing is ever in a
+        // slot-frozen state that unfreeze_sub would need to release.
+    }
+
+    std::vector<std::string> frozen_subnames() const override {
+        return {};   // per freeze_sub above: no slot is ever frozen in v1
+    }
+
     // ---- Kernel-tuning interface (readapt) ------------------------------
 
     /// joint_nuts_block supports kernel-tuning via readapt().

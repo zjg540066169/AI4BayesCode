@@ -618,3 +618,52 @@ ai4bayescode_diagnose <- function(hist, plot = TRUE) {
     }
     list(summary = summary, plot = plt)
 }
+
+# ----------------------------------------------------------------------------
+# ai4bayescode_new_frozen  (DESIGN_NOTES Sec.10.e)
+#
+# Ctor helper: construct a wrapper and immediately set + freeze the sub-
+# kernels listed in `fixed`, in one call. Equivalent to the two-step form:
+#     m <- new(module_class, ...)
+#     m$set_current(fixed)
+#     m$freeze(names(fixed), quiet = quiet_freeze)
+#
+# Scope: `fixed` keys must be FLAT (top-level child block names or
+# joint_nuts_block slot names -- whatever set_current() would accept).
+# Dot-path names (nested composite descent, rjmcmc sub-key) are REJECTED
+# because set_current does not route dot-path keys -- freezing a value
+# that was never actually set would silently produce wrong posteriors.
+# For dot-path freezes, use the two-step post-construction form with the
+# set_current call at the correct composite level.
+#
+# Args
+# ----
+# module_class   : Rcpp module class name (e.g. MyGaussianReg)
+# ...            : wrapper ctor arguments forwarded to new(module_class, ...)
+# fixed          : named list of (name = value) pairs. Empty list is a no-op.
+# quiet_freeze   : passed as `quiet=` to m$freeze() -- default TRUE, since
+#                  this is a ctor-time call where redundant-refreeze is
+#                  impossible (nothing was frozen before).
+# ----------------------------------------------------------------------------
+ai4bayescode_new_frozen <- function(module_class, ...,
+                                    fixed = list(),
+                                    quiet_freeze = TRUE) {
+    if (length(fixed) > 0L) {
+        nms <- names(fixed)
+        if (is.null(nms) || any(nms == "")) {
+            stop("ai4bayescode_new_frozen(): `fixed` must be a NAMED list")
+        }
+        dot_names <- grepl("\\.", nms, fixed = TRUE)
+        if (any(dot_names)) {
+            stop(sprintf(
+                "ai4bayescode_new_frozen(): dot-path names not allowed in `fixed` (%s). Use post-construction m$set_current(...) at the correct composite level + m$freeze(<dot.path>) instead.",
+                paste(nms[dot_names], collapse = ", ")))
+        }
+    }
+    m <- new(module_class, ...)
+    if (length(fixed) > 0L) {
+        m$set_current(fixed)
+        m$freeze(names(fixed), quiet = isTRUE(quiet_freeze))
+    }
+    m
+}

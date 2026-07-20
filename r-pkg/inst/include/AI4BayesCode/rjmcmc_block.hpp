@@ -379,6 +379,12 @@ public:
             // (A) CONTINUOUS UPDATE of beta_j (only if gamma_j = 1).
             //     Two mutually-exclusive modes. User picks one or neither
             //     at config time.
+            //
+            // Kernel-control freeze (DESIGN_NOTES Sec.10.d): beta_frozen_
+            // suppresses the entire (A) block so active beta values stay
+            // pinned at their current values. gamma sweep (B) still fires
+            // unless gamma_frozen_ is also set.
+            if (!beta_frozen_) {
             if (gamma_[j] == 1.0 && cfg_.continuous_update) {
                 // Mode 1: user-supplied direct update (typically Gibbs from
                 // closed-form conditional). Framework does NOT accept/reject
@@ -419,6 +425,14 @@ public:
                     context_[cfg_.beta_key] = beta_;
                 }
             }
+            }  // end !beta_frozen_
+
+            // Kernel-control freeze: gamma_frozen_ suppresses the entire
+            // (B) trans-dim sweep. Active-set membership stays constant.
+            // Note: if BOTH sub-keys are frozen, the loop body is a no-op
+            // for this j; composite_block's whole-block is_frozen_ check
+            // is the outer gate that skips step() entirely.
+            if (gamma_frozen_) continue;
 
             // (B) REVERSIBLE-JUMP FLIP on gamma_j (every sweep).
             const double gamma_cur = gamma_[j];
@@ -645,6 +659,55 @@ public:
             last_n_rw_try_,    last_n_rw_ok_};
     }
 
+    // ---- Kernel-control freeze API (sub-key, DESIGN_NOTES Sec.10.d) -----
+    //
+    // rjmcmc_block exposes two sub-keys -- gamma_key (trans-dim sweep) and
+    // beta_key (continuous_update on active betas). Composite calls
+    // freeze_sub(sub) with either name to disable that sub-update in
+    // subsequent step() calls; the whole-block freeze() (inherited from
+    // base) atomically disables both. See DESIGN_NOTES Sec.10.d for the
+    // ".beta" freeze semantic hazard (birth-proposed betas never refresh
+    // and active-beta vector length can still change under gamma sweep).
+
+    std::vector<std::string> subnames() const override {
+        return {cfg_.gamma_key, cfg_.beta_key};
+    }
+
+    void freeze_sub(const std::string& sub) override {
+        if (sub == cfg_.gamma_key) {
+            gamma_frozen_ = true;
+        } else if (sub == cfg_.beta_key) {
+            beta_frozen_ = true;
+        } else {
+            throw std::runtime_error(
+                "rjmcmc_block::freeze_sub: unknown sub-name '" + sub +
+                "'; valid sub-names for this block: '" + cfg_.gamma_key +
+                "', '" + cfg_.beta_key + "'");
+        }
+    }
+
+    void unfreeze_sub(const std::string& sub) override {
+        if (sub == cfg_.gamma_key)      gamma_frozen_ = false;
+        else if (sub == cfg_.beta_key)  beta_frozen_  = false;
+        // Unknown name = no-op (unfreeze is permissive).
+    }
+
+    std::vector<std::string> frozen_subnames() const override {
+        std::vector<std::string> out;
+        if (gamma_frozen_) out.push_back(cfg_.gamma_key);
+        if (beta_frozen_)  out.push_back(cfg_.beta_key);
+        return out;
+    }
+
+    /// Also unfreeze the two sub-flags on whole-block unfreeze, so a user
+    /// who does whole-block freeze then unfreeze gets a clean restart even
+    /// if they had sub-key-frozen state before.
+    void unfreeze() override {
+        block_sampler::unfreeze();   // clears is_frozen_
+        gamma_frozen_ = false;
+        beta_frozen_  = false;
+    }
+
 private:
     void refresh_current_cache_() {
         for (std::size_t j = 0; j < cfg_.p; ++j) {
@@ -663,6 +726,12 @@ private:
     std::size_t last_n_birth_try_ = 0, last_n_birth_ok_ = 0;
     std::size_t last_n_death_try_ = 0, last_n_death_ok_ = 0;
     std::size_t last_n_rw_try_    = 0, last_n_rw_ok_    = 0;
+
+    // Kernel-control sub-key freeze flags (DESIGN_NOTES Sec.10.d).
+    // Whole-block freeze goes via is_frozen_ in the base class; these two
+    // flags additionally gate the individual sub-updates inside step().
+    bool                     gamma_frozen_ = false;
+    bool                     beta_frozen_  = false;
 };
 
 } // namespace AI4BayesCode

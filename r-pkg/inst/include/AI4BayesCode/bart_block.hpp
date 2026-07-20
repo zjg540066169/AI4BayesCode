@@ -403,6 +403,19 @@ public:
 
     const std::string& name() const noexcept override { return cfg_.name; }
 
+    // Kernel-control freeze BLACKLIST (DESIGN_NOTES Sec.6): non-invertible
+    // forest + derived-state hazard (f_bart stales under set_current(X=...)
+    // if BART step() is skipped). composite_block::freeze() checks this and
+    // Rcpp::stops when the user tries to freeze a bart_block child.
+    bool supports_freeze() const noexcept override { return false; }
+    std::string freeze_not_supported_reason() const override {
+        return "freezing bart_block not supported "
+               "(forest is non-invertible + derived-state hazard on "
+               "subsequent set_current(X=...) updates); use predict_at "
+               "for held-out prediction, drop the BART child from composite "
+               "for ablation";
+    }
+
     std::size_t dim() const noexcept override {
         return static_cast<std::size_t>(cfg_.x_train.n_rows);
     }

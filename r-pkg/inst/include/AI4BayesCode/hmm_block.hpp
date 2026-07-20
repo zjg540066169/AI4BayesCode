@@ -271,6 +271,17 @@ public:
     const std::string& name() const noexcept override { return cfg_.name; }
     std::size_t dim() const noexcept override { return cfg_.T; }
 
+    // Kernel-control freeze BLACKLIST (DESIGN_NOTES Sec.6): latent state
+    // sequence z frozen while emission parameters sample yields mismatched
+    // conditioning (Baum-Welch forward pass depends on emissions).
+    bool supports_freeze() const noexcept override { return false; }
+    std::string freeze_not_supported_reason() const override {
+        return "freezing hmm_block not supported "
+               "(latent state sequence conditioning breaks when emission "
+               "parameters sample); model the HMM inside a two-composite "
+               "pattern with the emission-freeze at the outer level";
+    }
+
     std::unordered_map<std::string, arma::vec>
     current_named_outputs() const override {
         std::unordered_map<std::string, arma::vec> out;

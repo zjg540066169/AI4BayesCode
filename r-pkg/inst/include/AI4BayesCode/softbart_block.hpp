@@ -243,6 +243,15 @@ public:
 
     const std::string& name() const noexcept override { return cfg_.name; }
 
+    // Kernel-control freeze BLACKLIST (DESIGN_NOTES Sec.6): same class as
+    // bart_block (non-invertible forest + derived-state hazard).
+    bool supports_freeze() const noexcept override { return false; }
+    std::string freeze_not_supported_reason() const override {
+        return "freezing softbart_block not supported "
+               "(forest is non-invertible + derived-state hazard); "
+               "same rationale as bart_block";
+    }
+
     std::size_t dim() const noexcept override {
         return static_cast<std::size_t>(cfg_.x_train.n_rows);
     }

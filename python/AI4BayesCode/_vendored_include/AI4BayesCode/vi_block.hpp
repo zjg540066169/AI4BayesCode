@@ -150,6 +150,19 @@ public:
         return engine_kind_t::VI;
     }
 
+    // Kernel-control freeze BLACKLIST (DESIGN_NOTES Sec.6): Sec.18.4
+    // invariant -- the composite writes current_sample(rng) (a fresh
+    // q-draw) to shared_data each step, NOT current() (q-mean). Freezing
+    // a VI block (skipping step()) means shared_data keeps ONE q-sample
+    // forever, so MCMC siblings in hybrid mode condition on a fixed draw
+    // and silently underestimate posterior variance. Reject upfront.
+    bool supports_freeze() const noexcept override { return false; }
+    std::string freeze_not_supported_reason() const override {
+        return "freezing VI blocks not supported "
+               "(breaks q-sample stream invariant); freeze the entire "
+               "VI wrapper at composite level instead";
+    }
+
     // ---- VI-specific public interface ------------------------------------
 
     /**

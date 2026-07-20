@@ -388,9 +388,100 @@ public:
         // >0 = temporarily cap NUTS tree depth for these n adaptation iters.
     }
 
+    // ---- Kernel-control freeze interface (kernel-control category) ----------
+    //
+    // See DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md for the full contract.
+    // freeze() sets a flag consulted by composite_block::step() and
+    // composite_block::readapt_NUTS() to skip this child; the block's own
+    // step() is NEVER called while frozen (composite iterates children and
+    // gates on is_frozen()).
+    //
+    // Default whole-block semantics; joint_nuts_block and rjmcmc_block
+    // override to accept sub-names (slot names / sub-keys) via a 1-arg
+    // overload defined in those subclasses. The 0-arg forms below always
+    // mean "whole this block", used by composite_block after name routing.
+
+    /**
+     * Whether the freeze mechanism supports this block family at all
+     * (whitelist gate for composite_block::freeze).  Default true (most
+     * families support freeze).  Blacklisted families (bart_block,
+     * genbart_block, hmm_block, all vi_block subclasses) override to
+     * return false, causing composite_block::freeze(name) to raise
+     * Rcpp::stop with a "not supported" reason string when name matches
+     * this block.  See DESIGN_NOTES Sec.6 blacklist rationale.
+     */
+    virtual bool supports_freeze() const noexcept {
+        return true;
+    }
+
+    /**
+     * A canonical error string emitted when composite_block::freeze
+     * attempts to freeze a blacklisted family.  Must contain the
+     * substring "not supported" so validator Check #26(b) regex matches
+     * uniformly across the four blacklisted families.  Default is a
+     * placeholder that no whitelisted family will ever use.
+     */
+    virtual std::string freeze_not_supported_reason() const {
+        return "freezing this block family not supported";
+    }
+
+    /**
+     * The block is currently held at its last set_current / last-step
+     * value.  While true, composite_block::step() and readapt_NUTS()
+     * skip this child.
+     */
+    virtual bool is_frozen() const noexcept { return is_frozen_; }
+
+    /**
+     * Whole-block freeze (0-arg).  Called by composite_block after name
+     * routing has confirmed this child is the freeze target.  Sub-name
+     * targets (joint_nuts_block slot names, rjmcmc_block sub-keys) go
+     * through overloads in the respective subclasses.
+     */
+    virtual void freeze() { is_frozen_ = true; }
+
+    /**
+     * Whole-block unfreeze (0-arg). Sub-name unfreezes go through
+     * subclass overloads.
+     */
+    virtual void unfreeze() { is_frozen_ = false; }
+
+    /**
+     * Sub-names this block supports for slot-level / sub-key freeze.
+     * Empty by default (whole-block only). joint_nuts_block returns its
+     * slot names; rjmcmc_block returns {gamma_key, beta_key}. Used by
+     * composite_block::freeze(name) for slot-name routing (Sec.10.a/d).
+     */
+    virtual std::vector<std::string> subnames() const { return {}; }
+
+    /**
+     * Freeze a specific sub-name (slot / sub-key). Default: throw
+     * because whole-block-only families do not support sub-names.
+     * joint_nuts_block / rjmcmc_block override.
+     */
+    virtual void freeze_sub(const std::string& sub) {
+        (void)sub;
+        throw std::runtime_error(
+            "sub-name freeze not supported on this block family");
+    }
+
+    /**
+     * Unfreeze a specific sub-name. Default: no-op (whole-block-only
+     * families have nothing to unfreeze at sub-name level).
+     */
+    virtual void unfreeze_sub(const std::string& sub) { (void)sub; }
+
+    /**
+     * Currently-frozen sub-names (for composite::get_frozen aggregation
+     * in dot-path canonical form: "<block_name>.<sub_name>"). Default
+     * empty (whole-block-only families).
+     */
+    virtual std::vector<std::string> frozen_subnames() const { return {}; }
+
 protected:
     bool keep_history_ = false;
     bool keep_tree_    = false;
+    bool is_frozen_    = false;
 };
 
 } // namespace AI4BayesCode

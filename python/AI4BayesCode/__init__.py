@@ -40,6 +40,7 @@ from .rhat_summary import rhat_summary
 from .utils import rhat, ess_bulk, ess_tail, posterior_summary
 from .meta import version, include_path, list_skills
 from ._blocks import blocks
+from .new_frozen import new_frozen
 
 __version__ = "1.0.0"
 __all__ = [
@@ -75,4 +76,5 @@ __all__ = [
     "ess_bulk",
     "ess_tail",
     "posterior_summary",
+    "new_frozen",
 ]
