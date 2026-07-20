@@ -113,8 +113,10 @@ phase loads exactly ONE `block_design_skills/<phase>.md` module on entry.
  slice-ESS / **VI sub-flow** -- all engine kinds, do not pin to MCMC; Stage 2), the **constraint mapping** to the 15 supported
  `joint_constraint` kinds (`constraints.md`), and
  the **three-tier interface implementation** (Tier C kernel +
- license-gate / Tier B `block_sampler` contract / Tier A six-method
- wrapper; Stage 4). This is where you index the
+ license-gate / Tier B `block_sampler` contract / Tier A core-6 state
+ methods + kernel-control category (freeze/unfreeze/get_frozen always;
+ readapt_NUTS iff NUTS-family child) via the `kernel_control_mixin`
+ CRTP + `AI4BAYESCODE_BIND_KERNEL_CONTROL` macro; Stage 4). This is where you index the
  **system_design modules** (see Sec.6 Module map). Output lands in the
  `blocks_local/<Block>/` bundle, NOT in core. Methodology sign-off gate
  closes the phase (SECOND RULE -- sampler, marginalization, update order,
@@ -125,7 +127,7 @@ phase loads exactly ONE `block_design_skills/<phase>.md` module on entry.
  -> L2 Semantic -> L3 Runtime**, semantic before runtime) PLUS the primitive-specific
  extra a new block needs (codegen composes pre-audited blocks; a new primitive has no
  prior evidence). L1 = compile; L2 = the **validator-check map** the block faces
- (which of #1-#25 apply; routed to each check's DEFINING file -- cite, don't restate;
+ (which of #1-#26 apply; routed to each check's DEFINING file -- cite, don't restate;
  Check #12 AD-twin mandatory for any hand-written gradient); L3 = the **ground-truth
  library test** `test_<Block>.cpp` ladder (T0 sanity / T1 FD or parity / T2 recovery /
  T3 cross-chain-Rhat / T4 stress). **Compile + run the library test runs AUTOMATICALLY -- no "go"
@@ -341,7 +343,7 @@ path (`contrib.md`).
 | `00_flow.md` | THIS router: 5-phase backbone, lazy-load schedule, sign-off gates |
 | `intake.md` | INTAKE: math spec * naming-uniqueness gate * `SelectWhen` * advisory novelty/benchmark * geometry classification + correctness gate |
 | `design.md` | DESIGN: algorithm spec (Gibbs/NUTS/slice-ESS/VI) * constraint mapping * three-tier interface impl |
-| `validate.md` | VALIDATE: library test scaffold * validator-check map (#1-#25) * compile+test on "go" (mandatory T0-T4 + Check #12 AD-twin) * cross-chain R-hat < 1.01 fixed * heavy audit = submission-path extra |
+| `validate.md` | VALIDATE: library test scaffold * validator-check map (#1-#26) * compile+test on "go" (mandatory T0-T4 + Check #12 AD-twin) * cross-chain R-hat < 1.01 fixed * heavy audit = submission-path extra |
 | `example.md` | EXAMPLE: **offered (ask first; default yes, skippable)** -- ONE **tri-module** demo `examples/<Model>.cpp` (`int main` + `RCPP_MODULE` + `PYBIND11_MODULE` + both TESTED `@example`; source-able in R AND Python; cheapest end-to-end check + needed for registry submission) |
 | `skill.md` | SKILL: block-local `skills/<Block>.md` (cites core) + `manifest.dcf` (13 fields) * Sec.5b doc-consistency * Sec.5c FINAL GPL-3 license check |
 | `vendor.md` | VENDOR sub-skill (loaded ONLY if the block vendors a kernel): STATEFUL adaptation of the borrowed code -- isolate global/`static` state, thread the block's `rng`, rebuild caches on `set_context` * minimal-diff staging + `PATCHES.md` * upstream license kept verbatim |
@@ -353,7 +355,7 @@ needs -- cite via "system_design Sec.N", resolves through
 
 | Need | system_design module | Sec.N |
 |---|---|---|
-| six-method R contract + C++ `block_sampler` contract + three tiers | `interface.md` | Sec.1, Sec.2 |
+| core-6 R contract + kernel-control category (freeze/unfreeze/get_frozen + readapt_NUTS iff NUTS-family) + C++ `block_sampler` contract + three tiers | `interface.md` | Sec.1, Sec.2 |
 | shared_data / Gibbs-DAG vs predict-DAG / refreshers / set_current / RNG / history | `dataflow.md` | Sec.3-Sec.9 |
 | Jacobian discipline (`constraints::<kind>::wrap`; never hand-write) | `jacobian.md` | Sec.10 |
 | target-geometry legality gate (the correctness gate; validator can't catch it) | `geometry.md` | Sec.11 |

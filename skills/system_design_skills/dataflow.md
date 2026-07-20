@@ -244,6 +244,16 @@ dispatcher. The body is a sequence of `if
    comment block on the method. The codegen agent reads these
    comments when generating derived wrappers.
 
+9. **Not for kernel-control.** `set_current` is for state injection
+   (parameters, data). It is NOT the vehicle for kernel-behavior
+   configuration -- freezing / unfreezing sub-kernels, re-adapting
+   NUTS metric, etc. Those go through the kernel-control methods
+   defined in `interface.md Sec.1` (`freeze` / `unfreeze` /
+   `get_frozen` / `readapt_NUTS`), not `set_current`. Rationale:
+   `set_current` semantics stay "pure state dispatcher"; kernel
+   configuration lives in its own explicit R method category with
+   its own validator conformance check (Sec.26).
+
 ---
 
 ## 8. RNG discipline

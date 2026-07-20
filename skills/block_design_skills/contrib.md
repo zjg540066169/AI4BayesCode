@@ -160,7 +160,7 @@ that would reject `gmrf_whitened_ess_block`, which IS composable via `joint_nuts
 **Acceptance mechanism [FUTURE, deferred].** CRAN has a human team; we do not, so the gate is a
 LAYERED automated check designed NOT to rely on "an AI says yes":
 - **Deterministic backbone (primary):** compile; bundled tests pass; validator static checks
- (#1-#25 as applicable -- see `validator.md`); **sandboxed re-run** of the submitted
+ (#1-#26 as applicable -- see `validator.md`); **sandboxed re-run** of the submitted
  benchmark/tests (reproduce, don't trust submitted numbers).
 - **AI adversarial concurrence:** multiple independent reviewers (the audit-workflow pattern)
  for semantic correctness, novelty/quality, and security source review.

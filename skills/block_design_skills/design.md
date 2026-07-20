@@ -104,8 +104,12 @@ contract; the load-bearing pieces:
   chain-corruption mechanism).
 Your block's `step()` delegates to the child's `step()`; `current()` returns its draw. A block
 that internally owns a NUTS kernel **IS NUTS-family** -- it returns `supports_readapt() == true`,
-so the Tier-A wrapper must expose the **7th method `readapt_NUTS`** (forwarding to the child),
-even though the new block itself is not literally a `nuts_block` composite child.
+so the Tier-A wrapper must expose the **kernel-control method `readapt_NUTS(n, reset=false,
+max_tree_depth=-1)`** (forwarding to the child), even though the new block itself is not literally
+a `nuts_block` composite child. The Tier-A wrapper ALSO exposes `freeze / unfreeze / get_frozen`
+unconditionally (kernel-control category, interface.md Sec.1); those bind via the
+`AI4BAYESCODE_BIND_KERNEL_CONTROL(ClassName)` macro from
+`include/AI4BayesCode/kernel_control_mixin.hpp`.
 
 **Step 2.2 -- Metric + warmup (NUTS / joint-NUTS only).** Follow `families.md` "Metric + warmup
 decision" -- the **ESCALATION-DRIVEN-BY-DIAGNOSTICS** ladder, NOT a dimension threshold:
@@ -272,17 +276,20 @@ Tier B). The lifecycle to follow is `lifecycle.md` Sec.14's 7-step (Tier C kerne
 Tier B block -> Tier A wrapper -> skills/catalogue -> tests -> validator -> cross-chain audit); for
 block_design, Steps 4-7 land in the `blocks_local/<Block>/` bundle, NOT in core.
 
-**The R six-method wrapper is a SEPARATE thing (Tier A).** A Tier-A example wrapper (part of the
+**The R wrapper contract is a SEPARATE thing (Tier A).** A Tier-A example wrapper (part of the
 REQUIRED `examples/<Model>.cpp` -- every block ships exactly ONE example; see the EXAMPLE phase)
-exposes to R EXACTLY the six methods
-`step / get_current / set_current / predict_at / get_dag / get_history`, plus the 7th
-`readapt_NUTS` ONLY if the composite contains a NUTS-family child (interface.md Sec.1). Tier A's
-`set_current(Rcpp::List)` is a pure DISPATCHER routing keys into Tier B's fine-grained C++
-setters (interface.md Sec.2; dispatcher contract in `dataflow.md` Sec.7). **There is NEVER a `$set_X`,
-`$set_Y`, `$set_sigma`, or any other state-method on the wrapper** (interface.md Sec.1; the Sec.17
-anti-patterns live in `lifecycle.md`) -- kernel-tuning `readapt_NUTS` is the only allowed extension. The C++ contract and
-the R contract are DIFFERENT vocabularies at DIFFERENT tiers; the block class implements the
-former, never the latter.
+exposes to R the **core-six state methods**
+(`step / get_current / set_current / predict_at / get_dag / get_history`) plus the
+**kernel-control category**: `freeze / unfreeze / get_frozen` UNCONDITIONALLY (via the
+`AI4BAYESCODE_BIND_KERNEL_CONTROL(ClassName)` macro + `kernel_control_mixin<ClassName>` CRTP
+inheritance), and `readapt_NUTS` ONLY if the composite contains a NUTS-family child
+(interface.md Sec.1). Tier A's `set_current(Rcpp::List)` is a pure DISPATCHER routing keys into
+Tier B's fine-grained C++ setters (interface.md Sec.2; dispatcher contract in `dataflow.md` Sec.7).
+**There is NEVER a `$set_X`, `$set_Y`, `$set_sigma`, or any other state-method on the wrapper**
+(interface.md Sec.1; the Sec.17 anti-patterns live in `lifecycle.md`) -- kernel-control methods
+(`freeze / unfreeze / get_frozen / readapt_NUTS`) are the only allowed extensions. The C++
+contract and the R contract are DIFFERENT vocabularies at DIFFERENT tiers; the block class
+implements the former, never the latter.
 
 **Tier C / license gate.** If your block vendors a new kernel, it goes under
 `blocks_local/<Block>/vendor/` with the upstream LICENSE preserved verbatim, and must pass the
@@ -292,9 +299,12 @@ special branch; non-free / GPL-3-incompatible -> reject). The system's already-v
 on `-I` and need no per-block declaration.
 
 > **SIGN-OFF 4 (interface).** Confirm the new class's Tier-B `block_sampler` override list and
-> any fine-grained C++ setters; confirm (if a wrapper ships) the R contract is exactly six (+7th
-> iff NUTS-family) with set_current-as-dispatcher and zero state-method leaks; confirm the
-> license gate for any vendored kernel.
+> any fine-grained C++ setters; confirm (if a wrapper ships) the R contract matches interface.md
+> Sec.1 formula = core-6 state methods + kernel-control category
+> (`freeze / unfreeze / get_frozen` always via `AI4BAYESCODE_BIND_KERNEL_CONTROL` macro +
+> `kernel_control_mixin` CRTP; `readapt_NUTS` iff NUTS-family child; BART tree-serialization
+> carve-out iff BART-family child), with set_current-as-dispatcher and zero state-method leaks;
+> confirm the license gate for any vendored kernel.
 
 ---
 

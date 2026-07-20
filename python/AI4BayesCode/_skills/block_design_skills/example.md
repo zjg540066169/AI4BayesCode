@@ -10,6 +10,16 @@
 # skeleton (include preamble, the two module blocks, the int-main fence, the @example format) =
 # codegen_cpp.md (Sec. "Class shape", "Header @example block", "Authoring order"); the canonical worked
 # file to copy verbatim for SHAPE = examples/GaussianLocationScale.cpp.
+#
+# HEADER PATCH IN FLIGHT (2026-07-19): the kernel-control category
+# (freeze / unfreeze / get_frozen) described in codegen_cpp.md and referenced below is a
+# FORWARD-LOOKING contract. The required header include/AI4BayesCode/kernel_control_mixin.hpp
+# SHIPS IN A SEPARATE FOLLOW-UP PATCH. Until that patch lands, DO NOT emit the mixin inheritance
+# or the AI4BAYESCODE_BIND_KERNEL_CONTROL / AI4BAYESCODE_PYBIND_KERNEL_CONTROL macros here --
+# they will fail to compile. Emit core-6 + conditional readapt_NUTS only. Downstream users of
+# examples generated in the interim who call m$freeze(...) will see an R error like
+# "no method for 'freeze'" -- expected, will disappear once the header patch lands.
+# See DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md for migration timeline.
 
 ## !!! GATE CHECK FIRST -- did the user accept the example gate? !!!
 
@@ -81,11 +91,13 @@ The driver reads state back with the neutral C++ API (`comp.data().get("<key>")`
 `dynamic_cast<Block&>(comp.child(0)).current()`); `comp.step(rng)` advances the sampler. Wrap the
 model in a small **driver class** (the Tier-A wrapper) whose methods are NEUTRAL-typed only --
 `state_map` / `history_map` / `arma::vec`, NEVER `Rcpp::List` or a pybind type -- exposing the
-six-method contract (`step` / `get_current` / `set_current` / `predict_at` / `get_dag` /
-`get_history`). If the block wraps a NUTS child, add the **7th method `readapt_NUTS`** (forwarding to
-the child -- `design.md Sec....`). The `block_sampler` semantics are owned by **system_design Sec.1**
-(`interface.md`) -- do not re-derive them. The two frontend module blocks bind THIS driver class; the
-`int main()` drives it directly.
+**core-six state contract** (`step` / `get_current` / `set_current` / `predict_at` / `get_dag` /
+`get_history`) plus the **kernel-control category** (`freeze` / `unfreeze` / `get_frozen` always;
+`readapt_NUTS` iff the composite contains a NUTS-family child). The driver class MUST inherit
+`AI4BayesCode::kernel_control_mixin<Driver>` (CRTP) so it gets the R/Python-facing forwarders
+for `freeze / unfreeze / get_frozen` for free -- see `codegen_cpp.md` for the exact pattern. The
+`block_sampler` semantics are owned by **system_design Sec.1** (`interface.md`) -- do not re-derive
+them. The two frontend module blocks bind THIS driver class; the `int main()` drives it directly.
 
 ## Structure of the file (tri-module) -- copy GaussianLocationScale.cpp
 
@@ -116,14 +128,20 @@ blocks, and the fence copy as-is.
    `constraints.hpp`, `rcpp_wrap.hpp`, plus `<random>` / `<cmath>` / `<cstdio>`. Other C++ libraries
    (Eigen, celerite, libgp, autodiff) are fine if the block needs them.
 4. **(optional) anonymous-namespace free functions** -- e.g. a log-density/grad closure, file-local.
-5. **The neutral driver class** -- wires data + DAG + the new block child; the six/seven-method
-   contract; neutral types only.
+5. **The neutral driver class** -- wires data + DAG + the new block child; inherits
+   `AI4BayesCode::kernel_control_mixin<Driver>` (CRTP) for kernel-control forwarders;
+   core-6 + kernel-control (freeze/unfreeze/get_frozen always; readapt_NUTS iff NUTS-family
+   child) methods; neutral types only.
 6. **RCPP_MODULE block** -- `#ifdef AI4BAYESCODE_RCPP_MODULE` ... `RCPP_MODULE(<Model>_module){
-   Rcpp::class_<<Model>>("<Model>") .constructor<...>() ... .method("step", ...) ... }` ... `#endif`.
+   Rcpp::class_<<Model>>("<Model>") .constructor<...>() ... .method("step", ...) ...
+   AI4BAYESCODE_BIND_KERNEL_CONTROL(<Model>); }` ... `#endif`. The macro emits the three
+   `freeze` / `unfreeze` / `get_frozen` method lines from
+   `kernel_control_mixin.hpp` -- do NOT write them by hand.
 7. **PYBIND11_MODULE block** -- `#ifdef AI4BAYESCODE_PYBIND_MODULE` ... `#include
    "AI4BayesCode/pybind_casters.hpp"` ... `PYBIND11_MODULE(<Model>, m){
    AI4BayesCode::register_ai4bayescode_types(m); pybind11::class_<<Model>>(m,"<Model>") .def(init<...>())
-   ... }` ... `#endif`.
+   ... AI4BAYESCODE_PYBIND_KERNEL_CONTROL(m, <Model>); }` ... `#endif`. Companion macro to
+   the Rcpp one.
 8. **`int main()`** -- `#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)`
    -> simulate data from a KNOWN truth -> build the composite/block -> warmup + sample -> compute a
    posterior mean -> compare to truth (or a naive baseline) -> `printf` the result -> `return ok ? 0 : 1;`
@@ -178,9 +196,12 @@ nodes, predict-DAG BFS -- system_design Sec.4), `get_dag` / `get_history` thin f
 
 ### The two frontend module blocks + `@example` (both are REQUIRED)
 
-Write BOTH module blocks, binding the driver's six/seven methods -- copy the exact idiom from
-`GaussianLocationScale.cpp` (L314-352): register both constructors (legacy + full), both `step`
-overloads, and `readapt_NUTS` only if the driver has it. The `PYBIND11_MODULE` block opens with
+Write BOTH module blocks, binding the driver's core-6 state methods + kernel-control category --
+copy the exact idiom from `GaussianLocationScale.cpp` (L314-352): register both constructors
+(legacy + full), both `step` overloads, `readapt_NUTS` only if the driver has it, and
+`AI4BAYESCODE_BIND_KERNEL_CONTROL(<Model>)` (RCPP) +
+`AI4BAYESCODE_PYBIND_KERNEL_CONTROL(m, <Model>)` (pybind) UNCONDITIONALLY (kernel-control is
+a universal wrapper category, interface.md Sec.1). The `PYBIND11_MODULE` block opens with
 `AI4BayesCode::register_ai4bayescode_types(m)` so `state_map` / `history_map` cross the boundary.
 These bindings are exactly what makes the contributed block `source`-able in R and Python -- they are
 NOT deferred to "codegen/packaging elsewhere" the way the old frontend-independent example did.

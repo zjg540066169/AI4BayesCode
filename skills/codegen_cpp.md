@@ -8,11 +8,26 @@ description: |
   family templates: Gaussian / Bernoulli / Poisson / Multinomial /
   BART-noise), Check #12 gradient verification via autodiff (with
   throwaway verify_<ClassName>.cpp companion file), Assembly order
-  inside constructor, Class shape (6-method contract + mutable
-  predict_rng_). Extracted from codegen.md (sections 4a, 5, 6, 6a,
-  6b, 7, 8). The entry-point skill `codegen.md` points here for all
-  C++-emission guidance.
+  inside constructor, Class shape (core-6 state contract + kernel-control
+  category via kernel_control_mixin CRTP + mutable predict_rng_).
+  Extracted from codegen.md (sections 4a, 5, 6, 6a, 6b, 7, 8). The
+  entry-point skill `codegen.md` points here for all C++-emission
+  guidance.
 ---
+
+> **HEADER PATCH IN FLIGHT (2026-07-19):** The kernel-control category
+> (`freeze / unfreeze / get_frozen`) documented in this skill is a
+> FORWARD-LOOKING contract. The required header
+> `include/AI4BayesCode/kernel_control_mixin.hpp` and its base-class
+> hooks (`block_sampler::is_frozen_`, `composite_block::freeze/unfreeze/
+> get_frozen`, `joint_nuts_block` slot-level override) SHIP IN A
+> SEPARATE FOLLOW-UP PATCH. Until that patch lands, code generated per
+> this skill's mixin + macro template WILL FAIL TO COMPILE. See
+> `DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md` for the migration
+> timeline. During the interval, do NOT emit the mixin inheritance or
+> the `AI4BAYESCODE_BIND_KERNEL_CONTROL` macro (emit the core-6 only,
+> plus conditional `readapt_NUTS`); users lose the freeze feature until
+> the header patch lands.
 
 # AI4BayesCode codegen -- C++ file emission
 
@@ -1888,7 +1903,10 @@ template OR the strict-N pattern with documented reason.
 ## 8. Class shape
 
 ```cpp
-class <ClassName> {
+#include "AI4BayesCode/kernel_control_mixin.hpp"   // kernel-control CRTP + macros
+
+class <ClassName>
+    : public AI4BayesCode::kernel_control_mixin<<ClassName>> {   // ALWAYS inherit mixin
 public:
     <ClassName>(/* data + int rng_seed + bool keep_history = false */);
     void                      step();                             // no-arg = 1 sweep; body is just `{ step(1); }`
@@ -1898,15 +1916,22 @@ public:
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const;
     AI4BayesCode::dag_info    get_dag() const;                    // = impl_->get_dag()
     AI4BayesCode::history_map get_history() const;                // = impl_->get_history()
-    // CONDITIONAL 7th method -- emit ONLY if the composite contains any
+    // CONDITIONAL kernel-control method -- emit ONLY if the composite contains any
     // nuts_block / joint_nuts_block child (see Sec.9). Then also add the
     // readapt_rng_ member below.
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1);
+    // Kernel-control category (freeze / unfreeze / get_frozen) is provided
+    // automatically by the kernel_control_mixin<Derived> base class -- do NOT
+    // declare them here. The mixin's forwarders read this->impl_ (composite
+    // pointer) via the CRTP static_cast; ensure `impl_` is a member (private
+    // is fine) named exactly `impl_`. The RCPP_MODULE / PYBIND11_MODULE
+    // macros AI4BAYESCODE_BIND_KERNEL_CONTROL(<ClassName>) /
+    // AI4BAYESCODE_PYBIND_KERNEL_CONTROL(m, <ClassName>) bind them.
 private:
     std::mt19937_64                             rng_;
     mutable std::mt19937_64                     predict_rng_;  // Sec.6a
     mutable std::mt19937_64                     readapt_rng_;  // Sec.9, NUTS-family only
-    std::unique_ptr<AI4BayesCode::composite_block> impl_;
+    std::unique_ptr<AI4BayesCode::composite_block> impl_;    // mixin reads this
     bool                                        keep_history_ = false;
 };
 ```
@@ -2278,13 +2303,16 @@ your backend at the tail of the `.cpp`.
 
 **Rule:** if the wrapper's composite contains at least one
 `nuts_block` or `joint_nuts_block`
-child, the wrapper MUST expose a 7th R-level method
+child, the wrapper MUST expose a conditional kernel-control method
 `readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1)` and carry a
 3rd RNG member `readapt_rng_`. If the composite has no NUTS-family
 child (pure BART, pure Gibbs, pure VI, pure HMM, pure SBP, pure
-RJMCMC, pure slice), the wrapper has exactly the 6 core methods
-and 2 RNGs. See `system_design.md Sec.1` (conditional 7th method),
-Sec.8 (3rd RNG), Sec.13 NUTS-family contract, and `validator.md Sec.24`.
+RJMCMC, pure slice), the wrapper has core-6 state methods + the
+always-present kernel-control category (`freeze / unfreeze / get_frozen`
+via the mixin macro), 2 RNGs, and no `readapt_NUTS`. See
+`system_design.md Sec.1` (core-6 + kernel-control formula, including
+conditional `readapt_NUTS`), Sec.8 (3rd RNG), Sec.13 NUTS-family
+contract, and `validator.md Sec.23` + `Sec.26`.
 
 **ALWAYS register the 3-arg form.** Use EXACTLY
 `readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1)` (the code
@@ -2339,6 +2367,20 @@ below, each under its own `#ifdef`, regardless of the runtime-backend answer
 (`AI4BayesCode.source` sets `-DAI4BAYESCODE_PYBIND_MODULE`) -- the backend
 choice selects only the runner file, never which binding block(s) to write.
 
+**Class declaration (all wrappers inherit `kernel_control_mixin`).**
+Every wrapper class must inherit `AI4BayesCode::kernel_control_mixin<Derived>`
+(CRTP) so it gets the R-facing forwarders for `freeze` / `unfreeze` /
+`get_frozen` for free. Include the mixin header alongside the other
+AI4BayesCode headers:
+
+```cpp
+#include "AI4BayesCode/kernel_control_mixin.hpp"
+
+class <ClassName> : public AI4BayesCode::kernel_control_mixin<<ClassName>> {
+    // ... composite_block impl_; state; constructors; step / get_current / ...
+};
+```
+
 **`RCPP_MODULE` block (R -- active when `AI4BAYESCODE_RCPP_MODULE` is defined):**
 
 ```cpp
@@ -2358,7 +2400,11 @@ RCPP_MODULE(<ClassName>_module) {
         // CONDITIONAL -- only emit the line below if the composite
         // contains any NUTS-family child (nuts_block /
         // joint_nuts_block).
-        .method("readapt_NUTS", &ClassName::readapt_NUTS);
+        .method("readapt_NUTS", &ClassName::readapt_NUTS)
+        // ALWAYS -- kernel-control category (interface.md Sec.1).
+        // The macro emits `.method("freeze", ...)`, `.method("unfreeze", ...)`,
+        // `.method("get_frozen", ...)` bound to the mixin's forwarders.
+        AI4BAYESCODE_BIND_KERNEL_CONTROL(ClassName);
 }
 #endif
 ```
@@ -2390,6 +2436,10 @@ PYBIND11_MODULE(<ClassName>, m) {
         .def("readapt_NUTS", &ClassName::readapt_NUTS,
              pybind11::arg("n"), pybind11::arg("reset") = false,
              pybind11::arg("max_tree_depth") = -1);
+    // ALWAYS -- kernel-control category (interface.md Sec.1).
+    // The macro emits `.def("freeze", ...)`, `.def("unfreeze", ...)`,
+    // `.def("get_frozen", ...)` bound to the mixin's forwarders.
+    AI4BAYESCODE_PYBIND_KERNEL_CONTROL(m, ClassName);
 }
 #endif
 ```

@@ -233,6 +233,30 @@ model$predict_at(list(<X> = <X>_test))
 ## model$step(1L)               ## refresh derived state -- hybrid composites only
 ## model$readapt_NUTS(500L, FALSE, -1L)  ## re-tune metric (Rcpp needs ALL 3 args; reset=FALSE, max_tree_depth=-1 = configured depth)
 ## ## model$readapt_NUTS(500L, TRUE, -1L)   ## use reset=TRUE if data change is dramatic
+
+## freeze() / unfreeze() / get_frozen() -- kernel-control, always available on every wrapper.
+##
+## freeze holds a child block's state fixed (skips its step() and readapt_NUTS()).
+## Use for probit-style pinning (sigma = 1), prior sensitivity, two-stage inference.
+##
+## STRICT semantics:
+##   freeze("<name>")           -- hold sigma at last set_current value
+##   freeze(c("<n1>", "<n2>"))  -- hold multiple
+##   freeze()                   -- ERROR (freeze requires a non-empty name vector)
+##   freeze("unknown")          -- ERROR (block name not in composite)
+##   freeze("<bart_block>")     -- ERROR (BART / VI / HMM / genBART on the blacklist)
+##
+## PERMISSIVE unfreeze:
+##   unfreeze()                 -- release all
+##   unfreeze("<name>")         -- release one
+##   unfreeze(character(0))     -- ERROR (empty set; use unfreeze() for all)
+##
+## Example (uncomment for a probit-style sigma pin):
+## model$set_current(list(sigma = 1))
+## model$freeze("sigma")
+## model$step(1L)               ## sigma stays 1; beta continues to sample
+## model$get_frozen()           ## -> "sigma"
+## model$unfreeze("sigma")      ## sigma resumes sampling
 ```
 
 The example must run as-is on the synthetic shapes generated in the
@@ -343,6 +367,14 @@ ai4bayescode_source("<folder>/<ClassName>.cpp")   # relative path; no AI4BayesCo
 # RIGHT (data passed in; model-specific name):
 run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep, diagnosis = FALSE) {
     model <- new(<ClassName>, <data_args>, as.integer(seed), TRUE)
+    # Kernel-control (freeze/unfreeze): must be re-issued per worker.
+    # run_chain constructs a fresh model per chain (via foreach %dopar%);
+    # freeze state does NOT auto-propagate from the outer scope. If you
+    # want to pin sigma (probit) or hold any block, add the calls HERE:
+    #   model$set_current(list(sigma = 1))
+    #   model$freeze("sigma")
+    # Then also set `frozen_names <- c("sigma")` at runner scope for R2.f
+    # exclusion. See validator.md Sec.R2.f + DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md Sec.8.
     t0 <- Sys.time()
     model$step(n_burnin)
     model$step(n_keep)
@@ -484,7 +516,24 @@ r2_diag <- function(h1, h2, n_keep_used) {
     list(rhat = worst_rhat, ess_ratio = worst_ess_ratio)
 }
 
-d <- r2_diag(c1$hist, c2$hist, n_keep)
+# R2.f: exclude frozen params (kernel-control) from R-hat / ESS aggregation.
+# See validator.md Sec.R2.f. Frozen params appear as constant columns in
+# get_history() (composite appends a repeat every skipped step to preserve
+# shape); their R-hat is undefined (NaN). Excluding them keeps the diagnostic
+# honest and logs the exclusion for user verification.
+# NOTE: if run_chain_<ClassName>() calls model$freeze(...) inside the worker,
+# set `frozen_names` here to the same character vector so R2.f can filter.
+# For a default (no-freeze) runner, this is character(0) and a no-op.
+frozen_names <- character(0)   # <-- set to c("sigma", ...) if run_chain freezes
+apply_frozen_filter <- function(h) {
+    if (length(frozen_names) == 0L) h else h[setdiff(names(h), frozen_names)]
+}
+if (length(frozen_names) > 0L) {
+    cat(sprintf("[R2.f] Excluding %d frozen param(s) from R2: %s\n",
+                length(frozen_names), paste(frozen_names, collapse = ", ")))
+}
+
+d <- r2_diag(apply_frozen_filter(c1$hist), apply_frozen_filter(c2$hist), n_keep)
 
 # Stage-2 escalation (within-attempt): re-run at 20k+20k if Stage-1 (4k+4k) shows
 # max R-hat >= 1.05 OR a severely low ess_ratio (< 0.005), then recompute.
@@ -495,7 +544,7 @@ if (d$rhat >= 1.05 || d$ess_ratio < 0.005) {
     c2 <- run_chain_<ClassName>(<data_args>, seed = 202L, n_burnin, n_keep)
     stopifnot(all(sapply(c1$hist, function(x) all(is.finite(x)))))
     stopifnot(all(sapply(c2$hist, function(x) all(is.finite(x)))))
-    d <- r2_diag(c1$hist, c2$hist, n_keep)
+    d <- r2_diag(apply_frozen_filter(c1$hist), apply_frozen_filter(c2$hist), n_keep)
 }
 
 # Final gates: R-hat HARD; ESS SOFT (only ess_ratio < 0.005 at the escalated

@@ -28,11 +28,11 @@ library test** at L3 and runs the **FULL** by-mechanism sweep at L2.
 | Layer | Shared backbone (`validator.md`) | What block_design runs (this file) |
 |---|---|---|
 | **L1 Syntactic** | does it compile | Sec.3 -- compile the staged block + test (exact recipe) |
-| **L2 Semantic** | code-level checks for silent bugs | Sec.2 -- the by-mechanism `validator.md` checks #1-#25 the block triggers, **including the mandatory Check #12 AD-twin** for any hand-written gradient (the FULL sweep, not codegen's subset) |
+| **L2 Semantic** | code-level checks for silent bugs | Sec.2 -- the by-mechanism `validator.md` checks #1-#26 the block triggers, **including the mandatory Check #12 AD-twin** for any hand-written gradient (the FULL sweep, not codegen's subset) |
 | **L3 Runtime** | codegen: R1 smoke * R2 2-chain R-hat * R3 BPV/LOO | Sec.1 -- the **ground-truth library-test ladder T0-T4** (run via Sec.3 on "go"); SUBSUMES codegen's L3 and ADDS the primitive extra: **T0** sanity * **T1a** parity / **T1b** FD-gradient * **T2** recovery-from-known-truth * **T3** cross-chain R-hat **< 1.01** (stricter than codegen's 1.05) * **T4** stress/funnel |
 
 The block-design EXTRA = everything codegen skips because its inputs are pre-audited: the
-ground-truth regimes (T0/T1a/T1b/T2/T4) and the full #1-#25 sweep. That extra is the point -- a
+ground-truth regimes (T0/T1a/T1b/T2/T4) and the full #1-#26 sweep. That extra is the point -- a
 primitive must PROVE correctness against ground truth, not just run clean.
 
 **Execution order: L1 compile -> L2 semantic -> L3 runtime ladder**, run AUTOMATICALLY (no "go"

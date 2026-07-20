@@ -7,6 +7,39 @@
 
 Each family has its own setter naming; keep within the family.
 
+### Freeze semantics per family (kernel-control, interface.md Sec.1)
+
+Every wrapper exposes `freeze(names)` / `unfreeze(names = <missing>)` /
+`get_frozen()` as kernel-control methods (see interface.md Sec.1 amendment +
+DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md for the full contract). The per-family
+semantics of what "freezing" does are uniform in principle -- skip the child's
+`step()` and hold its shared_data key at the last-set value -- but the
+WHITELIST/BLACKLIST admission varies:
+
+**WHITELIST (freeze supported):**
+
+| Family | Freeze effect | Notes |
+|---|---|---|
+| `nuts_block` | `step()` skipped; kernel state (mass matrix, step size) preserved; `readapt_NUTS` also no-op on this child | canonical use case (probit / sigma-fixed extension) |
+| `joint_nuts_block` | **v1: BOTH whole-block AND slot-level** (scope-bumped 2026-07-19). Passing the block's own name freezes all slots atomically; passing a slot name (sub-parameter in `slot_specs_`) freezes ONLY that slot -- the remaining slots continue to sample jointly, with the mass matrix re-projected onto the free-slot subspace (Welford covariance skips frozen rows/cols; leapfrog zeros momentum/gradient on frozen dims; constraint chain rule outputs are masked). This unblocks the probit / partial-fix extension pattern (freeze `log_sigma` slot inside `joint_nuts_block({beta, log_sigma})` to pin sigma at 1). Dim-changing slots (SIMPLEX / CHOLESKY_* / CORR_ / COV_) freeze via the `unc_offset` / `unc_dim` dual-offset scheme. See DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md Sec.10.a for the integrator + Welford + constraint chain rule details. | `readapt_NUTS` on a slot-frozen joint block still runs; mass-matrix re-adaptation skips frozen dims. Whole-block freeze -> `readapt_NUTS` also no-op. |
+| `*_gibbs_block` (dirichlet / beta / binary / categorical / survival trio) | `step()` skipped; last draw held in shared_data | uniform; no derived-state hazard |
+| `gmrf_precision_block` / `gmrf_whitened_ess_block` | `step()` skipped; latent `x` held at last draw | mild derived state via `Q_fn(ctx)` -- if a hyperparam feeding Q moves while `x` is frozen, the effective conditional on `x` still makes sense (Gibbs-condition-on-x variant) |
+| `stick_breaking_block` / `normal_gamma_cluster_gibbs_block` | `step()` skipped; stick lengths / cluster params held | valid conditional; alpha etc. still sample |
+| `rjmcmc_block` | **whole-block only.** Freezing atomically suppresses BOTH the trans-dim gamma sweep AND the `continuous_update` beta refresh -- they live inside the same `step()`. To sample active betas conditional on frozen gamma: use two composites, or wait for v1.1 sub-key fix API. `dim()` is compile-time-fixed at 2p so composite concatenation stays type-stable through freeze/unfreeze. | see DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md Sec.6 |
+
+**BLACKLIST (freeze -> Rcpp::stop with reason):**
+
+| Family | Reason |
+|---|---|
+| `bart_block` | `set_current(arma::vec)` is `Rcpp::stop` -- no invertibility. Freezing means "hold current forest" but user cannot inject a specific forest state. Additionally: frozen BART leaves `f_bart` in shared_data stale under any subsequent `set_current(X = X_new)`, causing downstream sigma NUTS to adapt on stale residuals. Silent bias. Error string: `"freezing bart_block not supported (forest is non-invertible + derived-state hazard on subsequent set_current(X=...) updates)"`. |
+| `genbart_block` | Same class as `bart_block`. Error string: `"freezing genbart_block not supported (forest is non-invertible + derived-state hazard); same rationale as bart_block"`. |
+| `hmm_block` | Latent state sequence z frozen while emission parameters sample yields mismatched conditioning (Baum-Welch forward pass depends on emissions). Silent bias. Error string: `"freezing hmm_block not supported (latent state sequence conditioning breaks when emission parameters sample)"`. |
+| `vi_block` subclasses | Sec.18.4 invariant: composite writes `current_sample(rng)` (fresh q-draw) to shared_data each step, NOT `current()` (q-mean). Freezing VI breaks the hybrid q-sample stream -> MCMC siblings silently underestimate posterior variance. Error string: `"freezing VI blocks not supported (breaks q-sample stream invariant); freeze the entire VI wrapper at composite level instead"`. |
+
+**All FOUR error strings above contain the substring `"not supported"` verbatim** -- validator Check #26(b) uses `grepl("not supported", ...)` as a uniform blacklist-error test.
+
+Validator Check #26 tests presence + gate + refreeze warning + stale-derived warning.
+
 ### NUTS-family (continuous parameters)
 
 `nuts_block` (single parameter, real or constrained) and
@@ -294,7 +327,10 @@ single-pilot FIXED it (1.0015, 6x ESS). Full C++ suite green after the flip.
     window k-1 which let the chain explore more broadly than
     window k-1's biased start -- fixes ICAR-style ridge trapping.
   - **Phase III** (default `tp_phase3_iters = 50`): final
-    step-size tune with frozen mass matrix.
+    step-size tune with frozen mass matrix. **("Frozen" here is
+    the internal numerical term for a fixed mass matrix -- NOT to be
+    confused with the user-facing `m$freeze()` kernel-control method
+    in interface.md Sec.1.)**
 
   After all three phases, `first_call_` is set to FALSE so the main
   step path runs no additional warmup; sampling begins immediately.
@@ -378,6 +414,21 @@ C++-only setters. Rejected keys: `f_bart` for `bart_block`; `r`
 Case study: see Sec.15 (BART case study, lifecycle.md) for the full fix history (originally
 written for `bart_block`; the same pattern applies to `genbart_block`
 which uses `(Y, offset)` keys).
+
+**BART-family carve-out to interface.md Sec.1.** BART-family wrappers
+historically expose three tree-serialization methods NOT in the core-six
++ kernel-control formula: `get_tree` / `set_tree` / `get_tree_history`.
+These are BART-specific (non-BART wrappers must not expose them) and
+are formally acknowledged as a carve-out in interface.md Sec.1 so the
+grep-audit does not flag them as violations. They are not part of the
+kernel-control category and not the target of Check #26.
+
+**BART freeze blacklist.** BART-family blocks are on the freeze
+blacklist -- `m$freeze("<bart_block_name>")` raises `Rcpp::stop`. See
+the "Freeze semantics per family" table at the top of Sec.13 for
+rationale (non-invertible forest + stale derived state on subsequent
+`set_current(X = X_new)`). Sibling `nuts_block` children in a BART
+composite (e.g., `sigma`) can still be frozen normally.
 
 ### Joint-NUTS-family
 

@@ -8,6 +8,22 @@ description: |
 
 # AI4BayesCode code validator
 
+> **HEADER PATCH IN FLIGHT (2026-07-19) -- Check #26 is FORWARD-LOOKING.**
+> Check #26 (kernel-control conformance) tests the presence of
+> `freeze / unfreeze / get_frozen` methods bound via the
+> `AI4BAYESCODE_BIND_KERNEL_CONTROL` macro from
+> `include/AI4BayesCode/kernel_control_mixin.hpp`. That header + the
+> underlying `block_sampler` / `composite_block` / `joint_nuts_block`
+> implementations SHIP IN A SEPARATE FOLLOW-UP PATCH. Until that patch
+> lands, Check #26 is DISABLED -- do NOT run its (a)/(b)/(c)/(d)
+> sub-checks against generated code (they will fail structurally because
+> the required header + methods do not yet exist). Layer-3 R2.f (frozen
+> parameter exclusion) is also inert until then, since no wrapper will
+> have any frozen parameter to exclude. All other checks (#1-#25 +
+> Layer-3 R1 / R2 non-.f / R3) run as before. See
+> `DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md` for the migration
+> timeline.
+
 Validation of a generated sampler proceeds in **three** layers, from
 cheapest to most expensive. Sub-steps within Layer 3 share the same
 2-chain run, so running them in sequence is essentially free after the
@@ -26,13 +42,14 @@ chains finish.
 
 1. **Syntactic** -- compilation. The C++ compiler does this for free; no
    manual checklist. If `sourceCpp` fails, fix and retry.
-2. **Semantic** -- code-level review. Twenty-five checks (#1-#25), all
+2. **Semantic** -- code-level review. Twenty-six checks (#1-#26), all
    Layer-2 semantic. Most are static code review; a few -- #12 (gradient
    verification via autodiff), #14 (bijection probes), and #15 (library
    parity) -- run a throwaway compile at generation, but they are still
    semantic checks, not a separate category. Checks #11 (joint-NUTS)
-   and #13 (RNG separation) fire conditionally. These catch bugs that
-   compile and run without error but produce a wrong posterior.
+   and #13 (RNG separation) fire conditionally; Check #26 (kernel-control
+   conformance) fires on every wrapper. These catch bugs that compile
+   and run without error but produce a wrong posterior.
 3. **Runtime** -- all execution-based checks, sharing one pair of chains
    produced with `keep_history = TRUE`:
    - **R1. Smoke test** (~10 steps) -- catches immediate failures, non-
@@ -48,9 +65,9 @@ in order; failure at an earlier step means don't bother with the next.
 
 ---
 
-## Check number registry (all 25)
+## Check number registry (all 26)
 
-Checks #1-#25 are Layer-2 semantic audits (#14-#17 are defined in
+Checks #1-#26 are Layer-2 semantic audits (#14-#17 are defined in
 sibling skill files; the rest in this file). The Layer-3 R2-VI
 PSIS-k-hat diagnostic (no registry number) is also defined here. This
 registry is the authoritative cross-reference.
@@ -79,9 +96,10 @@ registry is the authoritative cross-reference.
 | 20 | n_warmup_per_step must stay 0 | Semantic | validator.md Sec.20 | any `nuts_block_config` in the generated cpp |
 | 21 | VI block contract conformance | Semantic | validator.md Sec.21 | any `vi_block` subclass in the wrapper's composite (inheritance + engine_kind + q-sample-write + history shape) |
 | 22 | VI optimizer = RAABBVI | Semantic | validator.md Sec.22 | any `vi_block` subclass (avgAdam + iterate averaging + R-hat-conv + SKL termination) |
-| 23 | readapt_NUTS state-preservation + RNG separation | Semantic | validator.md Sec.23 | wrapper exposes the 7th method `readapt_NUTS` (i.e., contains any `nuts_block` / `joint_nuts_block` child) |
+| 23 | readapt_NUTS state-preservation + RNG separation | Semantic | validator.md Sec.23 | wrapper exposes the kernel-control method `readapt_NUTS` (i.e., contains any `nuts_block` / `joint_nuts_block` child) |
 | 24 | Joint-NUTS pathology pre-flight (funnel NCR / constraint kind / lambda completeness) | Semantic | validator.md Sec.24 + joint_nuts_failure.md | cpp constructs a `joint_nuts_block` |
 | 25 | Trans-dimensional / Dirac-spike must use `rjmcmc_block` (reducibility + silent-slab guard) | Semantic | validator.md Sec.25 + codegen_priors.md Sec.3a Class 2b/4 | model is Sec.3a Class 2b (Dirac point-mass spike) or Class 4 (parameter-space dimension is a random variable) -- i.e. posterior support is a union of manifolds of different dimension |
+| 26 | Kernel-control conformance (freeze / unfreeze / get_frozen present + whitelist/blacklist gate + refreeze warning + stale-derived warning) | Semantic | validator.md Sec.26 + DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md | always (kernel-control is a universal wrapper category per interface.md Sec.1) |
 
 **Check #12 status note:** Check #12 is the ONE execution-based Layer-2
 check -- the AI writes a throwaway `tests_autodiff/verify_<ClassName>.cpp`
@@ -98,10 +116,10 @@ overall gate.
 
 ## Layer 2 -- Semantic
 
-Twenty-five checks. **Checks #1-#11, #13, #18, #19, #20, #21, #22,
-#23, and #25 are static** -- the AI audits them by reading the
-generated `.cpp` (plus, for #23 readapt_NUTS, an R-level round-trip
-test in the runner), no execution required. Checks #14-#17 are
+Twenty-six checks. **Checks #1-#11, #13, #18, #19, #20, #21, #22,
+#23, #25, and #26 are static** -- the AI audits them by reading the
+generated `.cpp` (plus, for #23 readapt_NUTS and #26 freeze/unfreeze,
+R-level round-trip tests in the runner), no execution required. Checks #14-#17 are
 defined in sibling skill files. **Check #12 (gradient verification via autodiff) is
 the one execution-based semantic check** -- the AI writes a throwaway
 companion file `tests_autodiff/verify_<ClassName>.cpp` that copies the
@@ -120,7 +138,8 @@ Checks #11 (joint-NUTS), #13 (RNG separation), #18 (dense metric),
 contract), #22 (VI optimizer), #23 (readapt_NUTS), #24 (joint-NUTS
 pathology pre-flight), and #25 (rjmcmc / Dirac-spike) fire
 conditionally -- only when the relevant pattern is present (see each
-check's **Trigger**).
+check's **Trigger**). Check #26 (kernel-control conformance) fires on
+EVERY wrapper -- freeze/unfreeze/get_frozen is a universal category.
 
 ### 1. Distribution parameterization
 
@@ -1612,8 +1631,8 @@ do not reinvent the step-size logic.
 
 ### 23. readapt_NUTS state-preservation + RNG separation
 
-**Trigger:** Any user-facing wrapper that exposes the 7th
-R-level method `readapt_NUTS`. Equivalently: any wrapper whose
+**Trigger:** Any user-facing wrapper that exposes the kernel-control
+method `readapt_NUTS` (interface.md Sec.1). Equivalently: any wrapper whose
 composite contains at least one `nuts_block` or `joint_nuts_block`
 child.
 
@@ -1668,7 +1687,8 @@ If the test fails, the snapshot/restore implementation is buggy
 
 **Why this check exists**
 
-`readapt_NUTS` is a new R-level method category (kernel-tuning).
+`readapt_NUTS` is a member of the kernel-control R-level method
+category (interface.md Sec.1 amendment; see also Check #26).
 Three easy implementation bugs all produce silently-wrong samplers
 that the existing Layer-3 R-hat / ESS / LOO suite does not catch:
 
@@ -1697,9 +1717,12 @@ time, before the sampler ships.
 each block reports `supports_readapt()`. NUTS-family blocks
 return `true` and run their per-block readapt; all other block
 families inherit `supports_readapt() == false` and are silently
-skipped. Validator does NOT check this dispatch logic -- it's
-covered by `composite_block`'s own unit tests in `tests/`. The
-wrapper-level audit above only ensures the 7th-method body is
+skipped. **Additionally, any child with `is_frozen() == true` is
+skipped regardless of family** -- freezing a NUTS-family child
+(via `m$freeze(...)`, Check #26) suppresses both its `step()` and
+its `readapt_NUTS()`. Validator does NOT check this dispatch logic --
+it's covered by `composite_block`'s own unit tests in `tests/`. The
+wrapper-level audit above only ensures the `readapt_NUTS` body is
 correctly built.
 
 ---
@@ -1804,6 +1827,155 @@ runtime diagnostics). Route via Sec.3a Class 2b/4 -> rjmcmc_block."
 freeze but is blind to mode B) and R2.s (which handles R-hat *exclusion* once
 the Dirac spike is sampled CORRECTLY by rjmcmc). #25 is the only line of
 defense against mode B.
+
+---
+
+### 26. Kernel-control conformance (freeze / unfreeze / get_frozen)
+
+**Trigger:** EVERY wrapper. Kernel-control is a universal category per
+interface.md Sec.1 -- every user-facing wrapper class MUST expose
+`freeze` / `unfreeze` / `get_frozen` (see DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md
+for the full contract).
+
+**Four sub-checks** (all must pass):
+
+**(a) Presence -- static grep.** The wrapper's RCPP_MODULE MUST contain
+`.method("freeze", ...)`, `.method("unfreeze", ...)`, and
+`.method("get_frozen", ...)`. Equivalently, the wrapper source MUST
+include either explicit `.method(` lines OR the
+`AI4BAYESCODE_BIND_KERNEL_CONTROL(ClassName)` macro from
+`include/AI4BayesCode/kernel_control_mixin.hpp`. Missing any of the
+three -> FAIL. Companion pybind check: PYBIND11_MODULE MUST include the
+corresponding `.def(...)` lines OR the
+`AI4BAYESCODE_PYBIND_KERNEL_CONTROL(m, ClassName)` macro.
+
+Grep:
+
+```
+grep -E '\.method\("freeze"|\.method\("unfreeze"|\.method\("get_frozen"|AI4BAYESCODE_BIND_KERNEL_CONTROL' \
+     examples/<ClassName>.cpp   # must find all three (or the macro)
+grep -E '\.def\("freeze"|\.def\("unfreeze"|\.def\("get_frozen"|AI4BAYESCODE_PYBIND_KERNEL_CONTROL' \
+     examples/<ClassName>.cpp   # must find all three (or the macro)
+```
+
+**(b) Whitelist / blacklist gate -- runtime R test.** The wrapper's
+runner / `example_<ClassName>.R` must include:
+
+```r
+m <- new(<ClassName>, ...)
+
+# freeze() on unknown name -> hard error
+res <- tryCatch(m$freeze("this_block_does_not_exist"), error = identity)
+stopifnot(inherits(res, "error"))
+
+# freeze(character(0)) -> hard error
+res <- tryCatch(m$freeze(character(0)), error = identity)
+stopifnot(inherits(res, "error"))
+
+# freeze() no-arg -> hard error (Rcpp arg-count)
+res <- tryCatch(m$freeze(), error = identity)
+stopifnot(inherits(res, "error"))
+```
+
+If the composite contains any block from the freeze BLACKLIST
+(`bart_block` / `genbart_block` / `hmm_block` / any `vi_block` subclass),
+the runner ALSO asserts:
+
+```r
+res <- tryCatch(m$freeze("<blacklist_block_name>"), error = identity)
+stopifnot(inherits(res, "error"),
+          grepl("not supported", conditionMessage(res)))
+```
+
+**(c) Idempotent refreeze warning -- runtime R test.** If the composite
+contains at least one whitelisted block (nearly all do), the runner
+includes:
+
+```r
+m$freeze("<whitelist_block_name>")
+w <- tryCatch(m$freeze("<whitelist_block_name>"),
+              warning = function(w) w)
+stopifnot(inherits(w, "warning"))    # redundant refreeze warns
+
+# state preserved across freeze + step()
+before <- m$get_current()[["<whitelist_block_name>"]]
+m$step(1L)
+after  <- m$get_current()[["<whitelist_block_name>"]]
+stopifnot(identical(before, after))  # frozen block's value unchanged
+
+# unfreeze() with no arg = all
+m$unfreeze()
+stopifnot(length(m$get_frozen()) == 0L)
+```
+
+If the composite includes any `joint_nuts_block`, ALSO test slot-level
+freeze (v1 feature per DESIGN_NOTES Sec.10.a):
+
+```r
+# joint_nuts_block("<joint_name>", slots = list(..., <slot_name>, ...))
+m$set_current(list(<slot_name> = <value>))
+m$freeze("<slot_name>")               # slot-level, NOT whole-block
+stopifnot(m$get_frozen() == "<slot_name>")   # slot name, not the joint block name
+before <- m$get_current()[["<slot_name>"]]
+m$step(1L)                             # remaining slots continue to sample jointly
+after  <- m$get_current()[["<slot_name>"]]
+stopifnot(identical(before, after))    # slot pinned, whole block not frozen
+m$unfreeze()
+```
+
+**(d) Stale-derived warning -- static grep.** For any wrapper whose
+composite has a deterministic refresher (`register_refresher(key, fn)`)
+that reads a whitelisted block's `name()`, the runner should include a
+test that freezing that block emits an `Rcpp::warning` mentioning the
+downstream derived key:
+
+```r
+w <- tryCatch(m$freeze("<upstream_of_derived_key>"),
+              warning = function(w) w)
+stopifnot(inherits(w, "warning"),
+          grepl("derived key", conditionMessage(w)))
+```
+
+If the composite has NO deterministic refresher over any whitelisted
+block's output, this sub-check is skipped.
+
+**Why this check exists**
+
+Freeze is a new R-level kernel-control category (interface.md Sec.1
+amendment). Four implementation bugs all produce silently-wrong or
+inconsistent samplers:
+
+1. **Missing method binding.** Without `.method("freeze", ...)`, the
+   R user cannot reach the C++ freeze; the composite's flag never
+   flips; `step()` continues to sample. Silent no-op, user thinks
+   sigma is frozen but it isn't.
+2. **Freezing a blacklist block.** Freezing a BART child leaves
+   `f_bart` stale on subsequent `set_current(X=...)`; downstream
+   sigma NUTS adapts on wrong residual. Freezing a VI block breaks
+   the hybrid q-sample-stream invariant (Sec.18.4). BLACKLIST gate
+   in the composite prevents these.
+3. **Silent redundant refreeze.** Without an idempotency warning,
+   users refreezing on checkpoint restore have no signal that the
+   restore did anything -- they may double-apply logic.
+4. **Missing stale-derived warning.** Freezing a block whose output
+   feeds a deterministic refresher, without warning, silently
+   produces stale derived values on subsequent `set_current(data=...)`.
+   Not incorrect (user asked for freeze), but easy to misdiagnose
+   downstream.
+
+The grep + R runtime combination catches all four at validator time,
+before the sampler ships.
+
+**Compositional behavior (informational, not checked here)**
+
+`composite_block::freeze(names)` validates every name is a known child
+and belongs to a WHITELIST family; unknown -> Rcpp::stop; blacklist ->
+Rcpp::stop; already-frozen -> Rcpp::warning; static-Gibbs-DAG check
+emits Rcpp::warning if the frozen name is upstream of any registered
+refresher. Validator does NOT check this dispatch logic -- it's
+covered by `composite_block`'s own unit tests. The wrapper-level
+audit above only ensures the three methods are correctly bound and
+behave through the R interface.
 
 ---
 
@@ -2158,6 +2330,51 @@ topics, DP/BNP clusters, factor-sign flips), a high raw per-component R-hat
 can be benign label switching, not a convergence failure -- diagnose and
 resolve per `label_switching.md` before treating it as an R2 failure.
 
+### R2.f. Frozen-parameter exclusion (kernel-control)
+
+**When this rule fires.** The wrapper has one or more currently-frozen
+child blocks (i.e., `m$get_frozen()` returns a non-empty CharacterVector).
+See interface.md Sec.1 kernel-control category and Check #26.
+
+**Why exclusion is necessary.** A frozen block's key in `get_history()`
+appears as a constant column (the composite appends the same value every
+skipped `step()` to preserve shape for `posterior::rhat`, `pack2`, and
+`trim_hist`). `posterior::rhat` returns `NaN` on a constant column; if
+included, the max-aggregation `max(rh_all, na.rm = TRUE)` silently drops
+it, but the summary still lists NaN entries that confuse downstream
+inspection.
+
+**The rule.** BEFORE calling `diag_one(h1, h2)` (or any per-key R-hat /
+ESS aggregation), filter `h1` / `h2` to exclude names in
+`m$get_frozen()`:
+
+```r
+frozen  <- m$get_frozen()
+h1_free <- h1[setdiff(names(h1), frozen)]
+h2_free <- h2[setdiff(names(h2), frozen)]
+d       <- diag_one(h1_free, h2_free)
+```
+
+The convergence gate (`d$max_rhat < 1.05`) is then computed only over
+the free (non-frozen) parameters -- which is the correct semantic: the
+frozen parameters are not being sampled, so convergence of the sampler
+concerns only the free ones.
+
+**Report the excluded params.** The runner MUST log the exclusion so
+the user can verify their intent:
+
+```r
+if (length(frozen) > 0L)
+    cat(sprintf("[R2.f] Excluded %d frozen param(s) from R-hat/ESS: %s\n",
+                length(frozen), paste(frozen, collapse = ", ")))
+```
+
+**Interaction with R2.s.** R2.f fires PRIOR to R2.s. Frozen params are
+excluded FIRST (they have no draws in any meaningful sense); R2.s then
+applies its Dirac-spike-and-slab filter to whatever remains. The two
+rules are orthogonal -- a wrapper can use both simultaneously
+(e.g., freeze sigma in a probit extension of a spike-and-slab regression).
+
 ### R2.s. Conditional-relevance R-hat exclusion (Dirac spike-and-slab -- slab DISTRIBUTION parameters)
 
 **Inclusion indicator convention.** Throughout this section,
@@ -2490,6 +2707,31 @@ matches the stated observation model.
 stochastic-refresher-backed `predict_at` in the wrapper (see
 `skills/codegen_cpp.md` Sec.6a for templates).
 
+**Semantics when kernel-control freeze is active.** If `m$get_frozen()`
+is non-empty (i.e., one or more child blocks are held at fixed values
+via `m$freeze(...)`), R3.a Bayesian p-values and R3.b PSIS-LOO become
+**conditional** statistics -- conditional on the frozen parameter values,
+not marginal over their posterior. `pointwise_loglik(y_i | theta_current)`
+with (say) sigma held at 1 is a conditional log-likelihood; LOO computed
+from it is conditional-LOO, and BPV is conditional-BPV. This is NOT
+incorrect -- it answers a different question ("how well does the model
+with sigma pinned at 1 fit the data?") -- but the runner MUST surface
+the change of semantics to the user:
+
+```r
+if (length(m$get_frozen()) > 0L) {
+    cat(sprintf(
+        "[R3] NOTE: %d frozen param(s) (%s) -- R3.a BPV / R3.b LOO are\n",
+        length(m$get_frozen()), paste(m$get_frozen(), collapse = ", ")))
+    cat("      CONDITIONAL on the frozen values, not marginal. Interpret\n")
+    cat("      as posterior predictive given the pinned parameters, not\n")
+    cat("      unconditional model-vs-data fit.\n")
+}
+```
+
+The Bayesian p-value thresholds and PSIS-k-hat diagnostic targets are
+unchanged; the interpretation is.
+
 #### R3.a Bayesian posterior-predictive p-values
 
 ```r
@@ -2615,8 +2857,8 @@ if (pct_k_lo < 50 || pct_k_hi >= 10) {
 
 - **Layer 1 (Syntactic):** run `sourceCpp`. Compilation errors -> fix
   and retry.
-- **Layer 2 (Semantic):** walk the generated `.cpp` through the 25
-  semantic checks (#1-#25; #14-#17 are defined in sibling skill
+- **Layer 2 (Semantic):** walk the generated `.cpp` through the 26
+  semantic checks (#1-#26; #14-#17 are defined in sibling skill
   files). Check #12 (gradient verification) is execution-based and
   done at generation time via a throwaway
   `tests_autodiff/verify_<ClassName>.cpp` companion file (see the
@@ -2624,7 +2866,8 @@ if (pct_k_lo < 50 || pct_k_hi >= 10) {
   review. Checks #11 (joint_nuts_block), #13 (RNG separation), #18
   (dense metric), #23 (readapt_NUTS), #24 (joint-NUTS pathology), and
   #25 (rjmcmc / Dirac-spike) fire conditionally -- only when the
-  relevant pattern is present.
+  relevant pattern is present. **Check #26 (kernel-control conformance)
+  fires on EVERY wrapper.**
 - **Layer 3 (Runtime):** emit R1, R2, R3 into the R runner. They share
   the same 2 chains (keep_history = TRUE). R1 is a smoke test; R2 is
   R-hat + ESS; R3 is posterior-predictive p-values + PSIS-LOO.

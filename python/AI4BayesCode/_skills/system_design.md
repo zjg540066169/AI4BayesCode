@@ -11,10 +11,12 @@ description: |
   Index + router for the AI4BayesCode system-design guide, split 2026-06-21 into
   lazy-loadable modules under `system_design_skills/`. Maps every Sec.N to its module so
   existing "system_design Sec.N" citations resolve to one small file. Covers the
-  non-negotiable interface invariant (six-method R contract), three-tier separation,
-  shared_data / Gibbs-DAG / predict-DAG semantics, Jacobian/constraint discipline, the
-  target-geometry boundary, block-family conventions (incl. the metric/warmup decision),
-  the new-block design lifecycle + pre-merge checklist, and the VI extension.
+  non-negotiable interface invariant (core-6 state contract + kernel-control category
+  freeze/unfreeze/get_frozen/readapt_NUTS), three-tier separation, shared_data /
+  Gibbs-DAG / predict-DAG semantics, Jacobian/constraint discipline, the target-geometry
+  boundary, block-family conventions (incl. the metric/warmup decision and per-family
+  freeze semantics), the new-block design lifecycle + pre-merge checklist, and the VI
+  extension.
 ---
 
 # AI4BayesCode -- system design guide (INDEX / ROUTER)
@@ -38,7 +40,7 @@ modify those headers. Compatibility notes are in `THIRD_PARTY_LICENSES.md`.
 
 | Sections | Module (`system_design_skills/...`) | Topic |
 |---|---|---|
-| **Sec.0** Audience * **Sec.1** non-negotiable interface invariant (the six-method R contract: step / get_current / set_current / predict_at / get_dag / get_history, +7th readapt_NUTS) * **Sec.2** three-tier architecture (wrapper / block / kernel) | `interface.md` | the non-negotiable interface contract |
+| **Sec.0** Audience * **Sec.1** non-negotiable interface invariant (the core-six state contract: step / get_current / set_current / predict_at / get_dag / get_history, + kernel-control category: freeze / unfreeze / get_frozen always, readapt_NUTS iff NUTS-family child, get_tree/set_tree/get_tree_history iff BART-family child) * **Sec.2** three-tier architecture (wrapper / block / kernel) | `interface.md` | the non-negotiable interface contract |
 | **Sec.3** shared_data + block_context * **Sec.4** Gibbs DAG vs Predict DAG * **Sec.5** refreshers (deterministic / stochastic) * **Sec.6** working-response / data-injection * **Sec.7** set_current dispatcher * **Sec.8** RNG discipline * **Sec.9** history / keep_history | `dataflow.md` | data flow + wiring contracts |
 | **Sec.10** Jacobian discipline (`constraints::<kind>::wrap`; users NEVER hand-write Jacobians) | `jacobian.md` | constraint / Jacobian discipline |
 | **Sec.11** target-distribution geometry boundary (the correctness gate; validator cannot catch geometry violations) * **Sec.12** memory safety | `geometry.md` | geometry legality gate |

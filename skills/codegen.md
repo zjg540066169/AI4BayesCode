@@ -1205,13 +1205,18 @@ run, and produce reasonable samples out of the box.
   }
   ```
   Do NOT call any `$set_X`, `$set_Y`, `$set_offset` R method -- those
-  do not exist on the R interface. The R interface is ALWAYS exactly
-  six methods: `step`, `get_current`, `set_current`, `predict_at`,
-  `get_dag`, `get_history`. If you need to ADD a new BART-family
-  block (not compose an existing one), that is a system-design task
-  and you should not be the agent doing it -- the design contract
-  lives in `skills/system_design.md` (a separate skill scoped
-  for system-design agents).
+  do not exist on the R interface. The R interface is the **core-six
+  state contract** (`step`, `get_current`, `set_current`, `predict_at`,
+  `get_dag`, `get_history`) plus the **kernel-control category**
+  (`freeze`, `unfreeze`, `get_frozen` on every wrapper; plus
+  `readapt_NUTS` on any wrapper whose composite contains a NUTS-family
+  child; plus BART-family `get_tree` / `set_tree` / `get_tree_history`
+  on any wrapper with a BART/genBART/softBART child). See
+  `interface.md Sec.1` for the exact formula. If you need to ADD a
+  new BART-family block (not compose an existing one), that is a
+  system-design task and you should not be the agent doing it -- the
+  design contract lives in `skills/system_design.md` (a separate
+  skill scoped for system-design agents).
 - Never add non-English comments to generated code.
 - **Always emit the GPL-3.0-or-later license header at the top of
   every generated `.cpp`** (see `codegen_cpp.md Sec.5` for the exact

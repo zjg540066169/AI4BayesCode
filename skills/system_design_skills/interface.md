@@ -31,18 +31,20 @@ That's the whole vocabulary. This file is two levels deeper than that.
 
 ### The system-design agent IS the reader.
 
-You are changing / extending the LAYERS that back the six-method
-interface. Every invariant below must still hold after your change,
-or nested MCMC composition silently breaks.
+You are changing / extending the LAYERS that back the core-6 state
+contract + kernel-control category (see Sec.1 amendment below). Every
+invariant below must still hold after your change, or nested MCMC
+composition silently breaks.
 
 ---
 
 ## 1. The non-negotiable invariant -- unified stateful-module interface
 
 **Every user-facing wrapper class in `examples/*.cpp` exposes the
-SAME six core R-level methods, and a 7th kernel-tuning method
-ONLY when the wrapper's composite contains at least one NUTS-family
-child block:**
+SAME set of R-level methods, organized in two categories: the CORE-SIX
+state contract (always present, uniform across every wrapper) and the
+KERNEL-CONTROL category (per-wrapper members determined by composite
+content):**
 
 **Core six (always present, every wrapper):**
 
@@ -55,28 +57,87 @@ get_dag      ()                     -> Rcpp::List
 get_history  ()                     -> Rcpp::List
 ```
 
-**Optional 7th (kernel-tuning category, conditional on NUTS-family child):**
+**Kernel-control category (per-wrapper, presence dictated by composite):**
 
 ```
-readapt_NUTS (int n, bool reset = false) -> void
+freeze       (Rcpp::CharacterVector names)                    -- always
+   * present on EVERY wrapper (composite-level operation);
+   * names must be non-empty valid child block names OR joint_nuts_block
+     sub-parameter (slot) names -- slot-level freeze on joint blocks is
+     supported in v1 via the joint_nuts_block::freeze() override
+     (DESIGN_NOTES Sec.10.a);
+   * unknown-name / blacklist-family / no-arg -> Rcpp::stop;
+   * already-frozen name -> Rcpp::warning (idempotent);
+   * see DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md for full contract
+     and Sec.13 "Freeze semantics per family" for the whitelist /
+     blacklist per block family.
+
+unfreeze     (Rcpp::Nullable<Rcpp::CharacterVector> = R_NilValue) -- always
+   * present on EVERY wrapper;
+   * no-arg = unfreeze all; other invalid forms
+     (NULL, character(0), unknown name) -> Rcpp::stop;
+   * not-currently-frozen name -> Rcpp::warning (idempotent).
+
+get_frozen   () -> Rcpp::CharacterVector -- always
+   * present on EVERY wrapper;
+   * returns names of currently-frozen children, in composite child
+     order (matches `get_dag()` ordering).
+
+readapt_NUTS (int n, bool reset = false, int max_tree_depth = -1) -> void
    * present ONLY on wrappers whose composite contains at least
      one `nuts_block` or `joint_nuts_block` child;
    * pure NUTS metric re-adaptation (mass matrix + step size +
      dual-averaging state); chain state is preserved (snapshot
      + restore around the n internal adaptation iterations);
-   * see Sec.13 "NUTS-family" for the full contract and Sec.24 of
+   * `max_tree_depth = -1` means "keep current value"; a non-negative
+     value overrides the sampler's tree-depth cap for the adaptation
+     iterations;
+   * skips any frozen NUTS-family children (no-op on those);
+   * see Sec.13 "NUTS-family" for the full contract and Sec.23 of
      `validator.md` for the conformance check.
 ```
+
+**Semantic separation.** Core-six methods are for STATE INJECTION and QUERY.
+Kernel-control methods are for KERNEL BEHAVIOR CONFIGURATION (which
+sub-kernels run, how they adapt); they MUST NOT mutate parameter state --
+that goes through `set_current`. Adding a new kernel-control method (e.g.,
+a hypothetical `readapt_VI` for VI blocks) requires an explicit Sec.1
+amendment and a listed inclusion criterion.
 
 Specifically: there is NEVER a `$set_X()`, `$set_Y()`,
 `$set_sigma()`, `$set_uv()`, `$update_working_response()`,
 `$refresh_y_rep()`, or any other state-method extension. All
 state-injection operations go through `set_current(list(...))` with
-keys routed internally. The 7th method `readapt_NUTS` is a
-KERNEL-tuning method (separate category from state methods) and is
-the ONLY R-level extension allowed beyond the core six. New
-kernel-tuning methods (e.g., a future `readapt_VI`) require an
-explicit Sec.1 amendment.
+keys routed internally.
+
+**BART-family carve-out (historical exception, documented).** Wrappers
+whose composite includes any `bart_block` / `genbart_block` / `softbart_block`
+child ALSO expose three tree-serialization methods:
+
+```
+get_tree          () -> Rcpp::List
+set_tree          (Rcpp::List tree) -> void
+get_tree_history  () -> Rcpp::List
+```
+
+These are historical exceptions to the "core-6 + kernel-control" rule,
+predating the formal categorization. They are BART-family specific
+(non-BART wrappers must not expose them). Documented here so grep-audit
+does not flag them as violations. Not treated as a formal
+"tree-serialization category"; any expansion (e.g., forest introspection
+on other tree kernels) requires an explicit Sec.1 amendment.
+
+**Naming disambiguation -- user-facing `freeze` vs internal numerical concepts.**
+The kernel-control method `m$freeze(...)` is UNRELATED to internal
+numerical terms also called "freeze" in the codebase:
+- funnel freeze (joint_nuts_failure.md Mode 1) -- a mixing pathology
+- phase-III frozen mass matrix (families.md 3-phase warmup) -- Stan-style windowed warmup terminology
+- dual-averaging freeze fix (numerical patch) -- an internal step-size adaptation guard
+
+Skill docs disambiguate by context: `m$freeze(` and
+`.method("freeze", ...)` always refer to the user API; bare "freeze" in
+the context of mixing / mass matrix / adaptation / warmup refers to the
+internal numerical concept.
 
 ### Why
 
@@ -103,18 +164,31 @@ using dbarts / mcmclib / etc. directly.
 ### How to verify the invariant
 
 - Grep every `examples/*.cpp` for `\.method(` inside its
-  `RCPP_MODULE(..._module)`. For wrappers WITHOUT any NUTS-family
-  child the count is **exactly 6** (core methods only). For
-  wrappers WITH at least one `nuts_block` or `joint_nuts_block`
-  child, the count is **exactly 7**
-  (core six plus `readapt_NUTS`). Any other count or method name
-  outside the core 6 / conditional 7 contract is a bug.
+  `RCPP_MODULE(..._module)`. The set of method names must exactly
+  match the following formula:
+  ```
+  { step, get_current, set_current, predict_at, get_dag, get_history }
+    ALWAYS (core-6)
+  U { freeze, unfreeze, get_frozen }
+    ALWAYS (kernel-control, via AI4BAYESCODE_BIND_KERNEL_CONTROL macro)
+  U { readapt_NUTS }
+    iff composite contains any nuts_block / joint_nuts_block child
+  U { get_tree, set_tree, get_tree_history }
+    iff composite contains any bart_block / genbart_block / softbart_block child
+  ```
+  Any name outside this formula is a bug. Missing a member the composite
+  requires is also a bug (e.g., a NUTS-family wrapper without
+  `readapt_NUTS`, or ANY wrapper without freeze/unfreeze/get_frozen).
 - In R: `names(m)` on any constructed wrapper should show only the
   reference-class internals (`.self`, `.module`, `.pointer`,
   `.refClassDef`, `.cppclass`, `initialize`, `finalize`) and
   NOTHING else. Rcpp's `.method` shows up as callable via `$`,
   but not in `names()`. Either way, no extra names / functions
-  outside the core 6 / conditional 7 contract should appear.
+  outside the formula above should appear.
+- Validator Check #23 verifies `readapt_NUTS` presence/absence + state
+  preservation; validator Check #26 verifies freeze/unfreeze/get_frozen
+  presence + whitelist/blacklist gate + refreeze warning + stale-derived
+  warning.
 
 ---
 
@@ -127,7 +201,7 @@ BART-family, NUTS-family, Gibbs-family block follows it.
  +------------------------------------------------------------+
  | TIER A -- user-facing wrapper (examples/MyModel.cpp)         |
  |   * exposed to R via RCPP_MODULE                            |
- |   * R sees ONLY the six-method contract                     |
+ |   * R sees ONLY core-6 state + kernel-control (Sec.1)        |
  |   * set_current(Rcpp::List) is a pure DISPATCHER; routes   |
  |     keys (X, y, theta, sigma, u, v, ...) to Tier B setters   |
  |   * owns a `composite_block impl_` with child blocks added |

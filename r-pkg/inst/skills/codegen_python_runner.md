@@ -154,6 +154,30 @@ y_rep = model.predict_at({})["y_rep"]        # posterior predictive at training 
 # model.step(1)             # refresh derived state -- hybrid composites only
 # model.readapt_NUTS(500)   # re-tune metric (default: reset=False)
 # model.readapt_NUTS(500, True)   # use reset=True if data change is dramatic
+
+# freeze() / unfreeze() / get_frozen() -- kernel-control, always available on every wrapper.
+#
+# freeze holds a child block's state fixed (skips its step() and readapt_NUTS()).
+# Use for probit-style pinning (sigma = 1), prior sensitivity, two-stage inference.
+#
+# STRICT semantics:
+#   model.freeze(["sigma"])          # hold sigma at last set_current value
+#   model.freeze(["s1", "s2"])       # hold multiple
+#   model.freeze()                    # ERROR (freeze requires non-empty list)
+#   model.freeze(["unknown"])         # ERROR (block name not in composite)
+#   model.freeze(["<bart_block>"])    # ERROR (BART / VI / HMM / genBART on blacklist)
+#
+# PERMISSIVE unfreeze:
+#   model.unfreeze()                  # release all
+#   model.unfreeze(["sigma"])         # release one
+#   model.unfreeze([])                # ERROR (empty set; use unfreeze() for all)
+#
+# Example (uncomment for a probit-style sigma pin):
+# model.set_current({"sigma": 1.0})
+# model.freeze(["sigma"])
+# model.step(1)              # sigma stays 1.0; beta continues to sample
+# model.get_frozen()         # -> ["sigma"]
+# model.unfreeze(["sigma"])  # sigma resumes sampling
 ```
 
 ### Python runner template -- standard body (DEFAULT)
@@ -169,6 +193,14 @@ def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
     if newdata is None:
         newdata = {}
     model = mod.<ClassName>(<data_args>, rng_seed=int(seed), keep_history=True)
+    # Kernel-control (freeze/unfreeze): must be re-issued per worker.
+    # run_chain constructs a fresh model per chain (via multiprocessing.Pool);
+    # freeze state does NOT auto-propagate from the outer scope. If you
+    # want to pin sigma (probit) or hold any block, add the calls HERE:
+    #   model.set_current({"sigma": 1.0})
+    #   model.freeze(["sigma"])
+    # Then also set `frozen_names = ["sigma"]` at runner scope for R2.f
+    # exclusion. See validator.md Sec.R2.f + DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md Sec.8.
     t0 = time.time()
     model.step(int(n_burn))
     model.step(int(n_keep))
@@ -512,8 +544,25 @@ def r2_diag(c1, c2, n_keep_used):
         worst_ess_ratio = min(worst_ess_ratio, ess_ratio)
     return {"rhat": worst_rhat, "ess_ratio": worst_ess_ratio}
 
+# R2.f: exclude frozen params (kernel-control) from R-hat / ESS aggregation.
+# See validator.md Sec.R2.f. Frozen params appear as constant columns in
+# get_history() (composite appends a repeat every skipped step to preserve
+# shape); their R-hat is undefined (NaN). Excluding them keeps the diagnostic
+# honest and logs the exclusion for user verification.
+# NOTE: if run_chain_<ClassName>() calls model.freeze(...) inside the worker,
+# set `frozen_names` here to the same list so R2.f can filter.
+frozen_names: list[str] = []   # <-- set to ["sigma", ...] if run_chain freezes
+def _apply_frozen_filter(chain):
+    if not frozen_names:
+        return chain
+    filt = {k: v for k, v in chain["hist"].items() if k not in frozen_names}
+    return {**chain, "hist": filt}
+if frozen_names:
+    print(f"[R2.f] Excluding {len(frozen_names)} frozen param(s) from R2: "
+          f"{', '.join(frozen_names)}")
+
 # Stage 1 diagnostic at the template's existing budget (4k + 4k).
-d = r2_diag(c1, c2, n_keep)
+d = r2_diag(_apply_frozen_filter(c1), _apply_frozen_filter(c2), n_keep)
 
 # Stage-2 escalation (within-attempt): re-run at 20000 + 20000 if Stage-1
 # shows max R-hat >= 1.05 OR a severely low ess_ratio (< 0.005), then
@@ -525,7 +574,7 @@ if d["rhat"] >= 1.05 or d["ess_ratio"] < 0.005:
     c1, c2, total_wall_sec = _run_two_chains(n_burn, n_keep)
     assert all(np.all(np.isfinite(np.asarray(v))) for v in c1["hist"].values())
     assert all(np.all(np.isfinite(np.asarray(v))) for v in c2["hist"].values())
-    d = r2_diag(c1, c2, n_keep)
+    d = r2_diag(_apply_frozen_filter(c1), _apply_frozen_filter(c2), n_keep)
 
 # worst rank-normalized R-hat across all parameters -- drives the final gate.
 worst_rhat = d["rhat"]

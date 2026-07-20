@@ -63,10 +63,18 @@ Write `examples/GPGaussian.cpp`:
   `keep_history`.
 - Owns a `composite_block impl_`.
 - Adds `gp_block` + any sibling blocks (e.g. a sigma `nuts_block`).
-- Implements the six-method contract. `set_current(Rcpp::List)`
-  dispatches on keys (`X`, `y`, `sigma`, any GP hyperparams) into
-  the relevant child block's C++ setters.
-- RCPP_MODULE exposes ONLY the six methods. DO NOT add `.method("set_X", ...)`.
+- Implements the **core-6 state contract** (`step / get_current /
+  set_current / predict_at / get_dag / get_history`).
+  `set_current(Rcpp::List)` dispatches on keys (`X`, `y`, `sigma`,
+  any GP hyperparams) into the relevant child block's C++ setters.
+- Inherits `AI4BayesCode::kernel_control_mixin<GPGaussian>` (CRTP)
+  so it automatically exposes the **kernel-control category**
+  (`freeze / unfreeze / get_frozen`) via the
+  `AI4BAYESCODE_BIND_KERNEL_CONTROL(GPGaussian)` macro in RCPP_MODULE.
+- RCPP_MODULE exposes ONLY core-6 + kernel-control (plus `readapt_NUTS`
+  iff any NUTS-family child, plus BART tree-serialization carve-out iff
+  any BART-family child). DO NOT add `.method("set_X", ...)` or any
+  other state-method extension.
 
 ### Step 4 -- skills + catalogue
 
@@ -145,7 +153,10 @@ reject `r` (or `r_j` for multinomial), silently ignore unknown keys.
 
 ### Invariants preserved
 
-- RCPP_MODULE entries: still exactly 6 on both wrappers. `names(m)`
+- RCPP_MODULE entries: still exactly 6 on both wrappers (per the
+  contract in force at the time of this 2026-04-19 case study; today
+  the invariant is core-6 + kernel-control per interface.md Sec.1).
+  `names(m)`
   from R shows no new methods.
 - Unified interface: outer MCMC uses `m$set_current(list(X = X_imp,
   y = r))` uniformly, same as for every other block.
@@ -170,8 +181,12 @@ one, and retrofitting is painful.
 Before any PR touching Tier A / B / C lands:
 
 - [ ] **Unified-interface grep.** `grep -n '\.method(' examples/*.cpp`:
-      for every wrapper class, exactly six entries, all from the
-      canonical six names. No extras, no renames.
+      for every wrapper class, the set of method names must match the
+      interface.md Sec.1 formula: core-6 + kernel-control
+      (`freeze`/`unfreeze`/`get_frozen`) + `readapt_NUTS` iff NUTS-family
+      child + BART tree-serialization carve-out (`get_tree`/`set_tree`/
+      `get_tree_history`) iff BART-family child. No extras outside this
+      formula; no renames.
 - [ ] **R-level names check.** Construct the wrapper in R, run
       `names(m)`. Should show only reference-class internals
       (`.self`, `.module`, etc.) -- no extra methods leaked.
@@ -262,6 +277,35 @@ Before any PR touching Tier A / B / C lands:
       (NOT `rng_` or `predict_rng_`), (c) R-level round-trip test
       `identical(get_current(), { readapt_NUTS(N); get_current() })`
       passes bitwise. See Sec.13 NUTS-family + `validator.md Sec.23`.
+- [ ] **Check #26 (a) -- kernel-control methods bound.** RCPP_MODULE
+      contains `.method("freeze", ...)`, `.method("unfreeze", ...)`,
+      and `.method("get_frozen", ...)` -- either explicitly or via the
+      `AI4BAYESCODE_BIND_KERNEL_CONTROL(ClassName)` macro from
+      `include/AI4BayesCode/kernel_control_mixin.hpp`. Companion
+      PYBIND11_MODULE contains the three `.def(...)` lines or the
+      `AI4BAYESCODE_PYBIND_KERNEL_CONTROL(m, ClassName)` macro. See
+      Sec.1 kernel-control category + `validator.md Sec.26 (a)`.
+- [ ] **Check #26 (b) -- freeze() strict error paths.** R-level test:
+      `m$freeze("unknown_block_name")` -> error; `m$freeze(character(0))`
+      -> error; `m$freeze()` (no arg) -> error. If composite contains
+      any blacklist-family block (`bart_block` / `genbart_block` /
+      `hmm_block` / `vi_block`): `m$freeze("<blacklist_name>")` -> error
+      with reason string mentioning "not supported". See DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md Sec.6.
+- [ ] **Check #26 (c) -- state preservation across freeze + step.**
+      R-level test on any WHITELIST block: `m$set_current(list(<name> = v))`
+      -> `m$freeze("<name>")` -> `m$step(1L)` -> `m$get_current()[["<name>"]]`
+      returns `v` unchanged. Redundant `m$freeze("<name>")` on already-
+      frozen block emits `Rcpp::warning`. `m$unfreeze()` with no arg
+      -> `m$get_frozen()` returns `character(0)`.
+- [ ] **Check #26 (d) -- stale-derived warning (only if applicable).**
+      For any wrapper whose composite has a deterministic refresher over
+      a whitelisted block's output: `m$freeze("<upstream_of_derived>")`
+      emits `Rcpp::warning` mentioning the downstream derived key.
+      Skip this sub-check if no such refresher exists.
+- [ ] **Layer-3 R2.f exclusion.** R runner emits the frozen-param
+      exclusion filter (`h1 <- h1[setdiff(names(h1), m$get_frozen())]`)
+      BEFORE calling `diag_one` / `posterior::rhat`. See
+      `validator.md Sec.R2.f`.
 
 ---
 
@@ -271,12 +315,12 @@ Before any PR touching Tier A / B / C lands:
   extension** on a user-facing wrapper (a new method that pushes
   parameter / data state into the block). The answer is ALWAYS:
   route it through `set_current(list(...))`.
-  **EXCEPTION**: kernel-tuning methods (separate category, NOT
-  state methods) are allowed per Sec.1 / Sec.13. The only kernel-tuning
-  method in v1 is `readapt_NUTS(n, reset)` for wrappers whose
-  composite contains any NUTS-family child. Future kernel-tuning
-  methods (e.g., a hypothetical `readapt_VI`) require an explicit
-  Sec.1 amendment.
+  **EXCEPTION**: kernel-control methods (separate category, NOT
+  state methods) are allowed per Sec.1 / Sec.13. Kernel-control
+  members in v1: `freeze` / `unfreeze` / `get_frozen` (always) +
+  `readapt_NUTS(n, reset, max_tree_depth)` (iff any NUTS-family
+  child). Future kernel-control methods (e.g., a hypothetical
+  `readapt_VI`) require an explicit Sec.1 amendment.
 - `Rcpp::stop("set_current not supported")` in a BART-family or any
   block that has data inputs an outer MCMC might update. If the
   block has NO updatable inputs, say that in the error message and

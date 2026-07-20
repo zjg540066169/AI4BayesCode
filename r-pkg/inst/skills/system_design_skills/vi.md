@@ -61,12 +61,16 @@ all-MCMC children, etc.) override to return `MCMC`. The new
 returns `MCMC` if all children are MCMC, `VI` if all are VI, and
 `MCMC` (conservative default) if mixed (the hybrid case).
 
-**The Sec.1 six-method R-level contract is preserved unchanged**:
-`engine_kind()` is C++ machinery, not Rcpp-exposed. R sees only
-the same `step / get_current / set_current / predict_at /
-get_dag / get_history`. The wrapper class chooses children at
-construction time; outer R/Python code is identical for MCMC,
-VI, and hybrid wrappers.
+**The Sec.1 R-level contract is preserved unchanged**: `engine_kind()`
+is C++ machinery, not Rcpp-exposed. R sees the same core-six state
+methods (`step / get_current / set_current / predict_at / get_dag /
+get_history`) plus the kernel-control category (`freeze / unfreeze /
+get_frozen` always; `readapt_NUTS` conditional on NUTS-family child).
+The wrapper class chooses children at construction time; outer
+R/Python code is identical for MCMC, VI, and hybrid wrappers. Note:
+freezing a VI child is blacklisted (Rcpp::stop) -- see Sec.18.4 for
+why (the q-sample stream invariant); freeze applies at the composite
+level via non-VI siblings.
 
 ### 18.3 VI block contract -- extension of Sec.1 semantics
 
@@ -412,7 +416,7 @@ Deferred to v2+ (each individually a substantial project):
   each sweep). The stateful contract (each wrapper owns its
   internal sampler; outer MCMC just tells it what changed) won.
 
-- **Six-method contract.** Tried exposing `$get_parameters`,
+- **Core-6 state contract + kernel-control category.** Tried exposing `$get_parameters`,
   `$set_parameter`, `$get_n_draws`, per-parameter `$set_<name>`,
   etc. Users forgot which method to call. The minimal uniform
   contract reduced the cognitive load and made outer
@@ -425,7 +429,8 @@ Deferred to v2+ (each individually a substantial project):
 
 - **Three-tier split.** Pre-2026-04-12, Tier A and Tier B were
   sometimes merged ("just expose the underlying kernel directly
-  to R"). That broke the six-method contract and made every
+  to R"). That broke the uniform R contract (now core-6 state +
+  kernel-control category, see interface.md Sec.1) and made every
   wrapper class different from R's perspective. The split is
   now strictly enforced.
 
