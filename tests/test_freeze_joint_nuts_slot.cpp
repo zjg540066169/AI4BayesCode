@@ -191,27 +191,8 @@ static void F2_slot_freeze() {
     // Note current sigma; freeze_sub target
     arma::vec pre_state = comp.current();
 
-    // Attempt slot-level freeze via composite dispatch.
-    bool threw = false;
-    std::string err_msg;
-    try {
-        comp.freeze({"log_sigma"});   // sub-name freeze on joint block's slot
-    } catch (const std::exception& e) {
-        threw = true;
-        err_msg = e.what();
-    }
-    if (threw) {
-        // PRE-kernel-patch behavior: freeze_sub throws with guidance.
-        check(err_msg.find("not yet implemented") != std::string::npos,
-              "F2.pre.a joint slot-level freeze throws 'not yet implemented' (kernel patch pending)");
-        check(err_msg.find("split") != std::string::npos ||
-              err_msg.find("whole-block") != std::string::npos,
-              "F2.pre.b throw message includes workaround guidance");
-        std::printf("    (kernel patch not yet landed; F2 acceptance test in wait state)\n");
-        return;
-    }
-
-    // POST-kernel-patch behavior (branch is EXPECTED to run once patch lands).
+    // Slot-level freeze via composite dispatch (Approach B shipped 2026-07-20).
+    comp.freeze({"log_sigma"});   // sub-name freeze on joint block's slot
     check(!comp.get_frozen().empty(), "F2.a get_frozen non-empty after slot freeze");
     // Set log_sigma to exactly 0 (sigma=1) and freeze
     // NOTE: This assumes the mixin has a set_current path that routes

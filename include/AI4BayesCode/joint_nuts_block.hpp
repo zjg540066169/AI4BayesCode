@@ -1002,11 +1002,32 @@ public:
         if (max_tree_depth_override > 0)            // per-call tree-depth cap
             ns.max_tree_depth = max_tree_depth_override;
 
-        auto adapter = [this](
+        // Freeze-aware adapter: if any slot is frozen, wrap eval_unc_ to
+        // override theta on frozen dims with a snapshot and zero grad on
+        // those dims (Approach B per DESIGN_NOTES Sec.10.a). Fast-path
+        // bit-identical when no slot is frozen. See step() for the full
+        // rationale. This SAME pattern also runs in readapt(),
+        // adapt_dense_metric_(), three_phase_warmup_() -- audit 2026-07-20
+        // Q9-1: without this wrap those routines silently sample from the
+        // full joint (not the conditional), corrupting DA state / Sigma_reg.
+        const bool _fz_any = frozen_unc_idx_.n_elem > 0;
+        arma::vec _fz_snap;
+        if (_fz_any) _fz_snap = theta_cat_.elem(frozen_unc_idx_);
+        auto adapter = [this, _fz_any, &_fz_snap](
                             const mcmc::ColVec_t& theta_in,
                             mcmc::ColVec_t* grad_out,
                             void* /*unused*/) -> mcmc::fp_t {
-            return static_cast<mcmc::fp_t>(eval_unc_(theta_in, grad_out));
+            if (!_fz_any) {
+                return static_cast<mcmc::fp_t>(eval_unc_(theta_in, grad_out));
+            }
+            arma::vec theta_eff(theta_in.n_elem);
+            for (arma::uword i = 0; i < theta_in.n_elem; ++i) theta_eff[i] = theta_in[i];
+            theta_eff.elem(frozen_unc_idx_) = _fz_snap;
+            double lp = eval_unc_(theta_eff, grad_out);
+            if (grad_out != nullptr && grad_out->n_elem == theta_in.n_elem) {
+                grad_out->elem(frozen_unc_idx_).zeros();
+            }
+            return static_cast<mcmc::fp_t>(lp);
         };
 
         // 4. Run n adaptation iterations. theta_cat_ is mutated during
@@ -1542,11 +1563,32 @@ private:
         ns.n_adapt_draws  = cfg_.dense_metric_pilot_iters;
 
         // Build adapter (same eval_unc_ as main step()).
-        auto adapter = [this](
+        // Freeze-aware adapter: if any slot is frozen, wrap eval_unc_ to
+        // override theta on frozen dims with a snapshot and zero grad on
+        // those dims (Approach B per DESIGN_NOTES Sec.10.a). Fast-path
+        // bit-identical when no slot is frozen. See step() for the full
+        // rationale. This SAME pattern also runs in readapt(),
+        // adapt_dense_metric_(), three_phase_warmup_() -- audit 2026-07-20
+        // Q9-1: without this wrap those routines silently sample from the
+        // full joint (not the conditional), corrupting DA state / Sigma_reg.
+        const bool _fz_any = frozen_unc_idx_.n_elem > 0;
+        arma::vec _fz_snap;
+        if (_fz_any) _fz_snap = theta_cat_.elem(frozen_unc_idx_);
+        auto adapter = [this, _fz_any, &_fz_snap](
                             const mcmc::ColVec_t& theta_in,
                             mcmc::ColVec_t* grad_out,
                             void* /*unused*/) -> mcmc::fp_t {
-            return static_cast<mcmc::fp_t>(eval_unc_(theta_in, grad_out));
+            if (!_fz_any) {
+                return static_cast<mcmc::fp_t>(eval_unc_(theta_in, grad_out));
+            }
+            arma::vec theta_eff(theta_in.n_elem);
+            for (arma::uword i = 0; i < theta_in.n_elem; ++i) theta_eff[i] = theta_in[i];
+            theta_eff.elem(frozen_unc_idx_) = _fz_snap;
+            double lp = eval_unc_(theta_eff, grad_out);
+            if (grad_out != nullptr && grad_out->n_elem == theta_in.n_elem) {
+                grad_out->elem(frozen_unc_idx_).zeros();
+            }
+            return static_cast<mcmc::fp_t>(lp);
         };
 
         mcmc::Mat_t draws_out;
@@ -1732,11 +1774,32 @@ private:
         const std::size_t saved_adapt  = ns.n_adapt_draws;
 
         // Shared adapter — same eval_unc_ as step() and adapt_dense_metric_.
-        auto adapter = [this](
+        // Freeze-aware adapter: if any slot is frozen, wrap eval_unc_ to
+        // override theta on frozen dims with a snapshot and zero grad on
+        // those dims (Approach B per DESIGN_NOTES Sec.10.a). Fast-path
+        // bit-identical when no slot is frozen. See step() for the full
+        // rationale. This SAME pattern also runs in readapt(),
+        // adapt_dense_metric_(), three_phase_warmup_() -- audit 2026-07-20
+        // Q9-1: without this wrap those routines silently sample from the
+        // full joint (not the conditional), corrupting DA state / Sigma_reg.
+        const bool _fz_any = frozen_unc_idx_.n_elem > 0;
+        arma::vec _fz_snap;
+        if (_fz_any) _fz_snap = theta_cat_.elem(frozen_unc_idx_);
+        auto adapter = [this, _fz_any, &_fz_snap](
                             const mcmc::ColVec_t& theta_in,
                             mcmc::ColVec_t* grad_out,
                             void* /*unused*/) -> mcmc::fp_t {
-            return static_cast<mcmc::fp_t>(eval_unc_(theta_in, grad_out));
+            if (!_fz_any) {
+                return static_cast<mcmc::fp_t>(eval_unc_(theta_in, grad_out));
+            }
+            arma::vec theta_eff(theta_in.n_elem);
+            for (arma::uword i = 0; i < theta_in.n_elem; ++i) theta_eff[i] = theta_in[i];
+            theta_eff.elem(frozen_unc_idx_) = _fz_snap;
+            double lp = eval_unc_(theta_eff, grad_out);
+            if (grad_out != nullptr && grad_out->n_elem == theta_in.n_elem) {
+                grad_out->elem(frozen_unc_idx_).zeros();
+            }
+            return static_cast<mcmc::fp_t>(lp);
         };
 
         // ----- Phase I: step-size adaptation only, identity mass matrix.
