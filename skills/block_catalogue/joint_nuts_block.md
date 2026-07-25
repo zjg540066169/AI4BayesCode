@@ -31,6 +31,13 @@ cfg.log_density_grad = &joint_theta_b_log_density;
 // the (N+J)-dim mass matrix needs more runway.
 cfg.n_warmup_first_call = 1000;
 
+// Dual-averaging target acceptance rate. AI4BayesCode default is 0.8
+// (Stan / PyMC / NumPyro mainstream; overrides the vendored mcmclib
+// default of 0.55 in the ctor). Raise to 0.9 - 0.99 on stiff funnel /
+// hierarchical models where divergences persist; leave at 0.8 otherwise.
+// Can also be adjusted per-call via readapt_NUTS(..., target_accept).
+// cfg.target_accept_rate = 0.8;
+
 impl_->add_child(std::make_unique<joint_nuts_block>(std::move(cfg)));
 
 // Dependencies are keyed by BLOCK name, not sub-param names.

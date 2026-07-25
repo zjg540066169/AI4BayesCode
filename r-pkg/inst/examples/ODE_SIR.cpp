@@ -544,9 +544,18 @@ public:
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
 
-    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
+    void readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept) {
         if (n < 0) ai4b::stop("readapt_NUTS: n must be non-negative");
-        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
+        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth),
+                            target_accept);
+    }
+
+    /// 3-arg backward-compat overload. Rcpp modules ignore C++ default
+    /// args, so both arities are exposed as separate bindings; from C++,
+    /// this thin forwarder keeps the pre-existing readapt_NUTS(n, reset,
+    /// max_tree_depth) call shape working.
+    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
+        readapt_NUTS(n, reset, max_tree_depth, -1.0);
     }
 
 private:
@@ -580,7 +589,17 @@ RCPP_MODULE(ODE_SIR_module) {
         .method("predict_at",   &ODE_SIR::predict_at)
         .method("get_dag",      &ODE_SIR::get_dag)
         .method("get_history",  &ODE_SIR::get_history)
-        .method("readapt_NUTS", &ODE_SIR::readapt_NUTS)
+        .method("readapt_NUTS",
+
+                (void (ODE_SIR::*)(int, bool, int)) &ODE_SIR::readapt_NUTS,
+
+                "Re-adapt NUTS metric (3-arg backward-compat form; target_accept unchanged).")
+
+        .method("readapt_NUTS",
+
+                (void (ODE_SIR::*)(int, bool, int, double)) &ODE_SIR::readapt_NUTS,
+
+                "Re-adapt NUTS metric; 4th arg target_accept in (0,1] overrides the block's dual-averaging target (default 0.8); sentinel <= 0 keeps current.")
         AI4BAYESCODE_BIND_KERNEL_CONTROL(ODE_SIR);
 }
 #endif  // AI4BAYESCODE_RCPP_MODULE
@@ -609,8 +628,9 @@ PYBIND11_MODULE(ODE_SIR, m) {
         .def("predict_at",   &ODE_SIR::predict_at, pybind11::arg("new_data"))
         .def("get_dag",      &ODE_SIR::get_dag)
         .def("get_history",  &ODE_SIR::get_history)
-        .def("readapt_NUTS", &ODE_SIR::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        .def("readapt_NUTS", (void (ODE_SIR::*)(int, bool, int, double)) &ODE_SIR::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1,
+             pybind11::arg("target_accept") = -1.0)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(ODE_SIR);
 }
 #endif  // AI4BAYESCODE_PYBIND_MODULE

@@ -28,6 +28,7 @@ authoritative codegen-time guide.
 | `initial_step_size` | YES | 0.01 - 0.1 | only set explicitly for simplex / ordered / cholesky_corr where the default 1.0 is too aggressive |
 | `n_draws_per_step` | NO | leave at default 1 | larger values thin-but-recompute; not needed for outer-Gibbs composition |
 | **`n_warmup_per_step`** | **NEVER** | **leave at default 0** | see "n_warmup_per_step is mandatory 0" below |
+| `target_accept_rate` | YES (rare) | 0.5 - 0.99 | AI4BayesCode default 0.8 (Stan/PyMC/NumPyro mainstream; the vendored mcmclib default of 0.55 is silently overridden in the nuts_block ctor). Raise to 0.9 - 0.99 for stiff funnel / hierarchical models where divergences persist. Leave at 0.8 unless a specific model demands otherwise. Also settable per readapt() call via the `readapt_NUTS(..., target_accept)` 4th arg. |
 
 ### `n_warmup_per_step` is mandatory 0
 
