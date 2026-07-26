@@ -32,6 +32,23 @@ rsync -a --exclude '.DS_Store' celerite/      r-pkg/inst/include/celerite/
 rsync -a --exclude '.DS_Store' libgp_kernels/ r-pkg/inst/include/libgp_kernels/
 echo "• include/AI4BayesCode -> python/_vendored_include/AI4BayesCode (core headers)"
 sync_dir include/AI4BayesCode python/AI4BayesCode/_vendored_include/AI4BayesCode
+# AI4BayesCode fork (2026-07-25): the mcmclib patch (metric-kind dispatch +
+# preconditioner cache) lives in include/mcmclib/. The r-pkg mirror copies
+# include/ wholesale so it picks up automatically, but the python mirror
+# previously only copied include/AI4BayesCode/. Extend the python sync to
+# also mirror the vendored C++ dependencies that AI4BayesCode/*.hpp includes,
+# otherwise the python package would ship pre-fork mcmclib + post-fork
+# wrappers -> compile / behaviour mismatch. Only bump when a vendored
+# dependency actually changes.
+echo "• include/{mcmclib,eigen,autodiff,BaseMatrixOps} -> python/_vendored_include (vendored deps)"
+sync_dir include/mcmclib      python/AI4BayesCode/_vendored_include/mcmclib
+sync_dir include/eigen        python/AI4BayesCode/_vendored_include/eigen
+if [ -d include/autodiff ]; then
+  sync_dir include/autodiff  python/AI4BayesCode/_vendored_include/autodiff
+fi
+if [ -d include/BaseMatrixOps ]; then
+  sync_dir include/BaseMatrixOps  python/AI4BayesCode/_vendored_include/BaseMatrixOps
+fi
 
 echo "• bart_pure_cpp/ -> r-pkg/inst ; start.md -> both"
 sync_dir bart_pure_cpp  r-pkg/inst/bart_pure_cpp

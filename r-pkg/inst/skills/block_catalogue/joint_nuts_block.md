@@ -119,6 +119,29 @@ impl_->data().declare_dependencies(
      genuinely scalar params, post-NCR branches, or obvious conditional
      independence.
 
+### mcmclib metric-kind dispatch (fork 2026-07-25)
+
+The forked mcmclib NUTS auto-detects whether the installed `precond_mat` is
+empty, diagonal, or dense and routes leap_frog / kinetic-energy /
+momentum-resample through the appropriate O(n) or O(n^2) path. The joint
+block explicitly tags `metric_kind` at every `precond_mat` mutation
+(identity fallback, diagonal-metric install, dense-metric install,
+3-phase Phase I identity, 3-phase Phase II window install) so the
+mcmclib cache skips its O(n^2) AUTO-detect scan. No user-facing knob;
+the DEFAULT (`cfg.use_dense_metric = false`, `cfg.use_diagonal_metric = false`)
+produces `metric_kind = IDENTITY` and drops the dense matvec entirely.
+`cfg.use_diagonal_metric = true` -> `metric_kind = DIAGONAL` (per-axis
+`(1/d) % v` product); `cfg.use_dense_metric = true` -> `metric_kind = DENSE`
+(unchanged upstream path, plus a preconditioner cache that skips the
+O(n^3) inv+chol rebuild across successive `step()` calls). Speedup
+measured on a 5-dim MVN target: DIAGONAL ~3x, IDENTITY ~3x vs the
+pre-fork DENSE-only dispatch at that size, and 10-100x at n>=1000.
+The same fork ships [Fix #3]: a per-depth ColVec_t scratch pool
+inside `nuts_build_tree` (bit-identical draws; eliminates ~154 arma
+allocations per nuts() call at `max_tree_depth=10`; see nuts.ipp
+`build_tree_scratch_t`).
+See `tests/test_mcmclib_metric_dispatch.cpp` for the correctness suite.
+
 ### Stan-style 3-phase warmup (SHIPPED 2026-06-03)
 
 Stan-style windowed warmup; **OPT-IN (default OFF since 2026-06-20)** -- set

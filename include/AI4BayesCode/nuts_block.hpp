@@ -437,6 +437,10 @@ public:
     /// batch of draws, and calling this with the batch covariance.
     void set_precond_matrix(mcmc::Mat_t M) {
         cfg_.nuts_settings.nuts_settings.precond_mat = std::move(M);
+        // AI4BayesCode fork (2026-07-25): invalidate the mcmclib preconditioner
+        // cache so the next mcmc::nuts() call rebuilds inv+chol against the
+        // new matrix instead of reusing stale cache values.
+        cfg_.nuts_settings.nuts_settings.precond_cache_valid = false;
     }
 
     /// T13: snapshot of NUTS dual-averaging adaptation state.
@@ -475,6 +479,8 @@ public:
         ns.adapt_iter_persist    = ad.adapt_iter;
         if (!ad.precond_mat.is_empty()) {
             ns.precond_mat = ad.precond_mat;
+            // AI4BayesCode fork (2026-07-25): invalidate mcmclib cache.
+            ns.precond_cache_valid = false;
         }
     }
 

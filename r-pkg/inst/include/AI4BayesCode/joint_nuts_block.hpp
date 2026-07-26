@@ -83,6 +83,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include <cmath>
@@ -685,6 +686,8 @@ public:
                 auto_selected_dense_     = -1;                 // record: aborted
                 auto_selected_cond_      = 0.0;
                 ns.precond_mat = mcmc::Mat_t();                // identity metric
+                ns.precond_cache_valid = false;                // fork 2026-07-25
+                ns.metric_kind = mcmc::metric_kind_t::IDENTITY; // fork 2026-07-25
                 ns.epsilon_bar_persist = 0.0;
                 ns.h_val_persist       = 0.0;
                 ns.mu_val_persist      = 0.0;
@@ -840,6 +843,9 @@ public:
 
     void set_precond_matrix(mcmc::Mat_t M) {
         cfg_.nuts_settings.nuts_settings.precond_mat = std::move(M);
+        // AI4BayesCode fork (2026-07-25): invalidate mcmclib preconditioner
+        // cache so the next mcmc::nuts() call rebuilds inv+chol against M.
+        cfg_.nuts_settings.nuts_settings.precond_cache_valid = false;
     }
 
     /// T13: snapshot of joint NUTS adaptation state (step size + DA
@@ -893,6 +899,8 @@ public:
                     std::to_string(total_unc_dim_));
             }
             ns.precond_mat = ad.precond_mat;
+            // AI4BayesCode fork (2026-07-25): invalidate mcmclib cache.
+            ns.precond_cache_valid = false;
             dense_metric_adapted_ = (ad.metric_kind == "dense");
         }
     }
@@ -1561,6 +1569,8 @@ private:
             auto_selected_dense_     = -1;
             auto_selected_cond_      = 0.0;
             ns.precond_mat           = mcmc::Mat_t();
+            ns.precond_cache_valid   = false;                       // fork 2026-07-25
+            ns.metric_kind           = mcmc::metric_kind_t::IDENTITY; // fork 2026-07-25
             ns.epsilon_bar_persist   = 0.0;
             ns.h_val_persist         = 0.0;
             ns.mu_val_persist        = 0.0;
@@ -1769,6 +1779,14 @@ private:
         // Σ, the optimal mass matrix is M = Σ^{-1}. Pass the PRECISION
         // matrix, not the covariance.
         cfg_.nuts_settings.nuts_settings.precond_mat = build_precond_(Sigma_reg);
+        // AI4BayesCode fork (2026-07-25): invalidate mcmclib preconditioner
+        // cache since precond_mat just changed from identity to the learned
+        // diagonal / dense metric. Also tag metric_kind explicitly so the
+        // cache-rebuild skips the O(n^2) AUTO-detect scan of the precond_mat.
+        cfg_.nuts_settings.nuts_settings.precond_cache_valid = false;
+        cfg_.nuts_settings.nuts_settings.metric_kind =
+            cfg_.use_diagonal_metric ? mcmc::metric_kind_t::DIAGONAL
+                                     : mcmc::metric_kind_t::DENSE;
 
         // Reset adapt_iter so dual-averaging step-size retunes against new
         // metric (the step size adapted under identity metric is wrong for
@@ -1857,7 +1875,11 @@ private:
             // → mcmclib uses identity. We don't touch a possibly user-
             // supplied precond_mat here; we override to identity.
             const mcmc::Mat_t saved_precond = ns.precond_mat;
+            const bool        saved_cache_valid = ns.precond_cache_valid;  // fork 2026-07-25
+            const mcmc::metric_kind_t saved_metric_kind = ns.metric_kind;  // fork 2026-07-25
             ns.precond_mat = mcmc::Mat_t();  // empty → identity in mcmclib
+            ns.precond_cache_valid = false;  // fork 2026-07-25
+            ns.metric_kind = mcmc::metric_kind_t::IDENTITY;  // fork 2026-07-25
 
             const std::size_t n1 = std::max<std::size_t>(cfg_.tp_phase1_iters, 1);
             ns.n_burnin_draws = n1;
@@ -1869,7 +1891,9 @@ private:
                 theta_cat_, adapter, out1, nullptr, cfg_.nuts_settings);
             if (!ok1 || out1.n_rows == 0) {
                 // Restore and abort: leave caller in single-phase fallback
-                ns.precond_mat = saved_precond;
+                ns.precond_mat         = saved_precond;
+                ns.precond_cache_valid = saved_cache_valid;  // fork 2026-07-25
+                ns.metric_kind         = saved_metric_kind;  // fork 2026-07-25
                 ns.n_burnin_draws = saved_burnin;
                 ns.n_keep_draws   = saved_keep;
                 ns.n_adapt_draws  = saved_adapt;
@@ -1943,6 +1967,13 @@ private:
             // previous mass matrix.
             try {
                 ns.precond_mat = build_precond_(Sigma_reg);
+                // AI4BayesCode fork (2026-07-25): invalidate mcmclib cache
+                // on every successful window install + tag the resolved
+                // metric kind to skip the AUTO-detect scan on rebuild.
+                ns.precond_cache_valid = false;
+                ns.metric_kind = cfg_.use_diagonal_metric
+                    ? mcmc::metric_kind_t::DIAGONAL
+                    : mcmc::metric_kind_t::DENSE;
             } catch (const std::runtime_error&) {
                 // inv_sympd failed; keep previous mass matrix
             }

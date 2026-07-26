@@ -12,6 +12,18 @@ cfg.initial_step_size   = 0.05;
 cfg.n_warmup_first_call = 400;
 ```
 
+The mcmclib backend fork (2026-07-25) auto-detects the metric kind
+(IDENTITY / DIAGONAL / DENSE) from the installed `precond_mat`. The
+default `nuts_block` never installs a `precond_mat`, so it always
+runs the O(n) IDENTITY dispatch (no dense matvec per leap). Users
+who install a matrix via `set_precond_matrix()` get DIAGONAL (if the
+matrix is diagonal-only) or DENSE dispatch automatically. The same
+fork [Fix #3] also removes the per-leaf ColVec_t allocation load in
+`nuts_build_tree` via a per-depth scratch pool owned by `nuts_impl`
+(bit-identical draws; see nuts.ipp comment). See
+`joint_nuts_block.md` for the joint-block details and
+`tests/test_mcmclib_metric_dispatch.cpp` for the correctness suite.
+
 ### Configuration discipline
 
 The `nuts_block_config` exposes several knobs that affect MCMC correctness;
