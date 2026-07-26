@@ -235,6 +235,18 @@ public:
                            "integer in {0, ..., %d}", (int)i, yi, C - 1);
             }
         }
+        // AI4BayesCode fork (2026-07-25) [BART RNG OMP-safe]: seed the
+        // genBART kernel's thread_local RNG per OMP thread, so N chains
+        // launched on N OMP threads no longer draw the IDENTICAL BART
+        // stream from the shared thread_local engine (fake R-hat
+        // convergence bug). Skipped under the Rcpp backend (R owns the
+        // RNG there).
+#if !defined(AI4BAYESCODE_RCPP_MODULE)
+        if (rng_seed != 0) {
+            bart_rng::set_seed_per_thread(static_cast<std::uint64_t>(rng_seed));
+        }
+#endif
+
         if (ntrees <= 0) {
             ai4b::stop("GBartMultinomial: ntrees must be > 0");
         }

@@ -225,6 +225,19 @@ public:
             ai4b::stop("BartNoise: X and y must have matching row counts");
         }
 
+        // AI4BayesCode fork (2026-07-25) [BART RNG OMP-safe]: seed the
+        // BART kernel's thread_local RNG per OMP thread, so N chains
+        // launched on N OMP threads no longer draw the IDENTICAL BART
+        // stream from the shared thread_local engine (fake R-hat
+        // convergence bug). The pybind / standalone backend uses
+        // bart_rng; the Rcpp backend uses R's global RNG, so we skip
+        // it there.
+#if !defined(AI4BAYESCODE_RCPP_MODULE)
+        if (rng_seed != 0) {
+            bart_rng::set_seed_per_thread(static_cast<std::uint64_t>(rng_seed));
+        }
+#endif
+
         const std::size_t N = static_cast<std::size_t>(X.n_rows);
 
         // ---- Install fixed data and initial parameter values ------------

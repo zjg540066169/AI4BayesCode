@@ -153,6 +153,18 @@ public:
             ai4b::stop("GBartHeteroscedastic: X and y must have matching "
                        "row counts");
         }
+
+        // AI4BayesCode fork (2026-07-25) [BART RNG OMP-safe]: seed the
+        // genBART kernel's thread_local RNG per OMP thread, so N chains
+        // launched on N OMP threads no longer draw the IDENTICAL BART
+        // stream from the shared thread_local engine (fake R-hat
+        // convergence bug). Skipped under the Rcpp backend (R owns the
+        // RNG there).
+#if !defined(AI4BAYESCODE_RCPP_MODULE)
+        if (rng_seed != 0) {
+            bart_rng::set_seed_per_thread(static_cast<std::uint64_t>(rng_seed));
+        }
+#endif
         for (std::size_t i = 0; i < y.n_elem; ++i) {
             if (!std::isfinite(y[i])) {
                 ai4b::stop("GBartHeteroscedastic: y must be finite");

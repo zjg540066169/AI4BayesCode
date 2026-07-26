@@ -60,6 +60,20 @@
 #include <stdexcept>
 #include <string>
 
+// ---- AI4BayesCode fork (2026-07-25) [BART RNG OMP-safe] -----------------
+// Pull in <omp.h> only when the translation unit is actually compiled with
+// OpenMP support (-fopenmp / /openmp). set_seed_per_thread() below uses
+// omp_get_thread_num() to xor the user seed with a per-thread offset so
+// that N chains launched on N OMP threads do NOT all end up drawing the
+// identical BART RNG stream from the SAME hard-coded thread_local engine
+// (the historical bug that caused fake R-hat convergence).
+// If rebasing onto upstream BART, re-apply this include block + the
+// set_seed_per_thread() function definition immediately below.
+// ------------------------------------------------------------------------
+#ifdef _OPENMP
+#  include <omp.h>
+#endif
+
 #ifndef M_PI
 #define M_PI 3.141592653589793238462643383279502884
 #endif
@@ -82,6 +96,24 @@ inline std::mt19937_64& engine() {
 }
 
 inline void set_seed(std::uint64_t s) { engine().seed(s); }
+
+// ---- AI4BayesCode fork (2026-07-25) [BART RNG OMP-safe] -----------------
+// OMP-safe seeder: each thread's thread_local engine gets a distinct seed
+// derived from `s` xor'd with (omp_get_thread_num() * 2^64/phi). Without
+// this, seeding the BART kernel from N OMP-parallel chains all writes the
+// SAME `s` into every thread_local engine, and every chain draws the
+// identical BART random walk (fake R-hat convergence). Backwards-compatible
+// with the plain set_seed() above (which stays single-thread-safe). When
+// compiled WITHOUT -fopenmp, this collapses to plain set_seed() behaviour.
+// If rebasing onto upstream BART, re-apply.
+// ------------------------------------------------------------------------
+inline void set_seed_per_thread(std::uint64_t s) {
+#ifdef _OPENMP
+    s ^= static_cast<std::uint64_t>(omp_get_thread_num())
+         * 0x9E3779B97F4A7C15ULL;   // 2^64 / golden ratio
+#endif
+    engine().seed(s);
+}
 
 // uniform on the OPEN interval (0,1) — matches R's unif_rand(), which
 // never returns exactly 0 or 1 (important: callers take log(unif_rand)).

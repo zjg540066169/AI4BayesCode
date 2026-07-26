@@ -167,6 +167,19 @@ public:
         if (X.n_rows != y.n_elem || Z.n_rows != y.n_elem) {
             ai4b::stop("VCBart: X, Z and y must have matching row counts");
         }
+
+        // AI4BayesCode fork (2026-07-25) [BART RNG OMP-safe]: seed the
+        // BART kernel's thread_local RNG per OMP thread ONCE (VCBart
+        // composes many BART blocks, but they all share the same static
+        // thread_local engine, so one seed per ctor is enough). Without
+        // this, N chains launched on N OMP threads all draw the
+        // IDENTICAL BART stream (fake R-hat convergence bug). Skipped
+        // under the Rcpp backend (R owns the RNG there).
+#if !defined(AI4BAYESCODE_RCPP_MODULE)
+        if (rng_seed != 0) {
+            bart_rng::set_seed_per_thread(static_cast<std::uint64_t>(rng_seed));
+        }
+#endif
         const std::size_t N = y.n_elem;
         const int J = p_ + 1;                 // number of ensembles (intercept + p)
 
