@@ -608,20 +608,11 @@ public:
 
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
 
-    void readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept) {
+    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
         if (n < 0) {
             ai4b::stop("readapt_NUTS: n must be non-negative");
         }
-        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth),
-                            target_accept);
-    }
-
-    /// 3-arg backward-compat overload. Rcpp modules ignore C++ default
-    /// args, so both arities are exposed as separate bindings; from C++,
-    /// this thin forwarder keeps the pre-existing readapt_NUTS(n, reset,
-    /// max_tree_depth) call shape working.
-    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
-        readapt_NUTS(n, reset, max_tree_depth, -1.0);
+        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
     }
 
 private:
@@ -653,17 +644,7 @@ RCPP_MODULE(IRT1PL_joint_module) {
         .method("predict_at",      &IRT1PL_joint::predict_at)
         .method("get_dag",         &IRT1PL_joint::get_dag)
         .method("get_history",     &IRT1PL_joint::get_history)
-        .method("readapt_NUTS",
-
-                (void (IRT1PL_joint::*)(int, bool, int)) &IRT1PL_joint::readapt_NUTS,
-
-                "Re-adapt NUTS metric (3-arg backward-compat form; target_accept unchanged).")
-
-        .method("readapt_NUTS",
-
-                (void (IRT1PL_joint::*)(int, bool, int, double)) &IRT1PL_joint::readapt_NUTS,
-
-                "Re-adapt NUTS metric; 4th arg target_accept in (0,1] overrides the block's dual-averaging target (default 0.8); sentinel <= 0 keeps current.")
+        .method("readapt_NUTS",    &IRT1PL_joint::readapt_NUTS)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(IRT1PL_joint);
 }
 #endif
@@ -693,9 +674,8 @@ PYBIND11_MODULE(IRT1PL_joint, m) {
              pybind11::arg("new_data"))
         .def("get_dag",         &IRT1PL_joint::get_dag)
         .def("get_history",     &IRT1PL_joint::get_history)
-        .def("readapt_NUTS",    (void (IRT1PL_joint::*)(int, bool, int, double)) &IRT1PL_joint::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1,
-             pybind11::arg("target_accept") = -1.0)
+        .def("readapt_NUTS",    &IRT1PL_joint::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(IRT1PL_joint);
 }
 #endif

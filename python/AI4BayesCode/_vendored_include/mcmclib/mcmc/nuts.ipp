@@ -61,39 +61,6 @@
   ##       new_draw_pos always tracks the "far forward leaf", which is
   ##       NOT what mcmclib's convention produces at depth >= 2.
   ##       See project_mcmclib_nuts_cache_investigation.md.
-  ##     - AI4BayesCode fork (2026-07-25, JZ): metric-kind dispatch.
-  ##       Every leap_frog drift + kinetic-energy dot on
-  ##       inv_precond_matrix * v was rerouted through nuts_metric_state_t
-  ##       so IDENTITY skips the matvec entirely (raw daxpy) and DIAGONAL
-  ##       uses the arma element-wise "%" product. DENSE keeps the
-  ##       upstream matvec byte-identical. The struct is a plain
-  ##       dispatch tag + non-owning pointers; nuts.hpp owns the storage
-  ##       (or a cached copy on nuts_settings_t). Signatures of
-  ##       nuts_find_initial_step_size and nuts_build_tree now take a
-  ##       const nuts_metric_state_t& in place of const Mat_t&
-  ##       inv_precond_matrix. If rebasing onto upstream mcmclib,
-  ##       re-apply this signature change and revert to the Mat_t path.
-  ##     - AI4BayesCode fork (2026-07-25, JZ) [Fix #3]: per-depth
-  ##       ColVec_t scratch pool inside nuts_build_tree. Each recursive
-  ##       frame previously stack-constructed up to 12 ColVec_t via the
-  ##       recursive-case + one direction branch (14 including the two
-  ##       leaf-case locals); on max_tree_depth=10 this is 154 arma
-  ##       ColVec_t heap allocations per nuts() call and O(dim) memcpy
-  ##       work per slot on entry. The pool is a
-  ##       std::vector<build_tree_scratch_t> sized max_tree_depth+1 and
-  ##       indexed by tree_depth. Alias-safe by construction: a caller
-  ##       at depth d uses pool[d]; the callee at depth d-1 uses
-  ##       pool[d-1]. Recursion is single-threaded depth-first, so at
-  ##       most one frame is active per depth. Each pool slot is
-  ##       pre-sized to n_vals in nuts_impl so subsequent arma
-  ##       assignments reuse memory instead of resizing. Bit-identical
-  ##       math: no arithmetic changed, only WHERE the temporaries
-  ##       live. Signature of nuts_build_tree gains a
-  ##       std::vector<build_tree_scratch_t>& scratch_pool trailing
-  ##       parameter; find_initial_step_size is untouched (called once
-  ##       per nuts() call, ROI negligible). If rebasing onto upstream
-  ##       mcmclib, delete build_tree_scratch_t + the scratch_pool
-  ##       parameter and revert to stack-local ColVec_t.
   ##
   ################################################################################*/
 
@@ -104,106 +71,6 @@
 #ifndef _mcmc_nuts_IPP
 #define _mcmc_nuts_IPP
 
-// ---- AI4BayesCode fork (2026-07-25): metric-kind dispatch struct ----------
-// nuts_metric_state_t is a plain dispatch tag + non-owning pointers into the
-// preconditioner cache owned by nuts_impl (or nuts_settings_t). It replaces
-// the `const Mat_t& inv_precond_matrix` parameter throughout the NUTS
-// internals so IDENTITY and DIAGONAL can skip the dense matvec entirely.
-// Correctness invariant:
-//   IDENTITY : inv(I) * v == v exactly (floating-point identity).
-//   DIAGONAL : inv(diag(d)) * v == (1/d) elementwise * v exactly.
-//   DENSE    : inv_mat * v -- byte-identical to upstream inv_precond_matrix * v.
-// If rebasing onto upstream mcmclib, revert callers to pass Mat_t and drop
-// this struct.
-// --------------------------------------------------------------------------
-struct nuts_metric_state_t {
-    metric_kind_t   kind      = metric_kind_t::IDENTITY;
-    const ColVec_t* inv_diag  = nullptr;  // used iff kind == DIAGONAL
-    const ColVec_t* sqrt_diag = nullptr;  // used iff kind == DIAGONAL
-    const Mat_t*    inv_mat   = nullptr;  // used iff kind == DENSE
-    const Mat_t*    sqrt_mat  = nullptr;  // used iff kind == DENSE
-};
-
-// ---- AI4BayesCode fork (2026-07-25) [Fix #3]: per-depth scratch pool -------
-// Replaces the stack-local ColVec_t constructions inside nuts_build_tree with
-// slots on a caller-owned per-depth pool.
-//
-// Alias-safety: nuts_build_tree at depth d touches ONLY scratch_pool[d]. The
-// two recursive calls inside the depth-d body invoke nuts_build_tree(depth-1),
-// which touches scratch_pool[d-1]. Recursion is single-threaded and
-// depth-first, so at most one frame is active at each depth at any moment;
-// callee's pool[d-1] slots and caller's pool[d] slots therefore never overlap
-// in memory. The two calls at depth d never overlap either: the first call
-// returns before the second is invoked, and both use pool[d-1].
-//
-// Within a single frame:
-//   * The leaf case (tree_depth == 0) uses only leaf_new_mntm and
-//     leaf_local_raw_grad.
-//   * The recursive case (tree_depth > 0) uses the "first-subtree" slots
-//     (which must survive across the second subtree call), the "second-subtree
-//     output" slots (only touched inside the second subtree branch), and the
-//     "direction" slots (only one branch runs per frame). The leaf slots are
-//     not touched in the recursive path, so leaf/recursive live cleanly in
-//     the same pool slot without aliasing (they are mutually exclusive).
-//
-// Slots are pre-sized to n_vals in nuts_impl (see nuts.hpp) so subsequent arma
-// operator= calls reuse existing storage rather than reallocating. All math
-// remains bit-identical to the pre-Fix#3 stack-local version: only the
-// storage location of the temporaries changes.
-//
-// If rebasing onto upstream mcmclib, delete this struct + the scratch_pool
-// parameter on nuts_build_tree and revert to stack-local ColVec_t.
-// ---------------------------------------------------------------------------
-struct build_tree_scratch_t {
-    // Leaf case (tree_depth == 0). Mutually exclusive with the recursive
-    // case; kept as separate slots for readability -- the memory cost is
-    // trivial (2 * n_vals doubles per depth).
-    ColVec_t leaf_new_mntm;
-    ColVec_t leaf_local_raw_grad;
-
-    // First-subtree outputs (survive across the SECOND subtree call).
-    ColVec_t new_draw_p;
-    ColVec_t cached_at_first_pos;
-    ColVec_t cached_at_first_neg;
-    ColVec_t prop_grad_first;
-
-    // Second-subtree output holders (only touched in the recursive-case
-    // second-subtree branch).
-    ColVec_t new_draw_pp;
-    ColVec_t cached_at_second_pos;
-    ColVec_t cached_at_second_neg;
-    ColVec_t prop_grad_second;
-
-    // Direction-specific temporaries. Only ONE branch (direction_val == -1
-    // OR == +1) runs per frame, so a single set of four slots serves both.
-    // dir_draw / dir_mntm hold the copy of draw_neg / mntm_neg (or
-    // draw_pos / mntm_pos) that is passed as the second subtree's input
-    // starting position; dir_dummy_draw / dir_dummy_mntm receive the
-    // "lost" boundary written by the callee.
-    ColVec_t dir_dummy_draw;
-    ColVec_t dir_dummy_mntm;
-    ColVec_t dir_draw;
-    ColVec_t dir_mntm;
-};
-
-// K = m^T inv(M) m / 2 with metric dispatch.
-inline
-fp_t
-nuts_metric_K(const nuts_metric_state_t& metric, const ColVec_t& mntm)
-{
-    switch (metric.kind) {
-        case metric_kind_t::IDENTITY:
-            // K = m^T m / 2
-            return BMO_MATOPS_DOT_PROD(mntm, mntm) / fp_t(2);
-        case metric_kind_t::DIAGONAL:
-            // K = m^T (inv_diag % m) / 2
-            return BMO_MATOPS_DOT_PROD(mntm, (*metric.inv_diag) % mntm) / fp_t(2);
-        case metric_kind_t::DENSE:
-        default:
-            return BMO_MATOPS_DOT_PROD(mntm, (*metric.inv_mat) * mntm) / fp_t(2);
-    }
-}
-
 //
 
 inline
@@ -211,7 +78,7 @@ fp_t
 nuts_find_initial_step_size(
     const ColVec_t& draw_vec,
     const ColVec_t& mntm_vec,
-    const nuts_metric_state_t& metric,
+    const Mat_t& inv_precond_matrix,
     std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data)> box_log_kernel_fn,
     std::function<fp_t (const ColVec_t& pos_inp, ColVec_t& raw_grad_out, void* target_data)> raw_grad_fn,
     std::function<void (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data)> leap_frog_fn,
@@ -229,10 +96,7 @@ nuts_find_initial_step_size(
         prev_U = posinf;
     }
 
-    // AI4BayesCode fork (2026-07-25): metric dispatch (was:
-    //   prev_K = DOT(mntm_vec, inv_precond_matrix * mntm_vec) / 2 ;
-    // ).
-    fp_t prev_K = nuts_metric_K(metric, mntm_vec);
+    fp_t prev_K = BMO_MATOPS_DOT_PROD(mntm_vec, inv_precond_matrix * mntm_vec) / fp_t(2);
 
     //
 
@@ -253,8 +117,7 @@ nuts_find_initial_step_size(
         prop_U = posinf;
     }
 
-    // AI4BayesCode fork (2026-07-25): metric dispatch.
-    fp_t prop_K = nuts_metric_K(metric, new_mntm);
+    fp_t prop_K = BMO_MATOPS_DOT_PROD(new_mntm, inv_precond_matrix * new_mntm) / fp_t(2);
 
     //
 
@@ -302,10 +165,8 @@ nuts_find_initial_step_size(
             prop_U = posinf;
         }
 
-        // AI4BayesCode fork (2026-07-25): metric dispatch (was:
-        //   prop_K = DOT(new_mntm, inv_precond_matrix * new_mntm) / 2 ;
-        // ).
-        prop_K = nuts_metric_K(metric, new_mntm);
+        prop_K = BMO_MATOPS_DOT_PROD(new_mntm, inv_precond_matrix * new_mntm)
+               / fp_t(2);
 
         max_steps--;
     }
@@ -325,10 +186,7 @@ nuts_build_tree(
     const fp_t prev_K,
     const ColVec_t& draw_vec,
     const ColVec_t& mntm_vec,
-    // AI4BayesCode fork (2026-07-25): metric dispatch struct in place of
-    // const Mat_t& inv_precond_matrix. Byte-identical dispatch on the DENSE
-    // path; O(n) leap on IDENTITY / DIAGONAL. See top of file.
-    const nuts_metric_state_t& metric,
+    const Mat_t& inv_precond_matrix,
     std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data)> box_log_kernel_fn,
     std::function<void (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data)> leap_frog_fn,
     const size_t tree_depth,
@@ -355,29 +213,16 @@ nuts_build_tree(
     // instead of recomputing (box_log_kernel_fn + raw_grad_fn at new_draw).
     // new_draw is a leaf created here; its value+grad were already computed.
     fp_t& prop_box_U_out,
-    ColVec_t& prop_grad_out,
-    // AI4BayesCode fork (2026-07-25) [Fix #3]: per-depth ColVec_t pool.
-    // Owned + pre-sized by nuts_impl. This frame touches scratch_pool[tree_depth]
-    // exclusively; the recursive call at depth-1 touches scratch_pool[tree_depth-1].
-    // See build_tree_scratch_t comment above for the alias-safety argument.
-    std::vector<build_tree_scratch_t>& scratch_pool
+    ColVec_t& prop_grad_out
 )
 {
     const fp_t max_tuning_par = 1000;
-    // AI4BayesCode fork (2026-07-25) [Fix #3]: bind our depth's slot ONCE.
-    build_tree_scratch_t& scratch = scratch_pool[tree_depth];
 
     if (tree_depth == size_t(0)) {
         new_draw = draw_vec;
-        // AI4BayesCode fork (2026-07-25) [Fix #3]: pool-backed (was stack
-        // ColVec_t new_mntm = mntm_vec).
-        ColVec_t& new_mntm = scratch.leaf_new_mntm;
-        new_mntm = mntm_vec;
+        ColVec_t new_mntm = mntm_vec;
 
-        // AI4BayesCode fork (2026-07-25) [Fix #3]: pool-backed (was stack
-        // ColVec_t local_raw_grad = cached_raw_grad_in).
-        ColVec_t& local_raw_grad = scratch.leaf_local_raw_grad;
-        local_raw_grad = cached_raw_grad_in;
+        ColVec_t local_raw_grad = cached_raw_grad_in;
         fp_t leaf_box_U = fp_t(0);
         leap_frog_fn(direction_val * step_size, 1, new_draw, new_mntm, local_raw_grad, leaf_box_U, target_data);
         // After leap_frog: local_raw_grad = grad(new_draw); leaf_box_U =
@@ -390,10 +235,7 @@ nuts_build_tree(
         fp_t prop_U = - leaf_box_U;
         if (!std::isfinite(prop_U)) prop_U = posinf;
 
-        // AI4BayesCode fork (2026-07-25): metric dispatch (was:
-        //   prop_K = DOT(new_mntm, inv_precond_matrix * new_mntm) / 2 ;
-        // ).
-        fp_t prop_K = nuts_metric_K(metric, new_mntm);
+        fp_t prop_K = BMO_MATOPS_DOT_PROD(new_mntm, inv_precond_matrix * new_mntm) / fp_t(2);
 
         n_val = (log_rand_val <= - prop_U - prop_K);
         s_val = (log_rand_val < max_tuning_par - prop_U - prop_K);
@@ -419,24 +261,23 @@ nuts_build_tree(
         size_t s_p_val;
         fp_t alpha_p_val;
         size_t n_alpha_p_val;
-        // AI4BayesCode fork (2026-07-25) [Fix #3]: pool-backed. First-subtree
-        // slots must survive across the second subtree call and must NOT be
-        // written by the callee (which uses pool[d-1], disjoint from pool[d]).
-        ColVec_t& new_draw_p          = scratch.new_draw_p;
-        ColVec_t& cached_at_first_pos = scratch.cached_at_first_pos;
-        ColVec_t& cached_at_first_neg = scratch.cached_at_first_neg;
-        ColVec_t& prop_grad_first     = scratch.prop_grad_first;
+        ColVec_t new_draw_p;
+        // Caches returned by the first sub-tree, aligned with the
+        // first sub-tree's new_draw_pos and new_draw_neg.
+        ColVec_t cached_at_first_pos;
+        ColVec_t cached_at_first_neg;
         // First sub-tree's selected-proposal value+grad (PERF threading).
         fp_t prop_box_U_first = fp_t(0);
+        ColVec_t prop_grad_first;
 
         nuts_build_tree(
             direction_val, step_size, log_rand_val, prev_U, prev_K,
-            draw_vec, mntm_vec, metric,
+            draw_vec, mntm_vec, inv_precond_matrix,
             box_log_kernel_fn, leap_frog_fn, tree_depth - 1,
             new_draw_p, new_draw_pos, new_draw_neg, new_mntm_pos, new_mntm_neg,
             n_p_val, s_p_val, alpha_p_val, n_alpha_p_val, rand_engine, target_data,
             cached_raw_grad_in, cached_at_first_pos, cached_at_first_neg,
-            prop_box_U_first, prop_grad_first, scratch_pool);
+            prop_box_U_first, prop_grad_first);
 
         // After first sub-tree: new_draw_pos/neg are the first sub-tree's
         // boundaries; cached_at_first_pos/neg are aligned with them.
@@ -446,38 +287,32 @@ nuts_build_tree(
             size_t s_pp_val;
             fp_t alpha_pp_val;
             size_t n_alpha_pp_val;
-            // AI4BayesCode fork (2026-07-25) [Fix #3]: pool-backed.
-            ColVec_t& new_draw_pp          = scratch.new_draw_pp;
-            ColVec_t& cached_at_second_pos = scratch.cached_at_second_pos;
-            ColVec_t& cached_at_second_neg = scratch.cached_at_second_neg;
-            ColVec_t& prop_grad_second     = scratch.prop_grad_second;
+            ColVec_t new_draw_pp;
+            // Caches returned by the second sub-tree.
+            ColVec_t cached_at_second_pos;
+            ColVec_t cached_at_second_neg;
             // Second sub-tree's selected-proposal value+grad (PERF threading).
             fp_t prop_box_U_second = fp_t(0);
+            ColVec_t prop_grad_second;
 
             if (direction_val == -1) {
                 // Second sub-tree extends backward from new_draw_neg.
                 // Input cache for it = cached_at_first_neg
                 //   (= grad@new_draw_neg, which is the second sub-tree's
                 //    starting position).
-                // AI4BayesCode fork (2026-07-25) [Fix #3]: pool-backed
-                // direction-branch temporaries (only one branch runs).
-                ColVec_t& dummy_draw = scratch.dir_dummy_draw;
-                ColVec_t& dummy_mntm = scratch.dir_dummy_mntm;
-                ColVec_t& draw_neg   = scratch.dir_draw;
-                ColVec_t& mntm_neg   = scratch.dir_mntm;
-                dummy_draw = new_draw_pos;
-                dummy_mntm = new_mntm_pos;
-                draw_neg   = new_draw_neg;
-                mntm_neg   = new_mntm_neg;
+                ColVec_t dummy_draw = new_draw_pos;
+                ColVec_t dummy_mntm = new_mntm_pos;
+                ColVec_t draw_neg = new_draw_neg;
+                ColVec_t mntm_neg = new_mntm_neg;
 
                 nuts_build_tree(
                     direction_val, step_size, log_rand_val, prev_U, prev_K,
-                    draw_neg, mntm_neg, metric,
+                    draw_neg, mntm_neg, inv_precond_matrix,
                     box_log_kernel_fn, leap_frog_fn, tree_depth - 1,
                     new_draw_pp, new_draw_neg, dummy_draw, new_mntm_neg, dummy_mntm,
                     n_pp_val, s_pp_val, alpha_pp_val, n_alpha_pp_val, rand_engine, target_data,
                     cached_at_first_neg, cached_at_second_pos, cached_at_second_neg,
-                    prop_box_U_second, prop_grad_second, scratch_pool);
+                    prop_box_U_second, prop_grad_second);
                 // mcmclib boundary mapping for direction=-1 second sub-tree:
                 //   arg 13 = callee's new_draw_pos -> caller's new_draw_neg (UPDATED via swap)
                 //   arg 14 = callee's new_draw_neg -> dummy_draw (lost)
@@ -488,24 +323,19 @@ nuts_build_tree(
                 cached_at_new_draw_pos_out = cached_at_first_pos;
             } else {
                 // Second sub-tree extends forward from new_draw_pos.
-                // AI4BayesCode fork (2026-07-25) [Fix #3]: pool-backed.
-                ColVec_t& dummy_draw = scratch.dir_dummy_draw;
-                ColVec_t& dummy_mntm = scratch.dir_dummy_mntm;
-                ColVec_t& draw_pos   = scratch.dir_draw;
-                ColVec_t& mntm_pos   = scratch.dir_mntm;
-                dummy_draw = new_draw_neg;
-                dummy_mntm = new_mntm_neg;
-                draw_pos   = new_draw_pos;
-                mntm_pos   = new_mntm_pos;
+                ColVec_t dummy_draw = new_draw_neg;
+                ColVec_t dummy_mntm = new_mntm_neg;
+                ColVec_t draw_pos = new_draw_pos;
+                ColVec_t mntm_pos = new_mntm_pos;
 
                 nuts_build_tree(
                     direction_val, step_size, log_rand_val, prev_U, prev_K,
-                    draw_pos, mntm_pos, metric,
+                    draw_pos, mntm_pos, inv_precond_matrix,
                     box_log_kernel_fn, leap_frog_fn, tree_depth - 1,
                     new_draw_pp, dummy_draw, new_draw_pos, dummy_mntm, new_mntm_pos,
                     n_pp_val, s_pp_val, alpha_pp_val, n_alpha_pp_val, rand_engine, target_data,
                     cached_at_first_pos, cached_at_second_pos, cached_at_second_neg,
-                    prop_box_U_second, prop_grad_second, scratch_pool);
+                    prop_box_U_second, prop_grad_second);
                 // mcmclib boundary mapping for direction=+1 second sub-tree:
                 //   callee's new_draw_pos -> dummy_draw (lost)
                 //   callee's new_draw_neg -> caller's new_draw_pos (updated)

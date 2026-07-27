@@ -1915,9 +1915,7 @@ public:
     AI4BayesCode::history_map get_history() const;                // = impl_->get_history()
     // CONDITIONAL kernel-control method -- emit ONLY if the composite contains any
     // nuts_block / joint_nuts_block child (see Sec.9). Then also add the
-    // readapt_rng_ member below. Both a 4-arg method and a 3-arg
-    // backward-compat forwarder are required; see Sec.9.
-    void readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept);
+    // readapt_rng_ member below.
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1);
     // Kernel-control category (freeze / unfreeze / get_frozen) is provided
     // automatically by the kernel_control_mixin<Derived> base class -- do NOT
@@ -1991,15 +1989,11 @@ The canonical, copy-this reference is `examples/GaussianLocationScale.cpp`
 
 **NUTS-family note:** if the composite contains ANY `nuts_block` or
 `joint_nuts_block` child, the wrapper MUST ALSO expose a conditional 7th
-method `void readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept);`
-plus a 3-arg backward-compat forwarder
-`void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1);`
-(the 3-arg form delegates to the 4-arg one with `target_accept = -1.0`,
-the sentinel "leave current target unchanged"), and carry a 3rd RNG
-member `mutable std::mt19937_64 readapt_rng_;` (seeded once in the ctor
-init list). See Sec.9 "Conditional kernel-control method `readapt_NUTS`"
+method `void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1);`
+and carry a 3rd RNG member `mutable std::mt19937_64 readapt_rng_;` (seeded
+once in the ctor init list). See Sec.9 "Conditional kernel-control method `readapt_NUTS`"
 below for the exact wrapper-class additions and the
-`examples/GaussianLocationScale.cpp` reference.
+`examples/GaussianLocationScale.cpp` reference (lines ~158, ~288, ~296).
 
 Expose via `RCPP_MODULE(<ClassName>_module) { ... }`.
 
@@ -2307,7 +2301,7 @@ your backend at the tail of the `.cpp`.
 **Rule:** if the wrapper's composite contains at least one
 `nuts_block` or `joint_nuts_block`
 child, the wrapper MUST expose a conditional kernel-control method
-`readapt_NUTS` and carry a
+`readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1)` and carry a
 3rd RNG member `readapt_rng_`. If the composite has no NUTS-family
 child (pure BART, pure Gibbs, pure VI, pure HMM, pure SBP, pure
 RJMCMC, pure slice), the wrapper has core-6 state methods + the
@@ -2317,25 +2311,17 @@ via the mixin macro), 2 RNGs, and no `readapt_NUTS`. See
 conditional `readapt_NUTS`), Sec.8 (3rd RNG), Sec.13 NUTS-family
 contract, and `validator.md Sec.23` + `Sec.26`.
 
-**ALWAYS register BOTH the 3-arg AND 4-arg forms.** The current
-standard signature is
-`readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept)`
-plus a thin 3-arg backward-compat forwarder
-`readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1)` that
-delegates to the 4-arg form with `target_accept = -1.0` (sentinel, "leave
-current target unchanged"). Rcpp modules IGNORE C++ default args, so both
-arities MUST be bound as separate `.method("readapt_NUTS", ...)` overloads
-using explicit function-pointer casts; pybind11 honours defaults, so a
-single `.def` on the 4-arg pointer suffices. Do NOT copy any shorter 2-arg
-form seen in older examples. `max_tree_depth = -1` = "use each block's
-configured depth" (the value the runner passes for essentially every
-model); tuning to a positive value is RARE. `target_accept = -1.0` (or any
-value <= 0 or > 1) = "leave each NUTS block's current target unchanged";
-values in `(0, 1]` overwrite the block's dual-averaging target for this
-call and all subsequent step()/readapt() calls (AI4BayesCode default is
-`target_accept_rate = 0.8`, matching Stan / PyMC / NumPyro; the vendored
-mcmclib default of 0.55 is documented on `nuts_block_config` /
-`joint_nuts_block_config`).
+**ALWAYS register the 3-arg form.** Use EXACTLY
+`readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1)` (the code
+template below). Some shipped examples show a shorter 2-arg
+`readapt_NUTS(int n, bool reset = false)` -- do NOT copy that shorter form; the
+3-arg signature is the current standard, and the R runner calls it with all
+three arguments (Rcpp drops C++ defaults, so the caller passes all three).
+`max_tree_depth = -1` = "use each block's configured depth" -- this is the value
+the runner passes (`readapt_NUTS(N, FALSE, -1L)`) for essentially EVERY model, so
+you do NOT need to think about tree depth. Tuning it to a positive value (faster
+re-adaptation on a stiff / ill-conditioned target) is RARE and decided per-model
+during generation; leave it at `-1L` unless a model specifically needs it.
 
 **Wrapper-class additions (NUTS-using wrappers only):**
 
@@ -2354,23 +2340,14 @@ mutable std::mt19937_64 readapt_rng_;   // readapt_NUTS only (kernel-control met
 /// dual averaging) without advancing chain state. Available because
 /// the composite contains NUTS-family children. See system_design.md
 /// Sec.13 NUTS-family + validator.md Sec.24.
-void readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept) {
+void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
     if (n < 0) Rcpp::stop("readapt_NUTS: n must be non-negative");
-    // max_tree_depth: -1 = use each block's configured depth;
-    //                 >0 = cap NUTS tree depth for these n adapt iters.
-    // target_accept:  in (0, 1] overrides the block's dual-averaging
-    //                 target (default 0.8); sentinel <= 0 or > 1 leaves
-    //                 the current target unchanged.
+    // max_tree_depth: -1 (default) = use each block's configured depth;
+    // >0 = temporarily cap NUTS tree depth for these n adaptation iters
+    // (faster re-adaptation on high-dim / ill-conditioned targets).
     impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_,
                         max_tree_depth > 0
-                            ? static_cast<std::size_t>(max_tree_depth) : 0,
-                        target_accept);
-}
-/// 3-arg backward-compat overload. Rcpp modules ignore C++ default
-/// args; both arities are exposed as separate bindings. From C++,
-/// this forwarder keeps the pre-existing 3-arg call shape working.
-void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
-    readapt_NUTS(n, reset, max_tree_depth, -1.0);
+                            ? static_cast<std::size_t>(max_tree_depth) : 0);
 }
 ```
 
@@ -2417,21 +2394,10 @@ RCPP_MODULE(<ClassName>_module) {
         .method("predict_at",   &ClassName::predict_at)
         .method("get_dag",      &ClassName::get_dag)
         .method("get_history",  &ClassName::get_history)
-        // CONDITIONAL -- only emit the two lines below if the composite
+        // CONDITIONAL -- only emit the line below if the composite
         // contains any NUTS-family child (nuts_block /
-        // joint_nuts_block). Rcpp modules IGNORE C++ default args, so
-        // BOTH the 3-arg backward-compat form AND the 4-arg current form
-        // MUST be bound as separate overloads (explicit function-pointer
-        // casts pick the right method).
-        .method("readapt_NUTS",
-                (void (ClassName::*)(int, bool, int)) &ClassName::readapt_NUTS,
-                "Re-adapt NUTS metric (3-arg backward-compat form; "
-                "target_accept unchanged).")
-        .method("readapt_NUTS",
-                (void (ClassName::*)(int, bool, int, double)) &ClassName::readapt_NUTS,
-                "Re-adapt NUTS metric; 4th arg target_accept in (0,1] "
-                "overrides the block's dual-averaging target (default "
-                "0.8); sentinel <= 0 keeps current.")
+        // joint_nuts_block).
+        .method("readapt_NUTS", &ClassName::readapt_NUTS)
         // ALWAYS -- kernel-control category (interface.md Sec.1).
         // The macro emits `.method("freeze", ...)`, `.method("unfreeze", ...)`,
         // `.method("get_frozen", ...)` bound to the mixin's forwarders.
@@ -2463,15 +2429,10 @@ PYBIND11_MODULE(<ClassName>, m) {
         .def("predict_at",   &ClassName::predict_at, pybind11::arg("new_data"))
         .def("get_dag",      &ClassName::get_dag)
         .def("get_history",  &ClassName::get_history)
-        // CONDITIONAL -- only emit if composite has NUTS-family child.
-        // pybind11 honours C++ default arguments and can pick the right
-        // 4-arg overload from an explicit function-pointer cast, so ONE
-        // .def() is enough (unlike Rcpp above).
-        .def("readapt_NUTS",
-             (void (ClassName::*)(int, bool, int, double)) &ClassName::readapt_NUTS,
+        // CONDITIONAL -- only emit if composite has NUTS-family child
+        .def("readapt_NUTS", &ClassName::readapt_NUTS,
              pybind11::arg("n"), pybind11::arg("reset") = false,
-             pybind11::arg("max_tree_depth") = -1,
-             pybind11::arg("target_accept") = -1.0);
+             pybind11::arg("max_tree_depth") = -1);
     // ALWAYS -- kernel-control category (interface.md Sec.1).
     // The macro emits `.def("freeze", ...)`, `.def("unfreeze", ...)`,
     // `.def("get_frozen", ...)` bound to the mixin's forwarders.

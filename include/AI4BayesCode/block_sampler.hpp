@@ -381,15 +381,11 @@ public:
     virtual void readapt(std::size_t n,
                          bool reset,
                          std::mt19937_64& rng,
-                         std::size_t max_tree_depth_override = 0,
-                         double target_accept_override = -1.0) {
+                         std::size_t max_tree_depth_override = 0) {
         (void)n; (void)reset; (void)rng; (void)max_tree_depth_override;
-        (void)target_accept_override;
         // Default no-op; only called when supports_readapt() == true.
         // max_tree_depth_override: 0 = use the block's configured depth;
         // >0 = temporarily cap NUTS tree depth for these n adaptation iters.
-        // target_accept_override: sentinel <= 0 or > 1 => leave unchanged;
-        // in (0, 1] => overwrite the block's target_accept_rate (persists).
     }
 
     // ---- Kernel-control freeze interface (kernel-control category) ----------

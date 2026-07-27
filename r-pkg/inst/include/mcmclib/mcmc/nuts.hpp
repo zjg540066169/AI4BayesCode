@@ -52,29 +52,6 @@
   ##       direction in nuts_find_initial_step_size (the original only
   ##       doubled; per Hoffman & Gelman 2014 Algorithm 4 it must also be
   ##       able to halve).
-  ##     - AI4BayesCode fork (2026-07-25, JZ): metric-kind dispatch +
-  ##       preconditioner cache. See mcmc_structs.hpp for the fields on
-  ##       nuts_settings_t and nuts.ipp for the nuts_metric_state_t dispatch
-  ##       struct. The setup block at the top of nuts_impl now (a) resolves
-  ##       AUTO to IDENTITY/DIAGONAL/DENSE from precond_mat contents ONCE,
-  ##       (b) memoizes inv(M) + chol_lower(M) on the caller's settings so
-  ##       subsequent nuts() calls skip the O(n^3) rebuild while precond_mat
-  ##       is unchanged, and (c) points a nuts_metric_state_t at the cached
-  ##       storage. Every leap_frog drift, kinetic-energy dot, and momentum
-  ##       resample dispatches on metric_kind. Byte-preserved DENSE path.
-  ##       If rebasing onto upstream mcmclib, remove this block and route
-  ##       everything back through the dense inv_precond_matrix * v path.
-  ##     - AI4BayesCode fork (2026-07-25, JZ) [Fix #3]: per-depth ColVec_t
-  ##       scratch pool for nuts_build_tree. nuts_impl now allocates a
-  ##       std::vector<build_tree_scratch_t> of length max_tree_depth+1,
-  ##       pre-sizes each slot's ColVec_t to n_vals ONCE, and threads it
-  ##       into both nuts_build_tree call sites. Alias-safety is
-  ##       structural (frame at depth d touches pool[d] only; callee at
-  ##       depth d-1 touches pool[d-1]). Bit-identical draws; the only
-  ##       change is temporary storage location. See nuts.ipp for the
-  ##       struct + method-level rationale. Rebase note: delete the pool
-  ##       allocation + the trailing scratch_pool argument on the two
-  ##       nuts_build_tree calls to revert.
   ##
   ################################################################################*/
 
@@ -186,129 +163,9 @@ internal::nuts_impl(
     const fp_t t0_val    = settings.nuts_settings.t0_val;
     const fp_t kappa_val = settings.nuts_settings.kappa_val;
 
-    // ---- AI4BayesCode fork (2026-07-25): metric resolution + cache ---------
-    // Upstream mcmclib built precond_matrix = precond_mat OR EYE(n_vals),
-    // then always computed inv(precond_matrix) + chol_lower(precond_matrix)
-    // on every nuts() call. For a nuts_block / joint_nuts_block that calls
-    // nuts() thousands of times, that O(n^3) rebuild dominates when precond_mat
-    // is stable across calls (e.g. after a dense-metric adapt_dense_metric_
-    // installs precond_mat once and then samples for the rest of the chain).
-    //
-    // This fork:
-    //   1. Resolves nuts_settings.metric_kind (AUTO -> IDENTITY / DIAGONAL /
-    //      DENSE) by inspecting precond_mat contents (empty / wrong-size ->
-    //      IDENTITY; off-diagonals all zero -> DIAGONAL; else -> DENSE). The
-    //      resolution is cached alongside inv+chol.
-    //   2. For IDENTITY: does NOT allocate EYE(n_vals) at all (the identity
-    //      metric never needs a stored matrix) -- 8 * n_vals^2 bytes freed and
-    //      one O(n^2) memset skipped per call.
-    //   3. For DIAGONAL: stores only the length-n vectors inv_diag = 1/d and
-    //      sqrt_diag = sqrt(d) (each O(n)) -- skips the O(n^3) inv+chol.
-    //   4. For DENSE: computes inv+chol byte-identically to upstream.
-    //   5. Persists resolved kind + cache in the caller's settings via the
-    //      end-of-nuts_impl write-back; on the next call, if
-    //      precond_cache_valid is set and (kind, n_vals) match, the O(n^3)
-    //      setup is skipped entirely.
-    // Correctness invariant: the cache is a pure function of precond_mat +
-    // resolved kind + n_vals. Users who mutate precond_mat MUST set
-    // precond_cache_valid = false so this block rebuilds. The AI4BayesCode
-    // wrappers (nuts_block, joint_nuts_block) honor this contract at every
-    // precond_mat assignment.
-    // If rebasing onto upstream mcmclib, revert to the three commented-out
-    // lines above.
-    // -------------------------------------------------------------------------
-    const bool has_user_precond =
-        (BMO_MATOPS_SIZE(settings.nuts_settings.precond_mat) == n_vals * n_vals);
-
-    // Resolve metric_kind from user setting + precond_mat.
-    metric_kind_t resolved_kind = settings.nuts_settings.metric_kind;
-    if (resolved_kind == metric_kind_t::AUTO) {
-        if (!has_user_precond) {
-            resolved_kind = metric_kind_t::IDENTITY;
-        } else {
-            // Detect diagonal by scanning off-diagonals for exact-zero. This is
-            // O(n^2) but happens ONCE per cache rebuild (not per nuts() call).
-            bool is_diag = true;
-            const Mat_t& M = settings.nuts_settings.precond_mat;
-            for (size_t i = 0; i < n_vals && is_diag; ++i) {
-                for (size_t j = 0; j < n_vals && is_diag; ++j) {
-                    if (i != j && M(i, j) != fp_t(0)) is_diag = false;
-                }
-            }
-            resolved_kind = is_diag ? metric_kind_t::DIAGONAL : metric_kind_t::DENSE;
-        }
-    } else if (resolved_kind != metric_kind_t::IDENTITY && !has_user_precond) {
-        // User asked for DIAGONAL / DENSE but did not supply a matrix. Fall
-        // back to IDENTITY (safe, and matches upstream fall-back semantics
-        // when the size check failed).
-        resolved_kind = metric_kind_t::IDENTITY;
-    }
-
-    // Decide whether to reuse the cache or rebuild inv + sqrt.
-    const bool cache_hit =
-        settings.nuts_settings.precond_cache_valid
-        && settings.nuts_settings.precond_cache_kind == resolved_kind
-        && settings.nuts_settings.precond_cache_n_vals == n_vals;
-
-    if (!cache_hit) {
-        // Rebuild the cache into settings.nuts_settings. The write-back at the
-        // end of nuts_impl persists this into settings_inp.
-        settings.nuts_settings.precond_cache_valid  = true;
-        settings.nuts_settings.precond_cache_kind   = resolved_kind;
-        settings.nuts_settings.precond_cache_n_vals = n_vals;
-        // Reset all four cache slots; only the ones this kind needs will be
-        // filled.
-        settings.nuts_settings.precond_inv_cache.reset();
-        settings.nuts_settings.precond_sqrt_cache.reset();
-        settings.nuts_settings.precond_inv_diag.reset();
-        settings.nuts_settings.precond_sqrt_diag.reset();
-        switch (resolved_kind) {
-            case metric_kind_t::IDENTITY:
-                // Nothing to store: nuts_metric_K + leap_frog + momentum
-                // resample bypass the matrix / vector entirely.
-                break;
-            case metric_kind_t::DIAGONAL: {
-                // Store only the length-n diag and its element-wise inverse
-                // and square-root. All positive by problem statement (precond
-                // is a covariance / mass matrix; diagonal entries are
-                // variances). We do not defensively clamp -- a nonpositive
-                // diagonal is a user bug that upstream inv() would also blow
-                // up on; the failure mode is now IEEE inf/nan instead of a
-                // singular-matrix throw, which callers must guard against.
-                const Mat_t& M = settings.nuts_settings.precond_mat;
-                settings.nuts_settings.precond_inv_diag.set_size(n_vals);
-                settings.nuts_settings.precond_sqrt_diag.set_size(n_vals);
-                for (size_t i = 0; i < n_vals; ++i) {
-                    const fp_t d = M(i, i);
-                    settings.nuts_settings.precond_inv_diag(i)  = fp_t(1) / d;
-                    settings.nuts_settings.precond_sqrt_diag(i) = std::sqrt(d);
-                }
-                break;
-            }
-            case metric_kind_t::DENSE:
-            default:
-                // Upstream path: inv + Cholesky of the dense precond_mat.
-                settings.nuts_settings.precond_inv_cache  =
-                    BMO_MATOPS_INV(settings.nuts_settings.precond_mat);
-                settings.nuts_settings.precond_sqrt_cache =
-                    BMO_MATOPS_CHOL_LOWER(settings.nuts_settings.precond_mat);
-                break;
-        }
-    }
-
-    // Assemble the dispatch struct threaded through leap_frog / build_tree /
-    // find_initial_step_size. Non-owning pointers into settings.nuts_settings's
-    // cache storage (which lives for the duration of nuts_impl and is written
-    // back to settings_inp at the end).
-    nuts_metric_state_t metric;
-    metric.kind = resolved_kind;
-    if (resolved_kind == metric_kind_t::DIAGONAL) {
-        metric.inv_diag  = &settings.nuts_settings.precond_inv_diag;
-        metric.sqrt_diag = &settings.nuts_settings.precond_sqrt_diag;
-    } else if (resolved_kind == metric_kind_t::DENSE) {
-        metric.inv_mat  = &settings.nuts_settings.precond_inv_cache;
-        metric.sqrt_mat = &settings.nuts_settings.precond_sqrt_cache;
-    }
+    const Mat_t precond_matrix = (BMO_MATOPS_SIZE(settings.nuts_settings.precond_mat) == n_vals*n_vals) ? settings.nuts_settings.precond_mat : BMO_MATOPS_EYE(n_vals);
+    const Mat_t inv_precond_matrix = BMO_MATOPS_INV(precond_matrix);
+    const Mat_t sqrt_precond_matrix = BMO_MATOPS_CHOL_LOWER(precond_matrix);
 
     const bool vals_bound = settings.vals_bound;
     
@@ -406,15 +263,8 @@ internal::nuts_impl(
     // captured from the grad refresh (raw_grad_fn) that already computes it.
     // The caller (nuts_build_tree base case) uses this instead of a separate
     // box_log_kernel_fn(new_draw, nullptr) re-evaluation. Bit-equivalent.
-    // AI4BayesCode fork (2026-07-25): leap_frog_fn captures the metric
-    // dispatch struct BY REFERENCE (so we do not deep-copy the potentially
-    // large inv_mat / sqrt_mat that live on settings.nuts_settings). The
-    // struct + its referents live for the entire nuts_impl body, so this
-    // capture is safe. The upstream capture of inv_precond_matrix BY VALUE is
-    // preserved for the DENSE path via metric.inv_mat -> settings.nuts_settings
-    // .precond_inv_cache (byte-identical values).
     std::function<void (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data)> leap_frog_fn \
-    = [target_log_kernel, raw_grad_fn, &metric, vals_bound, bounds_type, lower_bounds, upper_bounds] (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data) \
+    = [target_log_kernel, raw_grad_fn, inv_precond_matrix, vals_bound, bounds_type, lower_bounds, upper_bounds] (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data) \
     -> void
     {
         fp_t nat_U_final = fp_t(0);   // natural-scale log-density at final pos
@@ -448,33 +298,8 @@ internal::nuts_impl(
             } else {
                 new_mntm = new_mntm + step_size * cached_raw_grad / fp_t(2);
             }
-            // AI4BayesCode fork (2026-07-25): drift dispatch (was:
-            //   new_draw += step_size * inv_precond_matrix * new_mntm ;
-            // -- upstream matvec even for IDENTITY / DIAGONAL). Fix #4:
-            // materialise the vec-valued (inv * mntm) BEFORE scaling so arma
-            // does not create an O(n^2) scaled-matrix temporary from the
-            // left-to-right associative "step_size * mat * vec".
-            switch (metric.kind) {
-                case metric_kind_t::IDENTITY:
-                    // inv(I) * mntm == mntm: raw daxpy, O(n).
-                    new_draw += step_size * new_mntm;
-                    break;
-                case metric_kind_t::DIAGONAL:
-                    // inv(diag(d)) * mntm == (1/d) elementwise * mntm, O(n).
-                    new_draw += step_size * ((*metric.inv_diag) % new_mntm);
-                    break;
-                case metric_kind_t::DENSE:
-                default: {
-                    // Byte-preserved DENSE path with Fix #4 fuse:
-                    // parenthesise the matvec first so it collapses to a vec
-                    // BEFORE the scalar multiply, avoiding an O(n^2)
-                    // scaled-matrix temporary from left-to-right arma
-                    // evaluation of the original expression.
-                    const ColVec_t drift_vec = (*metric.inv_mat) * new_mntm;
-                    new_draw += step_size * drift_vec;
-                    break;
-                }
-            }
+            // Drift.
+            new_draw += step_size * inv_precond_matrix * new_mntm;
             // Refresh cached grad at the new (post-drift) position. CAPTURE the
             // natural-scale value it computes (was discarded) for the energy.
             nat_U_final = raw_grad_fn(new_draw, cached_raw_grad, target_data);
@@ -511,22 +336,7 @@ internal::nuts_impl(
 
     bmo::stats::internal::rnorm_vec_inplace<fp_t>(n_vals, rand_engine, rand_vec);
 
-    // AI4BayesCode fork (2026-07-25): momentum sample dispatch (was:
-    //   mntm_vec = sqrt_precond_matrix * rand_vec ;
-    // ). IDENTITY skips the matvec; DIAGONAL uses element-wise.
-    ColVec_t mntm_vec;
-    switch (metric.kind) {
-        case metric_kind_t::IDENTITY:
-            mntm_vec = rand_vec;
-            break;
-        case metric_kind_t::DIAGONAL:
-            mntm_vec = (*metric.sqrt_diag) % rand_vec;
-            break;
-        case metric_kind_t::DENSE:
-        default:
-            mntm_vec = (*metric.sqrt_mat) * rand_vec;
-            break;
-    }
+    ColVec_t mntm_vec = sqrt_precond_matrix * rand_vec;
 
     //
 
@@ -551,9 +361,7 @@ internal::nuts_impl(
         mu_val = std::log(10 * step_size);
         h_val = 0;
     } else {
-        // AI4BayesCode fork (2026-07-25): pass metric struct instead of
-        // inv_precond_matrix.
-        step_size = nuts_find_initial_step_size(first_draw, mntm_vec, metric, box_log_kernel_fn, raw_grad_fn, leap_frog_fn, target_data);
+        step_size = nuts_find_initial_step_size(first_draw, mntm_vec, inv_precond_matrix, box_log_kernel_fn, raw_grad_fn, leap_frog_fn, target_data);
         mu_val = std::log(10 * step_size);
         h_val = 0;
         epsilon_bar = fp_t(1);  // reset epsilon_bar at start of fresh adaptation
@@ -590,36 +398,6 @@ internal::nuts_impl(
     ColVec_t mntm_pos  = mntm_vec;
     ColVec_t mntm_neg  = mntm_vec;
 
-    // ---- AI4BayesCode fork (2026-07-25) [Fix #3]: build_tree scratch pool --
-    // Allocate ONCE per nuts_impl call; pre-size every slot's ColVec_t to
-    // n_vals so subsequent arma operator= inside nuts_build_tree reuses
-    // existing storage rather than reallocating. See build_tree_scratch_t in
-    // nuts.ipp for the alias-safety argument. Length is max_tree_depth + 1
-    // so pool[max_tree_depth] is a valid index (the outer while loop enters
-    // nuts_build_tree with tree_depth in [0, max_tree_depth - 1], and each
-    // recursion decrements tree_depth by 1, so the highest depth actually
-    // used is max_tree_depth - 1; +1 gives a safe upper bound). Memory
-    // footprint: 14 ColVec_t per depth * (max_tree_depth + 1) * n_vals * 8B
-    // ~ 14 * 11 * n_vals * 8 = ~1.2 KB * n_vals with the default depth 10.
-    // If rebasing onto upstream mcmclib, delete this block.
-    std::vector<build_tree_scratch_t> build_tree_scratch(max_tree_depth + 1);
-    for (auto& slot : build_tree_scratch) {
-        slot.leaf_new_mntm.set_size(n_vals);
-        slot.leaf_local_raw_grad.set_size(n_vals);
-        slot.new_draw_p.set_size(n_vals);
-        slot.cached_at_first_pos.set_size(n_vals);
-        slot.cached_at_first_neg.set_size(n_vals);
-        slot.prop_grad_first.set_size(n_vals);
-        slot.new_draw_pp.set_size(n_vals);
-        slot.cached_at_second_pos.set_size(n_vals);
-        slot.cached_at_second_neg.set_size(n_vals);
-        slot.prop_grad_second.set_size(n_vals);
-        slot.dir_dummy_draw.set_size(n_vals);
-        slot.dir_dummy_mntm.set_size(n_vals);
-        slot.dir_draw.set_size(n_vals);
-        slot.dir_mntm.set_size(n_vals);
-    }
-
     //
 
     size_t n_accept = 0;
@@ -627,21 +405,9 @@ internal::nuts_impl(
     for (size_t draw_ind = 0; draw_ind < n_total_draws; ++draw_ind) {
         bmo::stats::internal::rnorm_vec_inplace<fp_t>(n_vals, rand_engine, rand_vec);
 
-        // AI4BayesCode fork (2026-07-25): momentum + K dispatch.
-        switch (metric.kind) {
-            case metric_kind_t::IDENTITY:
-                mntm_vec = rand_vec;
-                break;
-            case metric_kind_t::DIAGONAL:
-                mntm_vec = (*metric.sqrt_diag) % rand_vec;
-                break;
-            case metric_kind_t::DENSE:
-            default:
-                mntm_vec = (*metric.sqrt_mat) * rand_vec;
-                break;
-        }
+        mntm_vec = sqrt_precond_matrix * rand_vec;
 
-        prev_K = nuts_metric_K(metric, mntm_vec);
+        prev_K = BMO_MATOPS_DOT_PROD(mntm_vec, inv_precond_matrix * mntm_vec) / fp_t(2);
 
         log_rand_val = std::log(bmo::stats::runif<fp_t>(rand_engine)) - prev_U - prev_K ;
 
@@ -703,14 +469,12 @@ internal::nuts_impl(
                 ColVec_t cached_at_new_draw_neg_after;
                 nuts_build_tree(
                     direction_val, step_size, log_rand_val, prev_U, prev_K,
-                    draw_neg, mntm_neg, metric,
+                    draw_neg, mntm_neg, inv_precond_matrix,
                     box_log_kernel_fn, leap_frog_fn, tree_depth,
                     new_draw, dummy_draw, draw_neg, dummy_mntm, mntm_neg,
                     n_p_val, s_p_val, alpha_val, n_alpha_val, rand_engine, target_data,
                     cached_raw_grad_neg, cached_at_new_draw_pos_after, cached_at_new_draw_neg_after,
-                    new_draw_box_U, new_draw_grad,
-                    // AI4BayesCode fork (2026-07-25) [Fix #3]: thread scratch pool.
-                    build_tree_scratch);
+                    new_draw_box_U, new_draw_grad);
                 // For direction=-1 outer mapping: draw_neg <- callee's new_draw_neg.
                 // So caller's cached_raw_grad_neg <- callee's cached_at_new_draw_neg.
                 cached_raw_grad_neg = cached_at_new_draw_neg_after;
@@ -721,14 +485,12 @@ internal::nuts_impl(
                 ColVec_t cached_at_new_draw_pos_after;
                 ColVec_t cached_at_new_draw_neg_after;
                 nuts_build_tree(direction_val, step_size, log_rand_val, prev_U, prev_K,
-                    draw_pos, mntm_pos, metric,
+                    draw_pos, mntm_pos, inv_precond_matrix,
                     box_log_kernel_fn, leap_frog_fn, tree_depth,
                     new_draw, draw_pos, dummy_draw, mntm_pos, dummy_mntm,
                     n_p_val, s_p_val, alpha_val, n_alpha_val, rand_engine, target_data,
                     cached_raw_grad_pos, cached_at_new_draw_pos_after, cached_at_new_draw_neg_after,
-                    new_draw_box_U, new_draw_grad,
-                    // AI4BayesCode fork (2026-07-25) [Fix #3]: thread scratch pool.
-                    build_tree_scratch);
+                    new_draw_box_U, new_draw_grad);
                 // For direction=+1 outer mapping: draw_pos <- callee's new_draw_pos.
                 // So caller's cached_raw_grad_pos <- callee's cached_at_new_draw_pos.
                 cached_raw_grad_pos = cached_at_new_draw_pos_after;
@@ -822,27 +584,6 @@ internal::nuts_impl(
             // Mark that persistent state is valid (adapt_iter > 0)
             settings_inp->nuts_settings.adapt_iter_persist = 1;
         }
-
-        // AI4BayesCode fork (2026-07-25): persist metric cache + resolved
-        // kind so the next nuts() call can skip the O(n^3) inv+chol rebuild
-        // while precond_mat is unchanged. Callers who mutate precond_mat MUST
-        // set settings_inp->nuts_settings.precond_cache_valid = false before
-        // the next call (nuts_block / joint_nuts_block do this at every
-        // precond_mat assignment site).
-        settings_inp->nuts_settings.precond_cache_valid  =
-            settings.nuts_settings.precond_cache_valid;
-        settings_inp->nuts_settings.precond_cache_kind   =
-            settings.nuts_settings.precond_cache_kind;
-        settings_inp->nuts_settings.precond_cache_n_vals =
-            settings.nuts_settings.precond_cache_n_vals;
-        settings_inp->nuts_settings.precond_inv_cache    =
-            settings.nuts_settings.precond_inv_cache;
-        settings_inp->nuts_settings.precond_sqrt_cache   =
-            settings.nuts_settings.precond_sqrt_cache;
-        settings_inp->nuts_settings.precond_inv_diag     =
-            settings.nuts_settings.precond_inv_diag;
-        settings_inp->nuts_settings.precond_sqrt_diag    =
-            settings.nuts_settings.precond_sqrt_diag;
     }
 
     //

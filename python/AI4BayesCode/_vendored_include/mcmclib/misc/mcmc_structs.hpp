@@ -20,7 +20,7 @@
 
 /*################################################################################
   ##
-  ##   Modifications Copyright (C) 2025-2026 Jungang Zou
+  ##   Modifications Copyright (C) 2025 Jungang Zou
   ##
   ##   This file has been modified from the original MCMClib source as part of
   ##   the MTBART project. Modifications are licensed under the Apache License,
@@ -31,9 +31,6 @@
   ##       (use_persistent_adapt, epsilon_bar_persist, h_val_persist,
   ##        mu_val_persist, adapt_iter_persist) to support mini-warmup
   ##        adaptation across Gibbs iterations in DP_DART / RE_DART.
-  ##     - AI4BayesCode fork (2026-07-25, JZ): metric-kind dispatch and
-  ##       preconditioner cache. See the AI4BayesCode fork block above
-  ##       `metric_kind_t` below for the full design + correctness argument.
   ##
   ################################################################################*/
 
@@ -96,29 +93,6 @@ struct hmc_settings_t
     size_t n_accept_draws; // will be returned by the function
 };
 
-// ---- AI4BayesCode fork (2026-07-25): metric-kind dispatch ----------------
-// Upstream mcmclib treats every preconditioner as a general dense positive-
-// definite matrix and dispatches every leapfrog drift + kinetic-energy
-// evaluation through a dense (BMO_MATOPS_INV(M) * v) matvec, which is O(n^2)
-// per leap and dominates the cost for large n. This fork tags the metric so
-// nuts() can route the identity + diagonal cases through their exact-arithmetic
-// O(n) reductions:
-//   IDENTITY : inv(I) * v == v                 (a raw daxpy)
-//   DIAGONAL : inv(diag(d)) * v == (1/d) % v   (arma element-wise product)
-//   DENSE    : inv(M) * v                      (unchanged upstream path)
-// AUTO auto-detects from precond_mat contents on the first nuts() call and is
-// the default (byte-identical dispatch to the upstream behaviour it replaces).
-// See `nuts_metric_state_t` in nuts.hpp for the internal state used by the
-// leap_frog / build_tree dispatch.
-// If rebasing onto upstream mcmclib, re-apply this enum + the fields below.
-// --------------------------------------------------------------------------
-enum class metric_kind_t {
-    AUTO     = 0,  // detect from precond_mat at first call (default)
-    IDENTITY = 1,
-    DIAGONAL = 2,
-    DENSE    = 3
-};
-
 // NUTS
 
 struct nuts_settings_t
@@ -149,25 +123,6 @@ struct nuts_settings_t
     fp_t h_val_persist = 0.0;
     fp_t mu_val_persist = 0.0;  // log(10 * step_size_init)
     size_t adapt_iter_persist = 0;  // cumulative iteration count across calls
-
-    // ---- AI4BayesCode fork (2026-07-25): metric + preconditioner cache ----
-    // Upstream mcmclib rebuilds inv(precond_mat) + chol_lower(precond_mat) on
-    // every nuts() call (O(n^3)). This fork memoizes those derivatives on the
-    // caller's settings so a stateful sampler that calls nuts() many times
-    // (nuts_block / joint_nuts_block) pays the O(n^3) setup once per metric
-    // change, not once per step(). Correctness: the cache is a pure function
-    // of (precond_mat, resolved metric_kind, n_vals); user code that mutates
-    // precond_mat MUST set precond_cache_valid = false to trigger a rebuild.
-    // If rebasing onto upstream mcmclib, re-apply this block.
-    metric_kind_t metric_kind          = metric_kind_t::AUTO;
-    bool          precond_cache_valid  = false;
-    metric_kind_t precond_cache_kind   = metric_kind_t::AUTO;
-    size_t        precond_cache_n_vals = 0;
-    Mat_t         precond_inv_cache;   // used only when precond_cache_kind==DENSE
-    Mat_t         precond_sqrt_cache;  // used only when precond_cache_kind==DENSE
-    ColVec_t      precond_inv_diag;    // used only when precond_cache_kind==DIAGONAL
-    ColVec_t      precond_sqrt_diag;   // used only when precond_cache_kind==DIAGONAL
-    // ----------------------------------------------------------------------
 };
 
 // RM-HMC

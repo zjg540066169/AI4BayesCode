@@ -238,24 +238,6 @@ struct nuts_block_config {
     /// outer Gibbs loop this is typically 1; larger values give more
     /// thinning per sweep at proportionally higher cost.
     std::size_t n_draws_per_step = 1;
-
-    /// Dual-averaging target acceptance rate for NUTS.
-    ///
-    /// AI4BayesCode DEFAULT = 0.8 (matches Stan / PyMC / NumPyro).
-    /// The vendored mcmclib default is 0.55 (Hoffman-Gelman 2014 NUTS
-    /// paper's "empirically optimal" value for a plain HMC-style acceptance
-    /// diagnostic). We override to 0.8 because a decade of Stan/PyMC
-    /// experience shows that 0.8 is more robust for the hierarchical /
-    /// funnel geometries that dominate real Bayesian models: the smaller
-    /// step 0.8 induces reduces divergences on stiff regions without a
-    /// meaningful ESS cost on well-conditioned targets. Set to 0.9-0.99
-    /// on very stiff hierarchical models when divergences persist.
-    ///
-    /// The ctor forwards this into
-    /// `nuts_settings.nuts_settings.target_accept_rate`, overwriting any
-    /// value the user pre-populated on the nested mcmclib field. Set this
-    /// TOP-LEVEL field to override the AI4BayesCode default.
-    double target_accept_rate = 0.8;
 };
 
 /**
@@ -291,12 +273,6 @@ public:
         // Force persistent adaptation ON. This is non-negotiable: without
         // it there is no reason to use nuts_block over a raw mcmclib call.
         ns.use_persistent_adapt = true;
-
-        // AI4BayesCode DEFAULT target_accept_rate = 0.8 (Stan/PyMC/NumPyro
-        // mainstream). Overwrites the vendored mcmclib default of 0.55.
-        // The user overrides via cfg.target_accept_rate (not the nested
-        // mcmclib field, which is silently reset here).
-        ns.target_accept_rate = cfg_.target_accept_rate;
 
         if (cfg_.initial_step_size > 0.0) {
             // User-provided seed: skip FindReasonableEpsilon entirely by
@@ -424,23 +400,12 @@ public:
         return cfg_.nuts_settings.nuts_settings.adapt_iter_persist;
     }
 
-    /// Current dual-averaging target acceptance rate (as stored in cfg).
-    /// Useful for tests / diagnostics; matches the value forwarded into
-    /// the nested mcmclib nuts_settings.
-    double current_target_accept() const noexcept {
-        return cfg_.target_accept_rate;
-    }
-
     /// Overwrite the preconditioner (mass matrix) between sweeps. Users
     /// can feed in an empirical covariance to get a v0-style online
     /// mass-matrix update by freezing the old matrix, collecting a
     /// batch of draws, and calling this with the batch covariance.
     void set_precond_matrix(mcmc::Mat_t M) {
         cfg_.nuts_settings.nuts_settings.precond_mat = std::move(M);
-        // AI4BayesCode fork (2026-07-25): invalidate the mcmclib preconditioner
-        // cache so the next mcmc::nuts() call rebuilds inv+chol against the
-        // new matrix instead of reusing stale cache values.
-        cfg_.nuts_settings.nuts_settings.precond_cache_valid = false;
     }
 
     /// T13: snapshot of NUTS dual-averaging adaptation state.
@@ -479,8 +444,6 @@ public:
         ns.adapt_iter_persist    = ad.adapt_iter;
         if (!ad.precond_mat.is_empty()) {
             ns.precond_mat = ad.precond_mat;
-            // AI4BayesCode fork (2026-07-25): invalidate mcmclib cache.
-            ns.precond_cache_valid = false;
         }
     }
 
@@ -505,8 +468,7 @@ public:
     void readapt(std::size_t n,
                  bool reset,
                  std::mt19937_64& rng,
-                 std::size_t max_tree_depth_override = 0,
-                 double target_accept_override = -1.0) override {
+                 std::size_t max_tree_depth_override = 0) override {
         if (n == 0) return;
 
         // 1. Snapshot chain state (block-local).
@@ -515,15 +477,6 @@ public:
         const bool      snap_first_call    = first_call_;
 
         auto& ns = cfg_.nuts_settings.nuts_settings;
-
-        // 1b. Optional per-call target_accept override (sentinel < 0 or
-        // > 1 => leave unchanged). When set, both the wrapper-visible
-        // cfg_.target_accept_rate AND the nested mcmclib field are updated
-        // so subsequent step()/readapt() calls also see the new target.
-        if (target_accept_override > 0.0 && target_accept_override <= 1.0) {
-            cfg_.target_accept_rate = target_accept_override;
-            ns.target_accept_rate   = target_accept_override;
-        }
 
         // 2. If reset, reinitialize dual-averaging state to defaults.
         if (reset) {

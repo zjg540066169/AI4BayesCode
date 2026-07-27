@@ -547,19 +547,9 @@ public:
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag();     }
     AI4BayesCode::history_map  get_history() const { return impl_->get_history(); }
 
-    void readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept) {
+    void readapt_NUTS(int n, bool reset, int max_tree_depth = -1) {
         if (n < 0) ai4b::stop("n must be >= 0");
-        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_,
-                            max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth),
-                            target_accept);
-    }
-
-    /// 3-arg backward-compat overload. Rcpp modules ignore C++ default
-    /// args, so both arities are exposed as separate bindings; from C++,
-    /// this thin forwarder keeps the pre-existing readapt_NUTS(n, reset,
-    /// max_tree_depth) call shape working.
-    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
-        readapt_NUTS(n, reset, max_tree_depth, -1.0);
+        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
     }
 
 private:
@@ -599,14 +589,10 @@ RCPP_MODULE(ICARSpatialGMRF_module) {
                 "Returns empty list — no y_rep refresher registered.")
         .method("get_dag",      &ICARSpatialGMRF::get_dag)
         .method("get_history",  &ICARSpatialGMRF::get_history)
-        .method("readapt_NUTS",
-                (void (ICARSpatialGMRF::*)(int, bool, int)) &ICARSpatialGMRF::readapt_NUTS,
-                "Re-tune NUTS dual-averaging state (3-arg backward-compat form).")
-        .method("readapt_NUTS",
-                (void (ICARSpatialGMRF::*)(int, bool, int, double)) &ICARSpatialGMRF::readapt_NUTS,
-                "Re-tune NUTS dual-averaging state; 4th arg target_accept in "
-                "(0,1] overrides the block's target (default 0.8); sentinel "
-                "<= 0 keeps current.")
+        .method("readapt_NUTS", &ICARSpatialGMRF::readapt_NUTS,
+                "Re-tune NUTS dual-averaging state for the joint hyperparam "
+                "block. Chain state preserved. Args: n (internal iters), "
+                "reset (bool; reinit DA state).")
         AI4BAYESCODE_BIND_KERNEL_CONTROL(ICARSpatialGMRF);
 }
 #endif
@@ -632,9 +618,8 @@ PYBIND11_MODULE(ICARSpatialGMRF, m) {
         .def("predict_at",   &ICARSpatialGMRF::predict_at,  pybind11::arg("new_data"))
         .def("get_dag",      &ICARSpatialGMRF::get_dag)
         .def("get_history",  &ICARSpatialGMRF::get_history)
-        .def("readapt_NUTS", (void (ICARSpatialGMRF::*)(int, bool, int, double)) &ICARSpatialGMRF::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1,
-             pybind11::arg("target_accept") = -1.0)
+        .def("readapt_NUTS", &ICARSpatialGMRF::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(ICARSpatialGMRF);
 }
 #endif

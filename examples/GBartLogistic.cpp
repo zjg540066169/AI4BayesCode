@@ -171,18 +171,6 @@ public:
                 ai4b::stop("GBartLogistic: y must be 0/1 binary");
             }
         }
-
-        // AI4BayesCode fork (2026-07-25) [BART RNG OMP-safe]: seed the
-        // genBART kernel's thread_local RNG per OMP thread, so N chains
-        // launched on N OMP threads no longer draw the IDENTICAL BART
-        // stream from the shared thread_local engine (fake R-hat
-        // convergence bug). Skipped under the Rcpp backend (R owns the
-        // RNG there).
-#if !defined(AI4BAYESCODE_RCPP_MODULE)
-        if (rng_seed != 0) {
-            bart_rng::set_seed_per_thread(static_cast<std::uint64_t>(rng_seed));
-        }
-#endif
         const std::size_t N = static_cast<std::size_t>(X.n_rows);
 
         impl_->data().set("y", y);

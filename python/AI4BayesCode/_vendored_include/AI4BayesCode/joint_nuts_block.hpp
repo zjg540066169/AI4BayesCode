@@ -83,7 +83,6 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 #include <cmath>
@@ -339,16 +338,6 @@ struct joint_nuts_block_config {
     bool        auto_select_metric         = false;
     double      auto_dense_cond_threshold  = 4.0;   // cond(R) above this => dense
     std::size_t auto_dense_max_dim         = 100;   // dense only if unc-dim <= this
-
-    /// Dual-averaging target acceptance rate for NUTS.
-    ///
-    /// AI4BayesCode DEFAULT = 0.8 (matches Stan / PyMC / NumPyro). The
-    /// vendored mcmclib default is 0.55 (Hoffman-Gelman 2014); we
-    /// override to 0.8 for the funnel / hierarchical geometry robustness
-    /// that Stan-family experience has settled on. See the identical
-    /// field on nuts_block_config for full rationale. The ctor forwards
-    /// this into `nuts_settings.nuts_settings.target_accept_rate`.
-    double target_accept_rate = 0.8;
 };
 
 /**
@@ -476,9 +465,6 @@ public:
         auto& ns = cfg_.nuts_settings.nuts_settings;
         ns.use_persistent_adapt = true;
         ns.max_tree_depth       = cfg_.max_tree_depth;   // first-class knob (default 10)
-        // AI4BayesCode DEFAULT target_accept_rate = 0.8 (Stan/PyMC/NumPyro
-        // mainstream). Overwrites the vendored mcmclib default of 0.55.
-        ns.target_accept_rate   = cfg_.target_accept_rate;
 
         if (cfg_.initial_step_size > 0.0) {
             ns.epsilon_bar_persist = cfg_.initial_step_size;
@@ -686,8 +672,6 @@ public:
                 auto_selected_dense_     = -1;                 // record: aborted
                 auto_selected_cond_      = 0.0;
                 ns.precond_mat = mcmc::Mat_t();                // identity metric
-                ns.precond_cache_valid = false;                // fork 2026-07-25
-                ns.metric_kind = mcmc::metric_kind_t::IDENTITY; // fork 2026-07-25
                 ns.epsilon_bar_persist = 0.0;
                 ns.h_val_persist       = 0.0;
                 ns.mu_val_persist      = 0.0;
@@ -835,17 +819,8 @@ public:
         return cfg_.nuts_settings.nuts_settings.adapt_iter_persist;
     }
 
-    /// Current dual-averaging target acceptance rate (as stored in cfg).
-    /// Matches the value forwarded into the nested mcmclib nuts_settings.
-    double current_target_accept() const noexcept {
-        return cfg_.target_accept_rate;
-    }
-
     void set_precond_matrix(mcmc::Mat_t M) {
         cfg_.nuts_settings.nuts_settings.precond_mat = std::move(M);
-        // AI4BayesCode fork (2026-07-25): invalidate mcmclib preconditioner
-        // cache so the next mcmc::nuts() call rebuilds inv+chol against M.
-        cfg_.nuts_settings.nuts_settings.precond_cache_valid = false;
     }
 
     /// T13: snapshot of joint NUTS adaptation state (step size + DA
@@ -899,8 +874,6 @@ public:
                     std::to_string(total_unc_dim_));
             }
             ns.precond_mat = ad.precond_mat;
-            // AI4BayesCode fork (2026-07-25): invalidate mcmclib cache.
-            ns.precond_cache_valid = false;
             dense_metric_adapted_ = (ad.metric_kind == "dense");
         }
     }
@@ -995,8 +968,7 @@ public:
     void readapt(std::size_t n,
                  bool reset,
                  std::mt19937_64& rng,
-                 std::size_t max_tree_depth_override = 0,
-                 double target_accept_override = -1.0) override {
+                 std::size_t max_tree_depth_override = 0) override {
         if (n == 0) return;
 
         // 1. Snapshot chain state.
@@ -1004,16 +976,6 @@ public:
         const bool      snap_first_call = first_call_;
 
         auto& ns = cfg_.nuts_settings.nuts_settings;
-
-        // 1b. Optional per-call target_accept override (sentinel <= 0 or
-        // > 1 => leave unchanged). When set, both the wrapper-visible
-        // cfg_.target_accept_rate AND the nested mcmclib field are
-        // updated so subsequent step()/readapt() calls also see the new
-        // target.
-        if (target_accept_override > 0.0 && target_accept_override <= 1.0) {
-            cfg_.target_accept_rate = target_accept_override;
-            ns.target_accept_rate   = target_accept_override;
-        }
 
         // 2. If reset, reinitialize dual-averaging persistent state.
         if (reset) {
@@ -1569,8 +1531,6 @@ private:
             auto_selected_dense_     = -1;
             auto_selected_cond_      = 0.0;
             ns.precond_mat           = mcmc::Mat_t();
-            ns.precond_cache_valid   = false;                       // fork 2026-07-25
-            ns.metric_kind           = mcmc::metric_kind_t::IDENTITY; // fork 2026-07-25
             ns.epsilon_bar_persist   = 0.0;
             ns.h_val_persist         = 0.0;
             ns.mu_val_persist        = 0.0;
@@ -1654,11 +1614,6 @@ private:
             // identity metric by leaving precond at its default. Should
             // not happen with dense_metric_adapt_iters >= 100.
             theta_cat_ = draws_out.row(n - 1).t();
-            // Approach B restore: draws_out row contains Brownian drift on
-            // frozen dims (adapter zeros grad but leapfrog integrates in
-            // momentum on identity mass); pin them back to the snapshot so
-            // the frozen slot stays bit-identical (F5.b regression, 2026-07-25).
-            if (_fz_any) theta_cat_.elem(frozen_unc_idx_) = _fz_snap;
             ns.n_burnin_draws = saved_burnin;
             ns.n_keep_draws   = saved_keep;
             ns.n_adapt_draws  = saved_adapt;
@@ -1779,14 +1734,6 @@ private:
         // Σ, the optimal mass matrix is M = Σ^{-1}. Pass the PRECISION
         // matrix, not the covariance.
         cfg_.nuts_settings.nuts_settings.precond_mat = build_precond_(Sigma_reg);
-        // AI4BayesCode fork (2026-07-25): invalidate mcmclib preconditioner
-        // cache since precond_mat just changed from identity to the learned
-        // diagonal / dense metric. Also tag metric_kind explicitly so the
-        // cache-rebuild skips the O(n^2) AUTO-detect scan of the precond_mat.
-        cfg_.nuts_settings.nuts_settings.precond_cache_valid = false;
-        cfg_.nuts_settings.nuts_settings.metric_kind =
-            cfg_.use_diagonal_metric ? mcmc::metric_kind_t::DIAGONAL
-                                     : mcmc::metric_kind_t::DENSE;
 
         // Reset adapt_iter so dual-averaging step-size retunes against new
         // metric (the step size adapted under identity metric is wrong for
@@ -1797,12 +1744,6 @@ private:
         ns.adapt_iter_persist  = 0;
 
         theta_cat_ = draws_out.row(n - 1).t();
-        // Approach B restore: same reason as the n<10 branch and step()
-        // (line ~730). Without this the pilot's frozen-dim Brownian drift
-        // (visible under target_accept_rate=0.8 where step size + trajectory
-        // count both grow) lands in theta_cat_ and downstream sampling sees
-        // a moved frozen slot -- F5.b regression fix, 2026-07-25.
-        if (_fz_any) theta_cat_.elem(frozen_unc_idx_) = _fz_snap;
 
         // Restore per-call budget.
         ns.n_burnin_draws = saved_burnin;
@@ -1875,11 +1816,7 @@ private:
             // → mcmclib uses identity. We don't touch a possibly user-
             // supplied precond_mat here; we override to identity.
             const mcmc::Mat_t saved_precond = ns.precond_mat;
-            const bool        saved_cache_valid = ns.precond_cache_valid;  // fork 2026-07-25
-            const mcmc::metric_kind_t saved_metric_kind = ns.metric_kind;  // fork 2026-07-25
             ns.precond_mat = mcmc::Mat_t();  // empty → identity in mcmclib
-            ns.precond_cache_valid = false;  // fork 2026-07-25
-            ns.metric_kind = mcmc::metric_kind_t::IDENTITY;  // fork 2026-07-25
 
             const std::size_t n1 = std::max<std::size_t>(cfg_.tp_phase1_iters, 1);
             ns.n_burnin_draws = n1;
@@ -1891,9 +1828,7 @@ private:
                 theta_cat_, adapter, out1, nullptr, cfg_.nuts_settings);
             if (!ok1 || out1.n_rows == 0) {
                 // Restore and abort: leave caller in single-phase fallback
-                ns.precond_mat         = saved_precond;
-                ns.precond_cache_valid = saved_cache_valid;  // fork 2026-07-25
-                ns.metric_kind         = saved_metric_kind;  // fork 2026-07-25
+                ns.precond_mat = saved_precond;
                 ns.n_burnin_draws = saved_burnin;
                 ns.n_keep_draws   = saved_keep;
                 ns.n_adapt_draws  = saved_adapt;
@@ -1902,8 +1837,6 @@ private:
                     "': 3-phase warmup Phase I (identity-NUTS) failed");
             }
             theta_cat_ = out1.row(out1.n_rows - 1).t();
-            // Approach B restore: pin frozen dims (see step() ~line 730).
-            if (_fz_any) theta_cat_.elem(frozen_unc_idx_) = _fz_snap;
             // Phase I complete; precond_mat stays empty (identity) until
             // first Phase II window completes and installs a dense one.
         }
@@ -1940,13 +1873,10 @@ private:
                 // some draws, advance theta_cat_.
                 if (win_out.n_rows > 0) {
                     theta_cat_ = win_out.row(win_out.n_rows - 1).t();
-                    if (_fz_any) theta_cat_.elem(frozen_unc_idx_) = _fz_snap;
                 }
                 continue;
             }
             theta_cat_ = win_out.row(win_out.n_rows - 1).t();
-            // Approach B restore: pin frozen dims (see step() ~line 730).
-            if (_fz_any) theta_cat_.elem(frozen_unc_idx_) = _fz_snap;
 
             // Welford covariance on this window.
             const std::size_t n_w = win_out.n_rows;
@@ -1967,13 +1897,6 @@ private:
             // previous mass matrix.
             try {
                 ns.precond_mat = build_precond_(Sigma_reg);
-                // AI4BayesCode fork (2026-07-25): invalidate mcmclib cache
-                // on every successful window install + tag the resolved
-                // metric kind to skip the AUTO-detect scan on rebuild.
-                ns.precond_cache_valid = false;
-                ns.metric_kind = cfg_.use_diagonal_metric
-                    ? mcmc::metric_kind_t::DIAGONAL
-                    : mcmc::metric_kind_t::DENSE;
             } catch (const std::runtime_error&) {
                 // inv_sympd failed; keep previous mass matrix
             }
@@ -2004,8 +1927,6 @@ private:
                     "': 3-phase warmup Phase III (final step-size tune) failed");
             }
             theta_cat_ = out3.row(out3.n_rows - 1).t();
-            // Approach B restore: pin frozen dims (see step() ~line 730).
-            if (_fz_any) theta_cat_.elem(frozen_unc_idx_) = _fz_snap;
         }
 
         // Restore per-call budget for normal sampling step().

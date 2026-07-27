@@ -151,11 +151,9 @@ y_rep = model.predict_at({})["y_rep"]        # posterior predictive at training 
 #
 # Example (uncomment in real sequential-update use):
 # model.set_current({"<data input>": <updated value>})
-# model.step(1)                                   # refresh derived state -- hybrid composites only
-# model.readapt_NUTS(500)                         # re-tune metric (defaults: reset=False, max_tree_depth=-1, target_accept=-1.0)
-# model.readapt_NUTS(500, reset=True)             # reset=True if data change is dramatic
-# model.readapt_NUTS(500, target_accept=0.9)      # 4th kwarg: target_accept in (0,1] overrides the block's dual-averaging target
-                                                  # (default 0.8, Stan/PyMC mainstream); sentinel <= 0 keeps current
+# model.step(1)             # refresh derived state -- hybrid composites only
+# model.readapt_NUTS(500)   # re-tune metric (default: reset=False)
+# model.readapt_NUTS(500, True)   # use reset=True if data change is dramatic
 
 # freeze() / unfreeze() / get_frozen() -- kernel-control, always available on every wrapper.
 #

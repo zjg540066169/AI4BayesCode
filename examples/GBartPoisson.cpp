@@ -170,15 +170,9 @@ public:
         // ---- Seed the kernel RNG so a construction seed yields an
         //      independent chain (pybind / standalone backend only; the
         //      Rcpp backend uses R's global RNG instead). ----------------
-        // AI4BayesCode fork (2026-07-25) [BART RNG OMP-safe]: switched
-        // from bart_rng::set_seed to bart_rng::set_seed_per_thread so
-        // that N chains launched on N OMP threads no longer draw the
-        // IDENTICAL BART stream from the shared thread_local engine
-        // (fake R-hat convergence bug); set_seed_per_thread xors the
-        // seed with the OMP thread id.
 #if !defined(AI4BAYESCODE_RCPP_MODULE)
         if (rng_seed != 0) {
-            bart_rng::set_seed_per_thread(static_cast<std::uint64_t>(rng_seed));
+            bart_rng::set_seed(static_cast<std::uint64_t>(rng_seed));
         }
 #endif
 

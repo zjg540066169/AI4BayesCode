@@ -124,19 +124,10 @@
  *  RNG
  *  ---
  *  The pure-C++ BART kernel draws from its own seedable std::mt19937_64
- *  stream (bart_rng in bart_pure_cpp/src/r_compat.h), driven through
+ *  stream (bart_rng in bart_pure_cpp/src/BART/r_compat.h), driven through
  *  the `arn` adapter. The `std::mt19937_64&` argument passed to
  *  bart_block::step() is IGNORED. To reproduce a run, seed the kernel
  *  stream (bart_rng::set_seed(seed)) before the run starts.
- *
- *  IMPORTANT: the engine is a THREAD_LOCAL static — when N chains run on
- *  N OMP threads, each thread has its OWN engine instance and each must
- *  be seeded on its own thread. Wrappers that construct bart_block from
- *  a run_chains OMP pool should therefore call
- *  bart_rng::set_seed_per_thread(seed) (added 2026-07-25 fork) rather
- *  than bart_rng::set_seed(seed) — the per-thread variant xors the seed
- *  with the OMP thread id so that N chains do NOT all draw the identical
- *  BART stream (which manifested as fake R-hat = 1.0 convergence).
  *================================================================================*/
 
 #ifndef AI4BAYESCODE_BART_BLOCK_HPP

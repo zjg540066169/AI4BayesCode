@@ -12,18 +12,6 @@ cfg.initial_step_size   = 0.05;
 cfg.n_warmup_first_call = 400;
 ```
 
-The mcmclib backend fork (2026-07-25) auto-detects the metric kind
-(IDENTITY / DIAGONAL / DENSE) from the installed `precond_mat`. The
-default `nuts_block` never installs a `precond_mat`, so it always
-runs the O(n) IDENTITY dispatch (no dense matvec per leap). Users
-who install a matrix via `set_precond_matrix()` get DIAGONAL (if the
-matrix is diagonal-only) or DENSE dispatch automatically. The same
-fork [Fix #3] also removes the per-leaf ColVec_t allocation load in
-`nuts_build_tree` via a per-depth scratch pool owned by `nuts_impl`
-(bit-identical draws; see nuts.ipp comment). See
-`joint_nuts_block.md` for the joint-block details and
-`tests/test_mcmclib_metric_dispatch.cpp` for the correctness suite.
-
 ### Configuration discipline
 
 The `nuts_block_config` exposes several knobs that affect MCMC correctness;
@@ -40,7 +28,6 @@ authoritative codegen-time guide.
 | `initial_step_size` | YES | 0.01 - 0.1 | only set explicitly for simplex / ordered / cholesky_corr where the default 1.0 is too aggressive |
 | `n_draws_per_step` | NO | leave at default 1 | larger values thin-but-recompute; not needed for outer-Gibbs composition |
 | **`n_warmup_per_step`** | **NEVER** | **leave at default 0** | see "n_warmup_per_step is mandatory 0" below |
-| `target_accept_rate` | YES (rare) | 0.5 - 0.99 | AI4BayesCode default 0.8 (Stan/PyMC/NumPyro mainstream; the vendored mcmclib default of 0.55 is silently overridden in the nuts_block ctor). Raise to 0.9 - 0.99 for stiff funnel / hierarchical models where divergences persist. Leave at 0.8 unless a specific model demands otherwise. Also settable per readapt() call via the `readapt_NUTS(..., target_accept)` 4th arg. |
 
 ### `n_warmup_per_step` is mandatory 0
 
