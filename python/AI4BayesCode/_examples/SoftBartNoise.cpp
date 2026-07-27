@@ -599,12 +599,24 @@ public:
     /// averaging) without advancing chain state. Available because the
     /// composite contains NUTS-family children. See system_design.md §13
     /// NUTS-family + validator.md §24.
-    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
+    // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
+    // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
+    // C++ default args so both arities are also exposed as separate
+    // bindings below; from C++, this forwarder keeps pre-existing
+    // readapt_NUTS(n, reset, mtd) call sites working.
+    void readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept) {
         if (n < 0) {
             ai4b::stop("readapt_NUTS: n must be non-negative");
         }
-        impl_->readapt_NUTS(static_cast<std::size_t>(n),
-                            reset, readapt_rng_, max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth));
+        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_,
+                                max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth),
+                                target_accept);
+    }
+
+    /// 3-arg backward-compat overload; target_accept defaults to -1.0
+    /// (sentinel = leave the block's target unchanged).
+    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
+        readapt_NUTS(n, reset, max_tree_depth, -1.0);
     }
 
 
@@ -675,7 +687,12 @@ RCPP_MODULE(SoftBartNoise_module) {
         .method("get_tree_history", &SoftBartNoise::get_tree_history,
                 "Return per-draw serialized SoftBart forests (one per "
                 "stored draw when keep_tree=TRUE; else the current forest).")
-        .method("readapt_NUTS", &SoftBartNoise::readapt_NUTS)
+        .method("readapt_NUTS",
+                (void (SoftBartNoise::*)(int, bool, int)) &SoftBartNoise::readapt_NUTS,
+                "Re-tune NUTS dual-averaging (3-arg backward-compat; target_accept unchanged).")
+        .method("readapt_NUTS",
+                (void (SoftBartNoise::*)(int, bool, int, double)) &SoftBartNoise::readapt_NUTS,
+                "Re-tune NUTS; 4th arg target_accept in (0,1] overrides the block's target (default 0.55); sentinel <= 0 keeps current.")
         AI4BAYESCODE_BIND_KERNEL_CONTROL(SoftBartNoise);
 }
 #endif
@@ -712,8 +729,10 @@ PYBIND11_MODULE(SoftBartNoise, m) {
         .def("get_dag",         &SoftBartNoise::get_dag)
         .def("get_history",     &SoftBartNoise::get_history)
         .def("get_tree_history", &SoftBartNoise::get_tree_history)
-        .def("readapt_NUTS",    &SoftBartNoise::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false, pybind11::arg("max_tree_depth") = -1)
+        .def("readapt_NUTS", (void (SoftBartNoise::*)(int, bool, int, double)) &SoftBartNoise::readapt_NUTS,
+             pybind11::arg("n"), pybind11::arg("reset") = false,
+             pybind11::arg("max_tree_depth") = -1,
+             pybind11::arg("target_accept") = -1.0)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(SoftBartNoise);
 }
 #endif

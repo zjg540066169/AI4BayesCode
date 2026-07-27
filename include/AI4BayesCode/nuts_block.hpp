@@ -238,6 +238,33 @@ struct nuts_block_config {
     /// outer Gibbs loop this is typically 1; larger values give more
     /// thinning per sweep at proportionally higher cost.
     std::size_t n_draws_per_step = 1;
+
+    // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
+    // Restored from 060abe4 with DEFAULT INTENTIONALLY LEFT AT 0.55 (NOT the
+    // 0.8 that 060abe4 shipped). Rationale: 060abe4's 0.8 default triggered
+    // a J100 hierarchical funnel mixing regression that forced the revert in
+    // 664a84f. Exposing the knob (so users with 5-arg readapt_NUTS calls
+    // compile) is the goal; changing the default is a separate concern that
+    // needs a hierarchical-funnel regression pass before it can ship.
+    // REBASE NOTE: to restore the 060abe4 shape completely, change 0.55 -> 0.8
+    // AND port 060abe4's Change 2 (F5.b pilot freeze wrap) into
+    // joint_nuts_block::adapt_dense_metric_ / adapt_three_phase_warmup_.
+    /// Dual-averaging target acceptance rate for NUTS.
+    ///
+    /// AI4BayesCode DEFAULT = 0.55 (matches Hoffman-Gelman 2014's paper-
+    /// optimal value and the vendored mcmclib default). Stan / PyMC /
+    /// NumPyro use 0.8, which is more robust on some stiff hierarchical /
+    /// funnel geometries but can hurt mixing on others; we keep the paper
+    /// default here because 0.8 introduced a J100 funnel regression in
+    /// earlier testing (see 664a84f revert). Users can override on a
+    /// per-block basis (0.8 for Stan parity, 0.9-0.99 for very stiff
+    /// hierarchies) by setting cfg.target_accept_rate.
+    ///
+    /// The ctor forwards this into
+    /// `nuts_settings.nuts_settings.target_accept_rate`, overwriting any
+    /// value the user pre-populated on the nested mcmclib field. Set this
+    /// TOP-LEVEL field to override the AI4BayesCode default.
+    double target_accept_rate = 0.55;
 };
 
 /**
@@ -273,6 +300,17 @@ public:
         // Force persistent adaptation ON. This is non-negotiable: without
         // it there is no reason to use nuts_block over a raw mcmclib call.
         ns.use_persistent_adapt = true;
+
+        // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
+        // Forward the wrapper-level target_accept_rate into the nested mcmclib
+        // field. Default is 0.55 (mcmclib's own default, Hoffman-Gelman 2014),
+        // so this line is a semantic no-op when cfg is left at defaults --
+        // its purpose is to give the user a single top-level knob and to make
+        // any user-set nested mcmclib target_accept_rate get overwritten
+        // predictably (per-block cfg.target_accept_rate wins).
+        // REBASE NOTE: to restore 060abe4's 0.8 default, only touch the field
+        // initializer in nuts_block_config; this ctor line stays as-is.
+        ns.target_accept_rate = cfg_.target_accept_rate;
 
         if (cfg_.initial_step_size > 0.0) {
             // User-provided seed: skip FindReasonableEpsilon entirely by
@@ -458,6 +496,14 @@ public:
         return theta_unc_;
     }
 
+    // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
+    /// Current dual-averaging target acceptance rate (as stored in cfg).
+    /// Useful for tests / diagnostics; matches the value forwarded into
+    /// the nested mcmclib nuts_settings.
+    double current_target_accept() const noexcept {
+        return cfg_.target_accept_rate;
+    }
+
     // ---- Kernel-tuning interface (readapt) ------------------------------
 
     /// NUTS-family supports kernel-tuning via readapt(). Composite
@@ -474,7 +520,8 @@ public:
     void readapt(std::size_t n,
                  bool reset,
                  std::mt19937_64& rng,
-                 std::size_t max_tree_depth_override = 0) override {
+                 std::size_t max_tree_depth_override = 0,
+                 double target_accept_override = -1.0) override {
         if (n == 0) return;
 
         // 1. Snapshot chain state (block-local).
@@ -483,6 +530,16 @@ public:
         const bool      snap_first_call    = first_call_;
 
         auto& ns = cfg_.nuts_settings.nuts_settings;
+
+        // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
+        // 1b. Optional per-call target_accept override (sentinel <= 0 or > 1
+        // => leave unchanged). When set, both the wrapper-visible
+        // cfg_.target_accept_rate AND the nested mcmclib field are updated so
+        // subsequent step()/readapt() calls also see the new target.
+        if (target_accept_override > 0.0 && target_accept_override <= 1.0) {
+            cfg_.target_accept_rate = target_accept_override;
+            ns.target_accept_rate   = target_accept_override;
+        }
 
         // 2. If reset, reinitialize dual-averaging state to defaults.
         if (reset) {

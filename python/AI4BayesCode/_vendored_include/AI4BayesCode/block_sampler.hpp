@@ -378,14 +378,22 @@ public:
      * \param rng    third RNG stream (readapt_rng_), separate from
      *               step()'s rng_ and predict_at's predict_rng_
      */
+    // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
+    // Virtual base gains 5th param target_accept_override so polymorphic
+    // dispatch through block_sampler* forwards the knob. Default -1.0 is the
+    // "keep current" sentinel; only nuts_block / joint_nuts_block override.
     virtual void readapt(std::size_t n,
                          bool reset,
                          std::mt19937_64& rng,
-                         std::size_t max_tree_depth_override = 0) {
+                         std::size_t max_tree_depth_override = 0,
+                         double target_accept_override = -1.0) {
         (void)n; (void)reset; (void)rng; (void)max_tree_depth_override;
+        (void)target_accept_override;
         // Default no-op; only called when supports_readapt() == true.
         // max_tree_depth_override: 0 = use the block's configured depth;
         // >0 = temporarily cap NUTS tree depth for these n adaptation iters.
+        // target_accept_override: sentinel <= 0 or > 1 => leave unchanged;
+        // in (0, 1] => overwrite the block's target_accept_rate (persists).
     }
 
     // ---- Kernel-control freeze interface (kernel-control category) ----------

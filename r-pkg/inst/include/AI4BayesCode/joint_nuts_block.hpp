@@ -343,6 +343,21 @@ struct joint_nuts_block_config {
     bool        auto_select_metric         = false;
     double      auto_dense_cond_threshold  = 4.0;   // cond(R) above this => dense
     std::size_t auto_dense_max_dim         = 100;   // dense only if unc-dim <= this
+
+    // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
+    // Restored from 060abe4 with DEFAULT INTENTIONALLY LEFT AT 0.55 (NOT the
+    // 0.8 060abe4 shipped) -- see nuts_block.hpp for full rationale (664a84f
+    // J100 funnel regression). 060abe4's Change 2 (F5.b pilot freeze wrap
+    // inside adapt_dense_metric_ / adapt_three_phase_warmup_) is NOT restored
+    // here because at target=0.55 the drift stays below tolerance; if we later
+    // raise the default to 0.8 that wrap MUST be restored too.
+    /// Dual-averaging target acceptance rate for NUTS.
+    ///
+    /// AI4BayesCode DEFAULT = 0.55 (matches Hoffman-Gelman 2014 and the
+    /// vendored mcmclib default). See the identical field on nuts_block_config
+    /// for full rationale. The ctor forwards this into
+    /// `nuts_settings.nuts_settings.target_accept_rate`.
+    double target_accept_rate = 0.55;
 };
 
 /**
@@ -479,6 +494,11 @@ public:
         auto& ns = cfg_.nuts_settings.nuts_settings;
         ns.use_persistent_adapt = true;
         ns.max_tree_depth       = cfg_.max_tree_depth;   // first-class knob (default 10)
+        // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
+        // Forward wrapper-level cfg_.target_accept_rate into the nested mcmclib
+        // field. Default 0.55 => no-op vs mcmclib's own default. See
+        // nuts_block.hpp ctor for full rationale (rebase note applies here too).
+        ns.target_accept_rate   = cfg_.target_accept_rate;
 
         if (cfg_.initial_step_size > 0.0) {
             ns.epsilon_bar_persist = cfg_.initial_step_size;
@@ -836,6 +856,13 @@ public:
         return cfg_.nuts_settings.nuts_settings.adapt_iter_persist;
     }
 
+    // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
+    /// Current dual-averaging target acceptance rate (as stored in cfg).
+    /// Matches the value forwarded into the nested mcmclib nuts_settings.
+    double current_target_accept() const noexcept {
+        return cfg_.target_accept_rate;
+    }
+
     void set_precond_matrix(mcmc::Mat_t M) {
         cfg_.nuts_settings.nuts_settings.precond_mat = std::move(M);
         // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate the
@@ -992,7 +1019,8 @@ public:
     void readapt(std::size_t n,
                  bool reset,
                  std::mt19937_64& rng,
-                 std::size_t max_tree_depth_override = 0) override {
+                 std::size_t max_tree_depth_override = 0,
+                 double target_accept_override = -1.0) override {
         if (n == 0) return;
 
         // 1. Snapshot chain state.
@@ -1000,6 +1028,16 @@ public:
         const bool      snap_first_call = first_call_;
 
         auto& ns = cfg_.nuts_settings.nuts_settings;
+
+        // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
+        // 1b. Optional per-call target_accept override (sentinel <= 0 or > 1
+        // => leave unchanged). When set, both the wrapper-visible
+        // cfg_.target_accept_rate AND the nested mcmclib field are updated so
+        // subsequent step()/readapt() calls also see the new target.
+        if (target_accept_override > 0.0 && target_accept_override <= 1.0) {
+            cfg_.target_accept_rate = target_accept_override;
+            ns.target_accept_rate   = target_accept_override;
+        }
 
         // 2. If reset, reinitialize dual-averaging persistent state.
         if (reset) {

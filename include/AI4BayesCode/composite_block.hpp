@@ -312,10 +312,14 @@ public:
      *               separate from step()'s rng_ and predict_at's
      *               predict_rng_
      */
+    // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
+    // 5th param target_accept_override forwards to every child->readapt.
+    // Default -1.0 sentinel = keep current target (backward-compat).
     void readapt_NUTS(std::size_t n,
                       bool reset,
                       std::mt19937_64& rng,
-                      std::size_t max_tree_depth_override = 0) {
+                      std::size_t max_tree_depth_override = 0,
+                      double target_accept_override = -1.0) {
         if (n == 0) return;
         for (auto& child : children_) {
             if (!child->supports_readapt()) continue;
@@ -328,7 +332,8 @@ public:
             // composite state.
             block_context ctx = data_.build_context_for(child->name());
             child->set_context(ctx);
-            child->readapt(n, reset, rng, max_tree_depth_override);
+            child->readapt(n, reset, rng, max_tree_depth_override,
+                           target_accept_override);
             // No write-back: child's state was restored at the end of
             // readapt(), so shared_data values are unchanged.
         }

@@ -200,6 +200,19 @@ internal::nuts_impl(
         sqrt_precond_matrix = BMO_MATOPS_CHOL_LOWER(precond_matrix);
     }
 
+    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
+    // Skip the O(n^2) inv/sqrt matvecs in leap_frog / K / momentum resample
+    // when the caller did NOT supply a precond_mat (i.e. metric is identity).
+    // DIAG-shaped precond_mat (from adapt_dense_metric_) still falls into the
+    // DENSE branch below and uses full SGEMV -- preserves J100 funnel mixing
+    // (the DIAG-branch approach in b35fd10 regressed there and was reverted;
+    // see 664a84f). Detection is based on the user-supplied precond_mat, NOT
+    // on inv_precond_matrix (which is always n*n after the cache setup).
+    // REBASE NOTE: delete this flag + the four branches below (search for
+    // "IDENTITY-only Fix #1") to restore byte-identical pre-fork DENSE path.
+    const bool is_identity_metric =
+        (static_cast<size_t>(BMO_MATOPS_SIZE(settings.nuts_settings.precond_mat)) != n_vals * n_vals);
+
     const bool vals_bound = settings.vals_bound;
     
     const ColVec_t lower_bounds = settings.lower_bounds;
@@ -297,7 +310,7 @@ internal::nuts_impl(
     // The caller (nuts_build_tree base case) uses this instead of a separate
     // box_log_kernel_fn(new_draw, nullptr) re-evaluation. Bit-equivalent.
     std::function<void (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data)> leap_frog_fn \
-    = [target_log_kernel, raw_grad_fn, inv_precond_matrix, vals_bound, bounds_type, lower_bounds, upper_bounds] (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data) \
+    = [target_log_kernel, raw_grad_fn, inv_precond_matrix, is_identity_metric, vals_bound, bounds_type, lower_bounds, upper_bounds] (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data) \
     -> void
     {
         fp_t nat_U_final = fp_t(0);   // natural-scale log-density at final pos
@@ -332,7 +345,17 @@ internal::nuts_impl(
                 new_mntm = new_mntm + step_size * cached_raw_grad / fp_t(2);
             }
             // Drift.
-            new_draw += step_size * inv_precond_matrix * new_mntm;
+            // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
+            // IDENTITY branch: skip the n*n * n matvec, use raw daxpy.
+            // DENSE branch: pre-fork single-line (works for both DIAG-shaped
+            // and full-dense precond_mat -- DIAG-shaped is a full-dense
+            // matvec with off-diagonal zeros; we intentionally do NOT special-
+            // case DIAG here, per b35fd10 regression).
+            if (is_identity_metric) {
+                new_draw += step_size * new_mntm;
+            } else {
+                new_draw += step_size * inv_precond_matrix * new_mntm;
+            }
             // Refresh cached grad at the new (post-drift) position. CAPTURE the
             // natural-scale value it computes (was discarded) for the energy.
             nat_U_final = raw_grad_fn(new_draw, cached_raw_grad, target_data);
@@ -369,7 +392,9 @@ internal::nuts_impl(
 
     bmo::stats::internal::rnorm_vec_inplace<fp_t>(n_vals, rand_engine, rand_vec);
 
-    ColVec_t mntm_vec = sqrt_precond_matrix * rand_vec;
+    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
+    // IDENTITY: p ~ N(0, I) = rand_vec directly.  DENSE: p ~ N(0, M) via chol.
+    ColVec_t mntm_vec = is_identity_metric ? rand_vec : sqrt_precond_matrix * rand_vec;
 
     //
 
@@ -394,7 +419,8 @@ internal::nuts_impl(
         mu_val = std::log(10 * step_size);
         h_val = 0;
     } else {
-        step_size = nuts_find_initial_step_size(first_draw, mntm_vec, inv_precond_matrix, box_log_kernel_fn, raw_grad_fn, leap_frog_fn, target_data);
+        // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
+        step_size = nuts_find_initial_step_size(first_draw, mntm_vec, inv_precond_matrix, is_identity_metric, box_log_kernel_fn, raw_grad_fn, leap_frog_fn, target_data);
         mu_val = std::log(10 * step_size);
         h_val = 0;
         epsilon_bar = fp_t(1);  // reset epsilon_bar at start of fresh adaptation
@@ -464,9 +490,15 @@ internal::nuts_impl(
     for (size_t draw_ind = 0; draw_ind < n_total_draws; ++draw_ind) {
         bmo::stats::internal::rnorm_vec_inplace<fp_t>(n_vals, rand_engine, rand_vec);
 
-        mntm_vec = sqrt_precond_matrix * rand_vec;
-
-        prev_K = BMO_MATOPS_DOT_PROD(mntm_vec, inv_precond_matrix * mntm_vec) / fp_t(2);
+        // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
+        // Momentum resample + K, IDENTITY vs DENSE branches.
+        if (is_identity_metric) {
+            mntm_vec = rand_vec;
+            prev_K = BMO_MATOPS_DOT_PROD(mntm_vec, mntm_vec) / fp_t(2);
+        } else {
+            mntm_vec = sqrt_precond_matrix * rand_vec;
+            prev_K = BMO_MATOPS_DOT_PROD(mntm_vec, inv_precond_matrix * mntm_vec) / fp_t(2);
+        }
 
         log_rand_val = std::log(bmo::stats::runif<fp_t>(rand_engine)) - prev_U - prev_K ;
 
@@ -535,7 +567,9 @@ internal::nuts_impl(
                     cached_raw_grad_neg, cached_at_new_draw_pos_after, cached_at_new_draw_neg_after,
                     new_draw_box_U, new_draw_grad,
                     // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
-                    build_tree_scratch);
+                    build_tree_scratch,
+                    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
+                    is_identity_metric);
                 // For direction=-1 outer mapping: draw_neg <- callee's new_draw_neg.
                 // So caller's cached_raw_grad_neg <- callee's cached_at_new_draw_neg.
                 cached_raw_grad_neg = cached_at_new_draw_neg_after;
@@ -553,7 +587,9 @@ internal::nuts_impl(
                     cached_raw_grad_pos, cached_at_new_draw_pos_after, cached_at_new_draw_neg_after,
                     new_draw_box_U, new_draw_grad,
                     // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
-                    build_tree_scratch);
+                    build_tree_scratch,
+                    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
+                    is_identity_metric);
                 // For direction=+1 outer mapping: draw_pos <- callee's new_draw_pos.
                 // So caller's cached_raw_grad_pos <- callee's cached_at_new_draw_pos.
                 cached_raw_grad_pos = cached_at_new_draw_pos_after;

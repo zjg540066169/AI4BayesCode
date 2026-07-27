@@ -231,8 +231,9 @@ model$predict_at(list(<X> = <X>_test))
 ## Example (uncomment in real sequential-update use):
 ## model$set_current(list(<data inputs> = <updated values>))
 ## model$step(1L)               ## refresh derived state -- hybrid composites only
-## model$readapt_NUTS(500L, FALSE, -1L)  ## re-tune metric (Rcpp needs ALL 3 args; reset=FALSE, max_tree_depth=-1 = configured depth)
-## ## model$readapt_NUTS(500L, TRUE, -1L)   ## use reset=TRUE if data change is dramatic
+## model$readapt_NUTS(500L, FALSE, -1L)         ## 3-arg backward-compat form: reset=FALSE, max_tree_depth=-1 = configured depth
+## ## model$readapt_NUTS(500L, TRUE, -1L)         ## reset=TRUE if data change is dramatic
+## ## model$readapt_NUTS(500L, FALSE, -1L, 0.9)   ## 4-arg form: 4th = target_accept in (0,1] (default 0.55; pass 0.8 for Stan/PyMC parity; sentinel <= 0 keeps current)
 
 ## freeze() / unfreeze() / get_frozen() -- kernel-control, always available on every wrapper.
 ##
