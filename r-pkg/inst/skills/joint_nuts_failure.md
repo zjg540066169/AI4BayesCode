@@ -62,7 +62,7 @@ hyperparameter is a standard deviation OR a variance:
     for j:  raw_j ~ Normal(<loc>, scale * <const>)           (sd used DIRECTLY)
 
 (B) VARIANCE- or PRECISION-parameterized -- the Gaussian-hierarchical / ARD /
-    Neal-1996 BNN standard (weight-variance priors; e.g. nn_rbm, ridge/ARD):
+    Neal-1996 BNN standard (weight-variance priors; BNN / ridge / ARD):
     var  ~ InvGamma / Scaled-Inv-chi^2   (POSITIVE variance)   ->  sd = sqrt(var)
     prec ~ Gamma                      (POSITIVE precision)  ->  sd = 1 / sqrt(prec)
     for j:  raw_j ~ Normal(<loc>, sd * <const>)             (sd = sqrt(var) OR 1/sqrt(prec))
@@ -129,7 +129,7 @@ cfg.sub_params = {
     {"tau", 1, joint_constraint::POSITIVE},  // hyper-scale  (block adds log|J|)
     {"eta", J, joint_constraint::REAL},      // standardized raw effects
 };
-// VARIANCE form (nn_rbm / ARD): make the POSITIVE slice the variance and take
+// VARIANCE form (weight-variance BNN / ARD): make the POSITIVE slice the variance and take
 // its sqrt when building theta --
 //     {"sigma2", 1, joint_constraint::POSITIVE},   // a VARIANCE, not an sd
 //     ... theta_j = mu + sqrt(sigma2) * eta_j;      // sqrt() inside the log-density

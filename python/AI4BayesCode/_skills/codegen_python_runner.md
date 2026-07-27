@@ -438,8 +438,8 @@ mod = AI4BayesCode.source("<folder>/<ClassName>.cpp")
 # variance hyperparameter FROM ITS PRIOR, then draw the effects at that scale;
 # do NOT hard-code the scale to an arbitrary "moderate" value (e.g. sd=0.6).
 # A fixed moderate scale can CONFLICT with a tight or heavy-tailed prior -- the
-# classic case is a tiny-scale InvGamma weight-variance prior (Neal-1996 / ARD,
-# e.g. nn_rbm, s0^2=(0.05/M^2)^2 ~ 1e-6): fixed sd 0.6 makes the DATA say
+# classic case is a tiny-scale InvGamma weight-variance prior (Neal-1996 / ARD
+# weight-variance BNN, where the true variance can be ~1e-6): fixed sd 0.6 makes the DATA say
 # "sigma^2 ~ 0.36" while the PRIOR insists "sigma^2 ~ 1e-6", an artificially HARD
 # prior-data-conflict posterior (R-hat stuck ~1.02, tiny ESS) wrongly blamed on
 # the sampler. Prior-drawn hyperparameters keep the L3 self-test calibrated

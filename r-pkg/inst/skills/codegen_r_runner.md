@@ -161,9 +161,9 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep,
 # variance hyperparameter FROM ITS PRIOR, then draw the effects at that scale.
 # Do NOT hard-code the scale to an arbitrary "moderate" value (e.g. sd = 0.6).
 # A fixed moderate scale can CONFLICT with a tight or heavy-tailed prior -- the
-# classic case is a tiny-scale InvGamma weight-variance prior (Neal-1996 / ARD,
-# e.g. nn_rbm, where s0^2 = (0.05 / M^2)^2 ~= 1e-6): fixed sd 0.6 makes the DATA
-# scream "sigma^2 ~= 0.36" while the PRIOR insists "sigma^2 ~= 1e-6". That prior-data
+# classic case is a tiny-scale InvGamma weight-variance prior (Neal-1996 / ARD
+# weight-variance BNN, where the true variance can be ~1e-6): fixed sd 0.6 makes
+# the DATA scream "sigma^2 ~= 0.36" while the PRIOR insists "sigma^2 ~= 1e-6". That prior-data
 # conflict is an artificially HARD, poorly-mixing posterior (R-hat stuck ~1.02,
 # tiny ESS) that then gets wrongly blamed on the sampler. Prior-drawn hyper-
 # parameters keep the L3 self-test calibrated (SBC-style) and on the geometry

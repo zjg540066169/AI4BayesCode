@@ -2308,8 +2308,8 @@ your backend at the tail of the `.cpp`.
      Section rewritten (from 060abe4's version) to document the 4-arg signature
      `readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept)`
      + 3-arg backward-compat forwarder. AI4BayesCode default target_accept is
-     0.55 (not the 0.8 that 060abe4 shipped -- that default triggered a J100
-     hierarchical funnel mixing regression, see 664a84f revert). REBASE NOTE:
+     0.55 (not 0.8 -- a 0.8 wrapper default triggered a hierarchical funnel
+     mixing regression on a stress model in earlier testing). REBASE NOTE:
      to switch back to a 0.8 default, change the "0.55" mentions here and
      in `skills/block_catalogue/{nuts,joint_nuts}_block.md`, then flip the
      initializer in `nuts_block.hpp` / `joint_nuts_block.hpp` (and restore
@@ -2348,9 +2348,9 @@ call and all subsequent step()/readapt() calls (AI4BayesCode default is
 `target_accept_rate = 0.55`, matching the vendored mcmclib default and
 Hoffman-Gelman 2014; Stan / PyMC / NumPyro ship 0.8, and passing 0.8 here
 matches that behaviour on a per-block basis. The wrapper default was left
-at 0.55 because raising it to 0.8 triggered a J100 hierarchical funnel
-mixing regression in earlier testing -- see `nuts_block_config` /
-`joint_nuts_block_config` docs).
+at 0.55 because raising it to 0.8 triggered a hierarchical funnel
+mixing regression on a stress model in earlier testing -- see
+`nuts_block_config` / `joint_nuts_block_config` docs).
 
 **Wrapper-class additions (NUTS-using wrappers only):**
 

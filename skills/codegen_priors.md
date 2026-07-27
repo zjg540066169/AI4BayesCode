@@ -224,7 +224,7 @@ rank -- do NOT read "item 1" as "try this first":
    weak/prior-dominated data). Commonly missed: the VARIANCE form
    (`var ~ InvGamma; raw_j ~ Normal(*, sqrt(var))`) and precision form
    (`prec ~ Gamma; Normal(*, 1/sqrt(prec))`) -- the Gaussian-hier / ARD /
-   Neal-1996 BNN standard (e.g. nn_rbm), missed because "scale" never
+   Neal-1996 BNN standard (weight-variance BNN / ridge / ARD), missed because "scale" never
    appears and `var` is conjugate (tempting a wrong Gibbs update; it
    FREEZES: eight_schools_centered -> ESS = NA, R-hat 2.23). The full
    recipe, the sqrt mapping, and the data-informativeness caveat (NCR is
