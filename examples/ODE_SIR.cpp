@@ -162,7 +162,7 @@ inline arma::vec solve_sir_I(double beta, double gamma,
     const arma::vec& t_obs = ctx.at("t_obs");
     const arma::vec theta_ode = {beta, gamma};
     arma::mat y_traj = ode::rk45(sir_rhs, y0, t_obs, theta_ode,
-                                  /*rtol=*/1e-8, /*atol=*/1e-8);
+                                  /*rtol=*/1e-6, /*atol=*/1e-6);  // Stan integrate_ode_rk45 default; 1e-8 forces tiny adaptive steps (~tens x slower) for no MCMC-relevant accuracy gain
     return y_traj.col(1);   // infected compartment
 }
 
@@ -387,7 +387,7 @@ public:
                 const arma::vec& t_obs = d.get("t_obs");
                 const arma::vec& theta = d.get("theta");
                 arma::mat y_traj = ode::rk45(sir_rhs, y0, t_obs, theta,
-                                             1e-8, 1e-8);
+                                             1e-6, 1e-6);  // Stan rk45 default (was 1e-8: needlessly tight, ~tens x slower)
                 return y_traj.col(1);
             });
         // Keyed under the JOINT BLOCK NAME (the joint block updates theta+sigma
