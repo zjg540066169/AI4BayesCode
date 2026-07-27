@@ -139,11 +139,6 @@ nuts_find_initial_step_size(
     const ColVec_t& draw_vec,
     const ColVec_t& mntm_vec,
     const Mat_t& inv_precond_matrix,
-    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: identity metric
-    // fast-path flag. When true, skip the two O(n^2) matvecs and use plain
-    // dot(p,p)/2. Same result byte-wise as inv_precond_matrix == I; only
-    // the flops differ.
-    const bool is_identity_metric,
     std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data)> box_log_kernel_fn,
     std::function<fp_t (const ColVec_t& pos_inp, ColVec_t& raw_grad_out, void* target_data)> raw_grad_fn,
     std::function<void (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data)> leap_frog_fn,
@@ -161,10 +156,7 @@ nuts_find_initial_step_size(
         prev_U = posinf;
     }
 
-    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
-    fp_t prev_K = is_identity_metric
-        ? BMO_MATOPS_DOT_PROD(mntm_vec, mntm_vec) / fp_t(2)
-        : BMO_MATOPS_DOT_PROD(mntm_vec, inv_precond_matrix * mntm_vec) / fp_t(2);
+    fp_t prev_K = BMO_MATOPS_DOT_PROD(mntm_vec, inv_precond_matrix * mntm_vec) / fp_t(2);
 
     //
 
@@ -185,10 +177,7 @@ nuts_find_initial_step_size(
         prop_U = posinf;
     }
 
-    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
-    fp_t prop_K = is_identity_metric
-        ? BMO_MATOPS_DOT_PROD(new_mntm, new_mntm) / fp_t(2)
-        : BMO_MATOPS_DOT_PROD(new_mntm, inv_precond_matrix * new_mntm) / fp_t(2);
+    fp_t prop_K = BMO_MATOPS_DOT_PROD(new_mntm, inv_precond_matrix * new_mntm) / fp_t(2);
 
     //
 
@@ -236,11 +225,8 @@ nuts_find_initial_step_size(
             prop_U = posinf;
         }
 
-        // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
-        prop_K = is_identity_metric
-            ? BMO_MATOPS_DOT_PROD(new_mntm, new_mntm) / fp_t(2)
-            : BMO_MATOPS_DOT_PROD(new_mntm, inv_precond_matrix * new_mntm)
-              / fp_t(2);
+        prop_K = BMO_MATOPS_DOT_PROD(new_mntm, inv_precond_matrix * new_mntm)
+               / fp_t(2);
 
         max_steps--;
     }
@@ -294,11 +280,7 @@ nuts_build_tree(
     // touches scratch_pool[tree_depth-1]. See build_tree_scratch_t at top
     // of file for the alias-safety argument. If rebasing onto upstream,
     // drop this parameter.
-    std::vector<build_tree_scratch_t>& scratch_pool,
-    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: identity metric
-    // fast-path flag. When true, the leaf's prop_K uses dot(p,p)/2 instead
-    // of a full O(n^2) matvec through inv_precond_matrix. Rebase: drop.
-    const bool is_identity_metric
+    std::vector<build_tree_scratch_t>& scratch_pool
 )
 {
     const fp_t max_tuning_par = 1000;
@@ -330,10 +312,7 @@ nuts_build_tree(
         fp_t prop_U = - leaf_box_U;
         if (!std::isfinite(prop_U)) prop_U = posinf;
 
-        // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
-        fp_t prop_K = is_identity_metric
-            ? BMO_MATOPS_DOT_PROD(new_mntm, new_mntm) / fp_t(2)
-            : BMO_MATOPS_DOT_PROD(new_mntm, inv_precond_matrix * new_mntm) / fp_t(2);
+        fp_t prop_K = BMO_MATOPS_DOT_PROD(new_mntm, inv_precond_matrix * new_mntm) / fp_t(2);
 
         n_val = (log_rand_val <= - prop_U - prop_K);
         s_val = (log_rand_val < max_tuning_par - prop_U - prop_K);
@@ -378,9 +357,7 @@ nuts_build_tree(
             cached_raw_grad_in, cached_at_first_pos, cached_at_first_neg,
             prop_box_U_first, prop_grad_first,
             // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
-            scratch_pool,
-            // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
-            is_identity_metric);
+            scratch_pool);
 
         // After first sub-tree: new_draw_pos/neg are the first sub-tree's
         // boundaries; cached_at_first_pos/neg are aligned with them.
@@ -423,9 +400,7 @@ nuts_build_tree(
                     cached_at_first_neg, cached_at_second_pos, cached_at_second_neg,
                     prop_box_U_second, prop_grad_second,
                     // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
-                    scratch_pool,
-                    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
-                    is_identity_metric);
+                    scratch_pool);
                 // mcmclib boundary mapping for direction=-1 second sub-tree:
                 //   arg 13 = callee's new_draw_pos -> caller's new_draw_neg (UPDATED via swap)
                 //   arg 14 = callee's new_draw_neg -> dummy_draw (lost)
@@ -456,9 +431,7 @@ nuts_build_tree(
                     cached_at_first_pos, cached_at_second_pos, cached_at_second_neg,
                     prop_box_U_second, prop_grad_second,
                     // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
-                    scratch_pool,
-                    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
-                    is_identity_metric);
+                    scratch_pool);
                 // mcmclib boundary mapping for direction=+1 second sub-tree:
                 //   callee's new_draw_pos -> dummy_draw (lost)
                 //   callee's new_draw_neg -> caller's new_draw_pos (updated)
