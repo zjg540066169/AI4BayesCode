@@ -102,7 +102,7 @@ R-package references. The body's draw-extraction line is the only piece
 that differs between reference types; the per-draw permutation logic
 shown below is identical for both.
 
-### K = 2 example (normal_mixture)
+### K = 2 example (Gaussian mixture)
 
 ```r
 align_Stan_draws <- function(stan_fit) {
@@ -127,7 +127,7 @@ The DGP truth must use the same convention:
 if (mu[1] > mu[2]) { mu <- rev(mu); theta <- 1 - theta }
 ```
 
-### K = 3 example (normal_mixture_k)
+### K = 3 example (Gaussian mixture)
 
 ```r
 align_Stan_draws <- function(stan_fit, K) {
@@ -402,10 +402,10 @@ Does the model have K exchangeable components / states / topics?
 
 | Model | K | Label switching? | Strategy |
 |-------|---|-----------------|----------|
-| `normal_mixture` | 2 | Yes (Stan); No (AI: mu ordered) | Simple sort on Stan draws; truth sorted ascending |
-| `normal_mixture_k` | 3 | Yes (Stan); No (AI: mu ordered) | Simple sort on Stan draws; truth sorted ascending |
-| `poisson_changepoint` | 1 cp -> 2 segments | No -- segments identified by time | No relabeling |
-| `poisson_k_changepoint` | K_cp+1 segments | No -- ordered by changepoint position | No relabeling |
+| Gaussian mixture (K=2) | 2 | Yes (Stan); No (AI: mu ordered) | Simple sort on Stan draws; truth sorted ascending |
+| Gaussian mixture (K=3) | 3 | Yes (Stan); No (AI: mu ordered) | Simple sort on Stan draws; truth sorted ascending |
+| Poisson changepoint (1 cp) | 1 cp -> 2 segments | No -- segments identified by time | No relabeling |
+| Poisson multi-changepoint | K_cp+1 segments | No -- ordered by changepoint position | No relabeling |
 | HMM (if added) | K states | Yes | Stephens with forward-backward alloc probs |
 | LDA / topic model | K topics | Yes | **Stephens with per-token topic-assignment posterior + Hungarian to truth.** Simple sort is NOT sufficient even at K=2 when the AI sampler is z-augmented (slow-mixing): the per-draw sort matches the wrong labels often enough to inflate cross-impl rhat. At K >= 3, simple sort completely fails (K! permutations); Stephens is mandatory. |
 

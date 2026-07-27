@@ -226,7 +226,7 @@ rank -- do NOT read "item 1" as "try this first":
    (`prec ~ Gamma; Normal(*, 1/sqrt(prec))`) -- the Gaussian-hier / ARD /
    Neal-1996 BNN standard (weight-variance BNN / ridge / ARD), missed because "scale" never
    appears and `var` is conjugate (tempting a wrong Gibbs update; it
-   FREEZES: eight_schools_centered -> ESS = NA, R-hat 2.23). The full
+   FREEZES: a centered scale-governed hierarchical model -> ESS = NA, R-hat >> 1). The full
    recipe, the sqrt mapping, and the data-informativeness caveat (NCR is
    NOT unconditional -- centered wins for strongly-informative groups)
    live in **`skills/joint_nuts_failure.md` (Mode 1)** -- follow it; do

@@ -41,14 +41,13 @@ Pattern names you will see in prompts:
 - "hospital effect" / "subject effect" / "school effect" / etc.
 - "crossed effects" (apply this skill TWICE -- see Sec.6)
 
-Concrete examples in this benchmark:
-- `radon_variable_intercept_centered` (1 RE level, 1 fixed slope)
-- `radon_hierarchical_intercept_centered` (1 RE level, 2 fixed slopes)
-- `radon_hierarchical_intercept_noncentered` (same model, prompt
-  explicitly notes NC -- but the codegen rule below is NC regardless)
-- `pilots` (CROSSED effects: groups + scenarios -- see Sec.6)
-- `seeds_model`, `surgical_model` (binomial likelihood; same recipe
-  applies -- see Sec.7)
+Concrete pattern classes this applies to:
+- single-RE-level model with 1 fixed slope (Gaussian likelihood)
+- single-RE-level model with 2 fixed slopes (Gaussian likelihood)
+- the same model whether the prompt writes it centered or non-centered
+  -- the codegen rule below is NC regardless (see Check #24 name rule)
+- CROSSED effects (groups + scenarios -- see Sec.6)
+- binomial-likelihood RE models (same recipe applies -- see Sec.7)
 
 ## 2. The funnel geometry -- why naive composition silently fails
 
@@ -76,11 +75,11 @@ Betancourt-Girolami 2015):
 
 **Empirical evidence (sim1 cross-impl rhat against Stan reference):**
 
-| Model | Naive composition | rhat | cov vs truth |
+| Pattern | Naive composition | rhat | cov vs truth |
 |---|---|---|---|
-| radon_variable_intercept_centered | modular | 1.64 | **AI 0.75 vs Stan 0.94** |
-| radon_hierarchical_intercept_noncentered | modular (with NC reparam) | 2.23 | **AI 0.12 vs Stan 0.94** |
-| surgical_model | modular | 2.02 | **AI 0.07 vs Stan 0.93** |
+| single-RE Gaussian, centered | modular | high (>1.5) | **collapses well below nominal vs reference** |
+| single-RE Gaussian, NC reparam | modular (with NC reparam) | high (>2) | **collapses far below nominal vs reference** |
+| binomial-RE | modular | high (>2) | **collapses far below nominal vs reference** |
 
 The "noncentered" variant fails just as badly as the centered one,
 because **the funnel returns when alpha_raw and sigma_alpha are in
@@ -124,8 +123,8 @@ slice 3: alpha_raw          dim = J, type = real_constraint
 slice 4: beta               dim = P, type = real_constraint   (omit if P = 0)
 ```
 
-Total joint dim: `3 + J + P`. For radon_variable_intercept (J=12, P=1)
-this is 16-dim. For radon_hierarchical (J=12, P=2) it is 17-dim.
+Total joint dim: `3 + J + P`. For a single-RE model with J=12, P=1
+this is 16-dim; with J=12, P=2 it is 17-dim.
 
 **Composite ordering**: this joint block is the ONLY child block of
 the wrapper's `composite_block`. Do NOT add separate sibling blocks
@@ -312,7 +311,7 @@ version of the same density and verifies max_diff < 1e-8 on 5-20
 random `(mu, sigma_alpha, sigma_y, alpha_raw, beta)` points, then
 deletes the verify file. See `validator.md Sec.12`.
 
-## 6. Crossed effects (pilots-style)
+## 6. Crossed effects (two crossed RE levels)
 
 For two independent hierarchies sharing `sigma_y`:
 
@@ -377,8 +376,8 @@ the binomial residual `y_n - n_n * sigmoid(eta_n)`).
 For Poisson `y_n ~ Poisson(exp(eta_n))`, the residual becomes
 `y_n - exp(eta_n)`. Same structure, same recipe.
 
-This covers `surgical_model` (binomial RE), `seeds_model` (binomial RE
-with interaction terms), and any GLMM with a single hierarchy.
+This covers binomial-RE models (including ones with interaction terms)
+and any GLMM with a single hierarchy.
 
 ## 8. Metric escalation (Check #18)
 
@@ -452,8 +451,9 @@ Before declaring a hierarchical wrapper complete, verify:
 
 ## 10. Anti-patterns to reject in review
 
-These are the top failure modes that produced cov_AI ~= 0 on the
-broken radon and surgical models. Reject these patterns at review:
+These are the top failure modes that produced near-zero coverage on
+broken single-RE and binomial-RE hierarchical models. Reject these
+patterns at review:
 
 1. `nuts_block(sigma_alpha)` and `nuts_block(alpha)` as separate
    children. The funnel is between these two -- they MUST be in

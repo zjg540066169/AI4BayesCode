@@ -135,10 +135,10 @@ LOO: PASS if >= 50% Pareto k < 0.5 AND < 10% k >= 0.7.
 
 Implementation: `scripts/run_l3_posthoc.sh` (TODO: write) loops
 over `STATUS == SUCCESS` cells and runs the protocol locally.
-Heavy models (`hierarchical_gp`, `sir`, `multi_occupancy`) may
-need longer wall budget than sim3's 5-15 min/cell -- give them
-30-120 min headroom, or punt to the server like sim1's
-hierarchical_gp / sir.
+Heavy models (large-latent GPs, ODE-likelihood models,
+occupancy / state-space models) may need longer wall budget than
+sim3's 5-15 min/cell -- give them 30-120 min headroom, or punt to
+the server like the heavy GP / ODE cases.
 
 ## Stage C -- sim2-style cross-impl comparison (optional)
 

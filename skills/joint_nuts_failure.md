@@ -146,12 +146,13 @@ cfg.log_density_grad = [/*data*/](const arma::vec& nat,
 ```
 
 ### Empirical evidence (this repo, 2026-06-11)
-`eight_schools_centered` sampled per-block + centered FROZE: all 8 theta at
-ESS = NA, R-hat ~= 2.23, coverage 0.10 -- while the reference (mcmclib, same
+A centered scale-governed hierarchical model sampled per-block + centered
+FROZE: all group-level effects at ESS = NA, R-hat >> 1, coverage collapsed
+-- while the reference (mcmclib, same
 centered model) reached coverage 0.90. Lowering the step size (target_accept
 0.8->0.95) gave a **bit-identical** failure: the chains were frozen, not
 mis-stepped. A diagonal-mass (`adapt_mass`) workaround rescued *this* model
-(cov 0.10->0.90) but REGRESSED tight time-series (arma11) and a harder funnel
+(cov 0.10->0.90) but REGRESSED a tight AR/ARMA time-series model and a harder funnel
 (Mh) -- it is a per-model band-aid, not a fix. **The real fix is joint + NCR**
 (this mode): it removes the funnel geometry at the source, model-independently.
 
@@ -419,7 +420,7 @@ error-prone, can hurt mixing, and may bias the natural-scale posterior
 resolved post-hoc (some models legitimately need it).
 
 ### Empirical evidence (this repo)
-`hmm_drive_0`: phi[1] and phi[2] are exchangeable transition rows -> R-hat ~= 2.23
+An HMM with exchangeable transition rows: phi[1] and phi[2] give R-hat >> 1
 from label switching, NOT a sampler bug. Diagnosed via per-parameter R-hat:
 the symmetric pair is high, the rest fine.
 

@@ -27,8 +27,8 @@ median [min--max] across the 5.
 sim2/
 +-- AI4BayesCode/    <- shared library (copied here for sim2-local sourceCpp)
 +-- models1/         <- regeneration 1 of each model (one cpp per model)
-|   +-- Mt_model/
-|   |   +-- Mt_model.cpp
+|   +-- example_model/
+|   |   +-- example_model.cpp
 |   |   +-- STATUS, l2_report.md, session.log
 |   |   +-- ...
 |   +-- <other models>/
@@ -37,8 +37,8 @@ sim2/
 +-- models4/
 +-- models5/
 +-- results/         <- one subfolder per model, holds the sim2 script + outputs
-    +-- Mt_model/
-        +-- sim2_Mt_model.R
+    +-- example_model/
+        +-- sim2_example_model.R
         +-- results.csv
         +-- results.rds
 ```
@@ -96,7 +96,7 @@ ARE renamed. Code idiom:
 
 ```r
 N_SAMPLERS <- 5L
-MODEL_NAME <- "Mt_model"
+MODEL_NAME <- "example_model"
 
 ai_classes <- character(N_SAMPLERS)
 for (k in seq_len(N_SAMPLERS)) {

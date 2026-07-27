@@ -972,8 +972,8 @@ the structured picker UI. Three firm rules:
      group-level `mu_u`, `tau`, regardless of likelihood family):
      read `skills/hierarchical_re.md`. NEVER use separate
      `nuts_block`s for `(mu_u, tau, u_i)` -- funnel geometry causes
-     silently wrong posterior (cov_AI ~= 0.07-0.75 vs cov_REF ~= 0.94
-     in the radon_*, surgical_model failures).
+     silently wrong posterior (coverage collapses well below nominal vs
+     the reference across single-RE hierarchical + binomial-RE models).
    - **LDA / topic-model** (`z_n` discrete, `theta`, `phi` Dirichlet):
      read `skills/block_catalogue/index.md` `lda_collapsed_gibbs_block` Sec..
 3. **Resolve priors** for each parameter using the decision flow in

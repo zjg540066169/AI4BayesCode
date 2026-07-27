@@ -1276,8 +1276,9 @@ diagonal, escalate on diagnostics.
      effect is NOT a valid dense justification:** it is a hard Check
      #24(a) FAIL, and the only accepted fix is non-centered
      reparameterization (NCR), not dense metric. Dense cannot rescue a
-     funnel that freezes under any static metric (eight_schools_centered
-     ESS=NA; joint_nuts_failure.md Mode-1). Do NOT keep a centered
+     funnel that freezes under any static metric (a centered
+     scale-governed hierarchical model -> ESS=NA; joint_nuts_failure.md
+     Mode-1). Do NOT keep a centered
      scale-governed effect and justify it with dense.
 
 2. **Pilot scaling** -- `cfg.dense_metric_pilot_iters >= max(2000,
@@ -1737,10 +1738,25 @@ form: a standardized `eta_j` sub-param (`REAL`) plus a DETERMINISTIC
 refresher), NOT a centered `theta_j ~ Normal(loc, scale)` sub-param.
 Static check: inspect the joint `sub_params` + log-density for the centered
 pattern; FAIL if a scale-governed effect is sampled centered. Rationale:
-centered + joint NUTS FREEZES on the funnel (empirically
-`eight_schools_centered` -> random-effect ESS = NA, R-hat 2.23; the verified
-non-centered fix is `tests/test_joint_nuts_ncr_funnel.cpp`). Fix:
+centered + joint NUTS FREEZES on the funnel (empirically a centered
+scale-governed hierarchical model -> random-effect ESS = NA and R-hat
+blows up; the verified non-centered fix is `tests/test_joint_nuts_ncr_funnel.cpp`). Fix:
 `joint_nuts_failure.md` Mode 1.
+
+  **Parameterization comes from the PROMPT SPEC, never from the model/file
+  NAME.** The prompt specifies a MODEL (`theta_j ~ Normal(mu, tau)`);
+  centered vs non-centered are the SAME posterior in different sampler
+  coordinates, so NCR is a sampler-level choice, not part of the model. If
+  the funnel pattern matches, NCR is MANDATORY regardless of what the model
+  is called -- a name (or filename) containing "centered" is NOT a spec
+  instruction to sample centered and is NOT a valid reason to skip NCR.
+  FAIL any 24(a) waiver whose justification is "the name asks for centered"
+  (or similar name-derived reasoning): re-read the prompt's math; if it is a
+  weak-data funnel, require the non-centered form. (This closes a real
+  codegen failure: a funnel model whose name contained "centered" was left
+  centered on that basis, froze at random-effect ESS ~ single digits, and
+  disagreed with the reference posterior while 2-chain within-AI R-hat still
+  looked fine.)
 
 **(b) Constraint-kind consistency.** Each sub-param's `joint_constraint`
 must match the prompt's declared support: a positive scale -> `POSITIVE`; a
