@@ -406,6 +406,9 @@ public:
     /// batch of draws, and calling this with the batch covariance.
     void set_precond_matrix(mcmc::Mat_t M) {
         cfg_.nuts_settings.nuts_settings.precond_mat = std::move(M);
+        // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate
+        // mcmclib's inv+chol setup cache. See mcmc_structs.hpp contract.
+        cfg_.nuts_settings.nuts_settings.precond_cache_valid = false;
     }
 
     /// T13: snapshot of NUTS dual-averaging adaptation state.
@@ -444,6 +447,9 @@ public:
         ns.adapt_iter_persist    = ad.adapt_iter;
         if (!ad.precond_mat.is_empty()) {
             ns.precond_mat = ad.precond_mat;
+            // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate
+            // -- precond_mat replaced.
+            ns.precond_cache_valid = false;
         }
     }
 

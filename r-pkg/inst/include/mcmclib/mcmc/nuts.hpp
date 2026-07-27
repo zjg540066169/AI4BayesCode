@@ -52,6 +52,9 @@
   ##       direction in nuts_find_initial_step_size (the original only
   ##       doubled; per Hoffman & Gelman 2014 Algorithm 4 it must also be
   ##       able to halve).
+  ##     - SAFE-SPEEDUP (2026-07-26, JZ) Fix #2: cache inv+chol of precond_mat
+  ##       across nuts() calls when the mass matrix is unchanged (byte-preserved
+  ##       when the cache miss branch runs; see mcmc_structs.hpp contract).
   ##
   ################################################################################*/
 
@@ -163,9 +166,39 @@ internal::nuts_impl(
     const fp_t t0_val    = settings.nuts_settings.t0_val;
     const fp_t kappa_val = settings.nuts_settings.kappa_val;
 
-    const Mat_t precond_matrix = (BMO_MATOPS_SIZE(settings.nuts_settings.precond_mat) == n_vals*n_vals) ? settings.nuts_settings.precond_mat : BMO_MATOPS_EYE(n_vals);
-    const Mat_t inv_precond_matrix = BMO_MATOPS_INV(precond_matrix);
-    const Mat_t sqrt_precond_matrix = BMO_MATOPS_CHOL_LOWER(precond_matrix);
+    // FORK MARKER (2026-07-26, JZ): SAFE-SPEEDUP Fix #2, setup cache.
+    //
+    // The original code (kept below in the rebuild branch) recomputes both
+    // inv(precond_mat) and chol_lower(precond_mat) EVERY nuts() call. In
+    // block-wise Gibbs / DART loops that reuse the same mass matrix across
+    // thousands of nuts() calls, this dominates set-up cost for larger blocks.
+    //
+    // Cache invariant: (input->output) is a pure function of precond_mat +
+    // n_vals. The caller (joint_nuts_block.hpp, nuts_block.hpp) sets
+    // precond_cache_valid=false whenever it mutates precond_mat; this file
+    // stamps it true after a rebuild and reuses the cache when it's true.
+    // Byte-identical to no-cache when valid==false at entry (rebuild path
+    // is unchanged mcmclib arithmetic).
+    Mat_t precond_matrix;
+    Mat_t inv_precond_matrix;
+    Mat_t sqrt_precond_matrix;
+    bool cache_hit = false;
+    if (settings_inp && settings_inp->nuts_settings.precond_cache_valid
+        && settings_inp->nuts_settings.precond_cache_n_vals == n_vals
+        && static_cast<size_t>(BMO_MATOPS_SIZE(settings_inp->nuts_settings.precond_inv_cache)) == n_vals * n_vals
+        && static_cast<size_t>(BMO_MATOPS_SIZE(settings_inp->nuts_settings.precond_sqrt_cache)) == n_vals * n_vals) {
+        // Reuse cached inv/sqrt. Skip precond_matrix rebuild too; only
+        // inv_precond and sqrt_precond are actually used downstream.
+        // precond_matrix itself is only referenced when non-cached (below);
+        // leave it empty here.
+        inv_precond_matrix  = settings_inp->nuts_settings.precond_inv_cache;
+        sqrt_precond_matrix = settings_inp->nuts_settings.precond_sqrt_cache;
+        cache_hit = true;
+    } else {
+        precond_matrix = (BMO_MATOPS_SIZE(settings.nuts_settings.precond_mat) == n_vals*n_vals) ? settings.nuts_settings.precond_mat : BMO_MATOPS_EYE(n_vals);
+        inv_precond_matrix = BMO_MATOPS_INV(precond_matrix);
+        sqrt_precond_matrix = BMO_MATOPS_CHOL_LOWER(precond_matrix);
+    }
 
     const bool vals_bound = settings.vals_bound;
     
@@ -398,6 +431,32 @@ internal::nuts_impl(
     ColVec_t mntm_pos  = mntm_vec;
     ColVec_t mntm_neg  = mntm_vec;
 
+    // FORK MARKER (2026-07-26, JZ) [Fix #3]: allocate build_tree scratch pool
+    // ONCE per nuts_impl. Pre-size each slot to n_vals so subsequent arma
+    // operator= inside nuts_build_tree reuses existing storage rather than
+    // reallocating. Length is max_tree_depth+1 so pool[max_tree_depth] is a
+    // valid index (outer loop enters build_tree with tree_depth in
+    // [0, max_tree_depth-1], recursion decrements by 1). Memory footprint
+    // is ~14 slots * (max_tree_depth+1) * n_vals * 8B -- trivial at default
+    // depth 10. See build_tree_scratch_t in nuts.ipp for alias-safety.
+    std::vector<build_tree_scratch_t> build_tree_scratch(max_tree_depth + 1);
+    for (auto& slot : build_tree_scratch) {
+        slot.leaf_new_mntm.set_size(n_vals);
+        slot.leaf_local_raw_grad.set_size(n_vals);
+        slot.new_draw_p.set_size(n_vals);
+        slot.cached_at_first_pos.set_size(n_vals);
+        slot.cached_at_first_neg.set_size(n_vals);
+        slot.prop_grad_first.set_size(n_vals);
+        slot.new_draw_pp.set_size(n_vals);
+        slot.cached_at_second_pos.set_size(n_vals);
+        slot.cached_at_second_neg.set_size(n_vals);
+        slot.prop_grad_second.set_size(n_vals);
+        slot.dir_dummy_draw.set_size(n_vals);
+        slot.dir_dummy_mntm.set_size(n_vals);
+        slot.dir_draw.set_size(n_vals);
+        slot.dir_mntm.set_size(n_vals);
+    }
+
     //
 
     size_t n_accept = 0;
@@ -474,7 +533,9 @@ internal::nuts_impl(
                     new_draw, dummy_draw, draw_neg, dummy_mntm, mntm_neg,
                     n_p_val, s_p_val, alpha_val, n_alpha_val, rand_engine, target_data,
                     cached_raw_grad_neg, cached_at_new_draw_pos_after, cached_at_new_draw_neg_after,
-                    new_draw_box_U, new_draw_grad);
+                    new_draw_box_U, new_draw_grad,
+                    // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
+                    build_tree_scratch);
                 // For direction=-1 outer mapping: draw_neg <- callee's new_draw_neg.
                 // So caller's cached_raw_grad_neg <- callee's cached_at_new_draw_neg.
                 cached_raw_grad_neg = cached_at_new_draw_neg_after;
@@ -490,7 +551,9 @@ internal::nuts_impl(
                     new_draw, draw_pos, dummy_draw, mntm_pos, dummy_mntm,
                     n_p_val, s_p_val, alpha_val, n_alpha_val, rand_engine, target_data,
                     cached_raw_grad_pos, cached_at_new_draw_pos_after, cached_at_new_draw_neg_after,
-                    new_draw_box_U, new_draw_grad);
+                    new_draw_box_U, new_draw_grad,
+                    // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
+                    build_tree_scratch);
                 // For direction=+1 outer mapping: draw_pos <- callee's new_draw_pos.
                 // So caller's cached_raw_grad_pos <- callee's cached_at_new_draw_pos.
                 cached_raw_grad_pos = cached_at_new_draw_pos_after;
@@ -584,6 +647,17 @@ internal::nuts_impl(
             // Mark that persistent state is valid (adapt_iter > 0)
             settings_inp->nuts_settings.adapt_iter_persist = 1;
         }
+
+        // FORK MARKER (2026-07-26, JZ): SAFE-SPEEDUP Fix #2, cache write-back.
+        // Stamp the cache with what we just computed / reused. Only write
+        // matrices back when we actually rebuilt (cache_hit==false), else the
+        // cached ones are already stored. Always update the flag+n_vals.
+        if (!cache_hit) {
+            settings_inp->nuts_settings.precond_inv_cache  = inv_precond_matrix;
+            settings_inp->nuts_settings.precond_sqrt_cache = sqrt_precond_matrix;
+        }
+        settings_inp->nuts_settings.precond_cache_n_vals = n_vals;
+        settings_inp->nuts_settings.precond_cache_valid  = true;
     }
 
     //

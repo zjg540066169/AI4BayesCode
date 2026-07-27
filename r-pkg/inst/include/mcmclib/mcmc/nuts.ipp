@@ -61,6 +61,11 @@
   ##       new_draw_pos always tracks the "far forward leaf", which is
   ##       NOT what mcmclib's convention produces at depth >= 2.
   ##       See project_mcmclib_nuts_cache_investigation.md.
+  ##     - SAFE-SPEEDUP (2026-07-26, JZ) Fix #3: per-depth ColVec_t scratch
+  ##       pool for nuts_build_tree, eliminating ~154 ColVec_t stack
+  ##       constructions per nuts() call at max_tree_depth=10. See top of
+  ##       file for the build_tree_scratch_t struct and alias-safety
+  ##       argument. Byte-identical to the pre-pool version.
   ##
   ################################################################################*/
 
@@ -70,6 +75,61 @@
 
 #ifndef _mcmc_nuts_IPP
 #define _mcmc_nuts_IPP
+
+// -------------------------------------------------------------------
+// FORK MARKER (2026-07-26, JZ): SAFE-SPEEDUP Fix #3, per-depth ColVec_t pool.
+//
+// nuts_build_tree previously stack-constructed up to 14 ColVec_t per
+// recursion frame; at max_tree_depth=10 that's ~154 heap allocations plus
+// O(n) memcpy work per slot per nuts() call. The pool is a
+// std::vector<build_tree_scratch_t> sized max_tree_depth+1, indexed by
+// tree_depth. Alias-safety: a caller at depth d uses pool[d]; the callee
+// at depth d-1 uses pool[d-1]; recursion is single-threaded depth-first,
+// so at most one frame is active per depth. Within a single frame the
+// leaf slots and recursive slots are mutually exclusive (only ONE of the
+// two branches runs), so they can share the same slot layout without
+// conflict. Slots are pre-sized to n_vals in nuts_impl so subsequent
+// arma operator= calls reuse memory instead of resizing.
+//
+// BYTE-IDENTICAL to the pre-pool stack version: no arithmetic changed,
+// only WHERE temporaries live. Signature of nuts_build_tree gains a
+// `std::vector<build_tree_scratch_t>&` trailing parameter;
+// nuts_find_initial_step_size is untouched (single call per nuts()).
+//
+// REBASE NOTE: delete this struct + the scratch_pool parameter and revert
+// to stack-local ColVec_t declarations to restore upstream mcmclib.
+// -------------------------------------------------------------------
+struct build_tree_scratch_t {
+    // Leaf case (tree_depth == 0). Mutually exclusive with recursive case;
+    // kept as distinct slots for readability -- memory cost is trivial.
+    ColVec_t leaf_new_mntm;
+    ColVec_t leaf_local_raw_grad;
+
+    // First-subtree outputs (must survive across the SECOND subtree call).
+    // The callee writes into pool[d-1]; these live in pool[d] so aliasing is
+    // impossible.
+    ColVec_t new_draw_p;
+    ColVec_t cached_at_first_pos;
+    ColVec_t cached_at_first_neg;
+    ColVec_t prop_grad_first;
+
+    // Second-subtree output holders (only touched inside the second-subtree
+    // branch when the first subtree returned s_p_val == 1).
+    ColVec_t new_draw_pp;
+    ColVec_t cached_at_second_pos;
+    ColVec_t cached_at_second_neg;
+    ColVec_t prop_grad_second;
+
+    // Direction-specific temporaries. Only ONE of direction_val == -1 / +1
+    // runs per frame, so a single set of four slots serves both. dir_draw
+    // / dir_mntm hold the copy of draw_neg/mntm_neg (or draw_pos/mntm_pos)
+    // that is passed as the second subtree's starting position; dir_dummy_*
+    // receive the "lost" boundary written by the callee.
+    ColVec_t dir_dummy_draw;
+    ColVec_t dir_dummy_mntm;
+    ColVec_t dir_draw;
+    ColVec_t dir_mntm;
+};
 
 //
 
@@ -213,16 +273,33 @@ nuts_build_tree(
     // instead of recomputing (box_log_kernel_fn + raw_grad_fn at new_draw).
     // new_draw is a leaf created here; its value+grad were already computed.
     fp_t& prop_box_U_out,
-    ColVec_t& prop_grad_out
+    ColVec_t& prop_grad_out,
+    // FORK MARKER (2026-07-26, JZ) [Fix #3]: per-depth ColVec_t pool.
+    // Owned + pre-sized by nuts_impl. This frame touches
+    // scratch_pool[tree_depth] exclusively; the recursive call at depth-1
+    // touches scratch_pool[tree_depth-1]. See build_tree_scratch_t at top
+    // of file for the alias-safety argument. If rebasing onto upstream,
+    // drop this parameter.
+    std::vector<build_tree_scratch_t>& scratch_pool
 )
 {
     const fp_t max_tuning_par = 1000;
+    // FORK MARKER (2026-07-26, JZ) [Fix #3]: bind our depth's slot once.
+    build_tree_scratch_t& scratch = scratch_pool[tree_depth];
 
     if (tree_depth == size_t(0)) {
         new_draw = draw_vec;
-        ColVec_t new_mntm = mntm_vec;
+        // FORK MARKER (2026-07-26, JZ) [Fix #3]: pool-backed (was:
+        //   ColVec_t new_mntm = mntm_vec;
+        // ). Byte-preserved assignment; only storage location changed.
+        ColVec_t& new_mntm = scratch.leaf_new_mntm;
+        new_mntm = mntm_vec;
 
-        ColVec_t local_raw_grad = cached_raw_grad_in;
+        // FORK MARKER (2026-07-26, JZ) [Fix #3]: pool-backed (was:
+        //   ColVec_t local_raw_grad = cached_raw_grad_in;
+        // ).
+        ColVec_t& local_raw_grad = scratch.leaf_local_raw_grad;
+        local_raw_grad = cached_raw_grad_in;
         fp_t leaf_box_U = fp_t(0);
         leap_frog_fn(direction_val * step_size, 1, new_draw, new_mntm, local_raw_grad, leaf_box_U, target_data);
         // After leap_frog: local_raw_grad = grad(new_draw); leaf_box_U =
@@ -261,14 +338,15 @@ nuts_build_tree(
         size_t s_p_val;
         fp_t alpha_p_val;
         size_t n_alpha_p_val;
-        ColVec_t new_draw_p;
-        // Caches returned by the first sub-tree, aligned with the
-        // first sub-tree's new_draw_pos and new_draw_neg.
-        ColVec_t cached_at_first_pos;
-        ColVec_t cached_at_first_neg;
+        // FORK MARKER (2026-07-26, JZ) [Fix #3]: pool-backed first-subtree
+        // slots. Callee (recursive call below) touches pool[d-1], disjoint
+        // from these pool[d] slots -- safe.
+        ColVec_t& new_draw_p          = scratch.new_draw_p;
+        ColVec_t& cached_at_first_pos = scratch.cached_at_first_pos;
+        ColVec_t& cached_at_first_neg = scratch.cached_at_first_neg;
+        ColVec_t& prop_grad_first     = scratch.prop_grad_first;
         // First sub-tree's selected-proposal value+grad (PERF threading).
         fp_t prop_box_U_first = fp_t(0);
-        ColVec_t prop_grad_first;
 
         nuts_build_tree(
             direction_val, step_size, log_rand_val, prev_U, prev_K,
@@ -277,7 +355,9 @@ nuts_build_tree(
             new_draw_p, new_draw_pos, new_draw_neg, new_mntm_pos, new_mntm_neg,
             n_p_val, s_p_val, alpha_p_val, n_alpha_p_val, rand_engine, target_data,
             cached_raw_grad_in, cached_at_first_pos, cached_at_first_neg,
-            prop_box_U_first, prop_grad_first);
+            prop_box_U_first, prop_grad_first,
+            // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
+            scratch_pool);
 
         // After first sub-tree: new_draw_pos/neg are the first sub-tree's
         // boundaries; cached_at_first_pos/neg are aligned with them.
@@ -287,23 +367,29 @@ nuts_build_tree(
             size_t s_pp_val;
             fp_t alpha_pp_val;
             size_t n_alpha_pp_val;
-            ColVec_t new_draw_pp;
-            // Caches returned by the second sub-tree.
-            ColVec_t cached_at_second_pos;
-            ColVec_t cached_at_second_neg;
+            // FORK MARKER (2026-07-26, JZ) [Fix #3]: pool-backed second-subtree.
+            ColVec_t& new_draw_pp          = scratch.new_draw_pp;
+            ColVec_t& cached_at_second_pos = scratch.cached_at_second_pos;
+            ColVec_t& cached_at_second_neg = scratch.cached_at_second_neg;
+            ColVec_t& prop_grad_second     = scratch.prop_grad_second;
             // Second sub-tree's selected-proposal value+grad (PERF threading).
             fp_t prop_box_U_second = fp_t(0);
-            ColVec_t prop_grad_second;
 
             if (direction_val == -1) {
                 // Second sub-tree extends backward from new_draw_neg.
                 // Input cache for it = cached_at_first_neg
                 //   (= grad@new_draw_neg, which is the second sub-tree's
                 //    starting position).
-                ColVec_t dummy_draw = new_draw_pos;
-                ColVec_t dummy_mntm = new_mntm_pos;
-                ColVec_t draw_neg = new_draw_neg;
-                ColVec_t mntm_neg = new_mntm_neg;
+                // FORK MARKER (2026-07-26, JZ) [Fix #3]: pool-backed direction
+                // temporaries (only ONE branch runs per frame).
+                ColVec_t& dummy_draw = scratch.dir_dummy_draw;
+                ColVec_t& dummy_mntm = scratch.dir_dummy_mntm;
+                ColVec_t& draw_neg   = scratch.dir_draw;
+                ColVec_t& mntm_neg   = scratch.dir_mntm;
+                dummy_draw = new_draw_pos;
+                dummy_mntm = new_mntm_pos;
+                draw_neg   = new_draw_neg;
+                mntm_neg   = new_mntm_neg;
 
                 nuts_build_tree(
                     direction_val, step_size, log_rand_val, prev_U, prev_K,
@@ -312,7 +398,9 @@ nuts_build_tree(
                     new_draw_pp, new_draw_neg, dummy_draw, new_mntm_neg, dummy_mntm,
                     n_pp_val, s_pp_val, alpha_pp_val, n_alpha_pp_val, rand_engine, target_data,
                     cached_at_first_neg, cached_at_second_pos, cached_at_second_neg,
-                    prop_box_U_second, prop_grad_second);
+                    prop_box_U_second, prop_grad_second,
+                    // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
+                    scratch_pool);
                 // mcmclib boundary mapping for direction=-1 second sub-tree:
                 //   arg 13 = callee's new_draw_pos -> caller's new_draw_neg (UPDATED via swap)
                 //   arg 14 = callee's new_draw_neg -> dummy_draw (lost)
@@ -323,10 +411,16 @@ nuts_build_tree(
                 cached_at_new_draw_pos_out = cached_at_first_pos;
             } else {
                 // Second sub-tree extends forward from new_draw_pos.
-                ColVec_t dummy_draw = new_draw_neg;
-                ColVec_t dummy_mntm = new_mntm_neg;
-                ColVec_t draw_pos = new_draw_pos;
-                ColVec_t mntm_pos = new_mntm_pos;
+                // FORK MARKER (2026-07-26, JZ) [Fix #3]: pool-backed
+                // direction temporaries (only ONE branch runs per frame).
+                ColVec_t& dummy_draw = scratch.dir_dummy_draw;
+                ColVec_t& dummy_mntm = scratch.dir_dummy_mntm;
+                ColVec_t& draw_pos   = scratch.dir_draw;
+                ColVec_t& mntm_pos   = scratch.dir_mntm;
+                dummy_draw = new_draw_neg;
+                dummy_mntm = new_mntm_neg;
+                draw_pos   = new_draw_pos;
+                mntm_pos   = new_mntm_pos;
 
                 nuts_build_tree(
                     direction_val, step_size, log_rand_val, prev_U, prev_K,
@@ -335,7 +429,9 @@ nuts_build_tree(
                     new_draw_pp, dummy_draw, new_draw_pos, dummy_mntm, new_mntm_pos,
                     n_pp_val, s_pp_val, alpha_pp_val, n_alpha_pp_val, rand_engine, target_data,
                     cached_at_first_pos, cached_at_second_pos, cached_at_second_neg,
-                    prop_box_U_second, prop_grad_second);
+                    prop_box_U_second, prop_grad_second,
+                    // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
+                    scratch_pool);
                 // mcmclib boundary mapping for direction=+1 second sub-tree:
                 //   callee's new_draw_pos -> dummy_draw (lost)
                 //   callee's new_draw_neg -> caller's new_draw_pos (updated)

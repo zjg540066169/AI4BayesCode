@@ -87,6 +87,11 @@
 #include <vector>
 #include <cmath>
 #include <limits>
+// FORK MARKER (2026-07-26, JZ) [pre-existing include fix, bundled in b35fd10]:
+// frozen_slots_ member is std::unordered_set<std::string>; missing transitive
+// include causes 3 joint-nuts tests to fail with a misleading
+// "block_sampler::unfreeze() cannot initialize object parameter" cascade.
+#include <unordered_set>
 
 #include "mcmclib/mcmc.hpp"
 
@@ -410,8 +415,17 @@ public:
 
         // Every slice REAL? Enables bit-identical V0 fast-paths. Also validate
         // per-slice bound configuration for parameterized constraints.
+        // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP eval_unc_ fast-path]:
+        // populate sub_needs_transform_ alongside the all_real_ scan so the
+        // mixed-path loop can skip the constraints::real::wrap machinery
+        // (closure + wrap dispatch + intermediate arma::vec allocations)
+        // for REAL sub_params inline. See sub_needs_transform_ decl comment.
         all_real_ = true;
+        sub_needs_transform_.clear();
+        sub_needs_transform_.reserve(cfg_.sub_params.size());
         for (const auto& sp : cfg_.sub_params) {
+            const bool needs = (sp.constraint != joint_constraint::REAL);
+            sub_needs_transform_.push_back(needs);
             if (sp.constraint != joint_constraint::REAL) all_real_ = false;
             if (sp.constraint == joint_constraint::INTERVAL &&
                 !(sp.upper > sp.lower)) {
@@ -672,6 +686,9 @@ public:
                 auto_selected_dense_     = -1;                 // record: aborted
                 auto_selected_cond_      = 0.0;
                 ns.precond_mat = mcmc::Mat_t();                // identity metric
+                // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate
+                // -- escape-guard fell back from dense to identity.
+                ns.precond_cache_valid = false;
                 ns.epsilon_bar_persist = 0.0;
                 ns.h_val_persist       = 0.0;
                 ns.mu_val_persist      = 0.0;
@@ -821,6 +838,10 @@ public:
 
     void set_precond_matrix(mcmc::Mat_t M) {
         cfg_.nuts_settings.nuts_settings.precond_mat = std::move(M);
+        // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate the
+        // setup cache in mcmclib whenever precond_mat is mutated. See
+        // mcmc_structs.hpp contract + nuts.hpp cache read/write.
+        cfg_.nuts_settings.nuts_settings.precond_cache_valid = false;
     }
 
     /// T13: snapshot of joint NUTS adaptation state (step size + DA
@@ -874,6 +895,9 @@ public:
                     std::to_string(total_unc_dim_));
             }
             ns.precond_mat = ad.precond_mat;
+            // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate
+            // setup cache -- precond_mat just changed.
+            ns.precond_cache_valid = false;
             dense_metric_adapted_ = (ad.metric_kind == "dense");
         }
     }
@@ -1383,6 +1407,26 @@ private:
             const std::size_t uoff = unc_offsets_[s];  // unconstrained slice
             const std::size_t udim = unc_dims_[s];
             const std::size_t noff = offsets_[s];       // natural slice
+
+            // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP eval_unc_ fast-path]:
+            // REAL sub_param bypasses the constraints::real::wrap machinery
+            // (closure allocation + intermediate `gn_slice` + `g_slice`
+            // arma::vec + wrap dispatch). Byte-preserved: real::wrap is
+            //   template<InnerFn> double wrap(u, g, inner) { return inner(u, g); }
+            // and inner writes `*gout = gn_slice; return 0.0`. For a REAL
+            // sub_param: udim == sp.dim (from unc_dim_for_), log|J| == 0, and
+            // the chain-ruled unc-gradient equals grad_nat exactly. So the
+            // fast-path is literally a subvec copy + no lp addition -- same
+            // numbers as the wrap path.
+            if (!sub_needs_transform_[s]) {
+                if (grad_unc) {
+                    grad_unc->subvec(uoff, uoff + udim - 1) =
+                        grad_nat.subvec(noff, noff + sp.dim - 1);
+                }
+                // total_lp += 0.0;  // no-op (real::wrap contributes log|J| = 0)
+                continue;
+            }
+
             const arma::vec u_slice =
                 theta_unc.subvec(uoff, uoff + udim - 1);
             // inner injects the precomputed natural-scale slice gradient and
@@ -1531,6 +1575,9 @@ private:
             auto_selected_dense_     = -1;
             auto_selected_cond_      = 0.0;
             ns.precond_mat           = mcmc::Mat_t();
+            // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate
+            // -- three_phase_guarded_ escape falls back to identity metric.
+            ns.precond_cache_valid   = false;
             ns.epsilon_bar_persist   = 0.0;
             ns.h_val_persist         = 0.0;
             ns.mu_val_persist        = 0.0;
@@ -1734,6 +1781,9 @@ private:
         // Σ, the optimal mass matrix is M = Σ^{-1}. Pass the PRECISION
         // matrix, not the covariance.
         cfg_.nuts_settings.nuts_settings.precond_mat = build_precond_(Sigma_reg);
+        // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate
+        // setup cache -- freshly-installed dense/diag metric.
+        cfg_.nuts_settings.nuts_settings.precond_cache_valid = false;
 
         // Reset adapt_iter so dual-averaging step-size retunes against new
         // metric (the step size adapted under identity metric is wrong for
@@ -1817,6 +1867,9 @@ private:
             // supplied precond_mat here; we override to identity.
             const mcmc::Mat_t saved_precond = ns.precond_mat;
             ns.precond_mat = mcmc::Mat_t();  // empty → identity in mcmclib
+            // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate
+            // -- switched to identity metric for Phase I.
+            ns.precond_cache_valid = false;
 
             const std::size_t n1 = std::max<std::size_t>(cfg_.tp_phase1_iters, 1);
             ns.n_burnin_draws = n1;
@@ -1829,6 +1882,9 @@ private:
             if (!ok1 || out1.n_rows == 0) {
                 // Restore and abort: leave caller in single-phase fallback
                 ns.precond_mat = saved_precond;
+                // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate
+                // -- restored possibly-different saved metric.
+                ns.precond_cache_valid = false;
                 ns.n_burnin_draws = saved_burnin;
                 ns.n_keep_draws   = saved_keep;
                 ns.n_adapt_draws  = saved_adapt;
@@ -1897,6 +1953,9 @@ private:
             // previous mass matrix.
             try {
                 ns.precond_mat = build_precond_(Sigma_reg);
+                // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate
+                // -- Phase-II window installed a new precision matrix.
+                ns.precond_cache_valid = false;
             } catch (const std::runtime_error&) {
                 // inv_sympd failed; keep previous mass matrix
             }
@@ -1976,6 +2035,15 @@ private:
     std::vector<std::size_t> unc_dims_;     // UNCONSTRAINED width per sub_param
     std::size_t             total_unc_dim_ = 0;   // == theta_cat_ length
     bool                    has_dim_changing_ = false;
+    // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP eval_unc_ fast-path]:
+    // per-sub_param cache of "needs constraint::<kind>::wrap machinery?".
+    // false iff constraint == REAL. Populated once in the constructor to
+    // avoid a per-iteration switch(sp.constraint) dispatch inside eval_unc_.
+    // Byte-preserved: constraints::real::wrap is literally
+    //   `return inner(theta_unc, grad_unc);`
+    // where the inner lambda writes `*gout = gn_slice; return 0.0`, so the
+    // fast-path (direct subvec copy) produces identical numbers.
+    std::vector<bool>       sub_needs_transform_;
     bool                    all_real_  = true;  // every sub_param REAL?
                                                 // enables bit-identical V0
                                                 // fast-paths.

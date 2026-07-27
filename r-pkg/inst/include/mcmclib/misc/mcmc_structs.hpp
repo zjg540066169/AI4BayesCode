@@ -31,6 +31,10 @@
   ##       (use_persistent_adapt, epsilon_bar_persist, h_val_persist,
   ##        mu_val_persist, adapt_iter_persist) to support mini-warmup
   ##        adaptation across Gibbs iterations in DP_DART / RE_DART.
+  ##     - SAFE-SPEEDUP (2026-07-26, JZ): Added precond_mat setup-cache fields
+  ##       (precond_cache_valid, precond_inv_cache, precond_sqrt_cache,
+  ##        precond_cache_n_vals) to nuts_settings_t. See nuts.hpp Fix #2 and
+  ##       joint_nuts_block.hpp mutation-site invalidation for the contract.
   ##
   ################################################################################*/
 
@@ -123,6 +127,35 @@ struct nuts_settings_t
     fp_t h_val_persist = 0.0;
     fp_t mu_val_persist = 0.0;  // log(10 * step_size_init)
     size_t adapt_iter_persist = 0;  // cumulative iteration count across calls
+
+    // -------------------------------------------------------------------
+    // FORK MARKER (2026-07-26, JZ): SAFE-SPEEDUP SUBSET, Fix #2 setup cache.
+    //
+    // Cache the precomputed inverse and lower-Cholesky of precond_mat across
+    // successive nuts() calls that reuse the SAME mass matrix (identity or
+    // adapted). nuts_impl checks precond_cache_valid on entry; if true, reuses
+    // the cached inv/sqrt; else rebuilds and stamps precond_cache_valid=true.
+    //
+    // CACHE COHERENCE CONTRACT: any code that MUTATES nuts_settings_t::precond_mat
+    // (this file's field + all AI4BayesCode wiring) MUST set precond_cache_valid
+    // = false before the next nuts() call. joint_nuts_block.hpp wires this at
+    // the constructor, set_precond_matrix, set_adaptation, adapt_dense_metric_
+    // install, three_phase Phase-I save/restore, three_phase Phase-II install,
+    // and the escape-guard fallback.
+    //
+    // BYTE-PRESERVED to no-cache when precond_cache_valid == false at entry
+    // (the rebuild path takes the same code — including the identical
+    // BMO_MATOPS_INV / BMO_MATOPS_CHOL_LOWER of the same input).
+    //
+    // REBASE NOTE: If mcmclib upstream is bumped, keep this block AND the
+    // matching read/write in nuts.hpp. The cache is a pure optimization; if
+    // ever in doubt, set precond_cache_valid = false unconditionally in the
+    // AI4BayesCode wiring and correctness is preserved.
+    // -------------------------------------------------------------------
+    bool   precond_cache_valid  = false;
+    Mat_t  precond_inv_cache;
+    Mat_t  precond_sqrt_cache;
+    size_t precond_cache_n_vals = 0;
 };
 
 // RM-HMC
