@@ -52,6 +52,9 @@
   ##       direction in nuts_find_initial_step_size (the original only
   ##       doubled; per Hoffman & Gelman 2014 Algorithm 4 it must also be
   ##       able to halve).
+  ##     - SAFE-SPEEDUP (2026-07-26, JZ) Fix #2: cache inv+chol of precond_mat
+  ##       across nuts() calls when the mass matrix is unchanged (byte-preserved
+  ##       when the cache miss branch runs; see mcmc_structs.hpp contract).
   ##
   ################################################################################*/
 
@@ -163,9 +166,72 @@ internal::nuts_impl(
     const fp_t t0_val    = settings.nuts_settings.t0_val;
     const fp_t kappa_val = settings.nuts_settings.kappa_val;
 
-    const Mat_t precond_matrix = (BMO_MATOPS_SIZE(settings.nuts_settings.precond_mat) == n_vals*n_vals) ? settings.nuts_settings.precond_mat : BMO_MATOPS_EYE(n_vals);
-    const Mat_t inv_precond_matrix = BMO_MATOPS_INV(precond_matrix);
-    const Mat_t sqrt_precond_matrix = BMO_MATOPS_CHOL_LOWER(precond_matrix);
+    // FORK MARKER (2026-07-26, JZ): SAFE-SPEEDUP Fix #2, setup cache.
+    //
+    // The original code (kept below in the rebuild branch) recomputes both
+    // inv(precond_mat) and chol_lower(precond_mat) EVERY nuts() call. In
+    // block-wise Gibbs / DART loops that reuse the same mass matrix across
+    // thousands of nuts() calls, this dominates set-up cost for larger blocks.
+    //
+    // Cache invariant: (input->output) is a pure function of precond_mat +
+    // n_vals. The caller (joint_nuts_block.hpp, nuts_block.hpp) sets
+    // precond_cache_valid=false whenever it mutates precond_mat; this file
+    // stamps it true after a rebuild and reuses the cache when it's true.
+    // Byte-identical to no-cache when valid==false at entry (rebuild path
+    // is unchanged mcmclib arithmetic).
+    Mat_t precond_matrix;
+    Mat_t inv_precond_matrix;
+    Mat_t sqrt_precond_matrix;
+    bool cache_hit = false;
+    if (settings_inp && settings_inp->nuts_settings.precond_cache_valid
+        && settings_inp->nuts_settings.precond_cache_n_vals == n_vals
+        && static_cast<size_t>(BMO_MATOPS_SIZE(settings_inp->nuts_settings.precond_inv_cache)) == n_vals * n_vals
+        && static_cast<size_t>(BMO_MATOPS_SIZE(settings_inp->nuts_settings.precond_sqrt_cache)) == n_vals * n_vals) {
+        // Reuse cached inv/sqrt. Skip precond_matrix rebuild too; only
+        // inv_precond and sqrt_precond are actually used downstream.
+        // precond_matrix itself is only referenced when non-cached (below);
+        // leave it empty here.
+        inv_precond_matrix  = settings_inp->nuts_settings.precond_inv_cache;
+        sqrt_precond_matrix = settings_inp->nuts_settings.precond_sqrt_cache;
+        cache_hit = true;
+    } else {
+        precond_matrix = (BMO_MATOPS_SIZE(settings.nuts_settings.precond_mat) == n_vals*n_vals) ? settings.nuts_settings.precond_mat : BMO_MATOPS_EYE(n_vals);
+        inv_precond_matrix = BMO_MATOPS_INV(precond_matrix);
+        sqrt_precond_matrix = BMO_MATOPS_CHOL_LOWER(precond_matrix);
+    }
+
+    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
+    // Skip the O(n^2) inv/sqrt matvecs in leap_frog / K / momentum resample
+    // when the caller did NOT supply a precond_mat (i.e. metric is identity).
+    // DIAG-shaped precond_mat (from adapt_dense_metric_) still falls into the
+    // DENSE branch below and uses full SGEMV -- preserves J100 funnel mixing
+    // (the DIAG-branch approach in b35fd10 regressed there and was reverted;
+    // see 664a84f). Detection is based on the user-supplied precond_mat, NOT
+    // on inv_precond_matrix (which is always n*n after the cache setup).
+    // REBASE NOTE: delete this flag + the four branches below (search for
+    // "IDENTITY-only Fix #1") to restore byte-identical pre-fork DENSE path.
+    const bool is_identity_metric =
+        (static_cast<size_t>(BMO_MATOPS_SIZE(settings.nuts_settings.precond_mat)) != n_vals * n_vals);
+
+    // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]
+    // Detect a DIAGONAL (but full-dense-stored) metric ONCE per nuts() call and
+    // extract the diagonals of the ACTUAL inv/sqrt matrices the dense path uses,
+    // so the O(n) elementwise fast path multiplies by BIT-IDENTICAL values.
+    // Off-diagonals must be EXACTLY 0.0 (true for arma::inv / arma::chol of a
+    // diagonal input) so (D*v)_i reduces to the single product D(i,i)*v_i.
+    // Detection reads inv_precond_matrix / sqrt_precond_matrix (both populated
+    // on cache-hit and cache-miss). See mat_is_exactly_diagonal / diag_quad_form
+    // in nuts.ipp and the DIAG-vector Fix comment block there.
+    bool metric_is_diag = false;
+    ColVec_t inv_diag, sqrt_diag;
+    if (!is_identity_metric) {
+        metric_is_diag = mat_is_exactly_diagonal(inv_precond_matrix, n_vals)
+                      && mat_is_exactly_diagonal(sqrt_precond_matrix, n_vals);
+        if (metric_is_diag) {
+            inv_diag  = BMO_MATOPS_EXTRACT_DIAG(inv_precond_matrix);
+            sqrt_diag = BMO_MATOPS_EXTRACT_DIAG(sqrt_precond_matrix);
+        }
+    }
 
     const bool vals_bound = settings.vals_bound;
     
@@ -264,10 +330,14 @@ internal::nuts_impl(
     // The caller (nuts_build_tree base case) uses this instead of a separate
     // box_log_kernel_fn(new_draw, nullptr) re-evaluation. Bit-equivalent.
     std::function<void (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data)> leap_frog_fn \
-    = [target_log_kernel, raw_grad_fn, inv_precond_matrix, vals_bound, bounds_type, lower_bounds, upper_bounds] (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data) \
+    = [target_log_kernel, raw_grad_fn, inv_precond_matrix, is_identity_metric, metric_is_diag, inv_diag, vals_bound, bounds_type, lower_bounds, upper_bounds] (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data) \
     -> void
     {
         fp_t nat_U_final = fp_t(0);   // natural-scale log-density at final pos
+#if !AI4BAYESCODE_DIAGVEC_DRIFT
+        // Captured only for the (compile-time-gated) DIAG drift fast path.
+        (void)metric_is_diag; (void)inv_diag;
+#endif
         for (size_t k = 0; k < n_leap_steps; ++k) {
             // First half-kick uses cached grad at the CURRENT new_draw.
             // Cache invariant: caller guarantees cached_raw_grad equals
@@ -299,7 +369,29 @@ internal::nuts_impl(
                 new_mntm = new_mntm + step_size * cached_raw_grad / fp_t(2);
             }
             // Drift.
-            new_draw += step_size * inv_precond_matrix * new_mntm;
+            // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
+            // IDENTITY branch: skip the n*n * n matvec, use raw daxpy.
+            // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]
+            //   DIAG branch (gated by AI4BAYESCODE_DIAGVEC_DRIFT, default OFF):
+            //   O(n) elementwise drift. NOT bit-identical to the DENSE branch --
+            //   armadillo lowers `new_draw += step*inv*v` to a fused
+            //   gemv(alpha=step, beta=1) whose non-unit alpha/beta rounding no
+            //   elementwise grouping reproduces (verified ULP mismatches at
+            //   every n incl. 1605; this is the b35fd10 regression source).
+            //   Only enable for a funnel-verified fast path, never as
+            //   bit-identical. DENSE branch: pre-fork single-line, unchanged.
+            if (is_identity_metric) {
+                new_draw += step_size * new_mntm;
+#if AI4BAYESCODE_DIAGVEC_DRIFT
+            } else if (metric_is_diag) {
+                const size_t nq = BMO_MATOPS_SIZE(new_mntm);
+                for (size_t i = 0; i < nq; ++i) {
+                    new_draw[i] += step_size * (inv_diag[i] * new_mntm[i]);
+                }
+#endif
+            } else {
+                new_draw += step_size * inv_precond_matrix * new_mntm;
+            }
             // Refresh cached grad at the new (post-drift) position. CAPTURE the
             // natural-scale value it computes (was discarded) for the energy.
             nat_U_final = raw_grad_fn(new_draw, cached_raw_grad, target_data);
@@ -336,7 +428,19 @@ internal::nuts_impl(
 
     bmo::stats::internal::rnorm_vec_inplace<fp_t>(n_vals, rand_engine, rand_vec);
 
-    ColVec_t mntm_vec = sqrt_precond_matrix * rand_vec;
+    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
+    // IDENTITY: p ~ N(0, I) = rand_vec directly.  DENSE: p ~ N(0, M) via chol.
+    // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: DIAG p ~ N(0, M) via the
+    // elementwise sqrt-diagonal (bit-identical to the alpha=1 chol matvec).
+    ColVec_t mntm_vec;
+    if (is_identity_metric) {
+        mntm_vec = rand_vec;
+    } else if (metric_is_diag) {
+        mntm_vec.set_size(n_vals);
+        for (size_t i = 0; i < n_vals; ++i) mntm_vec[i] = sqrt_diag[i] * rand_vec[i];
+    } else {
+        mntm_vec = sqrt_precond_matrix * rand_vec;
+    }
 
     //
 
@@ -361,7 +465,8 @@ internal::nuts_impl(
         mu_val = std::log(10 * step_size);
         h_val = 0;
     } else {
-        step_size = nuts_find_initial_step_size(first_draw, mntm_vec, inv_precond_matrix, box_log_kernel_fn, raw_grad_fn, leap_frog_fn, target_data);
+        // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
+        step_size = nuts_find_initial_step_size(first_draw, mntm_vec, inv_precond_matrix, is_identity_metric, metric_is_diag, inv_diag, box_log_kernel_fn, raw_grad_fn, leap_frog_fn, target_data);
         mu_val = std::log(10 * step_size);
         h_val = 0;
         epsilon_bar = fp_t(1);  // reset epsilon_bar at start of fresh adaptation
@@ -398,16 +503,63 @@ internal::nuts_impl(
     ColVec_t mntm_pos  = mntm_vec;
     ColVec_t mntm_neg  = mntm_vec;
 
+    // FORK MARKER (2026-07-26, JZ) [Fix #3]: allocate build_tree scratch pool
+    // ONCE per nuts_impl. Pre-size each slot to n_vals so subsequent arma
+    // operator= inside nuts_build_tree reuses existing storage rather than
+    // reallocating. Length is max_tree_depth+1 so pool[max_tree_depth] is a
+    // valid index (outer loop enters build_tree with tree_depth in
+    // [0, max_tree_depth-1], recursion decrements by 1). Memory footprint
+    // is ~14 slots * (max_tree_depth+1) * n_vals * 8B -- trivial at default
+    // depth 10. See build_tree_scratch_t in nuts.ipp for alias-safety.
+    std::vector<build_tree_scratch_t> build_tree_scratch(max_tree_depth + 1);
+    for (auto& slot : build_tree_scratch) {
+        slot.leaf_new_mntm.set_size(n_vals);
+        slot.leaf_local_raw_grad.set_size(n_vals);
+        // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: pre-size the leaf
+        // diagonal-matvec temporary so the hot leaf path never reallocs.
+        slot.leaf_metric_w.set_size(n_vals);
+        slot.new_draw_p.set_size(n_vals);
+        slot.cached_at_first_pos.set_size(n_vals);
+        slot.cached_at_first_neg.set_size(n_vals);
+        slot.prop_grad_first.set_size(n_vals);
+        slot.new_draw_pp.set_size(n_vals);
+        slot.cached_at_second_pos.set_size(n_vals);
+        slot.cached_at_second_neg.set_size(n_vals);
+        slot.prop_grad_second.set_size(n_vals);
+        slot.dir_dummy_draw.set_size(n_vals);
+        slot.dir_dummy_mntm.set_size(n_vals);
+        slot.dir_draw.set_size(n_vals);
+        slot.dir_mntm.set_size(n_vals);
+    }
+
     //
 
     size_t n_accept = 0;
 
+    // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: reused elementwise matvec
+    // temporary for the per-draw diagonal K quadratic form (one resize, then
+    // reused each draw -- no per-draw allocation).
+    ColVec_t metric_w_main;
+
     for (size_t draw_ind = 0; draw_ind < n_total_draws; ++draw_ind) {
         bmo::stats::internal::rnorm_vec_inplace<fp_t>(n_vals, rand_engine, rand_vec);
 
-        mntm_vec = sqrt_precond_matrix * rand_vec;
-
-        prev_K = BMO_MATOPS_DOT_PROD(mntm_vec, inv_precond_matrix * mntm_vec) / fp_t(2);
+        // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
+        // Momentum resample + K, IDENTITY vs DENSE branches.
+        // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: DIAG branch --
+        // elementwise momentum (bit-identical alpha=1 chol matvec) + O(n)
+        // quadratic form (bit-identical to dense dot(p, inv*p)).
+        if (is_identity_metric) {
+            mntm_vec = rand_vec;
+            prev_K = BMO_MATOPS_DOT_PROD(mntm_vec, mntm_vec) / fp_t(2);
+        } else if (metric_is_diag) {
+            mntm_vec.set_size(n_vals);
+            for (size_t i = 0; i < n_vals; ++i) mntm_vec[i] = sqrt_diag[i] * rand_vec[i];
+            prev_K = diag_quad_form(mntm_vec, inv_diag, metric_w_main) / fp_t(2);
+        } else {
+            mntm_vec = sqrt_precond_matrix * rand_vec;
+            prev_K = BMO_MATOPS_DOT_PROD(mntm_vec, inv_precond_matrix * mntm_vec) / fp_t(2);
+        }
 
         log_rand_val = std::log(bmo::stats::runif<fp_t>(rand_engine)) - prev_U - prev_K ;
 
@@ -474,7 +626,11 @@ internal::nuts_impl(
                     new_draw, dummy_draw, draw_neg, dummy_mntm, mntm_neg,
                     n_p_val, s_p_val, alpha_val, n_alpha_val, rand_engine, target_data,
                     cached_raw_grad_neg, cached_at_new_draw_pos_after, cached_at_new_draw_neg_after,
-                    new_draw_box_U, new_draw_grad);
+                    new_draw_box_U, new_draw_grad,
+                    // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
+                    build_tree_scratch,
+                    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
+                    is_identity_metric, metric_is_diag, inv_diag);
                 // For direction=-1 outer mapping: draw_neg <- callee's new_draw_neg.
                 // So caller's cached_raw_grad_neg <- callee's cached_at_new_draw_neg.
                 cached_raw_grad_neg = cached_at_new_draw_neg_after;
@@ -490,7 +646,11 @@ internal::nuts_impl(
                     new_draw, draw_pos, dummy_draw, mntm_pos, dummy_mntm,
                     n_p_val, s_p_val, alpha_val, n_alpha_val, rand_engine, target_data,
                     cached_raw_grad_pos, cached_at_new_draw_pos_after, cached_at_new_draw_neg_after,
-                    new_draw_box_U, new_draw_grad);
+                    new_draw_box_U, new_draw_grad,
+                    // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
+                    build_tree_scratch,
+                    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
+                    is_identity_metric, metric_is_diag, inv_diag);
                 // For direction=+1 outer mapping: draw_pos <- callee's new_draw_pos.
                 // So caller's cached_raw_grad_pos <- callee's cached_at_new_draw_pos.
                 cached_raw_grad_pos = cached_at_new_draw_pos_after;
@@ -584,6 +744,17 @@ internal::nuts_impl(
             // Mark that persistent state is valid (adapt_iter > 0)
             settings_inp->nuts_settings.adapt_iter_persist = 1;
         }
+
+        // FORK MARKER (2026-07-26, JZ): SAFE-SPEEDUP Fix #2, cache write-back.
+        // Stamp the cache with what we just computed / reused. Only write
+        // matrices back when we actually rebuilt (cache_hit==false), else the
+        // cached ones are already stored. Always update the flag+n_vals.
+        if (!cache_hit) {
+            settings_inp->nuts_settings.precond_inv_cache  = inv_precond_matrix;
+            settings_inp->nuts_settings.precond_sqrt_cache = sqrt_precond_matrix;
+        }
+        settings_inp->nuts_settings.precond_cache_n_vals = n_vals;
+        settings_inp->nuts_settings.precond_cache_valid  = true;
     }
 
     //

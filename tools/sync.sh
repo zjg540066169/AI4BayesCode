@@ -32,6 +32,17 @@ rsync -a --exclude '.DS_Store' celerite/      r-pkg/inst/include/celerite/
 rsync -a --exclude '.DS_Store' libgp_kernels/ r-pkg/inst/include/libgp_kernels/
 echo "• include/AI4BayesCode -> python/_vendored_include/AI4BayesCode (core headers)"
 sync_dir include/AI4BayesCode python/AI4BayesCode/_vendored_include/AI4BayesCode
+# Vendored C++ deps that the core headers #include must ALSO reach the python
+# package, or python/_vendored_include/mcmclib drifts stale vs the synced
+# nuts_block.hpp (e.g. nuts_block.hpp references nuts_settings_t.precond_cache_valid
+# but a stale mcmclib lacks the field -> compile error). r-pkg gets these via the
+# whole-tree `sync_dir include r-pkg/inst/include` above; python needs them listed
+# explicitly because it only vendors include/AI4BayesCode by default.
+echo "• include/{mcmclib,eigen,autodiff,BaseMatrixOps} -> python/_vendored_include (vendored deps)"
+sync_dir include/mcmclib      python/AI4BayesCode/_vendored_include/mcmclib
+sync_dir include/eigen        python/AI4BayesCode/_vendored_include/eigen
+sync_dir include/autodiff     python/AI4BayesCode/_vendored_include/autodiff
+sync_dir include/BaseMatrixOps python/AI4BayesCode/_vendored_include/BaseMatrixOps
 
 echo "• bart_pure_cpp/ -> r-pkg/inst ; start.md -> both"
 sync_dir bart_pure_cpp  r-pkg/inst/bart_pure_cpp
