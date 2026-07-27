@@ -32,14 +32,23 @@
 //
 //  where SSE = sum_k (log I_obs[k] - log I_pred[k])^2.
 //
-//  Gradient:
-//      d/d beta  = central FD on ODE re-solve (mirrors ODE_SIR.cpp)
-//      d/d gamma = central FD on ODE re-solve
-//      d/d sigma = -(N+1)/sigma + SSE/sigma^3    (analytic)
+//  Gradient (Tier-2 forward sensitivity analysis, ode::rk45_sens):
+//      d/d beta  = sens_chain(dI/dbeta,  d lp/d I) - beta   (through-ODE + prior)
+//      d/d gamma = sens_chain(dI/dgamma, d lp/d I) - gamma
+//      d/d sigma = -(N+1)/sigma + SSE/sigma^3               (analytic)
 //
-//  ODE is solved ONCE per eval (center point); SSE is reused by both analytic
-//  and FD gradient. FD for beta/gamma re-solves ODE at ±h (4 extra solves for
-//  2 params).
+//  The gradient eval does ONE augmented ode::rk45_sens solve that returns both
+//  the trajectory (for the lp value + SSE) and S = d I(t)/d(beta,gamma). This
+//  replaces the old (2p+1)-FD-re-solve gradient with an EXACT, DETERMINISTIC
+//  gradient (no FD step size to tune, no differencing noise).
+//
+//  HONEST PERFORMANCE NOTE (measured on this model, rtol=1e-6): at this small
+//  size (n_state=3, n_param=2) the augmented solve is NOT faster in raw wall
+//  time than the 5 plain FD solves it replaces -- ~105 us (autodiff) vs ~34 us
+//  per gradient. The augmented system is larger and its per-step Jacobian cost
+//  dominates when n_param is small. The benefit here is gradient QUALITY, not
+//  speed; the wall-time ratio improves as n_param grows (one solve regardless
+//  of p). See the PERFORMANCE block in include/AI4BayesCode/ode_rk45.hpp.
 //
 //  Block decomposition
 //  -------------------
@@ -141,7 +150,7 @@ namespace ode         = AI4BayesCode::ode;
 
 namespace {
 
-// SIR RHS — identical to ODE_SIR.cpp.
+// SIR RHS (double / arma) — used for the y-trajectory (Tier-1 rk45 path).
 inline arma::vec sir_rhs(double /*t*/, const arma::vec& y,
                          const arma::vec& theta_ode) {
     const double beta  = theta_ode[0];
@@ -149,6 +158,24 @@ inline arma::vec sir_rhs(double /*t*/, const arma::vec& y,
     const double S = y[0], I = y[1], R = y[2];
     const double N = S + I + R;
     arma::vec dy(3);
+    dy[0] = -beta * S * I / N;
+    dy[1] =  beta * S * I / N - gamma * I;
+    dy[2] =  gamma * I;
+    return dy;
+}
+
+// Scalar-type-templated twin of sir_rhs. Used ONLY by ode::rk45_sens to build
+// the RHS Jacobians J_y, J_theta via autodiff forward-mode dual numbers (this
+// is what Stan's coupled sensitivity does). Encodes the SAME dynamics as
+// sir_rhs above; the two are cross-checked in tests_autodiff/test_ode_rk45_sens.
+template <typename T>
+inline std::vector<T> sir_rhs_ad(double /*t*/, const std::vector<T>& y,
+                                 const std::vector<T>& theta_ode) {
+    const T beta  = theta_ode[0];
+    const T gamma = theta_ode[1];
+    const T S = y[0], I = y[1], R = y[2];
+    const T N = S + I + R;
+    std::vector<T> dy(3);
     dy[0] = -beta * S * I / N;
     dy[1] =  beta * S * I / N - gamma * I;
     dy[2] =  gamma * I;
@@ -173,9 +200,19 @@ inline arma::vec solve_sir_I(double beta, double gamma,
 //
 //  lp = -(N+1)*log(sigma) - 0.5*SSE/sigma^2 - 0.5*(beta^2 + gamma^2)
 //
-//  Gradient:
-//    d/d beta, d/d gamma : central finite differences (re-solve ODE at ±h)
-//    d/d sigma           : analytic = -(N+1)/sigma + SSE/sigma^3
+//  Gradient (TIER 2 forward sensitivity analysis):
+//    d/d beta, d/d gamma : ONE augmented ode::rk45_sens solve gives the
+//                          parameter-Jacobian S(t) = d I(t)/d(beta,gamma);
+//                          sens_chain folds it against d lp/d I(t) to get the
+//                          exact through-ODE gradient (plus the -beta, -gamma
+//                          half-Normal prior terms). This REPLACES the old
+//                          central-FD-of-trajectory gradient, which re-solved
+//                          the ODE (2p+1) times and produced NOISY gradients
+//                          (the FD differenced two adaptive solves, each with
+//                          error ~rtol). Forward sensitivities give
+//                          analytic-quality (non-noisy) gradients -> better
+//                          NUTS mixing / fewer divergences.
+//    d/d sigma           : analytic = -(N+1)/sigma + SSE/sigma^3 (unchanged).
 //
 //  joint_nuts_block adds the POSITIVE-slice Jacobians (+log(beta), +log(gamma),
 //  +log(sigma)) internally. This function stays on the NATURAL scale.
@@ -196,104 +233,85 @@ double sir_joint_log_density(const arma::vec& theta_cat,
 
     const arma::vec& I_obs = ctx.at("I_obs");
     const std::size_t N    = I_obs.n_elem;
-
-    // --- Center ODE solve (reused by gradient too) -------------------------
-    arma::vec I_pred;
-    try {
-        I_pred = solve_sir_I(beta, gamma, ctx);
-    } catch (const std::exception&) {
-        if (grad_nat) grad_nat->set_size(3);
-        return -std::numeric_limits<double>::infinity();
-    }
-
-    // Guard: I_pred must be strictly positive everywhere.
-    for (arma::uword k = 0; k < N; ++k) {
-        if (!(I_pred[k] > 0.0)) {
-            if (grad_nat) grad_nat->set_size(3);
-            return -std::numeric_limits<double>::infinity();
-        }
-    }
-
-    // Compute SSE = sum_k (log I_obs[k] - log I_pred[k])^2
-    double sse = 0.0;
-    for (arma::uword k = 0; k < N; ++k) {
-        const double r = std::log(I_obs[k]) - std::log(I_pred[k]);
-        sse += r * r;
-    }
-
     const double Nd     = static_cast<double>(N);
     const double sigma2 = sigma * sigma;
     const double sigma3 = sigma2 * sigma;
 
-    // Joint log-density (each term exactly once):
-    //   likelihood: -N*log(sigma) - 0.5*SSE/sigma^2
-    //   Jeffreys:   -log(sigma)
-    //   theta prior: -0.5*(beta^2 + gamma^2)
-    const double lp =
-          -(Nd + 1.0) * std::log(sigma)
-        - 0.5 * sse / sigma2
-        - 0.5 * (beta * beta + gamma * gamma);
-
-    if (!grad_nat) return lp;
-
-    grad_nat->set_size(3);
-
-    // --- Analytic gradient w.r.t. sigma ------------------------------------
-    // d/d sigma = -(N+1)/sigma + SSE/sigma^3
-    (*grad_nat)[2] = -(Nd + 1.0) / sigma + sse / sigma3;
-
-    // --- Central FD gradient w.r.t. beta and gamma -------------------------
-    // Mirrors ODE_SIR.cpp's theta_log_density gradient, but uses the FULL
-    // joint log-density at ±h (so the SSE and prior are both included).
-    const double h = 1e-5;
-
-    // Helper: evaluate the full joint lp at a perturbed (beta, gamma).
-    auto eval_lp_at = [&](double b, double g) -> double {
-        if (b <= 0.0 || g <= 0.0) return -std::numeric_limits<double>::infinity();
-        arma::vec I_p;
-        try {
-            I_p = solve_sir_I(b, g, ctx);
-        } catch (...) {
-            return -std::numeric_limits<double>::infinity();
-        }
-        double sse_p = 0.0;
+    auto sse_of = [&](const arma::vec& I_pred, bool& ok) -> double {
+        ok = true;
+        double s = 0.0;
         for (arma::uword k = 0; k < N; ++k) {
-            if (!(I_p[k] > 0.0)) return -std::numeric_limits<double>::infinity();
-            const double r = std::log(I_obs[k]) - std::log(I_p[k]);
-            sse_p += r * r;
+            if (!(I_pred[k] > 0.0)) { ok = false; return 0.0; }
+            const double r = std::log(I_obs[k]) - std::log(I_pred[k]);
+            s += r * r;
         }
+        return s;
+    };
+    auto joint_lp = [&](double sse) {
+        //   likelihood: -N*log(sigma) - 0.5*SSE/sigma^2
+        //   Jeffreys:   -log(sigma)          theta prior: -0.5*(beta^2+gamma^2)
         return -(Nd + 1.0) * std::log(sigma)
-               - 0.5 * sse_p / sigma2
-               - 0.5 * (b * b + g * g);
+               - 0.5 * sse / sigma2
+               - 0.5 * (beta * beta + gamma * gamma);
     };
 
-    // d/d beta: perturb beta, keep gamma fixed.
-    {
-        const double b_plus  = beta + h;
-        double       b_minus = beta - h;
-        if (b_minus <= 0.0) b_minus = 1e-10;
-        const double lp_plus  = eval_lp_at(b_plus,  gamma);
-        const double lp_minus = eval_lp_at(b_minus, gamma);
-        if (std::isfinite(lp_plus) && std::isfinite(lp_minus)) {
-            (*grad_nat)[0] = (lp_plus - lp_minus) / (b_plus - b_minus);
-        } else {
-            (*grad_nat)[0] = 0.0;
+    // ---- Value-only path: a single (cheap) Tier-1 forward solve -----------
+    if (!grad_nat) {
+        arma::vec I_pred;
+        try { I_pred = solve_sir_I(beta, gamma, ctx); }
+        catch (const std::exception&) {
+            return -std::numeric_limits<double>::infinity();
         }
+        bool ok; const double sse = sse_of(I_pred, ok);
+        if (!ok) return -std::numeric_limits<double>::infinity();
+        return joint_lp(sse);
     }
 
-    // d/d gamma: perturb gamma, keep beta fixed.
-    {
-        const double g_plus  = gamma + h;
-        double       g_minus = gamma - h;
-        if (g_minus <= 0.0) g_minus = 1e-10;
-        const double lp_plus  = eval_lp_at(beta, g_plus);
-        const double lp_minus = eval_lp_at(beta, g_minus);
-        if (std::isfinite(lp_plus) && std::isfinite(lp_minus)) {
-            (*grad_nat)[1] = (lp_plus - lp_minus) / (g_plus - g_minus);
-        } else {
-            (*grad_nat)[1] = 0.0;
-        }
+    // ---- Gradient path: ONE augmented forward-sensitivity solve -----------
+    // Gives BOTH the trajectory (for the lp value + SSE) and S = d I/d theta,
+    // replacing the (2p+1) FD re-solves with a single adaptive solve.
+    grad_nat->set_size(3);
+    const arma::vec& y0    = ctx.at("y0");
+    const arma::vec& t_obs = ctx.at("t_obs");
+    const arma::vec theta_ode = { beta, gamma };
+
+    ode::rk45_sens_result r;
+    try {
+#ifdef AI4BAYESCODE_ODE_HAVE_AUTODIFF
+        // Preferred: autodiff forward-mode dual Jacobians (machine precision).
+        r = ode::rk45_sens(sir_rhs, sir_rhs_ad<autodiff::dual>,
+                           y0, t_obs, theta_ode, arma::uvec(),
+                           /*rtol=*/1e-6, /*atol=*/1e-6);
+#else
+        // Robust fallback: central-FD-of-RHS Jacobians (no autodiff needed).
+        r = ode::rk45_sens_fd(sir_rhs, y0, t_obs, theta_ode, arma::uvec(),
+                             /*rtol=*/1e-6, /*atol=*/1e-6);
+#endif
+    } catch (const std::exception&) {
+        return -std::numeric_limits<double>::infinity();
     }
+
+    const arma::vec I_pred = r.y.col(1);   // infected compartment
+    bool ok; const double sse = sse_of(I_pred, ok);
+    if (!ok) return -std::numeric_limits<double>::infinity();
+    const double lp = joint_lp(sse);
+
+    // d lp / d I_pred[k] = (log I_obs[k] - log I_pred[k]) / (sigma^2 * I_pred[k])
+    // Only the infected compartment (state index 1) enters the likelihood.
+    arma::mat dlp_dy(N, 3, arma::fill::zeros);
+    for (arma::uword k = 0; k < N; ++k)
+        dlp_dy(k, 1) = (std::log(I_obs[k]) - std::log(I_pred[k]))
+                       / (sigma2 * I_pred[k]);
+
+    // Chain the sensitivities into the through-ODE gradient; add the
+    // half-Normal(0,1) prior gradient (-beta, -gamma) which does NOT flow
+    // through the ODE.
+    const arma::vec g_ode = ode::sens_chain(r, dlp_dy);   // length 2
+    (*grad_nat)[0] = g_ode[0] - beta;
+    (*grad_nat)[1] = g_ode[1] - gamma;
+
+    // Analytic gradient w.r.t. sigma (unchanged): -(N+1)/sigma + SSE/sigma^3.
+    (*grad_nat)[2] = -(Nd + 1.0) / sigma + sse / sigma3;
 
     return lp;
 }
@@ -585,7 +603,8 @@ RCPP_MODULE(ODE_SIR_module) {
             "infected counts > 0 at each t_obs), rng_seed, keep_history. "
             "Infers (beta, gamma, sigma) jointly via one joint_nuts_block. "
             "Priors: beta,gamma ~ half-Normal(0,1); sigma ~ Jeffreys. "
-            "Gradient w.r.t. beta/gamma via central FD; w.r.t. sigma analytic.")
+            "Gradient w.r.t. beta/gamma via forward sensitivity analysis "
+            "(ode::rk45_sens); w.r.t. sigma analytic.")
         .method("step", (void (ODE_SIR::*)())    &ODE_SIR::step, "Run one sweep.")
         .method("step", (void (ODE_SIR::*)(int)) &ODE_SIR::step, "Run n sweeps.")
         .method("get_current",  &ODE_SIR::get_current)
@@ -618,8 +637,8 @@ PYBIND11_MODULE(ODE_SIR, m) {
              pybind11::arg("keep_history") = false,
              "Joint-NUTS SIR ODE model. Infers (beta, gamma, sigma) in one "
              "joint_nuts_block. Priors: beta,gamma ~ half-Normal(0,1); "
-             "sigma ~ Jeffreys. Gradient w.r.t. beta/gamma via central FD; "
-             "w.r.t. sigma analytic.")
+             "sigma ~ Jeffreys. Gradient w.r.t. beta/gamma via forward "
+             "sensitivity analysis (ode::rk45_sens); w.r.t. sigma analytic.")
         .def("step", (void (ODE_SIR::*)())    &ODE_SIR::step, "Run one sweep.")
         .def("step", (void (ODE_SIR::*)(int)) &ODE_SIR::step, pybind11::arg("n_steps"))
         .def("get_current",  &ODE_SIR::get_current)

@@ -360,6 +360,33 @@ rank -- do NOT read "item 1" as "try this first":
    `block_catalogue/index.md` **"GP convergence troubleshooting ladder"**
    for the full escalation order, and **"GP composition recipes"**
    for heteroscedastic / hierarchical / multi-output GP patterns.
+
+   ### ODE-model gradients: forward sensitivities, NOT trajectory FD
+
+   For a mechanistic / compartmental / pharmacokinetic ODE model whose
+   likelihood depends on the solved trajectory y(t; theta), do NOT get
+   the NUTS gradient by finite-differencing the whole ODE solve
+   (re-solving at theta +/- h per parameter). That FD-of-TRAJECTORY
+   differences two adaptive solves, each carrying integration error
+   ~rtol, so the gradient is NOISY (relative noise ~ rtol/h) and it
+   costs (2p+1) full solves per gradient. Instead use forward
+   sensitivity analysis: `AI4BayesCode::ode::rk45_sens(f, f_ad, y0, ts,
+   theta, ...)` integrates the augmented system for both y(t) and
+   S(t) = d y/d theta in ONE adaptive solve, and
+   `ode::sens_chain(result, dlp_dy)` folds S against d(log lik)/d y to
+   give an EXACT, DETERMINISTIC gradient (no FD step size to tune, no
+   differencing noise). `f_ad` is the RHS templated on scalar type (for
+   autodiff Jacobians); if templating the RHS is awkward, `rk45_sens_fd`
+   central-differences the CHEAP RHS instead -- far more accurate than
+   FD of the trajectory because there is no ODE-solve-error
+   amplification. Seed initial-condition sensitivities via the `S0`
+   argument when some parameters ARE initial conditions. HONEST perf:
+   the augmented system has n_state*(1+p) components, so the win is
+   gradient QUALITY (better mixing / fewer divergences) rather than a
+   guaranteed wall-time speedup -- for small p the augmented solve can
+   be SLOWER than the (2p+1) plain solves; the ratio improves as p grows
+   or each solve is expensive. MEASURE; do not assume a speedup. See
+   `include/AI4BayesCode/ode_rk45.hpp` (TIER 2 API + PERFORMANCE block).
 8. **`gmrf_precision_block`** -- Gaussian Markov Random Field latent
    (sparse precision matrix Q). Rue 2001 sparse-Cholesky direct
    sampler via Eigen SimplicialLLT + AMD reordering, with optional
