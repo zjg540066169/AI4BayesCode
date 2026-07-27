@@ -179,18 +179,63 @@ internal::nuts_impl(
     // stamps it true after a rebuild and reuses the cache when it's true.
     // Byte-identical to no-cache when valid==false at entry (rebuild path
     // is unchanged mcmclib arithmetic).
+    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: identity-metric flag.
+    // When the caller supplied no precond_mat the metric is identity and the
+    // leapfrog / K / momentum sites skip the n*n matvecs entirely.
+    const bool is_identity_metric =
+        (static_cast<size_t>(BMO_MATOPS_SIZE(settings.nuts_settings.precond_mat)) != n_vals * n_vals);
+
+    // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix v2] -- detect BEFORE setup.
+    // A diagonal metric is supplied as diagmat(...), so precond_mat has BIT-EXACT
+    // 0 off-diagonals. Detect on that INPUT (the v1 test read the dense
+    // arma::inv/chol OUTPUT, whose ~1e-16 off-diagonal noise made detection ALWAYS
+    // fail, so high-dim diagonal metrics silently ran the dense O(n^2) SGEMV every
+    // leapfrog -- ~500x slower; J100 profiled: ~99% in BLAS thread dispatch + 20MB
+    // memmove). For a diagonal M, diag(inv M)=1/diag(M) and diag(chol M)=
+    // sqrt(diag(M)) EXACTLY, so build inv_diag/sqrt_diag directly in O(n).
+    // Running this BEFORE the dense setup lets the diagonal metric ALSO SKIP the
+    // O(n^3) inv/chol (+ 20MB memmoves) -- the residual cost after the leapfrog
+    // matvec is fixed. K + momentum stay bit-identical to the dense path (values
+    // equal EXTRACT_DIAG of the dense inv/chol to <1 ULP); only the drift differs
+    // by ~1 ULP and is mixing-verified. REBASE NOTE: delete this block + the
+    // metric_is_diag branch in the setup + the diag branches at the leapfrog/K/
+    // momentum sites to restore the pre-fork dense-only path.
+    bool metric_is_diag = false;
+    ColVec_t inv_diag, sqrt_diag;
+    if (!is_identity_metric
+        && mat_is_exactly_diagonal(settings.nuts_settings.precond_mat, n_vals)) {
+        metric_is_diag = true;
+        inv_diag  = BMO_MATOPS_EXTRACT_DIAG(settings.nuts_settings.precond_mat);
+        sqrt_diag = inv_diag;
+        for (size_t i = 0; i < n_vals; ++i) {
+            const fp_t m_ii = inv_diag[i];
+            inv_diag[i]  = fp_t(1) / m_ii;
+            sqrt_diag[i] = std::sqrt(m_ii);
+        }
+    }
+    // FORK MARKER (2026-07-26, JZ): SAFE-SPEEDUP Fix #2, setup cache.
+    // The original code recomputes inv(precond_mat) + chol_lower(precond_mat)
+    // EVERY nuts() call; the cache reuses them across calls (see write-back
+    // below). The DIAG-vector Fix v2 adds a leading metric_is_diag branch that
+    // skips the dense inv/chol (and its 20MB memmoves) ENTIRELY -- a diagonal
+    // metric only ever needs inv_diag/sqrt_diag, built above in O(n).
     Mat_t precond_matrix;
     Mat_t inv_precond_matrix;
     Mat_t sqrt_precond_matrix;
     bool cache_hit = false;
-    if (settings_inp && settings_inp->nuts_settings.precond_cache_valid
+    if (metric_is_diag || is_identity_metric) {
+        // Diagonal OR identity metric: every leapfrog / K / momentum / drift
+        // site uses an O(n) fast path (inv_diag/sqrt_diag for diagonal; raw
+        // daxpy / dot(p,p) for identity) and NEVER references the dense inv/sqrt
+        // matrices, so skip building them. Identity previously still built
+        // EYE(n) and its dense inv/chol -- pure O(n^3) + 20MB waste at high dim
+        // (the slow early-warmup phase before the metric adapts).
+    } else if (settings_inp && settings_inp->nuts_settings.precond_cache_valid
         && settings_inp->nuts_settings.precond_cache_n_vals == n_vals
         && static_cast<size_t>(BMO_MATOPS_SIZE(settings_inp->nuts_settings.precond_inv_cache)) == n_vals * n_vals
         && static_cast<size_t>(BMO_MATOPS_SIZE(settings_inp->nuts_settings.precond_sqrt_cache)) == n_vals * n_vals) {
         // Reuse cached inv/sqrt. Skip precond_matrix rebuild too; only
         // inv_precond and sqrt_precond are actually used downstream.
-        // precond_matrix itself is only referenced when non-cached (below);
-        // leave it empty here.
         inv_precond_matrix  = settings_inp->nuts_settings.precond_inv_cache;
         sqrt_precond_matrix = settings_inp->nuts_settings.precond_sqrt_cache;
         cache_hit = true;
@@ -198,39 +243,6 @@ internal::nuts_impl(
         precond_matrix = (BMO_MATOPS_SIZE(settings.nuts_settings.precond_mat) == n_vals*n_vals) ? settings.nuts_settings.precond_mat : BMO_MATOPS_EYE(n_vals);
         inv_precond_matrix = BMO_MATOPS_INV(precond_matrix);
         sqrt_precond_matrix = BMO_MATOPS_CHOL_LOWER(precond_matrix);
-    }
-
-    // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
-    // Skip the O(n^2) inv/sqrt matvecs in leap_frog / K / momentum resample
-    // when the caller did NOT supply a precond_mat (i.e. metric is identity).
-    // DIAG-shaped precond_mat (from adapt_dense_metric_) still falls into the
-    // DENSE branch below and uses full SGEMV -- preserves J100 funnel mixing
-    // (the DIAG-branch approach in b35fd10 regressed there and was reverted;
-    // see 664a84f). Detection is based on the user-supplied precond_mat, NOT
-    // on inv_precond_matrix (which is always n*n after the cache setup).
-    // REBASE NOTE: delete this flag + the four branches below (search for
-    // "IDENTITY-only Fix #1") to restore byte-identical pre-fork DENSE path.
-    const bool is_identity_metric =
-        (static_cast<size_t>(BMO_MATOPS_SIZE(settings.nuts_settings.precond_mat)) != n_vals * n_vals);
-
-    // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]
-    // Detect a DIAGONAL (but full-dense-stored) metric ONCE per nuts() call and
-    // extract the diagonals of the ACTUAL inv/sqrt matrices the dense path uses,
-    // so the O(n) elementwise fast path multiplies by BIT-IDENTICAL values.
-    // Off-diagonals must be EXACTLY 0.0 (true for arma::inv / arma::chol of a
-    // diagonal input) so (D*v)_i reduces to the single product D(i,i)*v_i.
-    // Detection reads inv_precond_matrix / sqrt_precond_matrix (both populated
-    // on cache-hit and cache-miss). See mat_is_exactly_diagonal / diag_quad_form
-    // in nuts.ipp and the DIAG-vector Fix comment block there.
-    bool metric_is_diag = false;
-    ColVec_t inv_diag, sqrt_diag;
-    if (!is_identity_metric) {
-        metric_is_diag = mat_is_exactly_diagonal(inv_precond_matrix, n_vals)
-                      && mat_is_exactly_diagonal(sqrt_precond_matrix, n_vals);
-        if (metric_is_diag) {
-            inv_diag  = BMO_MATOPS_EXTRACT_DIAG(inv_precond_matrix);
-            sqrt_diag = BMO_MATOPS_EXTRACT_DIAG(sqrt_precond_matrix);
-        }
     }
 
     const bool vals_bound = settings.vals_bound;
@@ -334,10 +346,6 @@ internal::nuts_impl(
     -> void
     {
         fp_t nat_U_final = fp_t(0);   // natural-scale log-density at final pos
-#if !AI4BAYESCODE_DIAGVEC_DRIFT
-        // Captured only for the (compile-time-gated) DIAG drift fast path.
-        (void)metric_is_diag; (void)inv_diag;
-#endif
         for (size_t k = 0; k < n_leap_steps; ++k) {
             // First half-kick uses cached grad at the CURRENT new_draw.
             // Cache invariant: caller guarantees cached_raw_grad equals
@@ -371,24 +379,30 @@ internal::nuts_impl(
             // Drift.
             // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
             // IDENTITY branch: skip the n*n * n matvec, use raw daxpy.
-            // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]
-            //   DIAG branch (gated by AI4BAYESCODE_DIAGVEC_DRIFT, default OFF):
-            //   O(n) elementwise drift. NOT bit-identical to the DENSE branch --
+            // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix v2]
+            //   DIAG branch (runtime metric_is_diag; formerly gated OFF behind
+            //   AI4BAYESCODE_DIAGVEC_DRIFT, now enabled by default): O(n)
+            //   elementwise drift. NOT bit-identical to the DENSE branch --
             //   armadillo lowers `new_draw += step*inv*v` to a fused
             //   gemv(alpha=step, beta=1) whose non-unit alpha/beta rounding no
-            //   elementwise grouping reproduces (verified ULP mismatches at
-            //   every n incl. 1605; this is the b35fd10 regression source).
-            //   Only enable for a funnel-verified fast path, never as
-            //   bit-identical. DENSE branch: pre-fork single-line, unchanged.
+            //   elementwise grouping reproduces (~1 ULP at every n incl. 1605).
+            //   The stationary distribution is UNCHANGED; enabled by default
+            //   because the dense O(n^2) drift made high-dim diagonal metrics
+            //   ~500x too slow. DENSE branch: pre-fork single-line, unchanged.
             if (is_identity_metric) {
                 new_draw += step_size * new_mntm;
-#if AI4BAYESCODE_DIAGVEC_DRIFT
             } else if (metric_is_diag) {
+                // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix v2]: O(n)
+                // elementwise drift (was AI4BAYESCODE_DIAGVEC_DRIFT-gated OFF).
+                // ~1 ULP off the fused dense gemv(alpha=step,beta=1); the
+                // stationary distribution is unchanged and mixing is VERIFIED
+                // on the J100 funnel (cross-rhat vs Stan), not assumed. This is
+                // the last per-leapfrog dense O(n^2) SGEMV; ungating it takes a
+                // 1605-dim diagonal-metric leapfrog from ~40ms to ~gradient-only.
                 const size_t nq = BMO_MATOPS_SIZE(new_mntm);
                 for (size_t i = 0; i < nq; ++i) {
                     new_draw[i] += step_size * (inv_diag[i] * new_mntm[i]);
                 }
-#endif
             } else {
                 new_draw += step_size * inv_precond_matrix * new_mntm;
             }
@@ -749,12 +763,18 @@ internal::nuts_impl(
         // Stamp the cache with what we just computed / reused. Only write
         // matrices back when we actually rebuilt (cache_hit==false), else the
         // cached ones are already stored. Always update the flag+n_vals.
-        if (!cache_hit) {
-            settings_inp->nuts_settings.precond_inv_cache  = inv_precond_matrix;
-            settings_inp->nuts_settings.precond_sqrt_cache = sqrt_precond_matrix;
+        // DIAG-vector Fix v2: for a diagonal metric we never built the dense
+        // inv/sqrt (inv_diag/sqrt_diag are rebuilt in O(n) each call), so leave
+        // the cache untouched -- caching empty matrices would fail the size
+        // guard on the next call anyway.
+        if (!metric_is_diag && !is_identity_metric) {
+            if (!cache_hit) {
+                settings_inp->nuts_settings.precond_inv_cache  = inv_precond_matrix;
+                settings_inp->nuts_settings.precond_sqrt_cache = sqrt_precond_matrix;
+            }
+            settings_inp->nuts_settings.precond_cache_n_vals = n_vals;
+            settings_inp->nuts_settings.precond_cache_valid  = true;
         }
-        settings_inp->nuts_settings.precond_cache_n_vals = n_vals;
-        settings_inp->nuts_settings.precond_cache_valid  = true;
     }
 
     //

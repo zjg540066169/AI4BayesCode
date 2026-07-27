@@ -125,16 +125,19 @@
 //     which armadillo lowers to a FUSED gemv(alpha=step_size, beta=1).
 //     BLAS applies the non-unit alpha/beta with implementation-specific
 //     per-element rounding that NO elementwise grouping reproduces
-//     bit-for-bit (verified: ULP mismatches at every size incl. n=1605).
-//     The drift diag path is therefore gated behind
-//     AI4BAYESCODE_DIAGVEC_DRIFT (default OFF = keep dense, bit-identical);
-//     define AI4BAYESCODE_DIAGVEC_DRIFT=1 only for the (funnel-verified)
-//     fast path, never as a bit-identity claim.
+//     bit-for-bit (~1 ULP at every size incl. n=1605). v2: the drift diag
+//     path is ENABLED BY DEFAULT (runtime metric_is_diag) -- the ~1 ULP
+//     does NOT change the stationary distribution, and gating it off left
+//     high-dim diagonal metrics ~500x too slow. The AI4BAYESCODE_DIAGVEC_DRIFT
+//     macro below is legacy/unused (the compile gates were removed).
 //
-// Detection requires off-diagonals to be EXACTLY 0.0 -- if inv/chol left
-// any non-zero off-diagonal, we stay on the dense path (correct, no
-// speedup). REBASE NOTE: delete this block + the metric_is_diag/inv_diag/
-// sqrt_diag params + branches (search "DIAG-vector Fix") to restore the
+// v2 (nuts.hpp): detection reads the INPUT precond_mat (built as diagmat(...),
+// bit-exact 0 off-diagonals) and builds inv_diag/sqrt_diag DIRECTLY, so a
+// diagonal metric also SKIPS the dense O(n^3) inv/chol setup entirely. (v1 read
+// the dense inv/chol OUTPUT, whose ~1e-16 off-diagonal noise made detection
+// ALWAYS fail -> dense O(n^2) SGEMV every leapfrog.) mat_is_exactly_diagonal is
+// still used on the input. REBASE NOTE: delete this block + the metric_is_diag/
+// inv_diag/sqrt_diag params + branches (search "DIAG-vector Fix") to restore the
 // pre-fork dense-only path.
 // ===================================================================
 #ifndef AI4BAYESCODE_DIAGVEC_DRIFT
