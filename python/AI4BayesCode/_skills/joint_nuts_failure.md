@@ -52,6 +52,13 @@ hyperparameter is a standard deviation OR a variance:
 ```
 (A) SD-parameterized:
     scale ~ HalfNormal / HalfCauchy / Exponential            (a POSITIVE sd)
+      -- OR a BOUNDED sd: scale ~ Uniform(0, U) / any INTERVAL(lo, U) prior
+         (the classic multilevel default). The funnel geometry is IDENTICAL:
+         the scale slice is INTERVAL not POSITIVE, but raw_j ~ Normal(loc,
+         scale) still forms the neck. Do NOT dismiss a bounded/Uniform scale
+         prior as a non-funnel because the slice is INTERVAL -- it IS Mode 1,
+         and the NCR fix + funnel-mixing risk apply exactly as in the
+         POSITIVE-sd case.
     for j:  raw_j ~ Normal(<loc>, scale * <const>)           (sd used DIRECTLY)
 
 (B) VARIANCE- or PRECISION-parameterized -- the Gaussian-hierarchical / ARD /
@@ -98,9 +105,11 @@ NCR". The general dominant form is partial non-centering `theta_j := mu + a*tau*
 no Jacobian.
 
 Rules:
-- The `joint_nuts_block` contains `(mu [REAL], scale-or-variance [POSITIVE], eta_1..p [REAL])`.
-  The POSITIVE slice is `tau` (sd form) OR `sigma^2` (variance form); `theta_j` is built with
-  `tau*eta_j` or `sqrt(sigma^2)*eta_j` accordingly.
+- The `joint_nuts_block` contains `(mu [REAL], scale-or-variance [POSITIVE or INTERVAL], eta_1..p [REAL])`.
+  The scale slice is `tau` (sd form) OR `sigma^2` (variance form); constraint is POSITIVE
+  for an unbounded scale, or INTERVAL(lo, U) for a bounded/Uniform-prior scale. `theta_j`
+  is built with `tau*eta_j` or `sqrt(sigma^2)*eta_j` accordingly; the slice's own
+  constraint (`positive::wrap` OR `interval::wrap`) supplies `log|J|` automatically.
 - `theta_j` is **computed inside the natural-scale log-density** (to evaluate the
   likelihood) and, if a downstream block needs it, in a **deterministic
   refresher** reading mu/tau/eta -- it is NEVER a sampled sub-parameter.
