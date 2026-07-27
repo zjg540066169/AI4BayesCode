@@ -213,6 +213,26 @@ internal::nuts_impl(
     const bool is_identity_metric =
         (static_cast<size_t>(BMO_MATOPS_SIZE(settings.nuts_settings.precond_mat)) != n_vals * n_vals);
 
+    // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]
+    // Detect a DIAGONAL (but full-dense-stored) metric ONCE per nuts() call and
+    // extract the diagonals of the ACTUAL inv/sqrt matrices the dense path uses,
+    // so the O(n) elementwise fast path multiplies by BIT-IDENTICAL values.
+    // Off-diagonals must be EXACTLY 0.0 (true for arma::inv / arma::chol of a
+    // diagonal input) so (D*v)_i reduces to the single product D(i,i)*v_i.
+    // Detection reads inv_precond_matrix / sqrt_precond_matrix (both populated
+    // on cache-hit and cache-miss). See mat_is_exactly_diagonal / diag_quad_form
+    // in nuts.ipp and the DIAG-vector Fix comment block there.
+    bool metric_is_diag = false;
+    ColVec_t inv_diag, sqrt_diag;
+    if (!is_identity_metric) {
+        metric_is_diag = mat_is_exactly_diagonal(inv_precond_matrix, n_vals)
+                      && mat_is_exactly_diagonal(sqrt_precond_matrix, n_vals);
+        if (metric_is_diag) {
+            inv_diag  = BMO_MATOPS_EXTRACT_DIAG(inv_precond_matrix);
+            sqrt_diag = BMO_MATOPS_EXTRACT_DIAG(sqrt_precond_matrix);
+        }
+    }
+
     const bool vals_bound = settings.vals_bound;
     
     const ColVec_t lower_bounds = settings.lower_bounds;
@@ -310,10 +330,14 @@ internal::nuts_impl(
     // The caller (nuts_build_tree base case) uses this instead of a separate
     // box_log_kernel_fn(new_draw, nullptr) re-evaluation. Bit-equivalent.
     std::function<void (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data)> leap_frog_fn \
-    = [target_log_kernel, raw_grad_fn, inv_precond_matrix, is_identity_metric, vals_bound, bounds_type, lower_bounds, upper_bounds] (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data) \
+    = [target_log_kernel, raw_grad_fn, inv_precond_matrix, is_identity_metric, metric_is_diag, inv_diag, vals_bound, bounds_type, lower_bounds, upper_bounds] (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data) \
     -> void
     {
         fp_t nat_U_final = fp_t(0);   // natural-scale log-density at final pos
+#if !AI4BAYESCODE_DIAGVEC_DRIFT
+        // Captured only for the (compile-time-gated) DIAG drift fast path.
+        (void)metric_is_diag; (void)inv_diag;
+#endif
         for (size_t k = 0; k < n_leap_steps; ++k) {
             // First half-kick uses cached grad at the CURRENT new_draw.
             // Cache invariant: caller guarantees cached_raw_grad equals
@@ -347,12 +371,24 @@ internal::nuts_impl(
             // Drift.
             // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
             // IDENTITY branch: skip the n*n * n matvec, use raw daxpy.
-            // DENSE branch: pre-fork single-line (works for both DIAG-shaped
-            // and full-dense precond_mat -- DIAG-shaped is a full-dense
-            // matvec with off-diagonal zeros; we intentionally do NOT special-
-            // case DIAG here, per b35fd10 regression).
+            // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]
+            //   DIAG branch (gated by AI4BAYESCODE_DIAGVEC_DRIFT, default OFF):
+            //   O(n) elementwise drift. NOT bit-identical to the DENSE branch --
+            //   armadillo lowers `new_draw += step*inv*v` to a fused
+            //   gemv(alpha=step, beta=1) whose non-unit alpha/beta rounding no
+            //   elementwise grouping reproduces (verified ULP mismatches at
+            //   every n incl. 1605; this is the b35fd10 regression source).
+            //   Only enable for a funnel-verified fast path, never as
+            //   bit-identical. DENSE branch: pre-fork single-line, unchanged.
             if (is_identity_metric) {
                 new_draw += step_size * new_mntm;
+#if AI4BAYESCODE_DIAGVEC_DRIFT
+            } else if (metric_is_diag) {
+                const size_t nq = BMO_MATOPS_SIZE(new_mntm);
+                for (size_t i = 0; i < nq; ++i) {
+                    new_draw[i] += step_size * (inv_diag[i] * new_mntm[i]);
+                }
+#endif
             } else {
                 new_draw += step_size * inv_precond_matrix * new_mntm;
             }
@@ -394,7 +430,17 @@ internal::nuts_impl(
 
     // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
     // IDENTITY: p ~ N(0, I) = rand_vec directly.  DENSE: p ~ N(0, M) via chol.
-    ColVec_t mntm_vec = is_identity_metric ? rand_vec : sqrt_precond_matrix * rand_vec;
+    // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: DIAG p ~ N(0, M) via the
+    // elementwise sqrt-diagonal (bit-identical to the alpha=1 chol matvec).
+    ColVec_t mntm_vec;
+    if (is_identity_metric) {
+        mntm_vec = rand_vec;
+    } else if (metric_is_diag) {
+        mntm_vec.set_size(n_vals);
+        for (size_t i = 0; i < n_vals; ++i) mntm_vec[i] = sqrt_diag[i] * rand_vec[i];
+    } else {
+        mntm_vec = sqrt_precond_matrix * rand_vec;
+    }
 
     //
 
@@ -420,7 +466,7 @@ internal::nuts_impl(
         h_val = 0;
     } else {
         // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
-        step_size = nuts_find_initial_step_size(first_draw, mntm_vec, inv_precond_matrix, is_identity_metric, box_log_kernel_fn, raw_grad_fn, leap_frog_fn, target_data);
+        step_size = nuts_find_initial_step_size(first_draw, mntm_vec, inv_precond_matrix, is_identity_metric, metric_is_diag, inv_diag, box_log_kernel_fn, raw_grad_fn, leap_frog_fn, target_data);
         mu_val = std::log(10 * step_size);
         h_val = 0;
         epsilon_bar = fp_t(1);  // reset epsilon_bar at start of fresh adaptation
@@ -469,6 +515,9 @@ internal::nuts_impl(
     for (auto& slot : build_tree_scratch) {
         slot.leaf_new_mntm.set_size(n_vals);
         slot.leaf_local_raw_grad.set_size(n_vals);
+        // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: pre-size the leaf
+        // diagonal-matvec temporary so the hot leaf path never reallocs.
+        slot.leaf_metric_w.set_size(n_vals);
         slot.new_draw_p.set_size(n_vals);
         slot.cached_at_first_pos.set_size(n_vals);
         slot.cached_at_first_neg.set_size(n_vals);
@@ -487,14 +536,26 @@ internal::nuts_impl(
 
     size_t n_accept = 0;
 
+    // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: reused elementwise matvec
+    // temporary for the per-draw diagonal K quadratic form (one resize, then
+    // reused each draw -- no per-draw allocation).
+    ColVec_t metric_w_main;
+
     for (size_t draw_ind = 0; draw_ind < n_total_draws; ++draw_ind) {
         bmo::stats::internal::rnorm_vec_inplace<fp_t>(n_vals, rand_engine, rand_vec);
 
         // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
         // Momentum resample + K, IDENTITY vs DENSE branches.
+        // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: DIAG branch --
+        // elementwise momentum (bit-identical alpha=1 chol matvec) + O(n)
+        // quadratic form (bit-identical to dense dot(p, inv*p)).
         if (is_identity_metric) {
             mntm_vec = rand_vec;
             prev_K = BMO_MATOPS_DOT_PROD(mntm_vec, mntm_vec) / fp_t(2);
+        } else if (metric_is_diag) {
+            mntm_vec.set_size(n_vals);
+            for (size_t i = 0; i < n_vals; ++i) mntm_vec[i] = sqrt_diag[i] * rand_vec[i];
+            prev_K = diag_quad_form(mntm_vec, inv_diag, metric_w_main) / fp_t(2);
         } else {
             mntm_vec = sqrt_precond_matrix * rand_vec;
             prev_K = BMO_MATOPS_DOT_PROD(mntm_vec, inv_precond_matrix * mntm_vec) / fp_t(2);
@@ -569,7 +630,7 @@ internal::nuts_impl(
                     // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
                     build_tree_scratch,
                     // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
-                    is_identity_metric);
+                    is_identity_metric, metric_is_diag, inv_diag);
                 // For direction=-1 outer mapping: draw_neg <- callee's new_draw_neg.
                 // So caller's cached_raw_grad_neg <- callee's cached_at_new_draw_neg.
                 cached_raw_grad_neg = cached_at_new_draw_neg_after;
@@ -589,7 +650,7 @@ internal::nuts_impl(
                     // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
                     build_tree_scratch,
                     // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
-                    is_identity_metric);
+                    is_identity_metric, metric_is_diag, inv_diag);
                 // For direction=+1 outer mapping: draw_pos <- callee's new_draw_pos.
                 // So caller's cached_raw_grad_pos <- callee's cached_at_new_draw_pos.
                 cached_raw_grad_pos = cached_at_new_draw_pos_after;

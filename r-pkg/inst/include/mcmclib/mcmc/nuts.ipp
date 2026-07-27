@@ -99,11 +99,85 @@
 // REBASE NOTE: delete this struct + the scratch_pool parameter and revert
 // to stack-local ColVec_t declarations to restore upstream mcmclib.
 // -------------------------------------------------------------------
+
+// ===================================================================
+// FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]
+//
+// When the preconditioner (mass) matrix supplied by the caller is a
+// DIAGONAL matrix stored as a full n*n dense matrix -- the shape that
+// joint_nuts_block::build_precond_ produces under use_diagonal_metric
+// (M = diagmat(1/var)) -- the DENSE branch pays a full O(n^2) SGEMV per
+// leapfrog drift and per leaf kinetic-energy evaluation, even though
+// every off-diagonal entry is exactly 0. This block adds the machinery
+// to detect that case ONCE per nuts() call (O(n^2), amortized over the
+// thousands of O(n^2) matvecs it replaces) and fall onto O(n) elementwise
+// ops.
+//
+// BIT-IDENTITY CONTRACT (see DIAGVEC probe results in the deliverable):
+//   * For a diagonal D, a plain (alpha=1) matvec (D*v)_i computed by BLAS
+//     gemv reduces to the single non-zero product D(i,i)*v_i with all
+//     other terms 0*v_j == 0 added exactly. So the elementwise form
+//     inv_diag_i * v_i is BIT-IDENTICAL to `inv_precond_matrix * v`, and
+//     the quadratic form dot(v, inv_precond*v) is bit-identical when the
+//     matvec temporary is built elementwise and fed to the SAME dot().
+//     This holds for the KINETIC-ENERGY and MOMENTUM sites (alpha=1).
+//   * The DRIFT site is `new_draw += step_size * inv_precond_matrix * v`,
+//     which armadillo lowers to a FUSED gemv(alpha=step_size, beta=1).
+//     BLAS applies the non-unit alpha/beta with implementation-specific
+//     per-element rounding that NO elementwise grouping reproduces
+//     bit-for-bit (verified: ULP mismatches at every size incl. n=1605).
+//     The drift diag path is therefore gated behind
+//     AI4BAYESCODE_DIAGVEC_DRIFT (default OFF = keep dense, bit-identical);
+//     define AI4BAYESCODE_DIAGVEC_DRIFT=1 only for the (funnel-verified)
+//     fast path, never as a bit-identity claim.
+//
+// Detection requires off-diagonals to be EXACTLY 0.0 -- if inv/chol left
+// any non-zero off-diagonal, we stay on the dense path (correct, no
+// speedup). REBASE NOTE: delete this block + the metric_is_diag/inv_diag/
+// sqrt_diag params + branches (search "DIAG-vector Fix") to restore the
+// pre-fork dense-only path.
+// ===================================================================
+#ifndef AI4BAYESCODE_DIAGVEC_DRIFT
+    #define AI4BAYESCODE_DIAGVEC_DRIFT 0
+#endif
+
+// True iff every off-diagonal entry of the n*n matrix M is exactly 0.0.
+inline
+bool
+mat_is_exactly_diagonal(const Mat_t& M, const size_t n)
+{
+    for (size_t j = 0; j < n; ++j) {
+        for (size_t i = 0; i < n; ++i) {
+            if (i != j && M(i, j) != fp_t(0)) return false;
+        }
+    }
+    return true;
+}
+
+// dot(v, D*v) for a diagonal D given by its diagonal inv_diag, computed as
+// BMO_MATOPS_DOT_PROD(v, w) with w_i = inv_diag_i * v_i. Bit-identical to
+// dot(v, inv_precond_matrix * v) for an exactly-diagonal inv_precond_matrix
+// (the elementwise w equals the alpha=1 gemv result bit-for-bit, and the
+// dot is the SAME reduction). w_scratch is caller-owned to avoid per-call
+// allocation on the hot path; a set_size to the same length is a no-op.
+inline
+fp_t
+diag_quad_form(const ColVec_t& v, const ColVec_t& inv_diag, ColVec_t& w_scratch)
+{
+    const size_t n = BMO_MATOPS_SIZE(v);
+    w_scratch.set_size(n);
+    for (size_t i = 0; i < n; ++i) w_scratch[i] = inv_diag[i] * v[i];
+    return BMO_MATOPS_DOT_PROD(v, w_scratch);
+}
+
 struct build_tree_scratch_t {
     // Leaf case (tree_depth == 0). Mutually exclusive with recursive case;
     // kept as distinct slots for readability -- memory cost is trivial.
     ColVec_t leaf_new_mntm;
     ColVec_t leaf_local_raw_grad;
+    // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: elementwise matvec
+    // temporary w_i = inv_diag_i * new_mntm_i for the leaf kinetic energy.
+    ColVec_t leaf_metric_w;
 
     // First-subtree outputs (must survive across the SECOND subtree call).
     // The callee writes into pool[d-1]; these live in pool[d] so aliasing is
@@ -144,6 +218,11 @@ nuts_find_initial_step_size(
     // dot(p,p)/2. Same result byte-wise as inv_precond_matrix == I; only
     // the flops differ.
     const bool is_identity_metric,
+    // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: diagonal-metric flag +
+    // its diagonal. When set, the O(n^2) K matvecs use the O(n) elementwise
+    // quadratic form (bit-identical to the dense dot(p, inv*p)).
+    const bool metric_is_diag,
+    const ColVec_t& inv_diag,
     std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data)> box_log_kernel_fn,
     std::function<fp_t (const ColVec_t& pos_inp, ColVec_t& raw_grad_out, void* target_data)> raw_grad_fn,
     std::function<void (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data)> leap_frog_fn,
@@ -152,6 +231,10 @@ nuts_find_initial_step_size(
 {
     fp_t step_size = fp_t(1); // initial value
     fp_t leap_U_unused = fp_t(0);  // value-cache out param (warmup: unused)
+
+    // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: elementwise matvec temp
+    // for the diagonal K quadratic form (not on the hot per-leaf path).
+    ColVec_t metric_w;
 
     //
 
@@ -162,9 +245,12 @@ nuts_find_initial_step_size(
     }
 
     // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
+    // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: diag branch (bit-identical)
     fp_t prev_K = is_identity_metric
         ? BMO_MATOPS_DOT_PROD(mntm_vec, mntm_vec) / fp_t(2)
-        : BMO_MATOPS_DOT_PROD(mntm_vec, inv_precond_matrix * mntm_vec) / fp_t(2);
+        : metric_is_diag
+            ? diag_quad_form(mntm_vec, inv_diag, metric_w) / fp_t(2)
+            : BMO_MATOPS_DOT_PROD(mntm_vec, inv_precond_matrix * mntm_vec) / fp_t(2);
 
     //
 
@@ -186,9 +272,12 @@ nuts_find_initial_step_size(
     }
 
     // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
+    // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: diag branch (bit-identical)
     fp_t prop_K = is_identity_metric
         ? BMO_MATOPS_DOT_PROD(new_mntm, new_mntm) / fp_t(2)
-        : BMO_MATOPS_DOT_PROD(new_mntm, inv_precond_matrix * new_mntm) / fp_t(2);
+        : metric_is_diag
+            ? diag_quad_form(new_mntm, inv_diag, metric_w) / fp_t(2)
+            : BMO_MATOPS_DOT_PROD(new_mntm, inv_precond_matrix * new_mntm) / fp_t(2);
 
     //
 
@@ -237,10 +326,13 @@ nuts_find_initial_step_size(
         }
 
         // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
+        // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: diag branch (bit-identical)
         prop_K = is_identity_metric
             ? BMO_MATOPS_DOT_PROD(new_mntm, new_mntm) / fp_t(2)
-            : BMO_MATOPS_DOT_PROD(new_mntm, inv_precond_matrix * new_mntm)
-              / fp_t(2);
+            : metric_is_diag
+                ? diag_quad_form(new_mntm, inv_diag, metric_w) / fp_t(2)
+                : BMO_MATOPS_DOT_PROD(new_mntm, inv_precond_matrix * new_mntm)
+                  / fp_t(2);
 
         max_steps--;
     }
@@ -298,7 +390,12 @@ nuts_build_tree(
     // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: identity metric
     // fast-path flag. When true, the leaf's prop_K uses dot(p,p)/2 instead
     // of a full O(n^2) matvec through inv_precond_matrix. Rebase: drop.
-    const bool is_identity_metric
+    const bool is_identity_metric,
+    // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: diagonal-metric flag +
+    // its diagonal. When set, the leaf's prop_K uses the O(n) elementwise
+    // quadratic form (bit-identical to dense dot(p, inv*p)). Rebase: drop.
+    const bool metric_is_diag,
+    const ColVec_t& inv_diag
 )
 {
     const fp_t max_tuning_par = 1000;
@@ -331,9 +428,15 @@ nuts_build_tree(
         if (!std::isfinite(prop_U)) prop_U = posinf;
 
         // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]
+        // FORK MARKER (2026-07-27, JZ) [DIAG-vector Fix]: diag branch. Uses the
+        // pool-backed scratch.leaf_metric_w so the hot leaf path allocates
+        // nothing. Bit-identical to the dense dot(p, inv*p) for exactly-diagonal
+        // inv_precond_matrix.
         fp_t prop_K = is_identity_metric
             ? BMO_MATOPS_DOT_PROD(new_mntm, new_mntm) / fp_t(2)
-            : BMO_MATOPS_DOT_PROD(new_mntm, inv_precond_matrix * new_mntm) / fp_t(2);
+            : metric_is_diag
+                ? diag_quad_form(new_mntm, inv_diag, scratch.leaf_metric_w) / fp_t(2)
+                : BMO_MATOPS_DOT_PROD(new_mntm, inv_precond_matrix * new_mntm) / fp_t(2);
 
         n_val = (log_rand_val <= - prop_U - prop_K);
         s_val = (log_rand_val < max_tuning_par - prop_U - prop_K);
@@ -380,7 +483,7 @@ nuts_build_tree(
             // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
             scratch_pool,
             // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
-            is_identity_metric);
+            is_identity_metric, metric_is_diag, inv_diag);
 
         // After first sub-tree: new_draw_pos/neg are the first sub-tree's
         // boundaries; cached_at_first_pos/neg are aligned with them.
@@ -425,7 +528,7 @@ nuts_build_tree(
                     // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
                     scratch_pool,
                     // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
-                    is_identity_metric);
+                    is_identity_metric, metric_is_diag, inv_diag);
                 // mcmclib boundary mapping for direction=-1 second sub-tree:
                 //   arg 13 = callee's new_draw_pos -> caller's new_draw_neg (UPDATED via swap)
                 //   arg 14 = callee's new_draw_neg -> dummy_draw (lost)
@@ -458,7 +561,7 @@ nuts_build_tree(
                     // FORK MARKER (2026-07-26, JZ) [Fix #3]: thread scratch pool.
                     scratch_pool,
                     // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
-                    is_identity_metric);
+                    is_identity_metric, metric_is_diag, inv_diag);
                 // mcmclib boundary mapping for direction=+1 second sub-tree:
                 //   callee's new_draw_pos -> dummy_draw (lost)
                 //   callee's new_draw_neg -> caller's new_draw_pos (updated)
