@@ -265,14 +265,15 @@ model$predict_at(list(<X> = <X>_test))
 ##                                  fixed = list(sigma = 1))
 
 ## Advanced names (all valid in freeze / unfreeze / ctor helper's `fixed` names):
-##   "<slot_name>"                          -- joint_nuts_block slot-level freeze (Sec.10.a)
-##   "<slot_name>[k]"                        -- joint_nuts_block ELEMENT-level freeze (1-based k;
+##   "<component_name>"                     -- joint_nuts_block component-level freeze (Sec.10.a)
+##   "<component_name>[k]"                   -- joint_nuts_block ELEMENT-level freeze (1-based k;
 ##                                              matrices use column-major flat k). Only for
-##                                              PER-ELEMENT slots (REAL / POSITIVE / LOWER_BOUNDED /
-##                                              UPPER_BOUNDED / INTERVAL); a coupled/constrained slot
-##                                              (ORDERED / SIMPLEX / CORR_MATRIX / COV_MATRIX / ...)
-##                                              ERRORS -- freeze the whole slot instead. get_frozen()
-##                                              reports it back as "<slot>[k]".
+##                                              PER-ELEMENT components (REAL / POSITIVE /
+##                                              LOWER_BOUNDED / UPPER_BOUNDED / INTERVAL); a
+##                                              coupled/constrained component (ORDERED / SIMPLEX /
+##                                              CORR_MATRIX / COV_MATRIX / ...) ERRORS -- freeze the
+##                                              whole component instead. get_frozen() reports it
+##                                              back as "<component>[k]".
 ##   "<outer>.<inner_leaf>"                 -- nested composite dot-path (Sec.10.c)
 ##   "<rjmcmc_name>.gamma" / ".beta"        -- rjmcmc sub-key freeze (Sec.10.d)
 

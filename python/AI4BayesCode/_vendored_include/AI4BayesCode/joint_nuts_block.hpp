@@ -1028,8 +1028,8 @@ public:
             }
             throw std::runtime_error(
                 "joint_nuts_block '" + cfg_.name +
-                "': freeze_sub unknown slot '" + base +
-                "'; valid slot names: " + valid);
+                "': freeze_sub unknown component '" + base +
+                "'; valid component names: " + valid);
         }
         if (!has_index) {
             frozen_slots_.insert(base);                 // whole-slot freeze
@@ -1039,15 +1039,15 @@ public:
             if (!per_element_constraint_(sp.constraint)) {
                 throw std::runtime_error(
                     "joint_nuts_block '" + cfg_.name + "': element-level freeze '" +
-                    sub + "' is not defined for this slot's constraint (its natural "
+                    sub + "' is not defined for this component's constraint (its natural "
                     "entries are a coupled transform of the sampled unconstrained "
-                    "coordinates). Freeze the whole slot ('" + base + "'), or "
+                    "coordinates). Freeze the whole component ('" + base + "'), or "
                     "reparameterize so the target is a free coordinate.");
             }
             if (index0 >= sp.dim) {
                 throw std::runtime_error(
                     "joint_nuts_block '" + cfg_.name + "': element index in '" + sub +
-                    "' is out of range (slot '" + base + "' has " +
+                    "' is out of range (component '" + base + "' has " +
                     std::to_string(sp.dim) + " elements, 1-based).");
             }
             frozen_elems_[base].insert(index0);
