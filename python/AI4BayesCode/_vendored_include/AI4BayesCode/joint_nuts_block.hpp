@@ -92,6 +92,9 @@
 // include causes 3 joint-nuts tests to fail with a misleading
 // "block_sampler::unfreeze() cannot initialize object parameter" cascade.
 #include <unordered_set>
+#include <unordered_map>
+#include <set>
+#include <algorithm>
 
 #include "mcmclib/mcmc.hpp"
 
@@ -966,11 +969,57 @@ public:
         return out;
     }
 
+    // FORK MARKER (2026-07-27, JZ) [element-level freeze] helpers.
+    // A per-element constraint maps each NATURAL element to exactly one
+    // unconstrained coordinate (unc_dim == natural_dim, elementwise scalar
+    // transform), so freezing element e = freezing unc coord unc_off+e. Coupled
+    // / dimension-changing constraints (ORDERED, POSITIVE_ORDERED, UNIT_VECTOR,
+    // SIMPLEX, SUM_TO_ZERO, CHOLESKY_*, CORR_MATRIX, COV_MATRIX) map many
+    // naturals to a joint unconstrained transform -- element freeze is ill-posed
+    // for them, so freeze_sub rejects an index on those slots.
+    static bool per_element_constraint_(joint_constraint c) {
+        switch (c) {
+            case joint_constraint::REAL:
+            case joint_constraint::POSITIVE:
+            case joint_constraint::LOWER_BOUNDED:
+            case joint_constraint::UPPER_BOUNDED:
+            case joint_constraint::INTERVAL:
+                return true;
+            default:
+                return false;
+        }
+    }
+    // Parse "slot" or "slot[k]" (k is 1-based). On "slot", has_index=false. On
+    // "slot[k]", has_index=true and index0 = k-1 (0-based natural element).
+    static void parse_slot_index_(const std::string& s, std::string& base,
+                                  bool& has_index, std::size_t& index0) {
+        const auto lb = s.find('[');
+        if (lb == std::string::npos) { base = s; has_index = false; index0 = 0; return; }
+        if (s.empty() || s.back() != ']')
+            throw std::runtime_error(
+                "joint_nuts_block: malformed element name '" + s +
+                "' (expected 'slot[k]', k a 1-based index)");
+        base = s.substr(0, lb);
+        const std::string num = s.substr(lb + 1, s.size() - lb - 2);
+        if (num.empty() || num.find_first_not_of("0123456789") != std::string::npos)
+            throw std::runtime_error(
+                "joint_nuts_block: element index in '" + s +
+                "' must be a positive 1-based integer");
+        const long long k = std::stoll(num);
+        if (k < 1)
+            throw std::runtime_error(
+                "joint_nuts_block: element index in '" + s + "' must be >= 1 (1-based)");
+        has_index = true;
+        index0 = static_cast<std::size_t>(k - 1);
+    }
+
     void freeze_sub(const std::string& sub) override {
-        // Validate: sub must match one of the block's slot names.
+        std::string base; bool has_index; std::size_t index0;
+        parse_slot_index_(sub, base, has_index, index0);
+        // Validate: base must match one of the block's slot names.
         std::size_t hit = static_cast<std::size_t>(-1);
         for (std::size_t s = 0; s < cfg_.sub_params.size(); ++s) {
-            if (cfg_.sub_params[s].name == sub) { hit = s; break; }
+            if (cfg_.sub_params[s].name == base) { hit = s; break; }
         }
         if (hit == static_cast<std::size_t>(-1)) {
             std::string valid;
@@ -979,26 +1028,60 @@ public:
             }
             throw std::runtime_error(
                 "joint_nuts_block '" + cfg_.name +
-                "': freeze_sub unknown slot '" + sub +
+                "': freeze_sub unknown slot '" + base +
                 "'; valid slot names: " + valid);
         }
-        frozen_slots_.insert(sub);
+        if (!has_index) {
+            frozen_slots_.insert(base);                 // whole-slot freeze
+        } else {
+            // Element-level freeze -- only for per-element constraints.
+            const auto& sp = cfg_.sub_params[hit];
+            if (!per_element_constraint_(sp.constraint)) {
+                throw std::runtime_error(
+                    "joint_nuts_block '" + cfg_.name + "': element-level freeze '" +
+                    sub + "' is not defined for this slot's constraint (its natural "
+                    "entries are a coupled transform of the sampled unconstrained "
+                    "coordinates). Freeze the whole slot ('" + base + "'), or "
+                    "reparameterize so the target is a free coordinate.");
+            }
+            if (index0 >= sp.dim) {
+                throw std::runtime_error(
+                    "joint_nuts_block '" + cfg_.name + "': element index in '" + sub +
+                    "' is out of range (slot '" + base + "' has " +
+                    std::to_string(sp.dim) + " elements, 1-based).");
+            }
+            frozen_elems_[base].insert(index0);
+        }
         rebuild_frozen_unc_idx_();
     }
 
     void unfreeze_sub(const std::string& sub) override {
-        auto it = frozen_slots_.find(sub);
-        if (it != frozen_slots_.end()) {
-            frozen_slots_.erase(it);
-            rebuild_frozen_unc_idx_();
+        std::string base; bool has_index; std::size_t index0;
+        parse_slot_index_(sub, base, has_index, index0);
+        if (!has_index) {
+            frozen_slots_.erase(base);
+        } else {
+            auto it = frozen_elems_.find(base);
+            if (it != frozen_elems_.end()) {
+                it->second.erase(index0);
+                if (it->second.empty()) frozen_elems_.erase(it);
+            }
         }
+        rebuild_frozen_unc_idx_();
     }
 
     std::vector<std::string> frozen_subnames() const override {
-        // Return in slot_specs_ order for stable get_frozen ordering.
+        // Return in slot_specs_ order for stable get_frozen ordering. A
+        // whole-slot freeze reports "slot"; element freezes report "slot[k]"
+        // (1-based), in ascending index order (std::set is ordered).
         std::vector<std::string> out;
         for (const auto& sp : cfg_.sub_params) {
-            if (frozen_slots_.count(sp.name)) out.push_back(sp.name);
+            if (frozen_slots_.count(sp.name)) { out.push_back(sp.name); continue; }
+            auto it = frozen_elems_.find(sp.name);
+            if (it != frozen_elems_.end()) {
+                for (std::size_t local : it->second)
+                    out.push_back(sp.name + "[" + std::to_string(local + 1) + "]");
+            }
         }
         return out;
     }
@@ -1008,6 +1091,7 @@ public:
     void unfreeze() override {
         block_sampler::unfreeze();
         frozen_slots_.clear();
+        frozen_elems_.clear();
         frozen_unc_idx_.reset();
     }
 
@@ -2044,22 +2128,41 @@ private:
     // unfreeze_sub); frozen_unc_idx_ is the derived index vector of positions
     // in theta_cat_ that are frozen, rebuilt by rebuild_frozen_unc_idx_.
     std::unordered_set<std::string> frozen_slots_;
+    // FORK MARKER (2026-07-27, JZ) [element-level freeze]: slot name -> set of
+    // 0-based NATURAL element indices frozen within that slot. Only populated
+    // for PER-ELEMENT constraints (REAL / POSITIVE / LOWER_BOUNDED /
+    // UPPER_BOUNDED / INTERVAL), where natural element e maps 1:1 to
+    // unconstrained coordinate unc_offsets_[s] + e. Coupled constraints
+    // (SIMPLEX / CORR / COV / ORDERED / ...) are rejected by freeze_sub.
+    std::unordered_map<std::string, std::set<std::size_t>> frozen_elems_;
     arma::uvec                      frozen_unc_idx_;   // empty when no slot frozen
 
     void rebuild_frozen_unc_idx_() {
         std::vector<arma::uword> ids;
         for (std::size_t s = 0; s < cfg_.sub_params.size(); ++s) {
-            if (!frozen_slots_.count(cfg_.sub_params[s].name)) continue;
+            const std::string& nm = cfg_.sub_params[s].name;
             const std::size_t off = unc_offsets_.empty()
                                         ? offsets_[s]
                                         : unc_offsets_[s];
             const std::size_t d   = unc_dims_.empty()
                                         ? cfg_.sub_params[s].dim
                                         : unc_dims_[s];
-            for (std::size_t k = 0; k < d; ++k)
-                ids.push_back(static_cast<arma::uword>(off + k));
+            if (frozen_slots_.count(nm)) {
+                // Whole-slot freeze -> every unconstrained coordinate of the slot.
+                for (std::size_t k = 0; k < d; ++k)
+                    ids.push_back(static_cast<arma::uword>(off + k));
+            } else {
+                // Element freeze -> unc coord unc_off + local (per-element slots
+                // have unc_dim == natural_dim, so the local index carries over).
+                auto it = frozen_elems_.find(nm);
+                if (it != frozen_elems_.end())
+                    for (std::size_t local : it->second)
+                        ids.push_back(static_cast<arma::uword>(off + local));
+            }
         }
         if (ids.empty()) { frozen_unc_idx_.reset(); return; }
+        std::sort(ids.begin(), ids.end());
+        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
         frozen_unc_idx_.set_size(ids.size());
         for (std::size_t i = 0; i < ids.size(); ++i) frozen_unc_idx_[i] = ids[i];
     }

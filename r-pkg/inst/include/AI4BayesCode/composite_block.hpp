@@ -459,6 +459,16 @@ public:
     }
 
 private:
+    // FORK MARKER (2026-07-27, JZ) [element-level freeze]: strip a trailing
+    // "[k]" element index so "beta[3]" routes to the slot named "beta". The
+    // FULL name (with "[k]") is passed on to freeze_sub / unfreeze_sub, which
+    // parse the index. A name with no "[" is returned unchanged (so whole-block
+    // / whole-slot routing is bit-identical to before).
+    static std::string slot_base_(const std::string& name) {
+        const auto lb = name.find('[');
+        return (lb == std::string::npos) ? name : name.substr(0, lb);
+    }
+
     void freeze_one_(const std::string& name, bool quiet,
                      std::vector<std::string>& warnings) {
         validate_name_shape_(name);
@@ -486,7 +496,7 @@ private:
         std::vector<std::string> matched_dotpaths;
         for (auto& c : children_) {
             auto subs = c->subnames();
-            if (std::find(subs.begin(), subs.end(), name) != subs.end()) {
+            if (std::find(subs.begin(), subs.end(), slot_base_(name)) != subs.end()) {
                 ++match_ct;
                 matched = c.get();
                 matched_dotpaths.push_back(c->name() + "." + name);
@@ -589,7 +599,7 @@ private:
         std::vector<std::string> matched_dotpaths;
         for (auto& c : children_) {
             auto subs = c->subnames();
-            if (std::find(subs.begin(), subs.end(), name) != subs.end()) {
+            if (std::find(subs.begin(), subs.end(), slot_base_(name)) != subs.end()) {
                 ++match_ct;
                 matched = c.get();
                 matched_dotpaths.push_back(c->name() + "." + name);
