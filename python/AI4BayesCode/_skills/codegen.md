@@ -435,25 +435,28 @@ AskUserQuestion **before generating any code**:
 This prompt is important: without it, users may think code generation
 has already started and miss the confirmation step entirely.
 
-### Delivered-code validation harness (ask in this same pre-generation round)
+### Ship the runtime validation code? (ask in this same pre-generation round)
 
 Alongside the summary-review question above, also ask whether the
-runtime-validation harness should be SHIPPED in the delivered
-code. The generated R runner currently carries a large Layer-3
-harness (R-hat/ESS, posterior-predictive p-values, PSIS-LOO, smoke
+runtime validation code should be SHIPPED in the delivered files.
+The generated R runner currently carries a large block of validation
+code (R-hat/ESS, posterior-predictive p-values, PSIS-LOO, smoke
 checks); for a first-time user that scaffolding obscures the simple
 "how do I use this" path.
 
-Ask:
+Ask in PLAIN language -- do NOT use the word "harness" (a first-time
+user will not know what it means); say "runtime validation code":
 
-> "Include the runtime-validation harness (R-hat/ESS, posterior-
-> predictive p-values, PSIS-LOO, smoke checks) in the delivered code?
-> Validation runs during generation EITHER WAY -- this only controls
-> whether the harness ships in the final code."
+> "Should the delivered code include the runtime validation code?
+> This is the code that checks the sampler actually converged: R-hat /
+> ESS, posterior-predictive checks, and PSIS-LOO. (These checks run
+> during generation either way -- this only controls whether that
+> checking code is kept in the final files you receive, or left out so
+> you get a shorter, cleaner usage example.)"
 >
 > Options:
-> - **No -- deliver a usage example without the validation harness (default)**
-> - **Yes -- ship the full validation runner**
+> - **No -- deliver a clean usage example, without the validation code (default)**
+> - **Yes -- include the full runtime validation code in the delivered files**
 
 **CORRECTNESS INVARIANT -- read this exactly; it is not optional.**
 The validator (Layer-3 R1/R2/R3 + Checks #1-20) **ALWAYS runs and
@@ -1089,7 +1092,7 @@ avoid false positives from short runs.
 **This is REQUIRED to RUN and PASS during generation regardless of
 any user option** -- it is part of the correctness gate, not optional.
 What is *conditional* is whether it is **shipped**: per the
-"Delivered-code validation harness" question above,
+"Ship the runtime validation code?" question above,
 - **default (No):** the Layer-3 runner (R1/R2/R3 incl. this Step-4
   diagnostic) is a **throwaway** -- it gates generation, then on PASS
   it is DELETED and only `example_<ClassName>.R` (the usage example
