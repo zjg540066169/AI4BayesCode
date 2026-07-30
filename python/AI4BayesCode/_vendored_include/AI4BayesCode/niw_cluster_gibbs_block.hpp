@@ -409,6 +409,16 @@ public:
 
     const arma::vec& current() const override { return current_; }
 
+    // FORK MARKER (2026-07-27, JZ) [freeze + predict_at history alignment]:
+    // record HELD values (each buffer) when whole-block frozen, so history
+    // stays aligned with unfrozen siblings. See block_sampler::record_held_history.
+    void record_held_history() override {
+        if (keep_history_) {
+            mu_history_buf_.push_back(mu_);
+            sigma_history_buf_.push_back(sigma_);
+        }
+    }
+
     void set_current(const arma::vec& theta) override {
         const std::size_t flat_mu    = cfg_.K_trunc * cfg_.d;
         const std::size_t flat_sigma = cfg_.K_trunc * cfg_.d * cfg_.d;

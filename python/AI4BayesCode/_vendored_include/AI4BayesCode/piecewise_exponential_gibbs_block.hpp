@@ -372,6 +372,15 @@ public:
 
     const arma::vec& current() const override { return values_; }
 
+
+    // FORK MARKER (2026-07-27, JZ) [freeze + predict_at history alignment]:
+    // record the HELD value when this block is whole-block frozen, so its
+    // history stays the same length as unfrozen siblings (composite_block
+    // calls this on a frozen child). See block_sampler::record_held_history.
+    void record_held_history() override {
+        if (keep_history_) history_buf_.push_back(current());
+    }
+
     void set_current(const arma::vec& theta) override {
         if (theta.n_elem != K_) {
             throw std::invalid_argument(

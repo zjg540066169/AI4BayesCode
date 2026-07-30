@@ -216,6 +216,19 @@ public:
     virtual void set_keep_history(bool keep) { keep_history_ = keep; }
     virtual bool keep_history() const noexcept { return keep_history_; }
 
+    // FORK MARKER (2026-07-27, JZ) [freeze + predict_at history alignment]
+    // Record the block's HELD (current, unchanged) value into its own history
+    // as if a sweep produced it. composite_block::step() calls this on a
+    // WHOLE-BLOCK-frozen child (whose step() -- and thus its normal history
+    // append -- is skipped) so that every child's history keeps the SAME
+    // length: one entry per composite sweep. Posterior-predictive / predict_at
+    // that iterate the JOINT history (draw d = one entry from each block)
+    // require aligned lengths; a frozen block otherwise stalls its history and
+    // trips "inconsistent history sizes". Default: no-op (blocks with no
+    // history, or that cannot be frozen). History-bearing freezable blocks
+    // override to append current() (single buffer) or each of their buffers.
+    virtual void record_held_history() {}
+
     // ---- Tree snapshot recording (BART-family only) ----------------------
     //
     // keep_tree_ is ORTHOGONAL to keep_history_:

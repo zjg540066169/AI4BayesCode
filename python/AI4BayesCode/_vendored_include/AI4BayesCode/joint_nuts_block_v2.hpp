@@ -162,6 +162,13 @@ public:
         return theta_cat_;
     }
 
+    // FORK MARKER (2026-07-27, JZ) [freeze + predict_at history alignment]:
+    // record the HELD value when whole-block frozen so history stays aligned
+    // with unfrozen siblings. See block_sampler::record_held_history.
+    void record_held_history() override {
+        if (keep_history_) history_buf_.push_back(current());
+    }
+
     void set_current(const arma::vec& theta) override {
         if (theta.n_elem != theta_cat_.n_elem) {
             throw std::invalid_argument(

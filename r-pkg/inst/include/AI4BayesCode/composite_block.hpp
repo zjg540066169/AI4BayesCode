@@ -201,7 +201,18 @@ public:
             // slot-level freeze is INTERNAL to the child (step() still fires,
             // integrator zeros momentum on frozen slots); is_frozen() here
             // means WHOLE-BLOCK freeze only.
-            if (child->is_frozen()) continue;
+            //
+            // FORK MARKER (2026-07-27, JZ) [freeze + predict_at history align]:
+            // a frozen child's step() is skipped, so its normal per-sweep
+            // history append is skipped too -- its history would stall while
+            // sibling histories grow, and predict_at over the JOINT history
+            // trips "inconsistent history sizes". Record the HELD value so all
+            // children stay the same length (frozen param constant across the
+            // kept draws, siblings vary). No-op unless keep_history_.
+            if (child->is_frozen()) {
+                if (keep_history_) child->record_held_history();
+                continue;
+            }
 
             // 1. Project shared_data into the child's context.
             block_context ctx = data_.build_context_for(cname);

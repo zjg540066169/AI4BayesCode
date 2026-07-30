@@ -47,7 +47,9 @@ chains finish.
 3. **Runtime** -- all execution-based checks, sharing one pair of chains
    produced with `keep_history = TRUE`:
    - **R1. Smoke test** (~10 steps) -- catches immediate failures, non-
-     finite values, and predict_at state mutation.
+     finite values, predict_at state mutation, and freeze->predict_at
+     history misalignment (a frozen block that stalls its history breaks
+     posterior-predictive over the joint draws).
    - **R2. 2-chain R-hat / ESS** (4000 burnin + 4000 keep per chain) --
      does the sampler converge to some stationary distribution?
    - **R3. Posterior check** (Bayesian p-values + PSIS-LOO, reuses R2's
@@ -2094,6 +2096,28 @@ if ("predict_at" %in% names(model)) {
     s_before <- model$get_current()
     try(model$predict_at(list()), silent = TRUE)
     s_after  <- model$get_current()
+    stopifnot(identical(s_before, s_after))
+}
+
+# freeze -> predict_at regression (kernel-control x predict_at). A WHOLE-BLOCK
+# frozen child's step() is skipped, so it must still record its HELD value each
+# sweep -- otherwise its history stalls while sibling histories grow and any
+# predict_at that iterates the JOINT history (posterior-predictive over the
+# kept draws) trips "inconsistent history sizes (a=N, b=M)". Freeze a
+# freezable child, take a few steps, and re-run predict_at: it must NOT error
+# and must NOT mutate live state.
+#   <FREEZABLE_BLOCK> = the name of any NON-blacklisted child (NOT a BART / VI /
+#   HMM / genBART block -- those refuse freeze). Emit this block ONLY if the
+#   model has at least one freezable child; omit it entirely for a model whose
+#   only child is blacklisted (e.g. a pure single-BART regression).
+if (all(c("predict_at", "freeze", "unfreeze") %in% names(model))) {
+    model$freeze("<FREEZABLE_BLOCK>")
+    model$step(5L)                         # frozen child held; siblings advance
+    s_before <- model$get_current()
+    pf <- try(model$predict_at(list()), silent = TRUE)
+    s_after  <- model$get_current()
+    model$unfreeze("<FREEZABLE_BLOCK>")
+    stopifnot(!inherits(pf, "try-error"))  # freeze + predict_at must not error
     stopifnot(identical(s_before, s_after))
 }
 

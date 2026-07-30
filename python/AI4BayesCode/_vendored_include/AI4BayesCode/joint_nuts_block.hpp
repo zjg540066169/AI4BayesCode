@@ -772,6 +772,13 @@ public:
         return theta_cat_nat_;
     }
 
+    // FORK MARKER (2026-07-27, JZ) [freeze + predict_at history alignment]:
+    // record the HELD value when whole-block frozen so history stays aligned
+    // with unfrozen siblings. See block_sampler::record_held_history.
+    void record_held_history() override {
+        if (keep_history_) history_buf_.push_back(current());
+    }
+
     /// Overwrite theta_cat with a new concatenated vector. Length must
     /// match total_dim_. Used for checkpointing / overdispersed starts.
     void set_current(const arma::vec& theta_new) override {

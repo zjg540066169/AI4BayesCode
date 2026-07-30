@@ -604,6 +604,13 @@ public:
         return current_cache_;
     }
 
+    // FORK MARKER (2026-07-27, JZ) [freeze + predict_at history alignment]:
+    // record the HELD value when whole-block frozen so history stays aligned
+    // with unfrozen siblings. See block_sampler::record_held_history.
+    void record_held_history() override {
+        if (keep_history_) history_buf_.push_back(current());
+    }
+
     /// Accepts a length-2p vector [gamma; beta] and validates coupling.
     void set_current(const arma::vec& theta) override {
         if (theta.n_elem != 2 * cfg_.p) {
