@@ -16,16 +16,23 @@ for full details.
 
 ### As an agent skill (Claude Code / Codex / Cursor / ...)
 
-The repository root IS the skill package (`SKILL.md` + the C++ library under
-`include/`). Clone it, then point your agent at it; after reloading, type
-`/AI4BayesCode` to launch (agents without slash commands read `start.md` first).
+The repository root is the skill package (`SKILL.md` + `start.md` + the C++
+library under `include/`). Clone it into your agent's skills directory, then
+launch it.
 
+**Claude Code** -- clone into `~/.claude/skills`, reload, then type `/AI4BayesCode`:
 ```bash
-git clone https://github.com/zjg540066169/AI4BayesCode.git AI4BayesCode
+git clone https://github.com/zjg540066169/AI4BayesCode.git ~/.claude/skills/AI4BayesCode
 ```
 
-See `AI_AGENT_INSTALL.md` for per-agent install steps (Claude Code, Codex,
-Cursor, AI-assisted).
+**Codex** -- clone into `~/.codex/skills`, restart, then type `/AI4BayesCode`
+(or, if your build has no slash commands, tell it to read `start.md`):
+```bash
+git clone https://github.com/zjg540066169/AI4BayesCode.git ~/.codex/skills/AI4BayesCode
+```
+
+For Cursor, the AI-assisted install, or letting your agent install it for you,
+see `AI_AGENT_INSTALL.md`.
 
 ### R  (needs a C++17 compiler and `Rcpp`, `RcppArmadillo`)
 ```r
