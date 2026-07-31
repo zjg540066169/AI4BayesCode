@@ -1,9 +1,9 @@
 # AI4BayesCode
 
-A header-only C++ library for stateful, block-wise MCMC inside a larger Gibbs
-loop, plus an AI code-generation skill that turns natural-language model
-descriptions into validated samplers. Supports R (Rcpp), Python (pybind11), and
-standalone C++ backends from the same source.
+AI4BayesCode is an AI-enhanced statistical software system for generating
+trustworthy Bayesian samplers from natural-language model descriptions.
+Supports R (Rcpp), Python (pybind11), and standalone C++ backends from the
+same source.
 
 **Full documentation, tutorials, and examples: [https://ai4bayescode.com/](https://ai4bayescode.com/)**
 
