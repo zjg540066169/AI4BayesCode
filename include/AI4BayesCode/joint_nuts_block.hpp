@@ -1790,6 +1790,10 @@ private:
             // identity metric by leaving precond at its default. Should
             // not happen with dense_metric_adapt_iters >= 100.
             theta_cat_ = draws_out.row(n - 1).t();
+            // FROZEN-HOLD FIX (2026-07-30): re-pin frozen coords (see the
+            // normal-exit path below for the full rationale) before the early
+            // return, so step()'s entry snapshot sees the true frozen value.
+            if (_fz_any) theta_cat_.elem(frozen_unc_idx_) = _fz_snap;
             ns.n_burnin_draws = saved_burnin;
             ns.n_keep_draws   = saved_keep;
             ns.n_adapt_draws  = saved_adapt;
@@ -1923,6 +1927,14 @@ private:
         ns.adapt_iter_persist  = 0;
 
         theta_cat_ = draws_out.row(n - 1).t();
+        // FROZEN-HOLD FIX (2026-07-30): the pilot integrates frozen coords as
+        // free particles (the density adapter force-holds them, but leapfrog
+        // still drifts their POSITION under a non-identity metric), so
+        // draws_out's last row has drifted frozen coords. step() re-snapshots
+        // theta_cat_[frozen] on entry, so a drifted value left here would be
+        // pinned forever. Re-pin to the snapshot before returning. Guarded by
+        // _fz_any -> the no-freeze fast path stays byte-identical.
+        if (_fz_any) theta_cat_.elem(frozen_unc_idx_) = _fz_snap;
 
         // Restore per-call budget.
         ns.n_burnin_draws = saved_burnin;
@@ -2121,6 +2133,13 @@ private:
         ns.n_burnin_draws = saved_burnin;
         ns.n_keep_draws   = saved_keep;
         ns.n_adapt_draws  = saved_adapt;
+
+        // FROZEN-HOLD FIX (2026-07-30): re-pin frozen coords to their snapshot.
+        // Phases I/II/III integrate them as free particles under the adapted
+        // metric, so the final Phase-III draw has drifted frozen coords; step()
+        // re-snapshots theta_cat_[frozen] on entry, so the drifted value would
+        // be pinned forever. Guarded by _fz_any -> no-freeze path byte-identical.
+        if (_fz_any) theta_cat_.elem(frozen_unc_idx_) = _fz_snap;
     }
 
     // Kernel-control slot-freeze state (DESIGN_NOTES Sec.10.a Approach B).
