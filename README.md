@@ -40,23 +40,25 @@ pip install "git+https://github.com/zjg540066169/AI4BayesCode.git#subdirectory=p
 ## Quick start (R)
 
 ```r
-library(AI4BayesCode)   # headers ship inside the package -- no checkout path needed
-ai4bayescode_sourceCpp(file.path(ai4bayescode_examples_path(), "GaussianLocationScale.cpp"))
+library(AI4BayesCode)
 
-set.seed(1)
-y <- rnorm(100, 2.0, 1.5)
+# 1. Generate a sampler from a plain-language model description.
+ai4bayescode_generate(
+  "linear regression, y ~ N(X beta, sigma^2), normal prior on beta, half-normal on sigma",
+  classname = "BayesLinReg", output_path = "./generated")
 
-m <- new(GaussianLocationScale, y, seed = 42L, keep_history = TRUE)
-m$step(4000L)   # warmup
-m$step(4000L)   # sampling
+# 2. Compile the generated sampler.
+ai4bayescode_source("./generated/BayesLinReg.cpp")
 
-h  <- m$get_history()
-pp <- m$predict_at(list())   # posterior-predictive y_rep
-
-cat("mu:    mean =", mean(h$mu),    " sd =", sd(h$mu),    "\n")
-cat("sigma: mean =", mean(h$sigma), " sd =", sd(h$sigma), "\n")
-cat("y_rep shape:", paste(dim(pp$y_rep), collapse = " x "), "\n")
+# 3. Run several chains on your data (y, X) and check convergence.
+run <- ai4bayescode_run_chains(
+  function(s) new(BayesLinReg, y, X, seed = s, keep_history = TRUE),
+  n_chains = 4, n_burn = 5000, n_keep = 5000)
+ai4bayescode_rhat_summary(run)
 ```
+
+See the [API reference](https://ai4bayescode.com/api.html) for `get_history`,
+`predict_at` (posterior-predictive), diagnostics, and the Python equivalents.
 
 ## License
 
