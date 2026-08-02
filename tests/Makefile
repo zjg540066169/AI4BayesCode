@@ -12,6 +12,14 @@
 # The Makefile assumes it is invoked from the tests/ directory.
 
 INC_DIR   := ../include
+
+# Headers the joint_nuts_block freeze regression tests guard -- listed as build
+# prerequisites so editing any of them rebuilds the tests (a header-only change
+# otherwise leaves the stale test binary in place).
+FREEZE_HDRS := $(INC_DIR)/AI4BayesCode/joint_nuts_block.hpp \
+               $(INC_DIR)/AI4BayesCode/composite_block.hpp \
+               $(INC_DIR)/AI4BayesCode/block_sampler.hpp \
+               $(INC_DIR)/AI4BayesCode/constraints.hpp
 # mcmclib's own internal includes expect its directory to be on the
 # search path (so that "BaseMatrixOps/include/BaseMatrixOps.hpp" resolves).
 MCMCLIB_INC := ../include/mcmclib
@@ -33,7 +41,7 @@ LDFLAGS  ?=
 # On macOS, link directly against Accelerate for BLAS/LAPACK.
 LDLIBS   ?= -framework Accelerate
 
-TARGETS  := test_constraints test_binary_gibbs test_dirichlet_gibbs test_categorical_gibbs test_gaussian_linear test_simplex_dirichlet test_nuts_variance test_nuts_block_stress test_vi_mean_field_gaussian test_vi_correlated_gaussian test_vi_hybrid_composition test_vi_glmm_logistic test_vi_bnn_regression test_vi_full_rank_correlated test_vi_bnn_full_rank test_readapt_NUTS test_target_accept_config test_ising_cluster_block test_ising_cluster_block_diagnostics test_ising_sw_vs_single_site test_ising_cluster_block_stress test_gmrf_precision_block test_gmrf_precision_block_diagnostics test_gmrf_precision_block_stress test_hmm_block_stress test_pg_logistic_block_stress test_joint_nuts_block_stress test_joint_nuts_block_mixed_stress test_rjmcmc_block_stress test_bde_scorer test_score_cache test_order_mcmc_block test_order_mcmc_block_stress test_order_mcmc_block_diagnostics test_bge_scorer test_partition_geometry test_partition_mcmc_diagnostics test_partition_mcmc_rhat test_order_mcmc_block_partition test_categorical_meanfield_vi_block test_categorical_meanfield_vi_chain test_categorical_meanfield_vi_cavi_cross test_categorical_meanfield_vi_stress test_structured_meanfield_vi_block test_structured_meanfield_vi_chain test_structured_meanfield_vi_cavi_cross test_structured_meanfield_vi_stress test_freeze_predict_history test_freeze_element test_freeze_dense_pilot
+TARGETS  := test_constraints test_binary_gibbs test_dirichlet_gibbs test_categorical_gibbs test_gaussian_linear test_simplex_dirichlet test_nuts_variance test_nuts_block_stress test_vi_mean_field_gaussian test_vi_correlated_gaussian test_vi_hybrid_composition test_vi_glmm_logistic test_vi_bnn_regression test_vi_full_rank_correlated test_vi_bnn_full_rank test_readapt_NUTS test_target_accept_config test_ising_cluster_block test_ising_cluster_block_diagnostics test_ising_sw_vs_single_site test_ising_cluster_block_stress test_gmrf_precision_block test_gmrf_precision_block_diagnostics test_gmrf_precision_block_stress test_hmm_block_stress test_pg_logistic_block_stress test_joint_nuts_block_stress test_joint_nuts_block_mixed_stress test_rjmcmc_block_stress test_bde_scorer test_score_cache test_order_mcmc_block test_order_mcmc_block_stress test_order_mcmc_block_diagnostics test_bge_scorer test_partition_geometry test_partition_mcmc_diagnostics test_partition_mcmc_rhat test_order_mcmc_block_partition test_categorical_meanfield_vi_block test_categorical_meanfield_vi_chain test_categorical_meanfield_vi_cavi_cross test_categorical_meanfield_vi_stress test_structured_meanfield_vi_block test_structured_meanfield_vi_chain test_structured_meanfield_vi_cavi_cross test_structured_meanfield_vi_stress test_freeze_predict_history test_freeze_element test_freeze_dense_pilot test_freeze_joint_nuts_slot
 
 .PHONY: all build run clean
 
@@ -176,6 +184,9 @@ run: build
 	@echo
 	@echo "=== Running test_freeze_dense_pilot ==="
 	./test_freeze_dense_pilot
+	@echo
+	@echo "=== Running test_freeze_joint_nuts_slot ==="
+	./test_freeze_joint_nuts_slot
 
 AI4BAYESCODE_HEADERS := \
   $(INC_DIR)/AI4BayesCode/block_sampler.hpp \
@@ -427,7 +438,10 @@ test_freeze_predict_history: test_freeze_predict_history.cpp
 test_freeze_element: test_freeze_element.cpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 
-test_freeze_dense_pilot: test_freeze_dense_pilot.cpp
+test_freeze_dense_pilot: test_freeze_dense_pilot.cpp $(FREEZE_HDRS)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
+
+test_freeze_joint_nuts_slot: test_freeze_joint_nuts_slot.cpp $(FREEZE_HDRS)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 
 clean:

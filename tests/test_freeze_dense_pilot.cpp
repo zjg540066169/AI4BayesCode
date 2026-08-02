@@ -11,6 +11,18 @@
 // via the degenerate-pilot escape reset), so this test asserts BIT-EXACT hold
 // across the tricky combinations, plus statistical correctness of the free
 // coordinate's conditional posterior.
+//
+// Coverage of the three re-pin insertions the fix added. DISCRIMINATING cases
+// (compiled against the pre-fix header they FAIL with large drift):
+//   - adapt_dense_metric_ normal exit   : metric 1 (diagonal) / 2 (dense) / 4 (auto-select)
+//   - adapt_dense_metric_ n<10 fallback : metric 5 (5-draw pilot)
+//   - element-level frozen index        : dense element beta[1]
+// EXECUTION-only coverage (holds post-fix; for THIS dataset the pre-fix drift is
+// masked by the degenerate-pilot escape reset, so it does not fail pre-fix):
+//   - adapt_three_phase_warmup_ exit    : metric 3 (dense + 3-phase)
+// plus: freeze applied MID-RUN (after the pilot already ran unfrozen -> main-path
+// restore), and each hold_case also asserts a FREE coordinate moved so a dead
+// chain cannot pass the hold check vacuously.
 // ---------------------------------------------------------------------------
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -52,7 +64,12 @@ static double dens(const arma::vec& c, const block_context&, arma::vec* g){
     return std::isfinite(lp)?lp:-std::numeric_limits<double>::infinity();
 }
 
-// metric: 2 = dense, 1 = diagonal, 0 = identity.
+// metric: 0 = identity, 1 = diagonal, 2 = dense single-pilot, 3 = dense + 3-phase
+// warmup, 4 = auto-select. Modes 1-4 all run an adaptation routine on the first
+// step(); the fix re-pins frozen coords at each routine's exit. Coverage map:
+//   1/2 -> adapt_dense_metric_ normal exit (and the n<10 fallback via metric 1/2)
+//   3   -> adapt_three_phase_warmup_ exit
+//   4   -> auto-select branch of adapt_dense_metric_
 static std::unique_ptr<joint_nuts_block> mk(int metric){
     joint_nuts_block_config cfg; cfg.name="beta_sigma_joint";
     cfg.sub_params.push_back(joint_nuts_sub_param{"beta",kP,joint_constraint::REAL});
@@ -61,6 +78,10 @@ static std::unique_ptr<joint_nuts_block> mk(int metric){
     cfg.n_warmup_first_call=1000; cfg.max_tree_depth=8;
     if (metric==2){ cfg.use_dense_metric=true; cfg.dense_metric_pilot_iters=200; cfg.dense_metric_adapt_iters=500; }
     else if (metric==1){ cfg.use_diagonal_metric=true; }
+    else if (metric==3){ cfg.use_dense_metric=true; cfg.use_three_phase_warmup=true; }  // adapt_three_phase_warmup_ exit
+    else if (metric==4){ cfg.auto_select_metric=true; }                                  // auto-select branch of adapt_dense_metric_
+    else if (metric==5){ cfg.use_dense_metric=true; cfg.dense_metric_pilot_iters=5;      // n<10 pilot -> adapt_dense_metric_ fallback exit
+                         cfg.dense_metric_adapt_iters=5; }
     return std::make_unique<joint_nuts_block>(std::move(cfg));
 }
 
@@ -73,10 +94,20 @@ static void hold_case(int metric, const std::string& slot, bool do_set,
     std::mt19937_64 r(7); auto& jb=dynamic_cast<joint_nuts_block&>(root->child(0));
     root->freeze(std::vector<std::string>{slot});
     if(do_set) jb.set_current(setcat);
+    arma::vec before=jb.current();
     for(int i=0;i<25;++i) root->step(r);
-    arma::vec got=jb.current().elem(fidx);
-    double drift=arma::max(arma::abs(got-expect));
-    check(drift==0.0, label, "drift=" + std::to_string(drift));
+    arma::vec after=jb.current();
+    // (1) frozen coords held BIT-EXACT.
+    double drift=arma::max(arma::abs(after.elem(fidx)-expect));
+    // (2) at least one FREE coord actually moved -- guards against a dead/frozen
+    //     chain satisfying the hold check vacuously.
+    double free_move=0.0;
+    for(arma::uword i=0;i<after.n_elem;++i){
+        bool frozen=false; for(arma::uword j=0;j<fidx.n_elem;++j) if(fidx[j]==i) frozen=true;
+        if(!frozen) free_move=std::max(free_move,std::abs(after[i]-before[i]));
+    }
+    check(drift==0.0 && free_move>1e-9, label,
+          "drift="+std::to_string(drift)+" free_move="+std::to_string(free_move));
 }
 
 int main(){
@@ -97,6 +128,33 @@ int main(){
                   std::string("freeze beta, no set_current (")+mn+")");
         hold_case(metric,"beta", true, arma::vec{1,2,3,1.0},arma::vec{1,2,3},arma::uvec{0,1,2},
                   std::string("freeze beta, set_current [1,2,3] (")+mn+")");
+    }
+
+    std::printf("=== 3-phase warmup / auto-select / n<10-fallback (all fix exits) ===\n");
+    for (int metric : {3, 4, 5}){
+        const char* mn = (metric==3)?"dense+3phase":(metric==4)?"auto-select":"dense+n<10-fallback";
+        hold_case(metric,"beta", true, arma::vec{1,2,3,1.0}, arma::vec{1,2,3}, arma::uvec{0,1,2},
+                  std::string("freeze beta, set_current [1,2,3] (")+mn+")");
+        hold_case(metric,"sigma",false,{}, arma::vec{1.0}, arma::uvec{3},
+                  std::string("freeze sigma, no set_current (")+mn+")");
+    }
+
+    std::printf("=== freeze MID-RUN (after the pilot already ran unfrozen) ===\n");
+    {
+        auto root=std::make_unique<composite_block>("r"); root->add_child(mk(2)); // dense
+        std::mt19937_64 r(7); auto& jb=dynamic_cast<joint_nuts_block&>(root->child(0));
+        for(int i=0;i<10;++i) root->step(r);                          // pilot + warmup run UNFROZEN
+        // Pin beta at the truth (keeps sigma's conditional near its adapted
+        // geometry, so the liveness check below is meaningful), keep current sigma.
+        jb.set_current(arma::join_cols(bt, arma::vec{jb.current()[kP]}));
+        root->freeze(std::vector<std::string>{"beta"});               // freeze AFTER adaptation
+        arma::vec before=jb.current();
+        for(int i=0;i<25;++i) root->step(r);
+        arma::vec after=jb.current();
+        check(arma::approx_equal(after.subvec(0,kP-1), bt, "absdiff", 0.0),
+              "freeze mid-run (post-pilot) holds beta bit-exact",
+              "beta=["+std::to_string(after[0])+","+std::to_string(after[1])+","+std::to_string(after[2])+"]");
+        check(std::abs(after[kP]-before[kP])>1e-9, "free sigma still moves after mid-run freeze");
     }
 
     std::printf("=== element-level freeze holds bit-exact (dense) ===\n");

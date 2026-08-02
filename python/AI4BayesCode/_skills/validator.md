@@ -1935,6 +1935,30 @@ stopifnot(identical(before, after))    # slot pinned, whole block not frozen
 m$unfreeze()
 ```
 
+**Adapted-metric pilot regression guard (REQUIRED when the `joint_nuts_block`
+uses an adapted metric -- `use_dense_metric` / `use_diagonal_metric` /
+`auto_select_metric` / `use_three_phase_warmup`).** The frozen-slot hold above
+can pass trivially if `m` was already stepped, because the metric-adaptation
+pilot then ran BEFORE the freeze (the main step() path restores frozen coords,
+so no drift is observable). The freeze-hold bug fixed 2026-07-30 only manifests
+when the pilot runs with the freeze ALREADY active. This guard therefore uses a
+FRESH instance and freezes BEFORE the first `step()`, so the first step()'s pilot
+runs frozen:
+
+```r
+m2 <- new(<ClassName>, ...)              # FRESH -- no step() yet, pilot not run
+m2$set_current(list(<slot_name> = <value>))
+m2$freeze("<slot_name>")                 # freeze BEFORE the first step()
+before <- m2$get_current()[["<slot_name>"]]
+m2$step(50L)                             # first step() runs the adapted-metric pilot FROZEN
+after  <- m2$get_current()[["<slot_name>"]]
+stopifnot(identical(before, after))      # frozen slot held bit-exact through the pilot
+m2$unfreeze()
+```
+
+(C++ regression coverage of the same invariant across diagonal/dense/auto-select/
+n<10-fallback exits and element-level freeze: `tests/test_freeze_dense_pilot.cpp`.)
+
 If the composite includes any `rjmcmc_block`, ALSO test sub-key freeze
 (v1 feature per DESIGN_NOTES Sec.10.d):
 
