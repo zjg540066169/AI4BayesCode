@@ -295,10 +295,12 @@ paper / PDF / long document instead of a direct model description, do NOT
 pull the whole thing into this context -- it starves the generation window.
 Dispatch a subagent (where one is available, e.g. a Task/Agent tool) to read
 it and return ONLY the extracted model spec (likelihood, priors, parameters,
-observation model, sampler notes). Then treat that spec EXACTLY like a
-user-typed model description -- START with the initial model-confirmation gate
-(Phase 3): show the extracted model back to the user for sign-off BEFORE any
-codegen (extraction can misread, so this gate matters MORE here, not less),
+observation model, sampler notes). Dispatch it DIRECTLY -- reading the paper is
+read-only with no side effects, so do NOT ask the user to confirm spawning it
+(that is not a confirm-before-action step). The ONE sign-off is the RETURNED
+SPEC: treat it EXACTLY like a user-typed model description and run the initial
+model-confirmation gate (Phase 3) -- show the extracted model back to the user
+BEFORE any codegen (extraction can misread, so this gate matters MORE here),
 then run the remaining phases below. (No subagent tool available: extract the
 spec, drop the paper text, continue from the spec.)
 
