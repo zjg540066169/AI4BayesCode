@@ -1,8 +1,8 @@
 /*================================================================================
  *  block_mcmc: stateful modular MCMC for composable Gibbs samplers
  *  Copyright (C) 2026 AI4BayesCode.
- *  Licensed under the GNU General Public License v2.0 or later
- *  (GPL-2.0-or-later). See COPYING / LICENSE at the repo root.
+ *  Licensed under the GNU General Public License v3.0 or later
+ *  (GPL-3.0-or-later). See COPYING / LICENSE at the repo root.
  *================================================================================
  *
  *  ode_rk45.hpp -- Tier 1 adaptive ODE integrator for AI4BayesCode.
@@ -858,6 +858,291 @@ inline arma::vec sens_chain(const rk45_sens_result& r,
     for (std::size_t i = 0; i < n_times; ++i)
         grad += r.S[i].t() * dlp_dy.row(i).t();
     return grad;
+}
+
+
+// ===========================================================================
+//  ALLOCATION-FREE IN-PLACE VARIANTS (Tier-2 fast path)
+// ===========================================================================
+// rk45_inplace / rk45_sens_fd_inplace are allocation-free (raw-loop) twins of
+// ode::rk45 and ode::rk45_sens_fd. The shipped arma rk45_sens_fd allocates
+// several arma temporaries per Dormand-Prince stage; on a small system that can
+// be SLOWER than plain central-FD of the whole solve (see the timing note in
+// the file header). These variants carry the augmented state y + vec(S) in
+// fixed-size stack buffers and evaluate an IN-PLACE RHS, removing all per-stage
+// heap traffic. They are numerical drop-ins -- same Butcher tableau, same PI
+// controller, same FD step (1e-6*max(1,|x|), matching detail::fd_rhs_jacobian),
+// and (with coupled_error=true) the same coupled error norm as rk45_sens_core
+// -- and reuse rk45_sens_result + sens_chain unchanged.
+//
+// IN-PLACE RHS signature (no arma dependency):
+//     void f(double t, const double* y, const double* theta, double* dy)
+//
+// FD-of-RHS discipline (jacobian.md Sec.10): the LIBRARY central-differences the
+// user's cheap RHS to build J_y = df/dy and J_theta = df/dtheta. Users / codegen
+// never hand-write Jacobians; runtime autodiff stays validation-only.
+
+// Compile-time stack-buffer caps. RK45_IP_MAXN bounds the BASE state dim and the
+// full theta length; RK45_IP_MAXAUG bounds the AUGMENTED dim n_state*(1+n_param).
+// Raise if a model needs more (each is a small stack-array size, not a heap cost).
+static constexpr int RK45_IP_MAXN   = 64;
+static constexpr int RK45_IP_MAXAUG = 128;
+
+namespace detail {
+
+// ---------------------------------------------------------------------------
+// Core allocation-free raw-loop Dormand-Prince 5(4). Integrates ANY state whose
+// derivative is supplied by the in-place RHS `f(t, a, theta, da)`. The adaptive
+// error norm is taken over the first `n_err` components:
+//   * n_err == n              -> plain base solve (identical to ode::rk45).
+//   * n_err == n (aug system) -> STATE-ONLY control for an augmented state.
+//   * n_err == aug_dim        -> COUPLED control (S in the norm; matches
+//                                rk45_sens_core).
+// Butcher tableau, initial-step heuristic and PI controller are identical to the
+// shipped ode::rk45, so a base solve reproduces it to machine precision.
+// ---------------------------------------------------------------------------
+template <class RHS_IP>
+inline arma::mat rk45_raw(RHS_IP&& f,
+                          const arma::vec& a0,
+                          const arma::vec& ts,
+                          const double* theta,
+                          int n_err,
+                          double rtol,
+                          double atol,
+                          double max_h,
+                          double min_h,
+                          long max_iter) {
+    using namespace dp5_tableau;
+
+    const int n  = static_cast<int>(a0.n_elem);
+    const int nt = static_cast<int>(ts.n_elem);
+    if (n > RK45_IP_MAXAUG)
+        throw std::invalid_argument("rk45_raw: augmented state dim exceeds RK45_IP_MAXAUG");
+    if (!(rtol > 0.0) || !(atol > 0.0))
+        throw std::invalid_argument("rk45_raw: rtol and atol must be > 0");
+
+    arma::mat out(nt, n);
+    for (int j = 0; j < n; ++j) out(0, j) = a0[j];
+    if (nt == 1) return out;
+
+    for (int i = 1; i < nt; ++i)
+        if (!(ts[i] > ts[i - 1]))
+            throw std::invalid_argument("rk45_raw: ts must be strictly increasing");
+
+    double y[RK45_IP_MAXAUG], yn[RK45_IP_MAXAUG], ys[RK45_IP_MAXAUG];
+    double k1[RK45_IP_MAXAUG], k2[RK45_IP_MAXAUG], k3[RK45_IP_MAXAUG], k4[RK45_IP_MAXAUG];
+    double k5[RK45_IP_MAXAUG], k6[RK45_IP_MAXAUG], k7[RK45_IP_MAXAUG];
+    for (int j = 0; j < n; ++j) y[j] = a0[j];
+    if (n_err <= 0 || n_err > n) n_err = n;
+
+    double t = ts[0];
+    double h = (ts[nt - 1] - ts[0]) / 100.0;
+    if (max_h > 0.0 && h > max_h) h = max_h;
+    if (h <= min_h)
+        throw std::invalid_argument("rk45_raw: initial step size underflow; check ts range vs min_h");
+
+    long iter = 0;
+    f(t, y, theta, k1);  // FSAL: k1 persists between accepted steps
+    for (int io = 1; io < nt; ++io) {
+        const double tt = ts[io];
+        while (t < tt) {
+            if (++iter > max_iter)
+                throw std::runtime_error("rk45_raw: max_iter exceeded (stiff dynamics; non-stiff only)");
+            double hs = h;
+            if (t + hs > tt) hs = tt - t;
+            if (hs < min_h)
+                throw std::runtime_error("rk45_raw: step size underflow (stiff dynamics / discontinuity)");
+
+            for (int j = 0; j < n; ++j) ys[j] = y[j] + hs * (a21 * k1[j]);
+            f(t + c2 * hs, ys, theta, k2);
+            for (int j = 0; j < n; ++j) ys[j] = y[j] + hs * (a31 * k1[j] + a32 * k2[j]);
+            f(t + c3 * hs, ys, theta, k3);
+            for (int j = 0; j < n; ++j) ys[j] = y[j] + hs * (a41 * k1[j] + a42 * k2[j] + a43 * k3[j]);
+            f(t + c4 * hs, ys, theta, k4);
+            for (int j = 0; j < n; ++j) ys[j] = y[j] + hs * (a51 * k1[j] + a52 * k2[j] + a53 * k3[j] + a54 * k4[j]);
+            f(t + c5 * hs, ys, theta, k5);
+            for (int j = 0; j < n; ++j) ys[j] = y[j] + hs * (a61 * k1[j] + a62 * k2[j] + a63 * k3[j] + a64 * k4[j] + a65 * k5[j]);
+            f(t + c6 * hs, ys, theta, k6);
+            for (int j = 0; j < n; ++j) yn[j] = y[j] + hs * (a71 * k1[j] + a72 * k2[j] + a73 * k3[j] + a74 * k4[j] + a75 * k5[j] + a76 * k6[j]);
+            f(t + c7 * hs, yn, theta, k7);  // FSAL stage
+
+            double es = 0.0;
+            for (int j = 0; j < n_err; ++j) {
+                const double e  = hs * (e1 * k1[j] + e2 * k2[j] + e3 * k3[j] + e4 * k4[j] + e5 * k5[j] + e6 * k6[j] + e7 * k7[j]);
+                const double sc = atol + rtol * std::max(std::fabs(y[j]), std::fabs(yn[j]));
+                const double r  = e / sc;
+                es += r * r;
+            }
+            const double en = std::sqrt(es / static_cast<double>(n_err));
+
+            constexpr double SF = 0.9, MN = 0.2, MX = 5.0, EX = -0.2;
+            if (en <= 1.0) {
+                t += hs;
+                for (int j = 0; j < n; ++j) { y[j] = yn[j]; k1[j] = k7[j]; }
+                const double sc = (en > 1e-12) ? std::pow(en, EX) : MX;
+                h = hs * std::max(MN, std::min(MX, SF * sc));
+                if (max_h > 0.0 && h > max_h) h = max_h;
+            } else {
+                h = hs * std::max(MN, SF * std::pow(en, EX));
+            }
+        }
+        for (int j = 0; j < n; ++j) out(io, j) = y[j];
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// FD-of-RHS augmented derivative. Over the augmented state
+//     a = [ y(n) ; s_0(n) ; s_1(n) ; ... ; s_{p-1}(n) ],  s_c = d y / d theta_{sidx[c]},
+// builds J_y = df/dy (central FD of the RHS) once, then for each tracked param c
+// forms d(s_c)/dt = J_y * s_c + df/d theta_{sidx[c]} (the theta column also by
+// central FD of the RHS). Allocation-free; FD step matches fd_rhs_jacobian.
+// ---------------------------------------------------------------------------
+template <class RHS_IP>
+struct fd_aug_rhs {
+    RHS_IP f;
+    int n;         // base state dim
+    int p;         // number of tracked params
+    int n_theta;   // full theta length
+    const int* sidx;  // length p: tracked theta component indices
+
+    void operator()(double t, const double* a, const double* theta, double* da) const {
+        double f0[RK45_IP_MAXN], yp[RK45_IP_MAXN], ym[RK45_IP_MAXN];
+        double fp[RK45_IP_MAXN], fm[RK45_IP_MAXN], th2[RK45_IP_MAXN];
+        double Jy[RK45_IP_MAXN][RK45_IP_MAXN];
+
+        // Base derivative dy/dt = f(t, y, theta).
+        f(t, a, theta, f0);
+        for (int i = 0; i < n; ++i) da[i] = f0[i];
+
+        // J_y = df/dy, central FD (step 1e-6 * max(1, |y_c|)).
+        for (int c = 0; c < n; ++c) {
+            const double hc = 1e-6 * std::max(1.0, std::fabs(a[c]));
+            for (int i = 0; i < n; ++i) { yp[i] = a[i]; ym[i] = a[i]; }
+            yp[c] = a[c] + hc; ym[c] = a[c] - hc;
+            f(t, yp, theta, fp);
+            f(t, ym, theta, fm);
+            const double inv = 0.5 / hc;
+            for (int i = 0; i < n; ++i) Jy[i][c] = (fp[i] - fm[i]) * inv;
+        }
+
+        // For each tracked param: d(s_c)/dt = J_y s_c + df/d theta_{sidx[c]}.
+        for (int c = 0; c < n_theta; ++c) th2[c] = theta[c];
+        for (int j = 0; j < p; ++j) {
+            const int tj = sidx[j];
+            const double hj = 1e-6 * std::max(1.0, std::fabs(theta[tj]));
+            th2[tj] = theta[tj] + hj; f(t, a, th2, fp);
+            th2[tj] = theta[tj] - hj; f(t, a, th2, fm);
+            th2[tj] = theta[tj];
+            const double inv = 0.5 / hj;
+            const double* s = a + n + n * j;   // s_j
+            double* ds      = da + n + n * j;  // d(s_j)/dt
+            for (int i = 0; i < n; ++i) {
+                double v = (fp[i] - fm[i]) * inv;         // (df/d theta_{tj})_i
+                for (int k = 0; k < n; ++k) v += Jy[i][k] * s[k];  // (J_y s_j)_i
+                ds[i] = v;
+            }
+        }
+    }
+};
+
+}  // namespace detail
+
+// ===========================================================================
+//  Public: allocation-free base solve (in-place RHS)
+// ===========================================================================
+/**
+ * @brief Allocation-free base ODE solve; numerical drop-in for ode::rk45.
+ *
+ * `f` is an in-place RHS `void f(double t, const double* y, const double* theta,
+ * double* dy)`. Returns the trajectory as an (n_times x n_state) matrix, one row
+ * per requested time. Same Butcher tableau / step control as ode::rk45.
+ */
+template <class RHS_IP>
+inline arma::mat rk45_inplace(RHS_IP&& f,
+                              const arma::vec& y0,
+                              const arma::vec& ts,
+                              const arma::vec& theta,
+                              double rtol   = 1e-6,
+                              double atol   = 1e-6,
+                              double max_h  = 0.0,
+                              double min_h  = 1e-14,
+                              long   max_iter = 100000) {
+    return detail::rk45_raw(std::forward<RHS_IP>(f), y0, ts, theta.memptr(),
+                            static_cast<int>(y0.n_elem), rtol, atol,
+                            max_h, min_h, max_iter);
+}
+
+// ===========================================================================
+//  Public: allocation-free FD-of-RHS forward sensitivities
+// ===========================================================================
+/**
+ * @brief Forward sensitivities via central FD of an IN-PLACE RHS, allocation-free.
+ *
+ * Numerical drop-in for ode::rk45_sens_fd (same rk45_sens_result, same
+ * sens_chain). `f` is the in-place RHS; the library builds J_y and J_theta by
+ * central FD of `f` (users never write Jacobians). The augmented state y + vec(S)
+ * is carried in stack buffers; `S[i]` is d y(ts[i])/d theta restricted to the
+ * tracked columns.
+ *
+ * @param coupled_error  true  -> S is in the adaptive error norm (drop-in for
+ *                                rk45_sens_fd); false -> STATE-ONLY control.
+ */
+template <class RHS_IP>
+inline rk45_sens_result rk45_sens_fd_inplace(RHS_IP&& f,
+                                             const arma::vec& y0,
+                                             const arma::vec& ts,
+                                             const arma::vec& theta,
+                                             const arma::uvec& theta_idx = arma::uvec(),
+                                             double rtol = 1e-6,
+                                             double atol = 1e-6,
+                                             const arma::mat& S0 = arma::mat(),
+                                             bool   coupled_error = true,
+                                             double max_h = 0.0,
+                                             double min_h = 1e-14,
+                                             long   max_iter = 100000) {
+    const int n = static_cast<int>(y0.n_elem);
+    if (n == 0) throw std::invalid_argument("rk45_sens_fd_inplace: y0 must be non-empty");
+    if (n > RK45_IP_MAXN)
+        throw std::invalid_argument("rk45_sens_fd_inplace: n_state exceeds RK45_IP_MAXN");
+
+    const arma::uvec idx = detail::resolve_theta_idx(theta_idx, theta.n_elem);
+    const int p = static_cast<int>(idx.n_elem);
+    const int aug = n * (1 + p);
+    if (aug > RK45_IP_MAXAUG)
+        throw std::invalid_argument("rk45_sens_fd_inplace: n_state*(1+n_param) exceeds RK45_IP_MAXAUG");
+    if (static_cast<int>(theta.n_elem) > RK45_IP_MAXN)
+        throw std::invalid_argument("rk45_sens_fd_inplace: theta length exceeds RK45_IP_MAXN");
+
+    // Augmented initial state a0 = [ y0 ; vec(S0) ]  (S0 default = 0).
+    arma::vec a0(aug, arma::fill::zeros);
+    for (int j = 0; j < n; ++j) a0[j] = y0[j];
+    if (S0.n_elem != 0) {
+        if (static_cast<int>(S0.n_rows) != n || static_cast<int>(S0.n_cols) != p)
+            throw std::invalid_argument("rk45_sens_fd_inplace: S0 must be n_state x n_param");
+        for (int j = 0; j < p; ++j)
+            for (int k = 0; k < n; ++k) a0[n + n * j + k] = S0(k, j);
+    }
+
+    std::vector<int> sidx(p);
+    for (int j = 0; j < p; ++j) sidx[j] = static_cast<int>(idx[j]);
+
+    detail::fd_aug_rhs<RHS_IP&> af{f, n, p, static_cast<int>(theta.n_elem), sidx.data()};
+    const int n_err = coupled_error ? aug : n;
+    const arma::mat A = detail::rk45_raw(af, a0, ts, theta.memptr(), n_err,
+                                         rtol, atol, max_h, min_h, max_iter);
+
+    // Reshape augmented trajectory into rk45_sens_result.
+    const int nt = static_cast<int>(ts.n_elem);
+    rk45_sens_result res;
+    res.theta_idx = idx;
+    res.y = A.cols(0, n - 1);
+    res.S.assign(nt, arma::mat(n, p));
+    for (int i = 0; i < nt; ++i)
+        for (int j = 0; j < p; ++j)
+            for (int k = 0; k < n; ++k)
+                res.S[i](k, j) = A(i, n + n * j + k);
+    return res;
 }
 
 }  // namespace ode
