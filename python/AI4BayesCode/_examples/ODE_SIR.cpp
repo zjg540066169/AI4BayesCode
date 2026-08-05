@@ -32,14 +32,14 @@
 //
 //  where SSE = sum_k (log I_obs[k] - log I_pred[k])^2.
 //
-//  Gradient:
-//      d/d beta  = central FD on ODE re-solve (mirrors ODE_SIR.cpp)
-//      d/d gamma = central FD on ODE re-solve
-//      d/d sigma = -(N+1)/sigma + SSE/sigma^3    (analytic)
+//  Gradient (skills/codegen_priors.md "ODE-model gradients" default):
+//      d/d beta, d/d gamma = forward sensitivity -- ONE augmented solve
+//          (ode::rk45_sens_fd_inplace) gives I(t) and S = d I/d theta;
+//          ode::sens_chain folds S against d(log lik)/d I.
+//      d/d sigma           = -(N+1)/sigma + SSE/sigma^3    (analytic)
 //
-//  ODE is solved ONCE per eval (center point); SSE is reused by both analytic
-//  and FD gradient. FD for beta/gamma re-solves ODE at ±h (4 extra solves for
-//  2 params).
+//  The single augmented solve replaces the old central-FD path's (1 + 2p)
+//  ODE re-solves; central FD stays the fallback for non-smooth RHS.
 //
 //  Block decomposition
 //  -------------------
@@ -155,6 +155,18 @@ inline arma::vec sir_rhs(double /*t*/, const arma::vec& y,
     return dy;
 }
 
+// SIR RHS, in-place form for the forward-sensitivity solver.
+inline void sir_rhs_ip(double /*t*/, const double* y, const double* theta_ode,
+                       double* dy) {
+    const double beta  = theta_ode[0];
+    const double gamma = theta_ode[1];
+    const double S = y[0], I = y[1], R = y[2];
+    const double N = S + I + R;
+    dy[0] = -beta * S * I / N;
+    dy[1] =  beta * S * I / N - gamma * I;
+    dy[2] =  gamma * I;
+}
+
 // Solve SIR and return I(t_obs). Reads y0 and t_obs from ctx.
 inline arma::vec solve_sir_I(double beta, double gamma,
                              const block_context& ctx) {
@@ -174,7 +186,7 @@ inline arma::vec solve_sir_I(double beta, double gamma,
 //  lp = -(N+1)*log(sigma) - 0.5*SSE/sigma^2 - 0.5*(beta^2 + gamma^2)
 //
 //  Gradient:
-//    d/d beta, d/d gamma : central finite differences (re-solve ODE at ±h)
+//    d/d beta, d/d gamma : forward sensitivity (one augmented ODE solve)
 //    d/d sigma           : analytic = -(N+1)/sigma + SSE/sigma^3
 //
 //  joint_nuts_block adds the POSITIVE-slice Jacobians (+log(beta), +log(gamma),
@@ -197,10 +209,28 @@ double sir_joint_log_density(const arma::vec& theta_cat,
     const arma::vec& I_obs = ctx.at("I_obs");
     const std::size_t N    = I_obs.n_elem;
 
-    // --- Center ODE solve (reused by gradient too) -------------------------
+    const double Nd     = static_cast<double>(N);
+    const double sigma2 = sigma * sigma;
+    const double sigma3 = sigma2 * sigma;
+
+    // --- ODE solve ---------------------------------------------------------
+    // Gradient path: ONE augmented forward-sensitivity solve yields both the
+    // trajectory I_pred and the parameter Jacobian S = d I(t)/d(beta,gamma),
+    // replacing the old central-FD path's (1 + 2p) ODE re-solves. Value-only
+    // path: a single cheap base solve.
     arma::vec I_pred;
+    const arma::vec& y0    = ctx.at("y0");
+    const arma::vec& t_obs = ctx.at("t_obs");
+    arma::vec theta_ode    = {beta, gamma};
+    ode::rk45_sens_result R;
     try {
-        I_pred = solve_sir_I(beta, gamma, ctx);
+        if (grad_nat) {
+            R = ode::rk45_sens_fd_inplace(sir_rhs_ip, y0, t_obs, theta_ode,
+                                          arma::uvec(), 1e-6, 1e-6);
+            I_pred = R.y.col(1);
+        } else {
+            I_pred = solve_sir_I(beta, gamma, ctx);
+        }
     } catch (const std::exception&) {
         if (grad_nat) grad_nat->set_size(3);
         return -std::numeric_limits<double>::infinity();
@@ -221,10 +251,6 @@ double sir_joint_log_density(const arma::vec& theta_cat,
         sse += r * r;
     }
 
-    const double Nd     = static_cast<double>(N);
-    const double sigma2 = sigma * sigma;
-    const double sigma3 = sigma2 * sigma;
-
     // Joint log-density (each term exactly once):
     //   likelihood: -N*log(sigma) - 0.5*SSE/sigma^2
     //   Jeffreys:   -log(sigma)
@@ -242,58 +268,16 @@ double sir_joint_log_density(const arma::vec& theta_cat,
     // d/d sigma = -(N+1)/sigma + SSE/sigma^3
     (*grad_nat)[2] = -(Nd + 1.0) / sigma + sse / sigma3;
 
-    // --- Central FD gradient w.r.t. beta and gamma -------------------------
-    // Mirrors ODE_SIR.cpp's theta_log_density gradient, but uses the FULL
-    // joint log-density at ±h (so the SSE and prior are both included).
-    const double h = 1e-5;
-
-    // Helper: evaluate the full joint lp at a perturbed (beta, gamma).
-    auto eval_lp_at = [&](double b, double g) -> double {
-        if (b <= 0.0 || g <= 0.0) return -std::numeric_limits<double>::infinity();
-        arma::vec I_p;
-        try {
-            I_p = solve_sir_I(b, g, ctx);
-        } catch (...) {
-            return -std::numeric_limits<double>::infinity();
-        }
-        double sse_p = 0.0;
-        for (arma::uword k = 0; k < N; ++k) {
-            if (!(I_p[k] > 0.0)) return -std::numeric_limits<double>::infinity();
-            const double r = std::log(I_obs[k]) - std::log(I_p[k]);
-            sse_p += r * r;
-        }
-        return -(Nd + 1.0) * std::log(sigma)
-               - 0.5 * sse_p / sigma2
-               - 0.5 * (b * b + g * g);
-    };
-
-    // d/d beta: perturb beta, keep gamma fixed.
-    {
-        const double b_plus  = beta + h;
-        double       b_minus = beta - h;
-        if (b_minus <= 0.0) b_minus = 1e-10;
-        const double lp_plus  = eval_lp_at(b_plus,  gamma);
-        const double lp_minus = eval_lp_at(b_minus, gamma);
-        if (std::isfinite(lp_plus) && std::isfinite(lp_minus)) {
-            (*grad_nat)[0] = (lp_plus - lp_minus) / (b_plus - b_minus);
-        } else {
-            (*grad_nat)[0] = 0.0;
-        }
-    }
-
-    // d/d gamma: perturb gamma, keep beta fixed.
-    {
-        const double g_plus  = gamma + h;
-        double       g_minus = gamma - h;
-        if (g_minus <= 0.0) g_minus = 1e-10;
-        const double lp_plus  = eval_lp_at(beta, g_plus);
-        const double lp_minus = eval_lp_at(beta, g_minus);
-        if (std::isfinite(lp_plus) && std::isfinite(lp_minus)) {
-            (*grad_nat)[1] = (lp_plus - lp_minus) / (g_plus - g_minus);
-        } else {
-            (*grad_nat)[1] = 0.0;
-        }
-    }
+    // --- Forward-sensitivity gradient w.r.t. beta and gamma ----------------
+    //   d(lp)/d theta = sum_k [ d(lp)/d I_pred[k] ] * S[k]  +  prior derivative,
+    //   d(lp)/d I_pred[k] = (log I_obs[k] - log I_pred[k]) / (sigma^2 I_pred[k]).
+    // Only the infected compartment (column 1) carries likelihood weight.
+    arma::mat dlp(N, 3, arma::fill::zeros);
+    for (arma::uword k = 0; k < N; ++k)
+        dlp(k, 1) = (std::log(I_obs[k]) - std::log(I_pred[k])) / (sigma2 * I_pred[k]);
+    arma::vec g_lik = ode::sens_chain(R, dlp);   // [d/d beta, d/d gamma] of the likelihood
+    (*grad_nat)[0] = g_lik[0] - beta;            // + half-Normal(0,1) prior derivative
+    (*grad_nat)[1] = g_lik[1] - gamma;
 
     return lp;
 }
@@ -585,7 +569,7 @@ RCPP_MODULE(ODE_SIR_module) {
             "infected counts > 0 at each t_obs), rng_seed, keep_history. "
             "Infers (beta, gamma, sigma) jointly via one joint_nuts_block. "
             "Priors: beta,gamma ~ half-Normal(0,1); sigma ~ Jeffreys. "
-            "Gradient w.r.t. beta/gamma via central FD; w.r.t. sigma analytic.")
+            "Gradient w.r.t. beta/gamma via forward sensitivity; w.r.t. sigma analytic.")
         .method("step", (void (ODE_SIR::*)())    &ODE_SIR::step, "Run one sweep.")
         .method("step", (void (ODE_SIR::*)(int)) &ODE_SIR::step, "Run n sweeps.")
         .method("get_current",  &ODE_SIR::get_current)
@@ -618,8 +602,8 @@ PYBIND11_MODULE(ODE_SIR, m) {
              pybind11::arg("keep_history") = false,
              "Joint-NUTS SIR ODE model. Infers (beta, gamma, sigma) in one "
              "joint_nuts_block. Priors: beta,gamma ~ half-Normal(0,1); "
-             "sigma ~ Jeffreys. Gradient w.r.t. beta/gamma via central FD; "
-             "w.r.t. sigma analytic.")
+             "sigma ~ Jeffreys. Gradient w.r.t. beta/gamma via forward "
+             "sensitivity; w.r.t. sigma analytic.")
         .def("step", (void (ODE_SIR::*)())    &ODE_SIR::step, "Run one sweep.")
         .def("step", (void (ODE_SIR::*)(int)) &ODE_SIR::step, pybind11::arg("n_steps"))
         .def("get_current",  &ODE_SIR::get_current)
