@@ -290,6 +290,18 @@ consumes the majority of the context window before any work begins.
 Load each instruction file ONLY when entering its phase, and AT MOST
 once per session.
 
+**Paper as input -> read it in a SUBAGENT, not here.** If the user gives a
+paper / PDF / long document instead of a direct model description, do NOT
+pull the whole thing into this context -- it starves the generation window.
+Dispatch a subagent (where one is available, e.g. a Task/Agent tool) to read
+it and return ONLY the extracted model spec (likelihood, priors, parameters,
+observation model, sampler notes). Then treat that spec EXACTLY like a
+user-typed model description -- START with the initial model-confirmation gate
+(Phase 3): show the extracted model back to the user for sign-off BEFORE any
+codegen (extraction can misread, so this gate matters MORE here, not less),
+then run the remaining phases below. (No subagent tool available: extract the
+spec, drop the paper text, continue from the spec.)
+
 | Phase | When | Instruction file to load |
 |---|---|---|
 | 0. Entry | session start | `start.md` (this file) -- already in progress |
