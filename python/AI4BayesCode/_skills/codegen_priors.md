@@ -361,44 +361,24 @@ rank -- do NOT read "item 1" as "try this first":
    for the full escalation order, and **"GP composition recipes"**
    for heteroscedastic / hierarchical / multi-output GP patterns.
 
-   ### ODE-model gradients: FD default for small models, forward
-   ### sensitivities for large parameter counts
+   ### ODE-model gradients: forward sensitivities by DEFAULT
 
-   For a mechanistic / compartmental / pharmacokinetic ODE model whose
-   likelihood depends on the solved trajectory y(t; theta), the SIMPLE
-   DEFAULT is central FD of the log-density: re-solve the ODE at
-   theta +/- h per parameter (cost 1 + 2p adaptive `ode::rk45` solves).
-   At the standard tolerance rtol=atol=1e-6 this gradient is accurate
-   for typical well-conditioned models -- the theta+/-h solves take
-   nearly the same adaptive steps, so their integration errors largely
-   cancel (measured relative error ~1e-8, NOT the naive rtol/h worst
-   case). Keep the ODE tolerance at 1e-6 (Stan's default), not 1e-8:
-   the tolerance is the dominant speed lever, independent of how the
-   gradient is formed.
+   ODE likelihood on trajectory y(t; theta): DEFAULT gradient is ONE
+   augmented solve `ode::rk45_sens_fd_inplace(f_ip, y0, ts, theta, ...)`
+   (allocation-free) + `ode::sens_chain(res, dlp_dy)`. Model supplies an
+   in-place RHS `void f_ip(double t, const double* y, const double* theta,
+   double* dy)`; the LIBRARY finite-differences it (never hand-write a
+   Jacobian; no runtime autodiff). dlp_dy(k,j) = d(log target)/d y_j at obs
+   time k gives the ODE-mediated grad; ADD direct theta terms by hand
+   (priors, noise scale); seed IC params via `S0`. Keep rtol=atol=1e-6.
+   Ref `examples/ODE_SIR.cpp`. (Faster than central FD even at small p;
+   OVERTURNS the old "not worth it at small p" note.)
 
-   For LARGE parameter counts, or when a stiff / chaotic / near-
-   ill-conditioned ODE makes the FD gradient too noisy for NUTS to
-   mix, switch to Tier-2 forward sensitivity analysis:
-   `AI4BayesCode::ode::rk45_sens(f, f_ad, y0, ts, theta, ...)` (or the
-   dependency-free `rk45_sens_fd(f, ...)`, which central-differences
-   the CHEAP RHS -- no ODE-solve-error amplification) integrates the
-   augmented system for both y(t) and S(t) = d y/d theta in ONE
-   adaptive solve; `ode::sens_chain(result, dlp_dy)` folds S against
-   d(log lik)/d y into an EXACT, DETERMINISTIC gradient. Seed
-   initial-condition sensitivities via the `S0` argument when some
-   parameters ARE initial conditions.
-
-   HONEST perf (measured): forward sensitivity is O(p) -- the SAME
-   order as FD -- and the augmented system has n_state*(1+p)
-   components with a per-step Jacobian cost, so for SMALL p it is
-   often SLOWER than the (2p+1) plain FD solves (e.g. a 3-state
-   2-param SIR: ~105 us autodiff vs ~34 us FD per gradient). The win
-   is gradient QUALITY (exact, no FD step to tune) and scaling as p
-   grows or each solve gets expensive -- NOT a guaranteed speedup at
-   small p. MEASURE; do not assume a speedup. Only true O(1)-in-p
-   scaling would come from adjoint sensitivity (not yet implemented).
-   See `include/AI4BayesCode/ode_rk45.hpp` (TIER 2 API + PERFORMANCE
-   block).
+   FALLBACK central FD (1 + 2p `ode::rk45` solves) when: (a) non-smooth
+   RHS; (b) log target does not factor as d(log target)/d y * S + analytic
+   direct terms (foolproof; hand weights risk a SEMANTIC bug); (c) over the
+   in-place caps -- try heap `ode::rk45_sens_fd` first. autodiff
+   `ode::rk45_sens` = validation only.
 8. **`gmrf_precision_block`** -- Gaussian Markov Random Field latent
    (sparse precision matrix Q). Rue 2001 sparse-Cholesky direct
    sampler via Eigen SimplicialLLT + AMD reordering, with optional
