@@ -294,12 +294,21 @@ once per session.
 paper / PDF / long document instead of a direct model description, do NOT
 pull the whole thing into this context -- it starves the generation window.
 Dispatch a subagent (where one is available, e.g. a Task/Agent tool) to read
-it and return ONLY the extracted model spec (likelihood, priors, parameters,
-observation model, sampler notes). The spec MUST pin down every distribution's
-exact parametrization (e.g. Gamma shape-rate vs shape-scale, LogNormal log-SD
-vs log-variance, Beta mean-precision vs shape) and enumerate any alternative
-parametrizations / model variants the paper gives -- the convention is where a
-wrong log-density hides. Dispatch it DIRECTLY -- reading the paper is
+it and return the extracted spec in THIS template (it feeds the codegen.md
+Sec.2 confirmation table):
+- Equations, grouped: observation / likelihood; latent / transition (if any);
+  priors.
+- One row per symbol: `| name | type | distribution / value (EXACT
+  parametrization) | tunable? |`. `type` is one of {observed data, known input,
+  sampled parameter, derived, hyperparameter}. EXACT parametrization spells out
+  the convention -- Gamma shape-rate vs shape-scale, LogNormal log-SD vs
+  log-variance, Beta mean-precision vs shape -- the convention is where a wrong
+  log-density hides. `tunable?` = YES for hyperparameters the user may retune
+  (prior hyperparameters / fixed constants exposed as ctor args), NO for
+  hard-coded.
+- Alternative parametrizations / model variants the paper offers.
+- Sampler notes. ASCII only.
+Dispatch it DIRECTLY -- reading the paper is
 read-only with no side effects, so do NOT ask the user to confirm spawning it
 (that is not a confirm-before-action step). The ONE sign-off is the RETURNED
 SPEC: treat it EXACTLY like a user-typed model description and run the initial
