@@ -305,6 +305,18 @@ constexpr double e7 = -1.0 / 40.0;
 
 }  // namespace dp5_tableau
 
+// ---------------------------------------------------------------------------
+// Hard accuracy floor for EVERY rk45* solve. rtol/atol are clamped so a solve
+// can NEVER run LOOSER than this. Looser tolerances trade posterior accuracy
+// for speed -- a generated log-density must not do that, and it also keeps
+// AI-vs-Stan benchmarks apples-to-apples (Stan's integrate_ode_rk45 default is
+// 1e-6). TIGHTER values pass through unchanged, so high-accuracy reference and
+// data-simulation solves (e.g. 1e-9) still work. This is a fixed library
+// constant -- NOT a per-call argument or codegen-settable knob; changing it is
+// a deliberate edit here, not something an agent can loosen.
+// ---------------------------------------------------------------------------
+static constexpr double RK45_TOL_FLOOR = 1e-6;
+
 /**
  * @brief Dormand-Prince 5(4) adaptive Runge-Kutta integrator.
  *
@@ -336,6 +348,9 @@ inline arma::mat rk45(RHS&& f,
     if (!(rtol > 0.0) || !(atol > 0.0)) {
         throw std::invalid_argument("ode::rk45: rtol and atol must be > 0");
     }
+    // Accuracy floor: never integrate looser than RK45_TOL_FLOOR (tighter OK).
+    if (rtol > RK45_TOL_FLOOR) rtol = RK45_TOL_FLOOR;
+    if (atol > RK45_TOL_FLOOR) atol = RK45_TOL_FLOOR;
 
     // Output matrix — row i is y(ts[i])
     arma::mat y_out(n_times, n_state);
@@ -536,6 +551,9 @@ inline rk45_sens_result rk45_sens_core(RHS&& f,
         throw std::invalid_argument("ode::rk45_sens: y0 must be non-empty");
     if (!(rtol > 0.0) || !(atol > 0.0))
         throw std::invalid_argument("ode::rk45_sens: rtol and atol must be > 0");
+    // Accuracy floor: never integrate looser than RK45_TOL_FLOOR (tighter OK).
+    if (rtol > RK45_TOL_FLOOR) rtol = RK45_TOL_FLOOR;
+    if (atol > RK45_TOL_FLOOR) atol = RK45_TOL_FLOOR;
 
     const arma::uvec idx = resolve_theta_idx(theta_idx_in, theta.n_elem);
     const std::size_t p  = idx.n_elem;
@@ -920,6 +938,9 @@ inline arma::mat rk45_raw(RHS_IP&& f,
         throw std::invalid_argument("rk45_raw: augmented state dim exceeds RK45_IP_MAXAUG");
     if (!(rtol > 0.0) || !(atol > 0.0))
         throw std::invalid_argument("rk45_raw: rtol and atol must be > 0");
+    // Accuracy floor: never integrate looser than RK45_TOL_FLOOR (tighter OK).
+    if (rtol > RK45_TOL_FLOOR) rtol = RK45_TOL_FLOOR;
+    if (atol > RK45_TOL_FLOOR) atol = RK45_TOL_FLOOR;
 
     arma::mat out(nt, n);
     for (int j = 0; j < n; ++j) out(0, j) = a0[j];

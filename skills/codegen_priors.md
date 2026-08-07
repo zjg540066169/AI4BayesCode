@@ -370,7 +370,9 @@ rank -- do NOT read "item 1" as "try this first":
    double* dy)`; the LIBRARY finite-differences it (never hand-write a
    Jacobian; no runtime autodiff). dlp_dy(k,j) = d(log target)/d y_j at obs
    time k gives the ODE-mediated grad; ADD direct theta terms by hand
-   (priors, noise scale); seed IC params via `S0`. Keep rtol=atol=1e-6.
+   (priors, noise scale); seed IC params via `S0`. Solve tol is FIXED at 1e-6
+   by the library (`RK45_TOL_FLOOR` clamps any looser rtol/atol -- do NOT try
+   to loosen it for speed; it is not a tunable).
    Ref `examples/ODE_SIR.cpp`. (Faster than central FD even at small p;
    OVERTURNS the old "not worth it at small p" note.)
 

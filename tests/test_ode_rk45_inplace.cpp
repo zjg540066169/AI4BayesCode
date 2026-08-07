@@ -164,6 +164,21 @@ int main() {
         ok &= (rS < 1e-6 && idx_ok);
     }
 
+    // (e) accuracy floor: looser-than-1e-6 clamped to 1e-6; tighter passes through.
+    {
+        arma::vec y0{100.0, 0.0, 0.0}, ts{0.0, 0.5, 1.0, 2.0, 3.5, 5.0}, theta{0.7, 0.4, 0.2};
+        arma::mat s_loose = ode::rk45(lin_ar, y0, ts, theta, 1e-3,  1e-3);   // requested loose -> floored to 1e-6
+        arma::mat s_floor = ode::rk45(lin_ar, y0, ts, theta, 1e-6,  1e-6);
+        arma::mat s_tight = ode::rk45(lin_ar, y0, ts, theta, 1e-10, 1e-10);  // tighter -> passes through
+        double d_floor = arma::abs(s_loose - s_floor).max();   // 0: 1e-3 was clamped to 1e-6
+        double d_tight = arma::abs(s_loose - s_tight).max();   // >0: 1e-10 not clamped
+        bool floor_ok = (d_floor < 1e-13) && (d_tight > 1e-8);
+        std::printf("==== (e) RK45_TOL_FLOOR (looser clamped to 1e-6, tighter passes) ====\n");
+        std::printf("(e) rk45(1e-3)==rk45(1e-6) |d|=%.3e ; rk45(1e-3)!=rk45(1e-10) |d|=%.3e  %s\n",
+                    d_floor, d_tight, floor_ok ? "OK" : "FAIL");
+        ok &= floor_ok;
+    }
+
     std::printf("\n%s\n", ok ? "ALL PASS" : "FAILED");
     return ok ? 0 : 1;
 }
