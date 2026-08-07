@@ -355,6 +355,23 @@ as variance of `beta`.
 Ref: Riutort-Mayol et al. 2023 Stat.Comput. 33(1) Sec.3.3;
 Solin-Sarkka 2020 Stat.Comput. 30(2).
 
+**Heteroscedastic / coupled GP (BOTH mean AND log-sigma are HSGPs): NCP +
+dense metric is often NOT enough.** Two coupled spectral paths, plus a
+persistent `(sdgp <-> beta)` funnel and inter-`beta` ridge when the lengthscale
+is small (wiggly `f`), can leave R-hat > 1.01 on the `beta` vector after every
+metric / target / warmup tweak. That is Mode-1-like (reparameterize /
+marginalize), NOT Mode 2 -- do NOT report it as "multimodal". Escalate:
+1. **MARGINALIZE the Gaussian-linear mean-GP coefficients `beta`** analytically:
+   conditional on the sigma path, `sum sqrt(S_j) beta_j phi_j` is Gaussian-linear
+   even under a heteroscedastic KNOWN noise covariance, so `beta` integrates out
+   in closed form -- removing the funnel + ridge entirely and leaving only the
+   hyperparameters + the sigma path to sample.
+2. the **GP convergence troubleshooting ladder** in `block_catalogue/index.md`
+   (Cholesky-AD gradient, marginal GP, celerite).
+Also sanity-check the lengthscale prior against the data x-scale -- a mismatched
+too-small lengthscale forces pathological wiggliness that masquerades as
+multimodality.
+
 ### Form G -- Global-local shrinkage / horseshoe family
 
 `beta_j ~ N(0, tau^2 * lambda_j^2)`, `tau ~ HalfCauchy(0, tau_0)` (global),
@@ -387,6 +404,28 @@ Bhadra et al. 2017 Bayesian Anal. 12(4):1105-1131 (HS+); Zhang et al. 2022
 JASA 117(538):862-874 (R2D2); Bhattacharya et al. 2015 JASA 110(512):1479-1490
 (DL); Ishwaran-Rao 2005 AoS 33(2):730-773 (spike-slab).
 
+### Form H -- Penalized-spline / linear-basis coefficient ridge
+
+Detection cue: a spline / B-spline / RBF / polynomial design matrix `X` with
+coefficients `s ~ N(0, tau^2 I)` (smoothing sd `tau`) and mean = `X s`. The
+`(tau, s)` pair is a Form-A funnel AND the columns of `X` are near-collinear, so
+`s` rides a highly correlated ridge -- two chains fit the SAME `mu = X s` with
+different `s`, giving persistent R-hat on `s` while `tau` and everything else
+converge.
+
+NCR fixes the `(tau, s)` funnel (`s = tau * z`, `z ~ N(0,1)`); it does NOT fix
+the inter-coefficient ridge. For that:
+1. **QR-decorrelate the design** (`X = Q R`; sample coefficients in the `Q`
+   basis, map back by `R`) -- the standard Stan/brms fix; makes the coefficient
+   posterior near-isotropic.
+2. or **MARGINALIZE the Gaussian-linear `s`** analytically (as in Form F;
+   `X s` is Gaussian-linear even under a heteroscedastic known noise
+   covariance) -- integrates the ridge out.
+
+A persistent R-hat on a linear-basis coefficient vector is Mode-1-like
+(reparameterize / marginalize), NOT Mode 2 -- there is no permutation or sign
+symmetry, so do NOT diagnose it as label-switching / "multimodal".
+
 ---
 
 ## Failure Mode 2 -- Multi-modal / label-switching (partially detectable)
@@ -399,6 +438,11 @@ yet each chain looks well-mixed internally; ESS may look fine per-chain.
 - Mixture components (label switching across the K components).
 - Factor / loading models (sign flips).
 - Any exact permutation/sign symmetry in the prompt's parameterization.
+- **NOT this mode**: a GP / spline / linear-basis coefficient ridge (Forms
+  F/H) has NO permutation or sign symmetry -- do NOT diagnose it as
+  label-switching / "multimodal"; route to Forms F/H (reparameterize /
+  marginalize). Genuine multimodality needs the evidence in validator.md's
+  R2 note (separated modes with a gap, from a known symmetry).
 
 ### Fix
 Usually NOT a sampler bug. The **preferred / default** handling is at the

@@ -59,6 +59,20 @@ Work through the layers in order. If a layer fails, fix the code and
 re-run that layer before moving on. Within Layer 3, run R1 -> R2 -> R3
 in order; failure at an earlier step means don't bother with the next.
 
+**R2 rank-R-hat > 1.01 is a MIXING failure by default -- not a property of the
+posterior.** Do NOT report FAILED with a "multimodal" / "genuinely hard
+posterior" / "ridge R-hat cannot reconcile" rationale UNLESS you can SHOW
+explicit evidence of genuine multimodality: over-dispersed independent chains
+settling in SEPARATED modes with a gap between them, from a KNOWN structural
+symmetry (mixture / label-switching / sign flip) -- NOT two points on one
+connected ridge, and NOT a scale<->coefficient funnel. Absent that evidence it
+is presumed fixable -- look for the parameterization fix before concluding
+failure. If the model uses a `joint_nuts_block`, you are ENCOURAGED (not
+required -- not every model needs it) to consult `joint_nuts_failure.md` and
+consider its reparameterization / marginalization routes. If you still report
+FAILED, JUSTIFY the multimodal claim with the evidence above; an unjustified
+"multimodal" is not an acceptable exit.
+
 ---
 
 ## Check number registry (all 26)
