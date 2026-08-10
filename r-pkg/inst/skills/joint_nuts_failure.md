@@ -2,11 +2,13 @@
 name: AI4BayesCode-joint-nuts-failure
 description: |
   Failure modes of joint_nuts_block (the default sampler for coupled
-  continuous parameters) and how to fix them BEFORE shipping. Covers the
-  three v1 modes -- (1) hierarchical funnel + the mandatory non-centered
-  reparameterization (NCR) recipe, (2) multi-modal / label-switching,
-  (3) high-dim joint slowness -- plus the escalation ladder. The funnel
-  NCR recipe lives HERE (codegen_priors.md and validator Check #24 point
+  continuous parameters) and how to fix them BEFORE shipping. LEADS with a
+  general funnel/ridge signature (S1 scale x latent; S2 correlated-latent
+  ridge) + a universal fix ladder (marginalize / NCR / QR), so a model matching
+  the PATTERN but no named Form is still covered. The named cases -- (1)
+  hierarchical funnel + NCR, (2) multi-modal / label-switching, (3) high-dim
+  slowness, plus Forms A-H -- are WORKED EXAMPLES. The escalation ladder and the
+  funnel NCR recipe live HERE (codegen_priors.md and validator Check #24 point
   here). Consult this skill BEFORE emitting a joint_nuts_block, and when a
   joint model shows pathology (max tree depth, divergences, R-hat large,
   a scale parameter stuck near zero, or random-effect ESS = NA).
@@ -27,6 +29,47 @@ failure modes. Each is detectable and fixable; this skill is the reference.
   against Mode 1 (funnel) -- NCR is **mandatory** when the pattern matches.
 - **Validator**: target reference when Check #24 (joint-NUTS pre-flight) fails.
 - **Debug**: lookup when a joint model shows pathology at runtime.
+
+---
+
+## The general signature -- match THIS, not just a named Form
+
+The Forms/Modes below are WORKED EXAMPLES, not an exhaustive catalogue. If a
+model's funnel/ridge matches no named Form, do NOT conclude "unfixable" or
+"multimodal" -- match it to one of two structural signatures (they cover the
+great majority of joint_nuts_block pathologies) and apply the fix ladder.
+
+**(S1) Scale x latent funnel.** A sampled scale-like `s` (variance / sd /
+precision / lengthscale / amplitude / spectral density / concentration) sets the
+scale of a VECTOR of latents `z` (z's prior sd is a function of s, OR z is
+multiplied by a function of s before the likelihood); `(s, z)` funnels as
+`s -> 0`. (Forms A, B, C, D, E, F, G.)
+
+**(S2) Correlated-latent ridge.** Latents have a highly correlated posterior -- a
+ridge where different coefficient vectors fit equally well -- from either (a) a
+collinear design/basis matrix `X` (spline / RBF / poly -- Form H), or (b) a
+prior-induced correlation (random-walk / AR states, no `X` -- Form C). S1 and S2
+co-occur in heteroscedastic latent-function (F/H) and state-space (C) models.
+
+**Fix ladder (by SIGNATURE, not Form name):**
+1. **MARGINALIZE** a conjugate Gaussian-linear latent (Gaussian latent + Gaussian
+   obs through a linear map, even heteroscedastic KNOWN noise) in closed form --
+   kills S1 AND S2 at once; try first. (A non-Gaussian GLM latent is NOT
+   closed-form marginalizable even with a linear predictor -- use NCR / QR.)
+2. **NCR** (S1): factor the scale out, `z = g(s) * z_raw`, `z_raw ~ N(0,1)`,
+   priors unchanged; substitute the family-specific product (see the Forms).
+3. **DECORRELATE** (S2): QR the design (`X = Q R`; sample in `Q`, map back by
+   `R^{-1}`); for a prior-induced state ridge (no `X`), a dense metric is the
+   in-sampler analogue (see Form C).
+4. **Data-strength**: NCR under weak data; the centered form can win under strong
+   data (the per-group likelihood dominates the prior).
+
+Only AFTER this ladder, and only with `validator.md`'s R2 evidence (over-
+dispersed chains in SEPARATED modes with a gap, from a KNOWN symmetry), is
+"genuine multimodality" (Mode 2) acceptable -- a missing Form is not evidence.
+Genuinely NONLINEAR geometries (banana, dynamical-system couplings) are neither
+S1 nor S2: reparameterize toward near-Gaussian coordinates or escalate (ladder
+at the end). These are less common in this library than S1/S2.
 
 ---
 
@@ -416,7 +459,7 @@ converge.
 NCR fixes the `(tau, s)` funnel (`s = tau * z`, `z ~ N(0,1)`); it does NOT fix
 the inter-coefficient ridge. For that:
 1. **QR-decorrelate the design** (`X = Q R`; sample coefficients in the `Q`
-   basis, map back by `R`) -- the standard Stan/brms fix; makes the coefficient
+   basis, map back by `R^{-1}`) -- the standard Stan/brms fix; makes the coefficient
    posterior near-isotropic.
 2. or **MARGINALIZE the Gaussian-linear `s`** analytically (as in Form F;
    `X s` is Gaussian-linear even under a heteroscedastic known noise
@@ -491,7 +534,11 @@ across a genuine coupling -- that silently biases inference.
 ## Escalation ladder
 
 ```
-Level 1: NCR (funnel)  OR  reparameterize (constraint boundary)
+Level 0: MARGINALIZE a conjugate Gaussian-linear latent in closed form --
+         removes the scale x latent funnel (S1) AND the correlated-latent
+         ridge (S2) at once
+Level 1: NCR (funnel S1)  OR  QR-decorrelate / dense metric (ridge S2)  OR
+         reparameterize (constraint boundary)
 Level 2: split into smaller joint groups via conditional independence
 Level 3: fall back to per-parameter nuts_block (correct, just slower per ESS)
 Level 4: declare "needs a specialized algorithm" (HMM / GMRF / order_mcmc)
