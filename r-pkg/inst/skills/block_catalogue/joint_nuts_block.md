@@ -32,11 +32,13 @@ cfg.log_density_grad = &joint_theta_b_log_density;
 cfg.n_warmup_first_call = 1000;
 
 // Dual-averaging target acceptance rate. AI4BayesCode default is 0.55
-// (matches the vendored mcmclib default and Hoffman-Gelman 2014). Stan /
-// PyMC / NumPyro use 0.8; set this field to 0.8 to match. Raise to
-// 0.9 - 0.99 on stiff funnel / hierarchical models where divergences
-// persist. Can also be adjusted per-call via readapt_NUTS(..., target_accept).
-// cfg.target_accept_rate = 0.8;
+// (vendored mcmclib default + Hoffman-Gelman 2014). Raising it is an OPTION but
+// STRONGLY DISCOURAGED: unlike Stan/PyMC adapt_delta, raising the target on THIS
+// kernel tends to lengthen NUTS trajectories dramatically (~100x slowdown,
+// near-max-tree-depth every iteration; measured on a GP-hyperparameter geometry
+// at 0.8 vs ~9 leaps at 0.55). Do NOT reflexively transfer the Stan habit of
+// raising adapt_delta for stiff funnels -- it is reversed here. Prefer the 0.55
+// default; raise only with measured evidence it helps THIS model.
 
 impl_->add_child(std::make_unique<joint_nuts_block>(std::move(cfg)));
 

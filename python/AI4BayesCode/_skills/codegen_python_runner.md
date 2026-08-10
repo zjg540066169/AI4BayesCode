@@ -154,8 +154,8 @@ y_rep = model.predict_at({})["y_rep"]        # posterior predictive at training 
 # model.step(1)                                   # refresh derived state -- hybrid composites only
 # model.readapt_NUTS(500)                         # re-tune metric (defaults: reset=False, max_tree_depth=-1, target_accept=-1.0)
 # model.readapt_NUTS(500, reset=True)             # reset=True if data change is dramatic
-# model.readapt_NUTS(500, target_accept=0.9)      # 4th kwarg: target_accept in (0,1] overrides the block's dual-averaging
-                                                  # target (default 0.55; pass 0.8 for Stan/PyMC parity); sentinel <= 0 keeps current
+# model.readapt_NUTS(500, target_accept=0.55)    # 4th kwarg: target_accept in (0,1] overrides the block's dual-averaging
+                                                  # target (default 0.55; raising is an option but DISCOURAGED -- on this kernel it can be ~100x slower, opposite of Stan adapt_delta); sentinel <= 0 keeps current
 
 # freeze() / unfreeze() / get_frozen() -- kernel-control, always available on every wrapper.
 #

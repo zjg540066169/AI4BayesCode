@@ -2346,11 +2346,14 @@ value <= 0 or > 1) = "leave each NUTS block's current target unchanged";
 values in `(0, 1]` overwrite the block's dual-averaging target for this
 call and all subsequent step()/readapt() calls (AI4BayesCode default is
 `target_accept_rate = 0.55`, matching the vendored mcmclib default and
-Hoffman-Gelman 2014; Stan / PyMC / NumPyro ship 0.8, and passing 0.8 here
-matches that behaviour on a per-block basis. The wrapper default was left
-at 0.55 because raising it to 0.8 triggered a hierarchical funnel
-mixing regression on a stress model in earlier testing -- see
-`nuts_block_config` / `joint_nuts_block_config` docs).
+Hoffman-Gelman 2014; raising it is an OPTION but STRONGLY DISCOURAGED: unlike Stan/PyMC `adapt_delta`
+(where raising is safe and helps hard geometries), on THIS kernel raising the
+target tends to lengthen NUTS trajectories dramatically -- ~100x slowdown,
+near-max-tree-depth every iteration, measured on a GP-hyperparameter geometry at
+0.8 vs ~9 leaps at 0.55; 0.8 also once caused a hierarchical funnel mixing
+regression. Prefer 0.55; do NOT reflexively transfer the Stan habit of raising
+adapt_delta for stiff geometries -- it is reversed here; raise only with
+measured evidence. See `nuts_block_config` / `joint_nuts_block_config` docs).
 
 **Wrapper-class additions (NUTS-using wrappers only):**
 
