@@ -335,9 +335,12 @@ many generations need 0 of these):
   patterns, DAG semantics, the metric (diagonal/dense) + warmup
   (single-pilot/3-phase) decision (Sec.13)
 - `skills/joint_nuts_failure.md` -- when a `joint_nuts_block` will not
-  converge: the documented failure modes (funnel / banana / centered-
-  hierarchical) and their fix (NCR / untwist REPARAMETERIZATION, not a
-  metric change). Load this before retrying a stuck joint-NUTS model.
+  converge (funnel OR ridge: R-hat large, max tree depth, divergences, a scale
+  stuck near zero, ESS=NA). Leads with a general signature -- S1 (scale x latent
+  funnel) and S2 (correlated-latent ridge: GP / spline / state-space) -- plus a
+  universal fix ladder (marginalize / NCR / QR / dense metric). Load this before
+  retrying a stuck joint-NUTS model, and before ever concluding it is
+  "multimodal".
 - `skills/hierarchical_re.md` -- hierarchical random-effects models
 - `skills/label_switching.md` -- mixture / HMM identifiability
 - `skills/constraints.md` -- constraint transforms + Jacobians
