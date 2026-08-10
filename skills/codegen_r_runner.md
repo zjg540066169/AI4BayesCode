@@ -233,7 +233,7 @@ model$predict_at(list(<X> = <X>_test))
 ## model$step(1L)               ## refresh derived state -- hybrid composites only
 ## model$readapt_NUTS(500L, FALSE, -1L)         ## 3-arg backward-compat form: reset=FALSE, max_tree_depth=-1 = configured depth
 ## ## model$readapt_NUTS(500L, TRUE, -1L)         ## reset=TRUE if data change is dramatic
-## ## model$readapt_NUTS(500L, FALSE, -1L, 0.55) ## 4-arg form: 4th = target_accept in (0,1] (default 0.55; raising is an option but DISCOURAGED -- unlike Stan adapt_delta, raising it on this kernel can be ~100x slower; sentinel <= 0 keeps current)
+## ## model$readapt_NUTS(500L, FALSE, -1L, 0.55) ## 4-arg form: 4th = target_accept in (0,1] (default 0.55; behaves like Stan adapt_delta -- raise 0.8-0.99 for divergent/stiff geometries. An accept-stat bug that made raising it collapse the step size was FIXED 2026-08-10, so raising is now safe; sentinel <= 0 keeps current)
 
 ## freeze() / unfreeze() / get_frozen() -- kernel-control, always available on every wrapper.
 ##

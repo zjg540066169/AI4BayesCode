@@ -2346,14 +2346,15 @@ value <= 0 or > 1) = "leave each NUTS block's current target unchanged";
 values in `(0, 1]` overwrite the block's dual-averaging target for this
 call and all subsequent step()/readapt() calls (AI4BayesCode default is
 `target_accept_rate = 0.55`, matching the vendored mcmclib default and
-Hoffman-Gelman 2014; raising it is an OPTION but STRONGLY DISCOURAGED: unlike Stan/PyMC `adapt_delta`
-(where raising is safe and helps hard geometries), on THIS kernel raising the
-target tends to lengthen NUTS trajectories dramatically -- ~100x slowdown,
-near-max-tree-depth every iteration, measured on a GP-hyperparameter geometry at
-0.8 vs ~9 leaps at 0.55; 0.8 also once caused a hierarchical funnel mixing
-regression. Prefer 0.55; do NOT reflexively transfer the Stan habit of raising
-adapt_delta for stiff geometries -- it is reversed here; raise only with
-measured evidence. See `nuts_block_config` / `joint_nuts_block_config` docs).
+Hoffman-Gelman 2014). It behaves like Stan/PyMC `adapt_delta`: raising it
+(0.8-0.99) takes smaller steps + more leapfrog work per iteration, which helps
+stiff funnel / hierarchical / divergent geometries. (NOTE: through 2026-08-09 a
+dual-averaging accept-stat bug -- the reference H0 drifted to the current sample
+instead of the fixed trajectory start, deviating from HG2014 Alg 6 -- made
+raising the target COLLAPSE the step size to max-tree-depth; FIXED 2026-08-10 in
+`mcmclib/mcmc/nuts.hpp`, so raising is now safe.) Prefer 0.55; raise like
+adapt_delta when a model diverges or mixes poorly. See `nuts_block_config` /
+`joint_nuts_block_config` docs.
 
 **Wrapper-class additions (NUTS-using wrappers only):**
 
