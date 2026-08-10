@@ -219,7 +219,7 @@ rank -- do NOT read "item 1" as "try this first":
    FREEZE outright on funnels -- so joint is the default, not an
    optimization.
 
-   **Funnel pattern (positive scale, variance, OR precision + raw
+   **Funnel pattern (S1; positive scale, variance, OR precision + raw
    effects) -> non-centered reparameterization** (the default for
    weak/prior-dominated data). Commonly missed: the VARIANCE form
    (`var ~ InvGamma; raw_j ~ Normal(*, sqrt(var))`) and precision form
@@ -231,6 +231,14 @@ rank -- do NOT read "item 1" as "try this first":
    NOT unconditional -- centered wins for strongly-informative groups)
    live in **`skills/joint_nuts_failure.md` (Mode 1)** -- follow it; do
    not restate it here. Validator Check #24 enforces.
+
+   **Ridge pattern (S2; correlated latents, NO scale funnel) -> marginalize /
+   decorrelate.** GP / spline coefficients (collinear basis) or random-walk / AR
+   states (prior-induced) ride a correlated ridge that NCR does NOT fix.
+   MARGINALIZE a conjugate Gaussian-linear latent (kills funnel + ridge at
+   once); else QR-decorrelate the basis, or use a dense metric for a state
+   ridge. Full S1/S2 signature + fix ladder in `joint_nuts_failure.md` -- load
+   it only if a pattern matches or R2 fails; do NOT restate here.
 
    Fill in `joint_nuts_block_config` directly (fields
    `log_density_grad` / `initial_cat`); POSITIVE and all per-slice
