@@ -27,8 +27,11 @@ the natural-scale logistic log-density instead when the coefficient prior is:
 (quasi-)separated dataset `omega -> 0`, `X'Omega X -> 0`, `beta`'s conditional
 variance -> inf, and `beta` runs off to `+/-1e9` (absorbing state; R-hat
 explodes, coverage collapses); (b) **weakly-informative** -- the floor is thin,
-prefer NUTS for robustness; (c) **non-Gaussian** (Cauchy / Student-t) -- PG
-cannot conjugate it. NUTS needs no precision floor and is stable in all three.
+prefer NUTS for robustness; (c) **non-Gaussian** -- this block takes only a fixed Gaussian `prior_cov`. (A
+Gaussian scale-mixture prior -- Student-t / Laplace / horseshoe / Cauchy -- can
+keep PG via an added scale latent, but this system routes such shrinkage priors
+to NUTS, `joint_nuts_failure.md` Form G; a non-scale-mixture prior needs NUTS.)
+NUTS needs no precision floor and is stable in all three.
 
 **JUSTIFICATION (Check #16): Exception 1** (discrete/augmented
 measure; NUTS cannot target PG latent directly). Library-blessed

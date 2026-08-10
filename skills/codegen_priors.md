@@ -329,9 +329,14 @@ rank -- do NOT read "item 1" as "try this first":
    (an absorbing state; R-hat explodes, coverage collapses);
    (b) **weakly-informative** -- the precision floor is thin, so prefer NUTS for
    robustness (this is the default -- do not "rescue" PG with a weak prior);
-   (c) **non-Gaussian** (Cauchy / Student-t) -- PG cannot conjugate it.
+   (c) **non-Gaussian** -- the SHIPPED block takes only a fixed Gaussian
+   `prior_cov`. (A Gaussian SCALE-MIXTURE prior -- Student-t / Laplace /
+   horseshoe / Cauchy -- can in principle KEEP PG by adding its scale latent as
+   an extra Gibbs block; this system instead routes such shrinkage priors to
+   NUTS, see `joint_nuts_failure.md` Form G. A genuinely non-scale-mixture prior
+   needs NUTS regardless.)
    NUTS targets the posterior directly (no collapsing `omega` augmentation) and
-   is stable in all three cases.
+   is stable in all cases.
 7. **Gaussian Process blocks** -- architecture chosen by the
    observation likelihood:
 
