@@ -19,6 +19,17 @@ non-conjugate sigmoid likelihood directly via Laplace leaf
 proposals, with no augmentation required. Never combine `bart_block` +
 `pg_logistic_block`.
 
+WARNING **Use this block ONLY with a PROPER, INFORMATIVE Gaussian `prior_cov`.**
+The `beta | omega` draw is `N(., (X'Omega X + prior_cov^{-1})^{-1})`; the prior
+precision `prior_cov^{-1}` is the stabilizer. Route to a `joint_nuts_block` on
+the natural-scale logistic log-density instead when the coefficient prior is:
+(a) **flat / improper** (incl. a fake-flat `prior_cov = ~1e8 * I`) -- on a
+(quasi-)separated dataset `omega -> 0`, `X'Omega X -> 0`, `beta`'s conditional
+variance -> inf, and `beta` runs off to `+/-1e9` (absorbing state; R-hat
+explodes, coverage collapses); (b) **weakly-informative** -- the floor is thin,
+prefer NUTS for robustness; (c) **non-Gaussian** (Cauchy / Student-t) -- PG
+cannot conjugate it. NUTS needs no precision floor and is stable in all three.
+
 **JUSTIFICATION (Check #16): Exception 1** (discrete/augmented
 measure; NUTS cannot target PG latent directly). Library-blessed
 block: user writes no PG sampling code. Check #15 parity test at

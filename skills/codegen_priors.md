@@ -319,6 +319,19 @@ rank -- do NOT read "item 1" as "try this first":
    observation tree-location identifiability. For logistic BART,
    use `genbart_block + genbart::lik::logistic_lik` (see
    `examples/GBartLogistic.cpp`) instead.
+   WARNING **Use `pg_logistic_block` ONLY with a PROPER, INFORMATIVE Gaussian
+   prior on the coefficients** -- PG's stability rests on the prior's precision
+   floor; NUTS needs none. Otherwise put the natural-scale logistic log-density
+   in a `joint_nuts_block`. Route to NUTS when the coefficient prior is:
+   (a) **flat / improper** (incl. a "numerically flat" `N(0, ~1e8)` faking one)
+   -- PG runs away: on a (quasi-)separated dataset `omega -> 0`,
+   `X'Omega X -> 0`, `beta`'s conditional variance -> inf, and `beta` -> `+/-1e9`
+   (an absorbing state; R-hat explodes, coverage collapses);
+   (b) **weakly-informative** -- the precision floor is thin, so prefer NUTS for
+   robustness (this is the default -- do not "rescue" PG with a weak prior);
+   (c) **non-Gaussian** (Cauchy / Student-t) -- PG cannot conjugate it.
+   NUTS targets the posterior directly (no collapsing `omega` augmentation) and
+   is stable in all three cases.
 7. **Gaussian Process blocks** -- architecture chosen by the
    observation likelihood:
 
