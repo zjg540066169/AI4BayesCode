@@ -874,7 +874,32 @@ themselves (`"theta"`, `"b"`) work unchanged -- the composite writes
 each sub-parameter into shared_data under its own key via
 `current_named_outputs()`.
 
-**Fix:** ensure declare_dependencies lists exactly the keys the lambda reads.
+**`declare_invalidates` -- same block-name namespace (silent-freeze trap):**
+`declare_invalidates(block_name, {derived_keys})` is ALSO keyed by the
+child **block name**, never by a sub-parameter. The refresh fires only
+under the name composite_block hands to `refresh_derived_for`
+(`child->name()`), so keying it on a joint block's sub-parameter (e.g.
+`"beta0"` instead of the block name `"reg_aug"`) is a SILENT no-op: the
+derived key freezes at its initial value and the sampler converges to the
+WRONG posterior with no exception, no NaN, and a healthy R-hat / ESS.
+composite_block now validates every declared name against its children on
+the first `step()` and throws (`validate_dag_keys_`), but catch it earlier
+in review:
+
+- Every first argument of `declare_invalidates("X", ...)` and
+  `declare_dependencies("X", ...)` must equal a `cfg.name` set in the same
+  file (a child block name), OR a dynamically constructed child name (loop
+  variable, `"pi_" + std::to_string(g)`, etc.). FLAG any literal `"X"` that
+  instead matches a shared_data KEY -- a refresher output, a joint
+  sub-parameter, or a declared data input -- rather than a block name.
+- `declare_invalidates` ACCUMULATES across calls (set-union): a second call
+  for the same block ADDS keys, it does not replace. `declare_dependencies`
+  REPLACES (its argument is the block's complete read-set). Do not rely on a
+  second `declare_invalidates` overwriting the first.
+
+**Fix:** ensure declare_dependencies lists exactly the keys the lambda
+reads, and that every declare_dependencies / declare_invalidates first
+argument names a child block, not a shared_data key.
 
 ### 8. Rcpp API correctness
 

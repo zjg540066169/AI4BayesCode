@@ -61,6 +61,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -190,6 +191,18 @@ public:
      * rebuilt lazily the next time it is requested.
      */
     void step(std::mt19937_64& rng) override {
+        // One-time DAG sanity check (see validate_dag_keys_): every key in
+        // the Gibbs-DAG maps (dependencies_ / invalidates_) MUST name a
+        // direct child. A key that does not -- e.g. a joint block's
+        // sub-parameter name mistaken for the block name -- is otherwise a
+        // silent no-op: build_context_for / refresh_derived_for return
+        // without doing anything, the derived key freezes at its initial
+        // value, and the sampler converges to the wrong posterior with no
+        // exception, no NaN, healthy R-hat and ESS. Fail loudly instead.
+        if (!dag_checked_) {
+            validate_dag_keys_();
+            dag_checked_ = true;
+        }
         for (auto& child : children_) {
             const std::string& cname = child->name();
 
@@ -991,6 +1004,44 @@ private:
         }
     }
 
+    // Assembly-time DAG validation: assert every key declared in the Gibbs
+    // DAG (declare_dependencies / declare_invalidates) names a direct child.
+    // Both maps are only ever queried by child name -- build_context_for and
+    // refresh_derived_for are called with child->name() -- so any other key
+    // is dead. The dangerous case is a joint block's sub-parameter name
+    // passed where the block name was meant: it silently freezes a derived
+    // key. Called once from the first step(); throws std::invalid_argument
+    // listing the unmatched names alongside the valid child names.
+    void validate_dag_keys_() const {
+        std::unordered_set<std::string> child_names;
+        for (const auto& c : children_) child_names.insert(c->name());
+
+        std::vector<std::string> bad;
+        auto scan = [&](const std::unordered_map<std::string,
+                                                 std::vector<std::string>>& m,
+                        const char* which) {
+            for (const auto& kv : m) {
+                if (!child_names.count(kv.first)) {
+                    bad.push_back(std::string(which) + " key '"
+                                  + kv.first + "'");
+                }
+            }
+        };
+        scan(data_.dependencies(), "declare_dependencies");
+        scan(data_.invalidates(),  "declare_invalidates");
+        if (bad.empty()) return;
+
+        std::string msg = "composite_block '" + name_
+            + "': Gibbs-DAG declaration names a non-child block. These keys "
+              "match no direct child, so they are silent no-ops (any derived "
+              "key they invalidate would freeze at its initial value, giving "
+              "a wrong posterior with no error). Offending: ";
+        for (const auto& b : bad) msg += b + "; ";
+        msg += "valid child names: ";
+        for (const auto& c : children_) msg += "'" + c->name() + "' ";
+        throw std::invalid_argument(msg);
+    }
+
     std::string                                 name_;
     std::vector<std::unique_ptr<block_sampler>> children_;
     shared_data_t                               data_;
@@ -1004,6 +1055,10 @@ private:
     // Mutable cache for current(); invalidated on every step / set_current.
     mutable arma::vec current_cache_;
     mutable bool      current_dirty_ = true;
+
+    // Set once the first step() has run validate_dag_keys_(). Mutable so the
+    // one-time check can fire from the non-const step() without re-running.
+    bool              dag_checked_ = false;
 };
 
 } // namespace AI4BayesCode

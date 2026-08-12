@@ -55,6 +55,7 @@
 
 #include "block_sampler.hpp"   // for block_context alias
 
+#include <algorithm>
 #include <functional>
 #include <iosfwd>
 #include <random>
@@ -146,10 +147,33 @@ public:
      * given block updates. The refreshers for those keys must have been
      * registered (see register_refresher) before the composite runs its
      * first sweep.
+     *
+     * IMPORTANT: block_name is a child BLOCK name -- the key that
+     * composite_block hands to refresh_derived_for, i.e. child->name() --
+     * NOT an individual shared_data key. A joint block writes several
+     * shared_data entries (one per sub-parameter), but the refresh fires
+     * once, under the block's name. So key this on the block name (e.g.
+     * "reg_aug"), never on a sub-parameter (e.g. "beta0"): a sub-parameter
+     * name here silently never fires. composite_block validates every
+     * declared name against its children on the first sweep and throws on
+     * any unmatched name (see composite_block::validate_dag_keys_).
+     *
+     * Repeated calls for the same block ACCUMULATE (set-union) rather than
+     * replace: declare_invalidates("b", {"A"}) then ("b", {"B"}) leaves "b"
+     * invalidating {"A","B"}. This differs deliberately from
+     * declare_dependencies, which replaces -- there the argument is the
+     * block's complete read-set, so an atomic replace is the intended
+     * reconfiguration semantics.
      */
     void declare_invalidates(const std::string& block_name,
                              std::vector<std::string> derived_keys) {
-        invalidates_[block_name] = std::move(derived_keys);
+        auto& existing = invalidates_[block_name];
+        for (auto& k : derived_keys) {
+            if (std::find(existing.begin(), existing.end(), k)
+                    == existing.end()) {
+                existing.push_back(std::move(k));
+            }
+        }
     }
 
     /**
