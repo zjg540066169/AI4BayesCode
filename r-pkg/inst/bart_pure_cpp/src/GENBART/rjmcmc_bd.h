@@ -12,11 +12,14 @@
  *   - partition helpers (associate observations to leaves)
  *   - leaf-prior log-density helpers
  *   - three MH moves (propose_birth, propose_death, propose_change)
- *   - the dispatch function draw_tree() that picks one at random
+ *   - the dispatch function draw_tree() that picks one at random and then
+ *     slice-samples every leaf mu from its exact full conditional
+ *     (Alg 2 line 6; see slice.h)
  *
  * Design principles:
  *   - All ratios computed in LOG space.
- *   - Laplace proposals via laplace_leaf() with step-halving & NaN guards.
+ *   - Laplace proposals via laplace_leaf() with step-halving & NaN guards
+ *     (structure moves only; the leaf M-step is exact slice sampling).
  *   - Every move returns an `accepted` flag; the caller updates the tree
  *     in-place only on accept (via tree::birthp / deathp).
  *   - NaN/infinity anywhere in log_ratio -> automatic reject.  Never let
@@ -37,6 +40,7 @@
 #include "BART/rn.h"
 #include "laplace.h"
 #include "likelihood_interface.h"
+#include "slice.h"
 
 namespace genbart {
 
@@ -56,7 +60,7 @@ struct rjmcmc_hypers {
   double p_change     = 0.5;    // P(propose CHANGE) -- rest
   int    min_leaf_n   = 5;      // minimum observations per leaf after BIRTH
   int    max_depth    = 20;     // absolute cap to prevent runaway
-  // ----- half-Cauchy hyperprior on sigma_mu (Linero 2022 §3.3) -----
+  // ----- half-Cauchy hyperprior on sigma_mu (Linero 2022 Sec 3.3) -----
   // If true, sigma_mu is sampled each iter from its full conditional given
   // the scale mixture representation
   //   sigma_mu^2 | xi ~ Inv-Gamma(1/2, 1/xi),  xi ~ Inv-Gamma(1/2, 1/c^2)
@@ -64,7 +68,7 @@ struct rjmcmc_hypers {
   // Set c = k / sqrt(ntrees) with k = 1 (default) or k = 0.1.
   bool   adaptive_sigma_mu = true;
   double half_cauchy_c     = -1.0;  // <=0 -> filled at setup = 1/sqrt(ntrees)
-  // ----- DART sparsity prior on split variables (Linero 2018, paper §3.3) -----
+  // ----- DART sparsity prior on split variables (Linero 2018, paper Sec 3.3) -----
   // s_j ~ Dirichlet(theta/P + n_j, ...), updated each iter when dart_active.
   // theta reparametrised: theta/(theta + rho) ~ Beta(a, b).
   //   Default (a, b, rho) = (0.5, 1, P) -> moderate sparsity.
@@ -643,10 +647,15 @@ inline move_result propose_change(
 
 // ---------------------------------------------------------------------------
 // Dispatch: one tree-update step.  Picks a move at random.
-// After the move, also does one Gibbs update on all leaf mus (M-step) by
-// sampling from their Laplace-approximated full conditional (slice sampling
-// would be more correct, but Laplace is cheap and matches the paper for
-// informative priors; if mixing suffers, replace with slice).
+// After the move, refreshes every leaf mu (M-step) by ONE slice-sampling
+// transition targeting its EXACT full conditional, per Linero (2022)
+// Algorithm 2 line 6: "Sample M_t targeting its full conditional using
+// (say) slice sampling (Neal, 2003)".  Together with the Proposition-1
+// MH correction on the structure moves above, every step of the sweep now
+// leaves the exact posterior invariant.  (The Laplace approximation is
+// used ONLY inside the MH-corrected structure proposals, where the paper
+// sanctions it; an uncorrected Laplace draw here would target the leaf
+// conditional only approximately.)
 // ---------------------------------------------------------------------------
 // If f_tree_out != nullptr, it's filled with the per-observation leaf theta
 // values after the M-step (saving a subsequent full tree traversal in the
@@ -680,9 +689,11 @@ inline move_result draw_tree(
     mr = propose_change(t, X_row_major, Y, lam_minus_t, N, p, xi, h, lik, gen);
   }
 
-  // --- M-step: refresh all leaf mu via Laplace-approximate Gibbs ----------
-  // While we're traversing the tree partition, optionally fill f_tree_out[i]
-  // with each obs's leaf theta (saves a redundant full traversal later).
+  // --- M-step: slice-sample every leaf mu from its exact full conditional --
+  // (Linero 2022 Alg 2 line 6; one Neal-2003 transition per leaf leaves the
+  // conditional invariant.)  While we're traversing the tree partition,
+  // optionally fill f_tree_out[i] with each obs's leaf theta (saves a
+  // redundant full traversal later).
   if (do_M_step) {
     std::map<tree::tree_p, std::vector<std::size_t> > part;
     partition_by_leaf(t, X_row_major, N, p, xi, part);
@@ -696,10 +707,9 @@ inline move_result draw_tree(
         ys[j]   = Y[idx[j]];
         lams[j] = lam_minus_t[idx[j]];
       }
-      laplace_opts opts_m = h.lap_opts; opts_m.init_mu = leaves[k]->gettheta();
-      laplace_proposal q = laplace_leaf(ys.data(), lams.data(), idx.data(),
-                                        ys.size(), h.sigma_mu, lik, opts_m);
-      const double new_mu = rnorm_from_laplace(q, gen);
+      const double new_mu = slice_leaf(ys.data(), lams.data(), idx.data(),
+                                       ys.size(), h.sigma_mu, lik,
+                                       leaves[k]->gettheta(), gen);
       leaves[k]->settheta(new_mu);
       if (f_tree_out != nullptr) {
         for (std::size_t j = 0; j < idx.size(); ++j) f_tree_out[idx[j]] = new_mu;

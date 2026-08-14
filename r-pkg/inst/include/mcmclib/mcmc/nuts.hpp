@@ -577,6 +577,36 @@ internal::nuts_impl(
 
         log_rand_val = std::log(bmo::stats::runif<fp_t>(rand_engine)) - prev_U - prev_K ;
 
+        // ------------------------------------------------------------------
+        // BUGFIX (2026-08-10, JZ): FIXED trajectory-start reference for the
+        // dual-averaging acceptance statistic. Hoffman & Gelman (2014)
+        // Algorithm 6 threads the FIXED initial point (theta^0, r^0) into every
+        // BuildTree doubling and computes the accept stat against it:
+        //   alpha = min(1, exp( L(theta') - K(r') - L(theta^0) + K(r^0) )).
+        // Here (theta^0, r^0) = (this draw's starting position prev_draw, the
+        // resampled momentum), fixed for the whole trajectory.
+        //
+        // The variable prev_U is ALSO reused as the progressive-sample tracker
+        // and is updated MID-trajectory (prev_U = prop_U on each accepting
+        // doubling, below). Feeding that moving value to nuts_build_tree as the
+        // alpha reference makes H0 drift to L(theta^m) (the current sample)
+        // instead of L(theta^0), so the adaptation statistic is under-estimated
+        // on deep trees -> dual averaging shrinks epsilon without bound ->
+        // trajectories collapse to max tree depth at raised target_accept
+        // (masked at the 0.55 default, where trees are shallow). This is a
+        // deviation from Alg 6 present in the upstream mcmclib source.
+        //
+        // Fix: capture the fixed reference here and pass ref_U0/ref_K0 (NOT the
+        // moving prev_U/prev_K) to BuildTree. This changes ONLY alpha (the
+        // dual-averaging step-size statistic); the slice log_rand_val above
+        // already uses the fixed reference, and n'/s'/proposal selection are
+        // unaffected, so the sampled distribution is IDENTICAL -- only the
+        // adapted step size becomes correct. prev_K is not updated mid-
+        // trajectory, but capturing it too keeps the reference unambiguous.
+        const fp_t ref_U0 = prev_U;
+        const fp_t ref_K0 = prev_K;
+        // ------------------------------------------------------------------
+
         //
 
         new_draw = prev_draw;
@@ -634,7 +664,7 @@ internal::nuts_impl(
                 ColVec_t cached_at_new_draw_pos_after;
                 ColVec_t cached_at_new_draw_neg_after;
                 nuts_build_tree(
-                    direction_val, step_size, log_rand_val, prev_U, prev_K,
+                    direction_val, step_size, log_rand_val, ref_U0, ref_K0,
                     draw_neg, mntm_neg, inv_precond_matrix,
                     box_log_kernel_fn, leap_frog_fn, tree_depth,
                     new_draw, dummy_draw, draw_neg, dummy_mntm, mntm_neg,
@@ -654,7 +684,7 @@ internal::nuts_impl(
                 ColVec_t dummy_mntm = mntm_neg;
                 ColVec_t cached_at_new_draw_pos_after;
                 ColVec_t cached_at_new_draw_neg_after;
-                nuts_build_tree(direction_val, step_size, log_rand_val, prev_U, prev_K,
+                nuts_build_tree(direction_val, step_size, log_rand_val, ref_U0, ref_K0,
                     draw_pos, mntm_pos, inv_precond_matrix,
                     box_log_kernel_fn, leap_frog_fn, tree_depth,
                     new_draw, draw_pos, dummy_draw, mntm_pos, dummy_mntm,

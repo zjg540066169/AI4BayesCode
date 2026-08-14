@@ -521,8 +521,16 @@ public:
 
     /// Predict f(X_new) at the CURRENT forest. Returns length-Nt vector
     /// on the natural Y scale (cached fmean is added back).
+    ///
+    /// Walks the LIVE forest directly (bart_model::predict_live) instead of
+    /// the former serialize->parse round-trip
+    /// predict_at_serialized_(impl_->get_tree(), X_new). Bit-identical (same
+    /// live trees, same cutpoints, same summation order, same fmean) but
+    /// ~50x faster: no re-serialization of the forest on every call.
+    /// predict_at_serialized_ remains for predict_history() and the external-
+    /// snapshot predict_at() path.
     arma::vec predict(const arma::mat& X_new) {
-        return predict_at_serialized_(impl_->get_tree(), X_new);
+        return impl_->predict_live(X_new);
     }
 
     /// Predict at X_new for ALL historical draws stored in the internal

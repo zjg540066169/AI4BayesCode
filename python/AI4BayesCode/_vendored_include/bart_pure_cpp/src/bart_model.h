@@ -393,6 +393,31 @@ public:
     return eval_serialized_forest_(last_trees_, last_cutpoints_, x_predict, fmean);
   }
 
+  // Live-forest predict at arbitrary X: walks the CURRENT in-memory trees via
+  // heterbart::predict (no serialize/parse). Unlike predict() above -- which
+  // uses last_trees_ (the forest from the most recent update()) and is stale
+  // after set_tree()/set_current() -- this reflects the live forest, so it is
+  // always in sync. Returns Y-scale (fmean added), bit-identical to the former
+  // bart_block round-trip predict_at_serialized_(get_tree(), X).
+  arma::vec predict_live(const arma::mat& x_predict) const {
+    if ((long)x_predict.n_cols != p)
+      throw std::invalid_argument("bart_model::predict_live: ncol(X) != p");
+    const std::size_t np = static_cast<std::size_t>(x_predict.n_rows);
+    if (np == 0) return arma::vec();
+    // heterbart::predict expects row-major x: point i's p features at x[i*p..].
+    std::vector<double> xrm(np * static_cast<std::size_t>(p));
+    for (std::size_t i = 0; i < np; ++i)
+      for (long j = 0; j < p; ++j)
+        xrm[i * static_cast<std::size_t>(p) + static_cast<std::size_t>(j)] =
+            x_predict(i, static_cast<arma::uword>(j));
+    std::vector<double> fp(np, 0.0);
+    const_cast<heterbart&>(bm).predict(static_cast<std::size_t>(p), np,
+                                       xrm.data(), fp.data());
+    arma::vec out(np);
+    for (std::size_t i = 0; i < np; ++i) out(i) = fp[i] + fmean;
+    return out;
+  }
+
   double get_sigma() const     { return this->sigma; }
   double current_sigma() const { return this->sigma; }
   bool   get_usequants() const { return this->usequants; }
