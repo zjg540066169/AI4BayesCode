@@ -41,7 +41,7 @@ LDFLAGS  ?=
 # On macOS, link directly against Accelerate for BLAS/LAPACK.
 LDLIBS   ?= -framework Accelerate
 
-TARGETS  := test_constraints test_binary_gibbs test_dirichlet_gibbs test_categorical_gibbs test_gaussian_linear test_simplex_dirichlet test_nuts_variance test_vi_mean_field_gaussian test_vi_correlated_gaussian test_vi_hybrid_composition test_vi_glmm_logistic test_vi_bnn_regression test_vi_full_rank_correlated test_vi_bnn_full_rank test_readapt_NUTS test_target_accept_config test_joint_nuts_block_mixed_stress test_bde_scorer test_score_cache test_order_mcmc_block test_order_mcmc_block_stress test_order_mcmc_block_diagnostics test_bge_scorer test_partition_geometry test_partition_mcmc_diagnostics test_partition_mcmc_rhat test_order_mcmc_block_partition test_freeze_predict_history test_freeze_element test_freeze_dense_pilot test_freeze_joint_nuts_slot test_ode_rk45_inplace test_dag_key_validation
+TARGETS  := test_constraints test_binary_gibbs test_dirichlet_gibbs test_categorical_gibbs test_gaussian_linear test_simplex_dirichlet test_nuts_variance test_vi_mean_field_gaussian test_vi_correlated_gaussian test_vi_hybrid_composition test_vi_glmm_logistic test_vi_bnn_regression test_vi_full_rank_correlated test_vi_bnn_full_rank test_readapt_NUTS test_target_accept_config test_joint_nuts_block_mixed_stress test_bde_scorer test_score_cache test_order_mcmc_block test_order_mcmc_block_stress test_order_mcmc_block_diagnostics test_bge_scorer test_partition_geometry test_partition_mcmc_diagnostics test_partition_mcmc_rhat test_order_mcmc_block_partition test_freeze_predict_history test_freeze_element test_freeze_dense_pilot test_freeze_joint_nuts_slot test_ode_rk45_inplace test_dag_key_validation test_genbart_slice_mstep
 
 .PHONY: all build run clean
 
@@ -133,6 +133,9 @@ run: build
 	@echo
 	@echo "=== Running test_dag_key_validation ==="
 	./test_dag_key_validation
+	@echo
+	@echo "=== Running test_genbart_slice_mstep ==="
+	./test_genbart_slice_mstep
 
 AI4BAYESCODE_HEADERS := \
   $(INC_DIR)/AI4BayesCode/block_sampler.hpp \
@@ -285,6 +288,11 @@ test_dag_key_validation: test_dag_key_validation.cpp \
                          $(INC_DIR)/AI4BayesCode/composite_block.hpp \
                          $(INC_DIR)/AI4BayesCode/shared_data.hpp \
                          $(INC_DIR)/AI4BayesCode/block_sampler.hpp
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
+
+test_genbart_slice_mstep: test_genbart_slice_mstep.cpp \
+                          ../bart_pure_cpp/src/GENBART/slice.h \
+                          ../bart_pure_cpp/src/GENBART/rjmcmc_bd.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 
 clean:
