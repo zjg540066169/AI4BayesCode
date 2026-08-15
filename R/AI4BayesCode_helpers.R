@@ -56,9 +56,9 @@ ai4bayescode_sourceCpp <- function(cpp_file,
     inc_mc    <- file.path(pkg_root, "include", "mcmclib")
     inc_bmo   <- file.path(pkg_root, "include", "mcmclib",
                            "BaseMatrixOps", "include")
-    # autodiff is at inc_root/autodiff/ → users include as
+    # autodiff is at inc_root/autodiff/ -> users include as
     # `<autodiff/reverse/var.hpp>`. No separate -I needed (inc_root covers it).
-    # Eigen is at inc_root/eigen/Eigen/ → needs a dedicated -I for
+    # Eigen is at inc_root/eigen/Eigen/ -> needs a dedicated -I for
     # `<Eigen/Dense>` to resolve.
     inc_eigen <- file.path(pkg_root, "include", "eigen")
     # libgp kernel subsystem (vendored, BSD-3) lives at pkg_root/libgp_kernels/.
@@ -196,8 +196,8 @@ ai4bayescode_plot_dag <- function(model,
         } else do.call(rbind, rows)
     }
 
-    # PREDICTION-ONLY DAG — Gibbs / refresh edges intentionally hidden.
-    # Per codegen.md §2(b): user-facing DAG visualization shows the
+    # PREDICTION-ONLY DAG -- Gibbs / refresh edges intentionally hidden.
+    # Per codegen.md Sec.2(b): user-facing DAG visualization shows the
     # generative / causal data flow, not the internal Gibbs full-
     # conditional graph. Conflating the two is a common source of
     # confusion. If you need to debug Gibbs dependencies, call
@@ -290,7 +290,7 @@ ai4bayescode_plot_dag <- function(model,
 
     # --- Classify nodes into 4 roles ----------------------------------------
     # Categories (graph-structural). The sampled-vs-predictive split is
-    # computed from the PREDICT subgraph only — context (prior) edges are
+    # computed from the PREDICT subgraph only -- context (prior) edges are
     # excluded so a sampled parameter with an incoming prior edge
     # (e.g. sigma_rw2 -> beta) is NOT mis-classified as predictive.
     #   data       -- explicitly declared via declare_data_input
@@ -516,8 +516,8 @@ ai4bayescode_plot_dag <- function(model,
 #                      reminder instead.
 #   thresholds       : optional list with `slow_sweep_sec` (default 0.5).
 #                      Hints are emitted only when per-sweep time exceeds
-#                      this. Absolute threshold; the alternative — a
-#                      relative speedup number — would need a theoretical
+#                      this. Absolute threshold; the alternative -- a
+#                      relative speedup number -- would need a theoretical
 #                      lower bound we cannot estimate generically.
 #
 # Returns nothing; prints to stderr via message().
@@ -666,4 +666,212 @@ ai4bayescode_new_frozen <- function(module_class, ...,
         m$freeze(names(fixed), quiet = isTRUE(quiet_freeze))
     }
     m
+}
+
+
+# ---------------------------------------------------------------------------
+# Multi-chain driver + cross-chain convergence summary.
+#
+# Ported verbatim from the installed package (r-pkg/R/helpers.R) so that a
+# checkout-mode user -- who sources THIS file instead of library(AI4BayesCode)
+# -- gets the identical generated-example flow:
+#     run <- ai4bayescode_run_chains(function(seed) new(<Class>, ..., seed, TRUE),
+#                                    n_chains = 4L, n_burn = 4000L, n_keep = 4000L)
+#     ai4bayescode_rhat_summary(run)
+#     ai4bayescode_diagnose(run$histories[[1]])
+# Keep in sync with r-pkg/R/helpers.R (single source of truth: the package).
+#
+# ai4bayescode_run_chains(): returns list(histories, seeds, wall). Histories are
+#   KEEP-ONLY -- the first n_burn draws of every entry are stripped along its
+#   first axis (vectors, matrices, and higher-dimensional arrays alike).
+# ai4bayescode_rhat_summary(): per-key rhat + ess_bulk across chains; needs the
+#   'posterior' package.
+# ---------------------------------------------------------------------------
+
+ai4bayescode_run_chains <- function(model_ctor,
+                                 n_chains  = 4,
+                                 n_burn    = 2000,
+                                 n_keep    = 10000,
+                                 seeds     = NULL,
+                                 parallel  = TRUE,
+                                 mc.cores  = NULL,
+                                 verbose   = TRUE) {
+    stopifnot(is.function(model_ctor),
+              n_chains >= 1, n_burn >= 0, n_keep >= 1)
+
+    if (is.null(seeds)) {
+        seeds <- as.integer(101L + (seq_len(n_chains) - 1L) * 101L)
+    }
+    if (length(seeds) != n_chains) {
+        stop("length(seeds) must equal n_chains")
+    }
+
+    # Drop the first `nb` draws along the FIRST axis of one history entry.
+    # Entries can be plain vectors (n), matrices (n x d), or higher-D
+    # arrays (n x r x c, ...); the slice runs along axis 1 only and keeps
+    # every other axis (and names/dimnames) intact. An entry with <= nb
+    # rows is returned unchanged: with keep_history disabled get_history()
+    # holds a single, already post-warmup, current draw -- emptying it
+    # would be worse than keeping it.
+    strip_burn_1 <- function(x, nb) {
+        d   <- dim(x)
+        len <- if (is.null(d)) length(x) else d[1L]
+        if (nb <= 0L || len <= nb) return(x)
+        keep <- (nb + 1L):len
+        if (is.null(d)) return(x[keep])
+        args <- c(list(x, keep),
+                  rep(list(quote(expr = )), length(d) - 1L),
+                  list(drop = FALSE))
+        do.call(`[`, args)
+    }
+
+    one_chain <- function(seed_val) {
+        t0 <- Sys.time()
+        m <- model_ctor(seed_val)
+        m$step(as.integer(n_burn))
+        m$step(as.integer(n_keep))
+        t1 <- Sys.time()
+        # get_history() spans EVERY stepped iteration (warmup + keep);
+        # return keep-only draws, matching this function's documentation.
+        h <- lapply(m$get_history(), strip_burn_1, nb = as.integer(n_burn))
+        list(history = h,
+             seed    = seed_val,
+             wall    = as.numeric(difftime(t1, t0, units = "secs")))
+    }
+
+    use_parallel <- parallel && .Platform$OS.type != "windows" &&
+                    requireNamespace("parallel", quietly = TRUE)
+
+    if (is.null(mc.cores)) {
+        mc.cores <- if (use_parallel)
+            min(n_chains, max(1, parallel::detectCores() - 1))
+        else 1
+    }
+
+    chain_ok <- function(r) !inherits(r, "try-error") && !is.null(r$history)
+
+    if (use_parallel && mc.cores > 1) {
+        if (verbose)
+            message("ai4bayescode_run_chains: running ", n_chains,
+                    " chains on ", mc.cores, " cores (parallel)")
+        results <- parallel::mclapply(seeds, one_chain, mc.cores = mc.cores,
+                                      mc.set.seed = TRUE)
+        if (!all(vapply(results, chain_ok, logical(1)))) {
+            # A forked worker died before returning a history. The usual cause
+            # is a fork-unsafe multithreaded BLAS -- notably macOS Accelerate
+            # (vecLib), whose GCD worker threads do not survive fork(), so a
+            # chain doing heavier linear algebra segfaults under mclapply.
+            # Recover by re-running every chain sequentially (no fork).
+            warning("ai4bayescode_run_chains: a parallel chain failed (likely a ",
+                    "fork-unsafe multithreaded BLAS, e.g. macOS Accelerate); ",
+                    "re-running all chains sequentially. To keep parallelism set ",
+                    "VECLIB_MAXIMUM_THREADS=1 before starting R, or pass ",
+                    "parallel = FALSE.", call. = FALSE, immediate. = TRUE)
+            results <- lapply(seeds, one_chain)
+        }
+    } else {
+        if (verbose)
+            message("ai4bayescode_run_chains: running ", n_chains,
+                    " chains sequentially")
+        results <- lapply(seeds, one_chain)
+    }
+
+    # Detect failures (after any sequential fallback -- a real model/data error).
+    for (i in seq_along(results)) {
+        if (!chain_ok(results[[i]])) {
+            stop("ai4bayescode_run_chains: chain ", i, " failed")
+        }
+    }
+
+    list(
+        histories = lapply(results, `[[`, "history"),
+        seeds     = sapply(results, `[[`, "seed"),
+        wall      = sapply(results, `[[`, "wall")
+    )
+}
+
+ai4bayescode_rhat_summary <- function(run, keys = NULL, drop_burn = 0,
+                                      order_components = FALSE) {
+    if (!requireNamespace("posterior", quietly = TRUE)) {
+        stop("posterior package required for R-hat summary")
+    }
+    histories <- run$histories
+    if (length(histories) < 1L) {
+        stop("run$histories is empty -- nothing to summarise")
+    }
+    if (length(histories) == 1L) {
+        # Single chain: posterior::rhat() splits the one chain in half and
+        # returns the rank-normalized SPLIT-R-hat (a valid within-chain
+        # convergence check). Between-chain R-hat needs >= 2 chains.
+        message("ai4bayescode_rhat_summary: only 1 chain -- reporting split-R-hat ",
+                "(each chain split in half); use >= 2 chains for the standard ",
+                "between-chain R-hat.")
+    }
+    all_keys <- names(histories[[1]])
+    if (is.null(keys)) keys <- all_keys
+
+    # Per-column split-R-hat + bulk-ESS across chains for a list of per-chain
+    # matrices (draws in rows). Returns list(rhat = <p>, ess = <p>).
+    col_diag <- function(mats) {
+        p <- ncol(mats[[1]])
+        rh <- numeric(p); eb <- numeric(p)
+        for (j in seq_len(p)) {
+            per_chain <- lapply(mats, function(m) m[, j])
+            arr_j <- array(unlist(per_chain),
+                           dim = c(length(per_chain[[1]]), length(per_chain), 1))
+            rh[j] <- tryCatch(posterior::rhat(arr_j[,,1]), error = function(e) NA)
+            eb[j] <- tryCatch(posterior::ess_bulk(arr_j[,,1]), error = function(e) NA)
+        }
+        list(rhat = rh, ess = eb)
+    }
+    # Sort each draw's components within a chain (order statistics are invariant to
+    # relabelling); leaves scalars / single-column matrices unchanged.
+    sort_rows <- function(m) if (is.null(dim(m)) || ncol(m) < 2L) m else t(apply(m, 1L, sort))
+
+    out <- list(); label_switch <- list()
+    for (k in keys) {
+        if (!k %in% all_keys) next
+        vals <- lapply(histories, function(h) h[[k]])
+        if (is.null(dim(vals[[1]]))) {
+            # Scalar history per chain (never label-switches).
+            n <- length(vals[[1]])
+            if (drop_burn > 0 && drop_burn < n)
+                vals <- lapply(vals, function(v) v[(drop_burn + 1):n])
+            arr <- array(unlist(vals),
+                          dim = c(length(vals[[1]]), length(vals), 1))
+            rh <- tryCatch(posterior::rhat(arr[,,1]), error = function(e) NA)
+            eb <- tryCatch(posterior::ess_bulk(arr[,,1]),
+                           error = function(e) NA)
+            out[[k]] <- list(rhat = rh, ess_bulk = eb)
+        } else {
+            # Matrix history (n_draws x dim per chain).
+            n <- nrow(vals[[1]])
+            if (drop_burn > 0 && drop_burn < n)
+                vals <- lapply(vals, function(m) m[(drop_burn + 1):n, , drop=FALSE])
+            raw <- col_diag(vals)
+            ord <- if (ncol(vals[[1]]) >= 2L) col_diag(lapply(vals, sort_rows)) else raw
+            # Flag label switching ONLY when the high raw max R-hat drops BELOW a
+            # converged level after ordering components within each draw. If it
+            # stays high, the non-convergence is genuine (bad sampler / wrong
+            # model / slow mixing) -- NOT a labelling artefact -- so do not flag.
+            mr <- max(raw$rhat, na.rm = TRUE); mo <- max(ord$rhat, na.rm = TRUE)
+            if (is.finite(mr) && is.finite(mo) && mr > 1.05 && mo < 1.05)
+                label_switch[[k]] <- list(raw = mr, ordered = mo)
+            chosen <- if (isTRUE(order_components)) ord else raw
+            out[[k]] <- list(rhat = chosen$rhat, ess_bulk = chosen$ess,
+                              max_rhat = max(chosen$rhat, na.rm = TRUE),
+                              min_ess  = min(chosen$ess,  na.rm = TRUE))
+        }
+    }
+    if (length(label_switch)) {
+        attr(out, "label_switch") <- label_switch
+        if (!isTRUE(order_components)) {
+            ex <- label_switch[[1L]]
+            message(sprintf(
+"ai4bayescode_rhat_summary: %s MIGHT have LABEL SWITCHING -- ordering components within\n  each draw brings R-hat down to a converged level (e.g. %s: %.2f -> %.2f), so the high\n  raw R-hat MAY be a labelling artefact rather than non-convergence. Pass order_components\n  = TRUE for a label-invariant summary, or canonicalize the labels in the sampler.",
+                paste(names(label_switch), collapse = ", "),
+                names(label_switch)[1L], ex$raw, ex$ordered))
+        }
+    }
+    out
 }
