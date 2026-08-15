@@ -252,9 +252,7 @@ later, at Sec.2 and Sec.3. **Once the model is confirmed**, ask the upfront ques
    default; VI shines when MCMC fails (high-dim with sign/permutation
    symmetry, BNN, large embedding spaces) AND the user accepts
    point-estimate-of-q semantics (biased CIs in exchange for tractable
-   speed). Ask this via `AskUserQuestion` BEFORE the sampler/block
-   preference question below, so picking pure VI can skip the MCMC
-   block elicitation entirely:
+   speed). Ask this via `AskUserQuestion`:
 
    > "Sampler engine for this model:"
    >
@@ -264,43 +262,40 @@ later, at Sec.2 and Sec.3. **Once the model is confirmed**, ask the upfront ques
    >   spec'd and recommends MCMC vs VI vs hybrid. Most users should pick
    >   this; codegen surfaces a recommendation with explanation at Sec.X
    >   (VI sub-flow) and the user can accept or override.
-   > - **(b) MCMC for all parameters** -- proceed straight to the
-   >   sampler/block preference question and standard MCMC code gen.
+   > - **(b) MCMC for all parameters** -- proceed straight to standard
+   >   MCMC code gen.
    > - **(c) VI** -- codegen will follow up at Sec.X (VI sub-flow) on
    >   pure vs hybrid, which parameters get VI, and the per-block VI
    >   family (mean-field / full-rank / categorical / structured).
 
    **Conditional follow-ups based on this answer:**
-   - **(a)** -> question #7 below (sampler/block preference) fires
-     normally. Sec.X VI sub-flow runs after model confirmation and may
-     still recommend VI based on the spec.
-   - **(b)** -> question #7 fires normally. Sec.X VI sub-flow is skipped
-     entirely.
-   - **(c)** -> question #7 is SKIPPED (MCMC block prefs are
-     irrelevant for pure VI; hybrid follow-up at Sec.X handles which
-     params get VI and which stay MCMC).
+   - **(a)** -> Sec.X VI sub-flow runs after model confirmation and may
+     still recommend VI based on the spec. The block plan is proposed by
+     the skill and reviewed at the Sec.3 gate (see #7 below).
+   - **(b)** -> Sec.X VI sub-flow is skipped entirely; block plan
+     proposed + reviewed at the Sec.3 gate as above.
+   - **(c)** -> block-plan review at Sec.3 is about the VI family
+     instead; hybrid follow-up at Sec.X handles which params get VI and
+     which stay MCMC.
 
-7. **Suggested sampling algorithm or preferred blocks** (optional).
-   **CONDITIONAL: only fire this question if the user picked (a) or (b)
-   in #6 above.** Some users have a strong preference for which block
-   family handles a particular parameter (e.g. "use
-   `joint_nuts_block` for the hierarchical scale + raw-effect
-   pair", "use `pg_logistic_block` instead of NUTS-on-beta for the
-   logistic regression coefficients", "wrap the discrete state sequence
-   with `hmm_block`"). Offer two choices via `AskUserQuestion`:
-   - **(a) Skip** -- let the skill pick blocks via its standard
-     decision rules (`codegen_priors.md Sec.2b` block-selection priority +
-     Sec.3a discrete-variable decision tree). This is the default for
-     most users; the recommended block menu is documented and almost
-     always optimal.
-   - **(b) I have a suggestion** -- accept a free-form text answer
-     describing the preferred algorithm / block(s) per parameter. The
-     skill MUST then honor that preference in code generation, EXCEPT
-     when it would violate a hard validator rule (Check #17
-     "no hand-written Gibbs", `system_design.md` Sec.11.2 "what NUTS
-     cannot sample", etc.). If the user's preference conflicts with
-     a hard rule, surface the conflict in an `AskUserQuestion`
-     follow-up before proceeding.
+7. **Sampler / block preferences: NEVER asked upfront -- the system
+   PROPOSES first.** Do NOT ask "do you have a preferred block?" as an
+   upfront question: users unfamiliar with this system do not know
+   what blocks exist, so a cold preference question is unanswerable
+   noise. Instead the skill picks the block plan itself via its
+   standard decision rules (`codegen_priors.md Sec.2b` block-selection
+   priority + Sec.3a discrete-variable decision tree) -- the
+   recommended menu is documented and almost always optimal -- and the
+   plan is SHOWN to the user at the Sec.3 confirmation gate (the
+   summary table's "Block type" column + the plain-language sampler
+   notes under it). THAT is where the user reacts: the Sec.3
+   confirmation prompt explicitly invites changes to the sampling
+   plan. A user-requested change (there, or stated spontaneously in
+   the model description) MUST be honored in code generation, EXCEPT
+   when it would violate a hard validator rule (Check #17 "no
+   hand-written Gibbs", `system_design.md` Sec.11.2 "what NUTS cannot
+   sample", etc.); if it conflicts with a hard rule, surface the
+   conflict in an `AskUserQuestion` follow-up before proceeding.
 8. **Maximum generation attempts.** Cap on the
    generate->validate->fix loop. Without a cap, hard models can burn
    unbounded user time / tokens / compute. Ask this with the
@@ -451,19 +446,15 @@ prior rationale.
 
 ## 3. Model confirmation
 
-After parsing the model and resolving all priors, ask the user via
-AskUserQuestion **before generating any code**:
-
-> "I've parsed your model and resolved all priors. Before I generate
-> code, would you like to review a summary (formulas, DAG, and parameter
-> table) to make sure everything is correct?"
->
-> Options:
-> - **Yes, show me the model summary first** (default)
-> - **No, go ahead and generate directly**
-
-This prompt is important: without it, users may think code generation
-has already started and miss the confirmation step entirely.
+After parsing the model and resolving all priors, SHOW the three-part
+summary (formulas, DAG, parameter table) UNCONDITIONALLY -- do NOT ask
+"would you like to review a summary?" first. That pre-question is
+noise (an extra click for every user), and its "No, go ahead" option
+lets the user skip the one gate that catches extraction and prior
+mistakes before code exists. The review is not optional content; it IS
+the sign-off gate. Display all three parts, then fire the single
+confirmation prompt at the end of this section. One display, one
+question, nothing before it.
 
 ### Ship the runtime validation code? (ask in this same pre-generation round)
 
@@ -680,6 +671,17 @@ The Hyperparams column clarifies whether prior hyperparameters are
 `hardcoded` to specific values or `exposed` as constructor arguments
 the user can tune from R.
 
+Under the table, add ONE plain-language line per distinct block choice
+explaining why in words a non-programmer can read, e.g.:
+
+> Sampling plan: `mu` and `sigma` are sampled jointly with NUTS
+> (they are correlated continuous parameters, and joint updates mix
+> better than one-at-a-time updates).
+
+This is where the user FIRST sees the proposed sampling plan (Sec.1 #7:
+block preferences are never asked cold -- the system proposes, the user
+reacts at the confirmation prompt below).
+
 ### Confirmation prompt
 
 This is the final sign-off gate before code generation. The model STRUCTURE was already
@@ -691,8 +693,13 @@ priors + wiring
 added since the Sec.1 confirm. After presenting all three, ask the user:
 
 > "Does this match your intended model? If anything is wrong -- priors,
-> likelihood, parameter constraints, or dependencies -- tell me and I'll
-> fix it before generating code."
+> likelihood, parameter constraints, dependencies, or the sampling plan
+> (the Block column: if you'd rather a different sampler handled some
+> parameter, just say so) -- tell me and I'll fix it before generating
+> code."
+
+A sampling-plan change requested here MUST be honored (Sec.1 #7 rules:
+hard validator rules are the only override, surfaced as a follow-up).
 
 **Do NOT proceed to code generation until the user confirms.**
 
@@ -1012,8 +1019,10 @@ the structured picker UI. Three firm rules:
 3. **Resolve priors** for each parameter using the decision flow in
    Sec.2 above + `codegen_priors.md` for details. Ask the user when
    needed. Do NOT silently pick priors.
-4. **Ask if the user wants to review** (Sec.3 above). If yes, show the
-   three-part confirmation and wait for approval.
+4. **Show the three-part confirmation (Sec.3 above) UNCONDITIONALLY**
+   -- formulas + DAG + summary table with the proposed sampling plan --
+   and wait for the single sign-off. Never ask "do you want to review?"
+   first.
 5. **For each NUTS block, pick the constraint transform** -- see
    `skills/constraints.md`.
 6. **Write one natural-scale log-density function per block.** This is
