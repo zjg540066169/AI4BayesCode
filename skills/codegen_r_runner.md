@@ -81,7 +81,10 @@ no abstractions, and as short as correctness allows. Whenever a
 structural choice trades completeness or cleverness against
 readability, readability wins. All comments and strings in the
 delivered files are ENGLISH, regardless of the conversation language
-(codegen.md Sec.0b).
+(codegen.md Sec.0b). **When in doubt about a comment, LEAVE IT OUT**:
+a comment you are not sure the user needs, or that could confuse them
+(undefined acronyms, internal machinery, absence-explanations,
+risk talk), is worse than no comment -- the default is omission.
 
 NOT a stripped golden-path snippet, and NOT a copy of the Layer-3
 harness prefix. The delivered example drives chains EXCLUSIVELY
@@ -99,9 +102,12 @@ The delivered `example_<ClassName>.R` MUST contain, in order, with
 the comments retained (do not strip comments -- they are the
 documentation a first-time user reads):
 
-1. **Header comment** -- what the model is + a note that generation
-   was validated by the full Layer-3 harness which is intentionally
-   not shipped here (regenerate with the harness for diagnostics).
+1. **Header comment** -- what the model is, plus the short list of the
+   shipped helpers the example uses (see the skeleton below). No
+   harness talk, no validator vocabulary (PSIS-LOO, BPV, Layer-3, check
+   numbers), no explanations of what the example does NOT contain --
+   an acronym with no context, or an absence-explanation, only
+   confuses the audience.
 2. **Compile** -- the packaged API compiles the class from a bare RELATIVE
    filename: `ai4bayescode_sourceCpp("<ClassName>.cpp")` (equivalently
    `ai4bayescode_source("<ClassName>.cpp")`). NEVER `AI4BayesCode_path=`, NEVER a
@@ -199,15 +205,11 @@ documentation a first-time user reads):
 Skeleton (parameterized; mirror this structure, fill placeholders):
 
 ```r
-# Usage example for <ClassName>. Generation was validated by the full
-# Layer-3 harness (R-hat/ESS, posterior-predictive p-values, PSIS-LOO);
-# that harness is intentionally not shipped here. For everyday use the
-# SHIPPED library helpers do all the chain work: ai4bayescode_run_chains
-# (parallel multi-chain), ai4bayescode_rhat_summary (cross-chain R-hat /
-# ESS), ai4bayescode_diagnose (per-chain summaries + trace+ACF+density
-# plots) -- see the calls below. PSIS-LOO is NOT part of them (it needs
-# a model-specific log-likelihood); regenerate with the validation
-# harness if you specifically need LOO.
+# Usage example for <ClassName> -- <one line: what the model is>.
+# Everything runs through the shipped library helpers:
+#   ai4bayescode_run_chains   -- run several MCMC chains in parallel
+#   ai4bayescode_rhat_summary -- convergence check across the chains
+#   ai4bayescode_diagnose     -- posterior summaries + diagnostic plots
 
 # Compile + load the C++ model (the class becomes available by name).
 # Packaged API -- no AI4BayesCode checkout / helper sourcing needed.
@@ -251,8 +253,7 @@ run <- ai4bayescode_run_chains(
 # no drop_burn / n_burn bookkeeping downstream.
 ai4bayescode_rhat_summary(run)   # cross-chain R-hat / ESS per parameter
 
-# Per-chain summaries + trace + autocorrelation + density plots
-# (model-independent; no LOO -- that needs a model-specific log-likelihood).
+# Per-chain summaries + trace + autocorrelation + density plots.
 dg <- ai4bayescode_diagnose(run$histories[[1]])
 dg$summary   # per-parameter table: mean/sd/median/90% CI, R-hat, ESS
 dg$plot      # trace + autocorrelation + density (prints; needs 'bayesplot')

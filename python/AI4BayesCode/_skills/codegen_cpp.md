@@ -320,13 +320,13 @@ mixed cleanly).
    (diagonal, correct SD). This is the recommended default for generated
    joint samplers. For a tiny, already-unit-scale block, the IDENTITY
    metric (`use_diagonal_metric = false`; step-size only, NOT diagonal)
-   is fine and skips the 1000-iter windowed warmup. Emit in the runner:
-   ```
-   # NOTE: joint_nuts_block metric = adapted diagonal (use_diagonal_metric).
-   # If R-hat > 1.05 OR ess_ratio is low at 20k+20k, the geometry may be ROTATED
-   # (off-diagonal correlation a diagonal metric can't capture) -- try the
-   # full-dense path (Check #18), keeping it only if ESS improves.
-   ```
+   is fine and skips the 1000-iter windowed warmup. Do NOT emit a
+   metric NOTE into the runner or example: "try the full-dense path
+   (Check #18)" is homework the R user has NO lever to perform
+   (use_dense_metric is a C++ generation-time config, and Check #18 is
+   an internal validator item) -- the diagonal-vs-dense escalation is
+   YOUR job at validation time (Check #18) or a regeneration decision,
+   never a user-facing instruction.
 
 3. **Enable dense metric only when** ONE of:
    - The user explicitly requests it after seeing diagonal R-hat

@@ -364,6 +364,21 @@ class), not separate classes.
 | 6. R / Python runner emission | ONLY after the printed L2 verdict PASSES | `skills/codegen_r_runner.md` (R backend) / `skills/codegen_python_runner.md` (Python backend; load whichever the chosen backend needs) |
 | 7. L3 runtime verification | after the runner compiles | `skills/validator.md` Layer 3 (R1 smoke -> R2 two-chain -> R3) |
 
+**SKILL TEXT NEVER LEAKS INTO DELIVERED FILES.** The skill corpus
+(this file + everything under `skills/`) is YOUR operating manual,
+not documentation for the user. NEVER transcribe skill prose into the
+comments of any generated file or into user-facing chat: no check
+numbers ("Check #11", "Check #18"), no validator vocabulary (PSIS-LOO,
+BPV, Layer-3, R2, semantic-bug surface), no trade-off discussions
+(diagonal vs dense metric, joint vs modular), no threshold tables, no
+skill-file paths, no instructions the user has no lever to perform.
+The ONLY comments a delivered file may carry are (1) templates a skill
+explicitly mandates verbatim and (2) short plain-language statements
+about THIS model (what it is, what a call does). Test: if a comment
+sentence traces back to a skill file rather than to the user's model,
+it does not belong. When in doubt about a comment, LEAVE IT OUT --
+a confusing comment is worse than no comment.
+
 **Phase 3 -- the model confirmation -- is the single most important
 gate in this table. It is NOT optional, NOT skippable, NOT a
 courtesy.** Every later layer (L1 compile, L2 semantic checks, L3

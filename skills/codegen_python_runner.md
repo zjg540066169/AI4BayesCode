@@ -97,7 +97,10 @@ no abstractions, and as short as correctness allows. Whenever a
 structural choice trades completeness or cleverness against
 readability, readability wins. All comments and strings in the
 delivered files are ENGLISH, regardless of the conversation language
-(codegen.md Sec.0b).
+(codegen.md Sec.0b). **When in doubt about a comment, LEAVE IT OUT**:
+a comment you are not sure the user needs, or that could confuse them
+(undefined acronyms, internal machinery, absence-explanations,
+risk talk), is worse than no comment -- the default is omission.
 
 Same rule as the R version: the delivered example drives chains
 EXCLUSIVELY through the SHIPPED helpers (`AI4BayesCode.run_chains`,
@@ -112,13 +115,13 @@ R1 smoke wiring) is throwaway and NOT shipped in the default case.
 
 The delivered `example_<ClassName>.py` MUST contain, in order:
 
-1. **Header comment** -- what the model is + a note that generation
-   was validated by the Layer-3 harness (not shipped here). For everyday
-   use, point at the shipped `AI4BayesCode.run_chains` /
-   `AI4BayesCode.rhat_summary` / `AI4BayesCode.diagnose` flow
-   (model-independent R-hat / ESS / MCSE / summaries + trace+ACF+density
-   via arviz); regenerate with the harness only if you specifically need
-   PSIS-LOO (model-specific).
+1. **Header comment** -- what the model is, plus the short list of the
+   shipped helpers the example uses (`AI4BayesCode.run_chains` /
+   `rhat_summary` / `diagnose`, one plain-language line each). No
+   harness talk, no validator vocabulary (PSIS-LOO, BPV, Layer-3,
+   check numbers), no explanations of what the example does NOT
+   contain -- an acronym with no context, or an absence-explanation,
+   only confuses the audience.
 2. **AI4BayesCode.sourceCpp call** -- exact same form as in the runner
    template below.
 3. **Compact constructor reference + doc() pointer** -- a SHORT
@@ -192,7 +195,7 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
    ```
 
    Single-chain use is `seeds=[1]` (or the stateful API below); never
-   a bespoke wrapper. No LOO (that is model-specific).
+   a bespoke wrapper.
 7. **Stateful-API usage**, in order: `model.step()`,
    `model.get_history()`, `model.get_current()`,
    `model.predict_at({"<X>": X_test})`, then
