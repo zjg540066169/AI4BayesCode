@@ -134,10 +134,10 @@ documentation a first-time user reads):
    run <- ai4bayescode_run_chains(make_<ClassName>(<data_args>),
                                   n_chains = 4L,
                                   n_burn = 4000L, n_keep = 4000L)
-   # histories include the warmup draws (run_chains does not strip
-   # them), so ALWAYS pass the burn length explicitly:
-   ai4bayescode_rhat_summary(run, drop_burn = 4000)   # cross-chain R-hat / ESS
-   dg <- ai4bayescode_diagnose(run$histories[[1]], n_burn = 4000)
+   # run$histories are KEEP-ONLY (run_chains strips the warmup draws),
+   # so no drop_burn / n_burn bookkeeping downstream:
+   ai4bayescode_rhat_summary(run)                     # cross-chain R-hat / ESS
+   dg <- ai4bayescode_diagnose(run$histories[[1]])
    dg$summary; dg$plot
    ```
 
@@ -210,13 +210,13 @@ run <- ai4bayescode_run_chains(make_<ClassName>(<data_args>),
                                n_chains = 4L,
                                n_burn = 4000L, n_keep = 4000L)
 
-# Histories include the warmup draws (run_chains does not strip them),
-# so ALWAYS pass the burn length explicitly.
-ai4bayescode_rhat_summary(run, drop_burn = 4000)   # cross-chain R-hat / ESS per parameter
+# run$histories are KEEP-ONLY (run_chains strips the warmup draws), so
+# no drop_burn / n_burn bookkeeping downstream.
+ai4bayescode_rhat_summary(run)   # cross-chain R-hat / ESS per parameter
 
 # Per-chain summaries + trace + autocorrelation + density plots
 # (model-independent; no LOO -- that needs a model-specific log-likelihood).
-dg <- ai4bayescode_diagnose(run$histories[[1]], n_burn = 4000)
+dg <- ai4bayescode_diagnose(run$histories[[1]])
 dg$summary   # per-parameter table: mean/sd/median/90% CI, R-hat, ESS
 dg$plot      # trace + autocorrelation + density (prints; needs 'bayesplot')
 
@@ -915,8 +915,9 @@ list-of-lists that the user has to manually aggregate.
 
 Multi-chain R-hat in the DELIVERED example is always the shipped pair
 `ai4bayescode_run_chains(make_<ClassName>(<data_args>), n_chains = ...)`
-+ `ai4bayescode_rhat_summary(run, drop_burn = <n_burn>)` -- never a
-hand-rolled loop or a hand-assembled `posterior::rhat` call.
++ `ai4bayescode_rhat_summary(run)` (histories are keep-only; run_chains
+strips the warmup draws) -- never a hand-rolled loop or a
+hand-assembled `posterior::rhat` call.
 Over-dispersed initial values, when needed, go through `set_current()`
 inside the factory closure. (The Layer-3 harness computes its R2
 R-hat with the validator.md recipe -- that stays harness-internal.)

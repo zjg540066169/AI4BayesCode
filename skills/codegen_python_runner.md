@@ -139,10 +139,10 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
    chains = AI4BayesCode.run_chains(make_<ClassName>(<data_args>),
                                     seeds=[101, 202, 303, 404],
                                     n_burn=4000, n_keep=4000)
-   # hist includes the warmup draws (run_chains does not strip them),
-   # so ALWAYS pass the burn length explicitly:
-   print(AI4BayesCode.rhat_summary(chains, drop_burn=4000))
-   tbl, plot = AI4BayesCode.diagnose(chains[0]["hist"], n_burn=4000)
+   # each chain's "hist" is KEEP-ONLY (run_chains strips the warmup
+   # draws), so no drop_burn / n_burn bookkeeping downstream:
+   print(AI4BayesCode.rhat_summary(chains))
+   tbl, plot = AI4BayesCode.diagnose(chains[0]["hist"])
    ```
 
    Single-chain use is `seeds=[1]` (or the stateful API below); never
@@ -292,8 +292,9 @@ parameter name -- scalars as `(n_keep,)` 1-D arrays, vectors as
 it). This is exactly what `model.get_history()` returns. Multi-chain
 R-hat in the DELIVERED example is always the shipped pair
 `AI4BayesCode.run_chains(make_<ClassName>(<data_args>), seeds=...)` +
-`AI4BayesCode.rhat_summary(chains, drop_burn=<n_burn>)` -- never a
-hand-rolled loop or a hand-assembled arviz call. Over-dispersed
+`AI4BayesCode.rhat_summary(chains)` (each chain's `"hist"` is keep-only;
+run_chains strips the warmup draws) -- never a hand-rolled loop or a
+hand-assembled arviz call. Over-dispersed
 initial values, when needed, go through `model.set_current(...)`
 inside the factory closure.
 
@@ -303,9 +304,10 @@ The constructor block must list ALL arguments the user can pass, their
 types, and brief descriptions. If hyperparameters are exposed as
 constructor arguments (see `codegen.md` Sec.2 and `codegen_priors.md`),
 document those too with their defaults. Also document the history keys
-and array shapes `get_history()` returns -- this is exactly what
-`AI4BayesCode.run_chains` puts in each chain's `"hist"` (note it spans
-burn + keep; strip warmup via `drop_burn` / `n_burn` downstream).
+and array shapes `get_history()` returns. `AI4BayesCode.run_chains`
+puts the KEEP-ONLY version in each chain's `"hist"` (it strips the
+warmup draws); a raw `get_history()` call on a stateful model still
+spans every stepped iteration.
 
 Concrete example -- the constructor block for a BART model:
 
@@ -327,7 +329,8 @@ Concrete example -- the constructor block for a BART model:
 #     .get_current()   -> {"f_bart": (N,), "sigma": float}
 #     .set_current(d)  -- overwrite sigma; f_bart is read-only
 #
-#   get_history() keys (= run_chains chain["hist"]; spans burn + keep):
+#   get_history() keys (run_chains returns these KEEP-ONLY in chain["hist"];
+#   a raw get_history() call spans burn + keep):
 #     hist["f_bart"] -- (n_iter, N) posterior draws of f
 #     hist["sigma"]  -- (n_iter,)   posterior draws of sigma
 # -------------------------------------------------------------------------

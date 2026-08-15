@@ -624,9 +624,12 @@ ai4bayescode_diagnose <- function(hist, n_burn = 0, plot = TRUE, order_component
 #'
 #' @description Spawns `n_chains` chains (parallel via `parallel::mclapply` on
 #'   POSIX, or sequential) from a deterministic constructor closure, runs warmup
-#'   + keep on each, and returns the per-chain `get_history()` results, the seeds
-#'   used, and the per-chain wall time. Each chain instantiates a fresh Rcpp
-#'   module object in its own worker, so object ownership is handled cleanly.
+#'   + keep on each, and returns the per-chain histories (KEEP-ONLY: the first
+#'   `n_burn` draws of every history entry are stripped along its first axis,
+#'   so downstream `ai4bayescode_rhat_summary()` / `ai4bayescode_diagnose()`
+#'   need no `drop_burn` / `n_burn` bookkeeping), the seeds used, and the
+#'   per-chain wall time. Each chain instantiates a fresh Rcpp module object
+#'   in its own worker, so object ownership is handled cleanly.
 #' @param model_ctor Function of one argument (the integer seed, passed positionally; the parameter name is irrelevant) returning a fresh wrapper
 #'   object exposing `step()` and `get_history()`. Must be deterministic in
 #'   `seed`.
@@ -639,7 +642,10 @@ ai4bayescode_diagnose <- function(hist, n_burn = 0, plot = TRUE, order_component
 #'   `TRUE` (silently sequential on Windows).
 #' @param mc.cores Number of cores; auto-chosen if `NULL`.
 #' @param verbose Logical; print a progress message. Defaults to `TRUE`.
-#' @return A list with `histories` (list of per-chain `get_history()` returns),
+#' @return A list with `histories` (list of per-chain histories, keep-only:
+#'   each entry -- vector, matrix, or higher-dimensional array -- has its
+#'   first `n_burn` draws dropped along the first axis; an entry with a
+#'   single stored draw, i.e. `keep_history = FALSE`, is returned unchanged),
 #'   `seeds`, and `wall` (per-chain seconds).
 #' @export
 ai4bayescode_run_chains <- function(model_ctor,
@@ -660,13 +666,35 @@ ai4bayescode_run_chains <- function(model_ctor,
         stop("length(seeds) must equal n_chains")
     }
 
+    # Drop the first `nb` draws along the FIRST axis of one history entry.
+    # Entries can be plain vectors (n), matrices (n x d), or higher-D
+    # arrays (n x r x c, ...); the slice runs along axis 1 only and keeps
+    # every other axis (and names/dimnames) intact. An entry with <= nb
+    # rows is returned unchanged: with keep_history disabled get_history()
+    # holds a single, already post-warmup, current draw -- emptying it
+    # would be worse than keeping it.
+    strip_burn_1 <- function(x, nb) {
+        d   <- dim(x)
+        len <- if (is.null(d)) length(x) else d[1L]
+        if (nb <= 0L || len <= nb) return(x)
+        keep <- (nb + 1L):len
+        if (is.null(d)) return(x[keep])
+        args <- c(list(x, keep),
+                  rep(list(quote(expr = )), length(d) - 1L),
+                  list(drop = FALSE))
+        do.call(`[`, args)
+    }
+
     one_chain <- function(seed_val) {
         t0 <- Sys.time()
         m <- model_ctor(seed_val)
         m$step(as.integer(n_burn))
         m$step(as.integer(n_keep))
         t1 <- Sys.time()
-        list(history = m$get_history(),
+        # get_history() spans EVERY stepped iteration (warmup + keep);
+        # return keep-only draws, matching this function's documentation.
+        h <- lapply(m$get_history(), strip_burn_1, nb = as.integer(n_burn))
+        list(history = h,
              seed    = seed_val,
              wall    = as.numeric(difftime(t1, t0, units = "secs")))
     }

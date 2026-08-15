@@ -36,6 +36,30 @@ import time
 import warnings
 from typing import Any, Callable, Iterable, Optional
 
+import numpy as np
+
+
+def _strip_burn(hist, n_burn):
+    """Drop the first ``n_burn`` draws along axis 0 of every history entry.
+
+    Entries may be 1-D ``(n,)``, 2-D ``(n, d)``, or higher-dimensional
+    ``(n, r, c, ...)`` arrays; the slice runs along the FIRST axis only and
+    keeps every other axis intact. An entry with ``<= n_burn`` rows is
+    returned unchanged: with ``keep_history`` disabled ``get_history()``
+    holds a single, already post-warmup, current draw -- emptying it would
+    be worse than keeping it.
+    """
+    if hist is None or n_burn <= 0:
+        return hist
+    out = {}
+    for k, v in hist.items():
+        a = np.asarray(v)
+        if a.ndim == 0 or a.shape[0] <= n_burn:
+            out[k] = v
+        else:
+            out[k] = a[int(n_burn):]
+    return out
+
 
 def _chain_worker(factory: Callable[[int], Any], seed: int,
                   n_burn: int, n_keep: int,
@@ -53,6 +77,9 @@ def _chain_worker(factory: Callable[[int], Any], seed: int,
         hist = m.get_history() if hasattr(m, "get_history") else None
         if history_keys is not None and hist is not None:
             hist = {k: hist[k] for k in history_keys if k in hist}
+        # get_history() spans EVERY stepped iteration (warmup + keep);
+        # return keep-only draws, matching this function's documentation.
+        hist = _strip_burn(hist, int(n_burn))
         return {"seed": seed, "wall": wall, "hist": hist}
     except Exception as e:  # noqa: BLE001
         # NOTE: unlike R's ai4bayescode_run_chains (which stop()s the whole run
@@ -125,7 +152,12 @@ def run_chains(
 
     Returns
     -------
-    list of dicts, one per chain: `{"seed", "wall", "hist"}`.
+    list of dicts, one per chain: `{"seed", "wall", "hist"}`. Each
+    ``"hist"`` is KEEP-ONLY: the first ``n_burn`` draws of every history
+    entry are stripped along its first axis (1-D, 2-D, and higher-D
+    entries alike), so downstream ``rhat_summary`` / ``diagnose`` need no
+    ``drop_burn`` / ``n_burn`` bookkeeping. An entry with a single stored
+    draw (``keep_history=False``) is returned unchanged.
     """
     seeds = list(seeds)
     if not seeds:
