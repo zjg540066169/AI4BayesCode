@@ -10,12 +10,19 @@ description: |
   + PSIS-LOO via arviz), AI4BayesCode.perf_hint call, joint-NUTS threshold
   tightening, and the reference-template catalogue (examples/*.cpp).
   Mirror of codegen_r_runner.md for the Python (pybind11) backend.
-  The entry-point skill `codegen.md` and `start.md` Phase 5 point here
+  The entry-point skill `codegen.md` and `start.md` Phase 6 point here
   for Python runner emission when the chosen runtime is Python (or
   Both R+Python dual-module).
 ---
 
 # AI4BayesCode codegen -- Python runner + reference templates
+
+**PREREQUISITE GATE -- L2 first.** Do not load this file, and do not
+emit or run any runner / Layer-3 harness, until the L2 semantic
+checklist + AD-twin (Check #12) have PASSED with the per-check verdict
+table printed (`codegen.md` Sec.11 Step 2, HARD ORDERING GATE). This
+file hands you executable runtime machinery; if L2 has not been
+printed yet, you are in the runtime-before-semantic reversal.
 
 Companion skill to `codegen.md`. Load this when writing the generated
 `.py` runner: `AI4BayesCode.sourceCpp` setup, constructor-argument

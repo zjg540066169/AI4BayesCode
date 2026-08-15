@@ -998,13 +998,18 @@ the structured picker UI. Three firm rules:
    `tests_autodiff/verify_<ClassName>.cpp`. See `codegen_cpp.md Sec.6b`.
 9. **Assemble the composite in the constructor.** See
    `codegen_cpp.md Sec.7`.
-10. **Output the `.cpp` + `.R` runner.** See `codegen_r_runner.md`
-    for the runner template + Layer 3 validator wiring.
-11. **Verify (Sec.11 below) -- STRICT ORDER L1 -> L2 -> L3, no reversal.** Compile (L1), then the
-    semantic validator checklist + AD-twin gradient check (L2), and ONLY AFTER L2 passes the
-    runtime checks (L3: smoke test, 2-chain diagnostic). Do NOT write/run the 2-chain runner
-    before L2 passes, and do NOT report "validation passed" off the runtime run alone -- see
-    the **HARD ORDERING GATE** at the top of Sec.11. Delete smoke-test file on PASS.
+10. **Compile the `.cpp` (L1) and clear the L2 semantic layer.** Run the
+    full validator checklist + the AD-twin gradient check (Check #12) and
+    PRINT the per-check verdict table (Sec.11 Step 2). NO runner file
+    exists yet at this step -- that is deliberate: the L3 harness must
+    not be in your hands until L2 has passed (see the **HARD ORDERING
+    GATE** at the top of Sec.11).
+11. **Only now emit the `.R` / `.py` runner and run L3.** See
+    `codegen_r_runner.md` / `codegen_python_runner.md` for the runner
+    template + Layer 3 wiring; then run the runtime checks in order
+    (Sec.11 Steps 3-4: smoke -> 2-chain). Do NOT report "validation
+    passed" off the runtime run alone. Delete the smoke-test file on
+    PASS.
 
 ---
 
@@ -1056,6 +1061,14 @@ autodiff-vs-hand-written gradient comparison -- is the cheapest correctness chec
 HERE (gen-time / L2), BEFORE the Step 3-4 runtime: a wrong gradient caught by the twin saves
 running the smoke + two-chain diagnostic on broken code (a chain on a wrong gradient can even
 *look* like it converges).
+
+**MANDATORY ARTIFACT -- print the verdict, or the layer did not run.** Emit the
+checklist result as a per-check verdict table in the conversation (check id ->
+PASS / FAIL / N-A, one line of reasoning each, conditional checks included).
+The FIRST `model$step()` of ANY runtime execution -- the Step-3 smoke test
+included -- must come AFTER this table exists in the transcript. An unprinted
+checklist counts as NOT run: silent "I checked it mentally" is exactly how the
+runtime-before-semantic reversal happens.
 
 ### Step 3: Smoke test (THROWAWAY -- delete file on PASS)
 

@@ -347,8 +347,17 @@ class), not separate classes.
 | 2. Prior elicitation | when a user prior is missing / ambiguous | `skills/codegen_priors.md` |
 | 3. Model confirmation | before writing any code | `skills/codegen.md` Sec.2 (inline DAG + summary table) |
 | 4. C++ emission | when starting to write `.cpp` | `skills/codegen_cpp.md` |
-| 5. R / Python runner emission | after `.cpp` is written | `skills/codegen_r_runner.md` (R backend) / `skills/codegen_python_runner.md` (Python backend; load whichever the chosen backend needs) |
-| 6. Verification (L1+L2+L3) | after `.cpp` + runner compile | `skills/validator.md` |
+| 5. L1 compile + L2 semantic validation | after `.cpp` is written, BEFORE any runner file exists | `skills/validator.md` (L2 semantic checklist + AD-twin Check #12); PRINT the per-check verdict table |
+| 6. R / Python runner emission | ONLY after the printed L2 verdict PASSES | `skills/codegen_r_runner.md` (R backend) / `skills/codegen_python_runner.md` (Python backend; load whichever the chosen backend needs) |
+| 7. L3 runtime verification | after the runner compiles | `skills/validator.md` Layer 3 (R1 smoke -> R2 two-chain -> R3) |
+
+The phase split above is deliberate: the L2 checklist must be loaded,
+run, and its verdict PRINTED before the Layer-3 runtime harness (which
+lives inside the runner file) is even written. Loading the runner
+skill first puts executable runtime machinery in hand one phase before
+the semantic checklist -- that is exactly the historical
+runtime-before-semantic reversal (codegen.md Sec.11 HARD ORDERING
+GATE).
 
 **On-demand instruction files** (load only when the topic comes up;
 many generations need 0 of these):
@@ -484,9 +493,11 @@ This chat client renders **display / block math** but does NOT render **inline
 
 ## 4. Validator must run for every generation
 
-Before declaring a generated `.cpp` complete, walk through the L2
-checks in `skills/validator.md`. The most commonly missed checks
-this skill set has caught:
+Walk through the L2 checks in `skills/validator.md` BEFORE any runtime
+execution of the generated model -- the smoke test's first `step()`
+included, not merely "before declaring the `.cpp` complete" -- and
+print the per-check verdict table (codegen.md Sec.11 Step 2). The most
+commonly missed checks this skill set has caught:
 
 - **Check #6 (DAG consistency).** Every key read inside a
   `register_stochastic_refresher` lambda must either be a

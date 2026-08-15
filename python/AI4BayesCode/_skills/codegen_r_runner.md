@@ -16,6 +16,13 @@ description: |
 
 # AI4BayesCode codegen -- R runner + reference templates
 
+**PREREQUISITE GATE -- L2 first.** Do not load this file, and do not
+emit or run any runner / Layer-3 harness, until the L2 semantic
+checklist + AD-twin (Check #12) have PASSED with the per-check verdict
+table printed (`codegen.md` Sec.11 Step 2, HARD ORDERING GATE). This
+file hands you executable runtime machinery; if L2 has not been
+printed yet, you are in the runtime-before-semantic reversal.
+
 Companion skill to `codegen.md`. Load this when writing the generated
 `.R` runner: ai4bayescode_sourceCpp setup, constructor-argument reference
 block, the delivered make_<ClassName>() factory + shipped
