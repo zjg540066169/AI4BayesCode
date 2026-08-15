@@ -270,9 +270,9 @@ ratio. Sanity-check `birth_logR == -death_logR` on a fixed pair.
 
 **The new block class implements the C++ `block_sampler` contract (Tier B).** It is a subclass of
 `block_sampler` (`include/AI4BayesCode/block_sampler.hpp`) overriding the pure-virtual contract:
-`set_context(const block_context&)`, `step(std::mt19937_64&)`, `current `, `set_current(arma::vec)`,
-`name `, `dim `, and `engine_kind ` (default `MCMC`; override to `VI` for a VI block). This is
-C++-only machinery -- NONE of these get a `.method ` and R never sees them (interface.md Sec.2,
+`set_context(const block_context&)`, `step(std::mt19937_64&)`, `current()`, `set_current(arma::vec)`,
+`name()`, `dim()`, and `engine_kind()` (default `MCMC`; override to `VI` for a VI block). This is
+C++-only machinery -- NONE of these get a `.method()` and R never sees them (interface.md Sec.2,
 Tier B). The lifecycle to follow is `lifecycle.md` Sec.14's 7-step (Tier C kernel + license-gate ->
 Tier B block -> Tier A wrapper -> skills/catalogue -> tests -> validator -> cross-chain audit); for
 block_design, Steps 4-7 land in the `blocks_local/<Block>/` bundle, NOT in core.
@@ -313,20 +313,20 @@ on `-I` and need no per-block declaration.
 
 > LOAD: `skills/system_design_skills/dataflow.md` (system_design Sec.3-Sec.9).
 
-- **shared_data sync** (Sec.3): a single-parameter block's `name ` IS its data key. After ANY
+- **shared_data sync** (Sec.3): a single-parameter block's `name()` IS its data key. After ANY
  `set_current`, every shared_data entry the block advertises (data inputs, derived quantities)
- MUST reflect the new state BEFORE the next `step ` -- a desync silently feeds DAG traversal and
+ MUST reflect the new state BEFORE the next `step()` -- a desync silently feeds DAG traversal and
  predict_at the OLD value (Sec.3 invariant).
 - **Refreshers** (Sec.5): deterministic (`register_refresher`, pure fn of shared_data, e.g.
  working residual) vs stochastic (`register_stochastic_refresher`, takes an rng, called ONLY by
  predict_at, e.g. `y_rep`). A wrapper expecting Layer-3 R3 MUST register a `y_rep` stochastic
- refresher. R3.b PSIS-LOO is DIAGNOSTIC ONLY -- `warning `, never `stopifnot ` (Sec.5).
+ refresher. R3.b PSIS-LOO is DIAGNOSTIC ONLY -- `warning()`, never `stopifnot()` (Sec.5).
 - **Two DAGs, kept disjoint** (Sec.4): the Gibbs DAG (`declare_dependencies` / `declare_invalidates`
  -- who READS whom, for sampling) is SEPARATE from the predict DAG (`declare_predict_edges` -- who
  PRODUCES whom, generatively, for predict_at BFS). A new derived quantity needs BOTH its Gibbs
  invalidation AND its predict edge. The viz-only context-edge set (`declare_context_edges`) is
  NEVER traversed by predict_at and must never overlap `predict_edges_` (Sec.4).
-- **RNG separation** (Sec.8): the wrapper carries `rng_` (MCMC, advanced by `step `),
+- **RNG separation** (Sec.8): the wrapper carries `rng_` (MCMC, advanced by `step()`),
  `mutable predict_rng_` (predict_at only), and -- iff NUTS-family -- `mutable readapt_rng_`. Seeds
  are the documented SplitMix64-mixed constants (Sec.8). Conflating streams is a silent reproducibility
  bug (Check #13 / Check #23). Note: BART-family uses R's RNG; the mt19937 arg is ignored.

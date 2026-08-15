@@ -139,7 +139,7 @@ blocks, and the fence copy as-is.
 7. **PYBIND11_MODULE block** -- `#ifdef AI4BAYESCODE_PYBIND_MODULE` ... `#include
    "AI4BayesCode/pybind_casters.hpp"` ... `PYBIND11_MODULE(<Model>, m){
    AI4BayesCode::register_ai4bayescode_types(m); pybind11::class_<<Model>>(m,"<Model>") .def(init<...>())
-   ... AI4BAYESCODE_PYBIND_KERNEL_CONTROL(m, <Model>); }` ... `#endif`. Companion macro to
+   ... AI4BAYESCODE_PYBIND_KERNEL_CONTROL(<Model>); }` ... `#endif`. Companion macro to
    the Rcpp one.
 8. **`int main()`** -- `#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)`
    -> simulate data from a KNOWN truth -> build the composite/block -> warmup + sample -> compute a
@@ -199,7 +199,7 @@ Write BOTH module blocks, binding the driver's core-6 state methods + kernel-con
 copy the exact idiom from `GaussianLocationScale.cpp` (L314-352): register both constructors
 (legacy + full), both `step` overloads, `readapt_NUTS` only if the driver has it, and
 `AI4BAYESCODE_BIND_KERNEL_CONTROL(<Model>)` (RCPP) +
-`AI4BAYESCODE_PYBIND_KERNEL_CONTROL(m, <Model>)` (pybind) UNCONDITIONALLY (kernel-control is
+`AI4BAYESCODE_PYBIND_KERNEL_CONTROL(<Model>)` (pybind) UNCONDITIONALLY (kernel-control is
 a universal wrapper category, interface.md Sec.1). The `PYBIND11_MODULE` block opens with
 `AI4BayesCode::register_ai4bayescode_types(m)` so `state_map` / `history_map` cross the boundary.
 These bindings are exactly what makes the contributed block `source`-able in R and Python -- they are

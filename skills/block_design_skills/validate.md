@@ -59,13 +59,13 @@ draws, then take the classical BETWEEN-chain R-hat over the two FULL different-s
 per-chain halving). compute sample mean/cov directly with `arma::mean` / `arma::cov`
 (there is no `sample_cov` / `sample_mean` helper to copy -- do not cite one). The test links
 ONLY `block_sampler.hpp` + `<Block>.hpp`, prints per-regime PASS/FAIL with the tolerance
-inline, and `main ` returns non-zero if any regime fails. Build the regime ladder T0->T4;
+inline, and `main()` returns non-zero if any regime fails. Build the regime ladder T0->T4;
 which of T1's two forms applies is **decided by the block's mechanism** (Stage 2):
 
 | Regime | Proves | Applies to |
 |---|---|---|
 | **T0 -- sanity** | a trivial closed-form case (e.g. diagonal `Q` => `Var(x_i)=1/kappa`; a flat/known-conjugate target) recovers the analytic mean+variance within MC SE | every block |
-| **T1a -- closed-form / dense-inverse parity** | empirical sample cov/mean from many `step ` draws matches the **dense analytic** posterior (e.g. `inv(Q)`, `Q^-^1b`, projected `P(Q+epsilonI)^-^1P^T`) within MC SE | **Gibbs / ESS / direct-draw** blocks (a conjugate or Gaussian-conditional draw HAS a closed form to match) |
+| **T1a -- closed-form / dense-inverse parity** | empirical sample cov/mean from many `step()` draws matches the **dense analytic** posterior (e.g. `inv(Q)`, `Q^-1b`, projected `P(Q+epsilonI)^-1P^T`) within MC SE | **Gibbs / ESS / direct-draw** blocks (a conjugate or Gaussian-conditional draw HAS a closed form to match) |
 | **T1b -- FD-gradient check** | for **any hand-written gradient**, a finite-difference `(logp(theta+h*e_j)-logp(theta-h*e_j))/(2h)` matches the analytic `grad[j]` at several random theta, to the Sec.5 default tolerance | **any block with a hand-written gradient** (NUTS-gradient blocks). This is the single highest-signal correctness test for a hand-derived gradient -- see Sec.2 Check #12 |
 | **T2 -- recovery-from-synthetic-truth** | simulate data from KNOWN parameters, sample, and the posterior mean/CI covers truth (parameter recovery, not just internal consistency) | every block (catches a self-consistent-but-wrong target T1 can miss) |
 | **T3 -- cross-chain R-hat** | run **TWO chains with DIFFERENT SEEDS** from **deliberately over-dispersed inits** (e.g. +/-5) on a non-trivial dim; compute the **cross-chain (between-chain) rank-normalized R-hat** -- Vehtari 2021 rank-normalization + classical between-chain R-hat, **NOT split-R-hat** -- across the marginals; it stays **< 1.01** (MANDATORY for a library block; NOT the looser exploratory 1.05; NOT user-selectable). Two over-dispersed INDEPENDENT seeds agreeing is the direct test of the reducibility / multimodality failure mode (a within-chain split cannot detect a mode the chain never visited) | every block (mixing failure / reducibility) |
@@ -74,8 +74,8 @@ which of T1's two forms applies is **decided by the block's mechanism** (Stage 2
 Notes that keep T1 honest:
 - **T1a needs a real closed form -- and each engine has its own honest surrogate.** Do NOT
  fake a dense inverse; use the engine-correct parity and SAY which in the test header:
-   - *Gibbs / direct-draw* (Gaussian conditional): empirical cov/mean vs `inv(Q)` / `Q^-^1b`.
-   - *NUTS-gradient* on a Gaussian target: empirical cov/mean vs the closed-form `Lambda^-^1`.
+   - *Gibbs / direct-draw* (Gaussian conditional): empirical cov/mean vs `inv(Q)` / `Q^-1b`.
+   - *NUTS-gradient* on a Gaussian target: empirical cov/mean vs the closed-form `Lambda^-1`.
    - *ESS / any intractable-posterior block* (e.g. GMRF prior + non-Gaussian likelihood, or a
      z-marginalized mixture): there is no closed-form posterior, so **T1a = PRIOR recovery
      under a FLATTENED likelihood** -- make the likelihood contribute NOTHING, then the

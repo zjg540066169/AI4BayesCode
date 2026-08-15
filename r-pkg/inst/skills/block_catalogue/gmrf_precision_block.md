@@ -11,7 +11,7 @@ Algorithm: P Q P^T = L L^T (AMD reordering + sparse Cholesky via Eigen
 SimplicialLLT) -> solve `L^T y_perm = z`, `z ~ N(0, I)` -> apply inverse
 permutation. Mean shift `mu = Q^{-1} b` via the cached factorisation.
 Per-sweep cost O(n * b_w^2) for the numerical re-factorisation
-(b_w = bandwidth ~= O(sqrtn) for typical 2D lattice GMRFs); the symbolic
+(b_w = bandwidth ~= O(sqrt(n)) for typical 2D lattice GMRFs); the symbolic
 factorisation + AMD ordering are computed once and amortised.
 
 **JUSTIFICATION (Check #16):** Fixed-dim continuous Gaussian with

@@ -75,7 +75,7 @@ likelihood and classify:
 | Bernoulli BART (binary classification) | Medium | **`genbart_block + logistic_lik`** directly (no augmentation) -- see `examples/GBartLogistic.cpp`. Do NOT use `pg_logistic_block + bart_block` -- PG's kappa = y - 0.5 pseudo-response breaks BART's Gaussian-observation tree-scale identifiability. |
 | Multinomial logistic BART (C >= 2 classes) | Medium | **C-1 x `genbart_block(poisson_lik, offset_key="log_phi_aug")` + one `poisson_multinomial_aug_block`** via the Baker 1994 / Forster 2010 gamma trick in the Murray 2021 Sec.3.1 reference-category identified architecture. See `examples/GBartMultinomial.cpp`. For binary (C=2) prefer the simpler `GBartLogistic` direct path. |
 | Dirichlet-Categorical conjugate | Low | `dirichlet_gibbs_block` + `categorical_gibbs_block` |
-| GP regression with **Gaussian** observation likelihood | (no latent f sampled) | **Marginal-likelihood architecture**: integrate f out, sample only `(amplitude, lengthscale, sigma)` from `y ~ N(0, K + sigma^2 I)` via one `joint_nuts_block` (3 POSITIVE slices). Analytic gradient via Rasmussen & Williams Sec.5.5 Eq. (5.9) `0.5 tr((alpha alpha' - K^-^1) dK/dtheta)`. NO ESS, NO latent f or z. See `examples/GPRegression.cpp`. Matches Stan / libgp / GaussianProcesses. |
+| GP regression with **Gaussian** observation likelihood | (no latent f sampled) | **Marginal-likelihood architecture**: integrate f out, sample only `(amplitude, lengthscale, sigma)` from `y ~ N(0, K + sigma^2 I)` via one `joint_nuts_block` (3 POSITIVE slices). Analytic gradient via Rasmussen & Williams Sec.5.5 Eq. (5.9) `0.5 tr((alpha alpha' - K^-1) dK/dtheta)`. NO ESS, NO latent f or z. See `examples/GPRegression.cpp`. Matches Stan / libgp / GaussianProcesses. |
 | Latent **dense GP** + **non-Gaussian** likelihood (GP classification, GP regression with Poisson / Student-t / NB observations) | N/A for the latent f | **Whitened ESS via z**: sample `z ~ N(0, I)` via `elliptical_slice_sampling_block` with `L_chol_key = "L_identity"`; recover `f = L(amp, ell) * z` inside the block's `log_lik`. Hyperparameter blocks include the non-Gaussian likelihood at proposed `(amp, ell)` in their log-density. See `examples/GPClassification.cpp`. |
 | Latent **sparse GMRF** (Q sparse PSD: CAR / ICAR / RW1 / RW2 / 2D lattice GMRF) + **non-Gaussian** likelihood (Poisson / Bernoulli / Student-t / NB / log-Gaussian Cox) | N/A for the latent x | **`gmrf_whitened_ess_block`** (Murray 2010 ESS on the IMPLICIT GMRF prior; Rue 2001 sparse-Cholesky permuted backsolve for prior draws). User supplies `Q_fn(ctx) -> arma::sp_mat` and `log_lik(x, ctx) -> double`. Strictly more efficient than the dense `elliptical_slice_sampling_block` path when Q is sparse (e.g. 4-NN / 6-NN lattice -- Q has O(n) non-zeros, dense Sigma has n^2 non-zeros). Sum-to-zero preserved exactly by ESS rotation linearity. Compose with `nuts_block` for hyperparameters (linear-predictor intercept on the real line, log-precision on the positive line, ...). See `block_catalogue/index.md` `gmrf_whitened_ess_block` section for the example recipe and verified convergence budgets at N=16 / N=64. |
 | GP hyperparameters under the **whitened ESS** path -- known `(amp, ell)` **banana ridge** | **High** for `(log_amp, log_ell)` | Default: one `joint_nuts_block({amp, ell})` (POSITIVE x 2), reading the latent `z` and computing the likelihood at proposed `(amp, ell)` via `f = L(amp, ell) * z`. Modular per-slice NUTS slow-mixes along the banana ridge (5-10x ESS loss on `amp` at long chains) and is NOT recommended even as a starting point. If `ell` ESS is still inadequate at the extended budget, escalate to a reverse-mode Cholesky-AD analytic gradient inside the joint log-density. See `block_catalogue/index.md` "GP convergence troubleshooting ladder". |
@@ -1060,7 +1060,7 @@ Thread it into every `impl_->predict_at(replaced, predict_rng_)` call.
 
 **3. In the `predict_at(state_map)` method**, the `y_rep` key will
 already be in the returned `block_context` -- just convert to
-`Rcpp::NumericVector` and add it to the output list. No special case
+an `arma::vec` entry in the returned map. No special case
 needed on the wrapper side.
 
 ### Per-observation-family templates (refresher + pointwise_loglik)
@@ -1927,9 +1927,8 @@ impl_->data().register_stochastic_refresher(
 
 ```cpp
 // LEGACY (system_design Sec.7 rule 4 violation):
-if (static_cast<std::size_t>(X_new.nrow()) != N_ ||
-    static_cast<std::size_t>(X_new.ncol()) != p_)
-    Rcpp::stop("X dimensions must match construction");
+if (X_new.n_elem != N_ * p_)
+    throw std::runtime_error("X dimensions must match construction");
 // -- compares against frozen N_; rejects any legitimate N change.
 ```
 
@@ -1940,9 +1939,10 @@ length is one example), then say so explicitly in the error:
 ```cpp
 // STRICT-N legitimate use (HMM, ARMA, change-point -- N is a model
 // invariant, not just a data dimension):
-if (X_new.nrow() != N_)
-    Rcpp::stop("set_current: this model fixes N at construction "
-               "because <REASON>. To change N, reconstruct the wrapper.");
+if (X_new.n_elem / p_ != N_)
+    throw std::runtime_error(
+        "set_current: this model fixes N at construction because "
+        "<REASON>. To change N, reconstruct the wrapper.");
 ```
 
 The validator (Check #19) accepts EITHER the dynamic-N canonical
@@ -1978,7 +1978,7 @@ public:
     // pointer) via the CRTP static_cast; ensure `impl_` is a member (private
     // is fine) named exactly `impl_`. The RCPP_MODULE / PYBIND11_MODULE
     // macros AI4BAYESCODE_BIND_KERNEL_CONTROL(<ClassName>) /
-    // AI4BAYESCODE_PYBIND_KERNEL_CONTROL(m, <ClassName>) bind them.
+    // AI4BAYESCODE_PYBIND_KERNEL_CONTROL(<ClassName>) binds them.
 private:
     std::mt19937_64                             rng_;
     mutable std::mt19937_64                     predict_rng_;  // Sec.6a
@@ -2126,7 +2126,7 @@ inputs and (2) whether the class supports `keep_history`.
 `declare_data_input("...")` for ANY key, the `predict_at` wrapper
 MUST accept that key in `new_data` and forward to
 `impl_->predict_at(replaced, predict_rng_)`. **Do NOT hard-reject
-non-empty `new_data` with `Rcpp::stop` if any data_input exists** --
+non-empty `new_data` (throw if any data_input exists)** --
 that silently breaks posterior predictive at new covariates
 (compile + R-hat pass, but `predict_at(list(X = X_new))` errors or
 uses the OLD X, producing meaningless predictions).
@@ -2274,7 +2274,7 @@ AI4BayesCode::history_map predict_at(
     const arma::vec& X_use = has_X ? x_flat : impl_->data().get("X");
     const std::size_t N_pred = X_use.n_elem / p_;
 
-    Rcpp::NumericMatrix yrep_mat(n_draws, N_pred);
+    arma::mat yrep_mat(n_draws, N_pred);
     std::normal_distribution<double> norm01(0.0, 1.0);
     for (std::size_t d = 0; d < n_draws; ++d) {
         const double sigma_d = sigma_hist(d, 0);
@@ -2286,7 +2286,6 @@ AI4BayesCode::history_map predict_at(
         }
     }
 
-    AI4BayesCode::history_map out;
     out.emplace("y_rep", std::move(yrep_mat));
     return out;
 }
@@ -2321,7 +2320,7 @@ Use this template ONLY when the constructor has no
 AI4BayesCode::history_map predict_at(
         const AI4BayesCode::state_map& new_data) const {
     if (new_data.size() > 0) {
-        Rcpp::stop("This model has no covariate inputs.");
+        throw std::runtime_error("This model has no covariate inputs.");
     }
     return AI4BayesCode::history_map();
 }
@@ -2433,7 +2432,7 @@ mutable std::mt19937_64 readapt_rng_;   // readapt_NUTS only (kernel-control met
 /// the chain. Useful after set_current() changes the data enough that
 /// the previous tuning no longer fits.
 void readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept) {
-    if (n < 0) Rcpp::stop("readapt_NUTS: n must be non-negative");
+    if (n < 0) throw std::runtime_error("readapt_NUTS: n must be non-negative");
     // max_tree_depth: -1 = use each block's configured depth;
     //                 >0 = cap NUTS tree depth for these n adapt iters.
     // target_accept:  in (0, 1] overrides the block's dual-averaging

@@ -202,11 +202,14 @@ same kernel state.
 
 ---
 
-## 7. set_current(Rcpp::List) -- dispatcher contract
+## 7. set_current(state_map) -- dispatcher contract
 
 Every user-facing wrapper implements `set_current` as a pure
-dispatcher. The body is a sequence of `if
-(params.containsElementNamed("key"))` branches. The contract:
+dispatcher taking `const AI4BayesCode::state_map&` (name -> arma::vec;
+NEVER `Rcpp::List` -- the class body is compiled by both the Rcpp and
+the pybind11 module blocks). The body is a sequence of
+`auto it = params.find("key"); if (it != params.end())` branches.
+The contract:
 
 1. **Accept any subset of the supported keys in a single call.**
    `set_current(list(X = X_new, y = r, sigma = s))` runs all three
@@ -214,7 +217,7 @@ dispatcher. The body is a sequence of `if
 
 2. **Silently ignore unknown keys.** Callers often round-trip
    `set_current(get_current())`, which carries every tracked scalar
-   / vector. Don't `Rcpp::stop` on unknown keys -- that breaks the
+   / vector. Don't `ai4b::stop` on unknown keys -- that breaks the
    round-trip.
 
 3. **Reject ONLY keys that would be semantically impossible to
@@ -226,7 +229,7 @@ dispatcher. The body is a sequence of `if
    Error message must be clear and point at the valid keys.
 
 4. **Validate type and dimension** for every accepted key; emit
-   `Rcpp::stop("...")` with a precise mismatch message ("row count
+   `ai4b::stop("...")` with a precise mismatch message ("row count
    50 does not match current n = 100"). Do NOT let bad input
    propagate into the kernel.
 
@@ -328,7 +331,7 @@ the constructor. When true:
   predictions;
 - memory grows ~linearly with iteration count.
 
-`get_history()` returns an aggregated `Rcpp::List` with one entry
+`get_history()` returns an aggregated `history_map` (name -> arma::mat) with one entry
 per block (scalar history -> `NumericVector` of length n_draws,
 vector history -> `NumericMatrix` of (n_draws x dim)).
 

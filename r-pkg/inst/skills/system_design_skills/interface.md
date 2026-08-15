@@ -49,12 +49,13 @@ content):**
 **Core six (always present, every wrapper):**
 
 ```
-step         (int n)                -> void
-get_current  ()                     -> Rcpp::List
-set_current  (Rcpp::List params)    -> void
-predict_at   (Rcpp::List new_data)  -> Rcpp::List
-get_dag      ()                     -> Rcpp::List
-get_history  ()                     -> Rcpp::List
+step         ()                                  -> void   (one sweep)
+step         (int n)                             -> void
+get_current  ()                                  -> state_map
+set_current  (const state_map& params)           -> void
+predict_at   (const state_map& new_data) const   -> history_map
+get_dag      ()                            const -> dag_info
+get_history  ()                            const -> history_map
 ```
 
 **Kernel-control category (per-wrapper, presence dictated by composite):**
@@ -67,7 +68,7 @@ freeze       (Rcpp::CharacterVector names, bool quiet = false) -- always
      of-composite structures (`"outer.inner.child"`) OR rjmcmc_block
      sub-keys (`"<rjmcmc_name>.gamma"` / `"<rjmcmc_name>.beta"`) -- see
      DESIGN_NOTES Sec.10.a / 10.c / 10.d for the override semantics per case;
-   * unknown-name / blacklist-family / no-arg -> Rcpp::stop;
+   * unknown-name / blacklist-family / no-arg -> ai4b::stop;
    * already-frozen name -> Rcpp::warning (idempotent) UNLESS quiet=true;
    * quiet=true suppresses redundant-refreeze warnings -- use for
      checkpoint restore where freezing an already-frozen set is
@@ -80,7 +81,7 @@ freeze       (Rcpp::CharacterVector names, bool quiet = false) -- always
 unfreeze     (Rcpp::Nullable<Rcpp::CharacterVector> = R_NilValue) -- always
    * present on EVERY wrapper;
    * no-arg = unfreeze all; other invalid forms
-     (NULL, character(0), unknown name) -> Rcpp::stop;
+     (NULL, character(0), unknown name) -> ai4b::stop;
    * not-currently-frozen name -> Rcpp::warning (idempotent).
 
 get_frozen   () -> Rcpp::CharacterVector -- always
@@ -88,7 +89,8 @@ get_frozen   () -> Rcpp::CharacterVector -- always
    * returns names of currently-frozen children, in composite child
      order (matches `get_dag()` ordering).
 
-readapt_NUTS (int n, bool reset = false, int max_tree_depth = -1) -> void
+readapt_NUTS (int n, bool reset, int max_tree_depth, double target_accept) -> void
+             (a 3-arg forwarder without target_accept is also bound)
    * present ONLY on wrappers whose composite contains at least
      one `nuts_block` or `joint_nuts_block` child;
    * pure NUTS metric re-adaptation (mass matrix + step size +
@@ -120,9 +122,9 @@ whose composite includes any `bart_block` / `genbart_block` / `softbart_block`
 child ALSO expose three tree-serialization methods:
 
 ```
-get_tree          () -> Rcpp::List
-set_tree          (Rcpp::List tree) -> void
-get_tree_history  () -> Rcpp::List
+get_tree          ()                        const -> std::string
+set_tree          (const std::string& tree)       -> void
+get_tree_history  ()                        const -> std::vector<std::string>
 ```
 
 These are historical exceptions to the "core-6 + kernel-control" rule,
@@ -242,7 +244,7 @@ BART-family, NUTS-family, Gibbs-family block follows it.
  | TIER A -- user-facing wrapper (examples/MyModel.cpp)         |
  |   * exposed to R via RCPP_MODULE                            |
  |   * R sees ONLY core-6 state + kernel-control (Sec.1)        |
- |   * set_current(Rcpp::List) is a pure DISPATCHER; routes   |
+ |   * set_current(state_map) is a pure DISPATCHER; routes    |
  |     keys (X, y, theta, sigma, u, v, ...) to Tier B setters   |
  |   * owns a `composite_block impl_` with child blocks added |
  +----------------+-------------------------------------------+

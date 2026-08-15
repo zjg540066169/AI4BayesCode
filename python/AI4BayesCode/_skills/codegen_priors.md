@@ -666,7 +666,7 @@ posterior draw, `Rcpp::rbeta`, `Rcpp::rgamma`, `Rcpp::rdirichlet`,
 - Inside `register_stochastic_refresher` for posterior-predictive
   `y_rep` generation (NOT part of the Markov chain; no correctness
   impact on posterior)
-- Inside `predict_at(Rcpp::List)` wrapper methods (NOT part of the
+- Inside `predict_at(state_map)` wrapper methods (NOT part of the
   Markov chain; same reasoning as stochastic refreshers)
 - Inside library internal code (`include/AI4BayesCode/*_gibbs_block.hpp`
   and friends)

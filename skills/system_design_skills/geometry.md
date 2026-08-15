@@ -179,10 +179,10 @@ Each needs a specialized block.
   variables, FK Sec.4.2 three-tier cache) via Friedman-Koller 2003
   order MCMC + Heckerman-Geiger-Chickering 1995 BDe / BDeu score;
   see `examples/OrderMCMCBN.cpp` and:
-  * a 30/30-PASS Layer-3 audit (plateau,
-    STRICT R-hat < 1.01 (Vehtari 2021), Sec.16 R-level pre-merge
-    checklist including derived-key rejection / predict_at state
-    preservation / round-trip identity).
+  * a Layer-3 audit, 30/30 PASS: plateau, STRICT R-hat < 1.01
+    (Vehtari 2021), and the Sec.16 R-level pre-merge checklist
+    (derived-key rejection / predict_at state preservation /
+    round-trip identity).
   * `tests/test_order_mcmc_block_diagnostics.cpp` -- **exact
     posterior gold standard**: D1 n = 3 enumerates 25 DAGs and
     compares MCMC empirical edge marginals to the closed-form
@@ -191,14 +191,15 @@ Each needs a specialized block.
     P(Pa_i | order, D). D4 ESS > 200 on 10000 samples.
   * `tests/test_order_mcmc_block_stress.cpp` -- 9 stress tests
     including 4-chain R-hat < 1.01 strict on a unimodal target.
-  * an ASIA cross-check
-    vs `bnlearn::hc`: 7/7 perfect skeleton agreement, 7/8 true
-    Markov-equivalent edges in top-8 inclusion).
-  * a **reference-
-    implementation comparison** against `BiDAG::orderMCMC`
-    (Kuipers-Moffa), 4 matched chains: both implementations
-    achieve R-hat < 1.01 (ours 1.00073, BiDAG 1.00000) -> our
-    code converges to the same target as the reference. v1.2 scope: discrete
+  * an ASIA cross-check vs `bnlearn::hc`: 7/7 perfect skeleton
+    agreement, 7/8 true Markov-equivalent edges in top-8 inclusion.
+  * a **reference-implementation comparison** against
+    `BiDAG::orderMCMC` (Kuipers-Moffa), 4 matched chains: both
+    implementations achieve R-hat < 1.01 (ours 1.00073, BiDAG
+    1.00000) -> our code converges to the same target as the
+    reference.
+
+  v1.2 scope: discrete
   data + BDeu only; documented FK Sec.4.1 induced-structure-prior
   bias within Markov equivalence classes (the algorithm finds the
   correct **skeleton** but may flip directions within an

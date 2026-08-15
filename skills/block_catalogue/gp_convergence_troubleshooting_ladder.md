@@ -56,7 +56,7 @@ GP sampler, escalate:
    taken by `GPRegression.cpp` for Gaussian observations.
 
 **References**: Rasmussen & Williams 2006 Sec.5 (marginal-likelihood
-gradient formula `0.5 tr((alpha alpha' - K^-^1) dK/dtheta)`, used in
+gradient formula `0.5 tr((alpha alpha' - K^-1) dK/dtheta)`, used in
 `GPRegression.cpp`); Murray & Adams 2010 *Slice Sampling Covariance
 Hyperparameters of Latent Gaussian Models* (whitening, used in
 `GPClassification.cpp`); Betancourt 2017 *Robust Gaussian Processes

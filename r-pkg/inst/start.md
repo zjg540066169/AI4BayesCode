@@ -581,7 +581,7 @@ commonly missed checks this skill set has caught:
   `predict_at(list(X = X_new))` bug.
 - **Check #6 sibling (predict_at wrapper forwarding).** If the class
   declares any `declare_data_input`, the Rcpp wrapper
-  `predict_at(Rcpp::List)` MUST forward to
+  `predict_at(state_map)` MUST forward to
   `impl_->predict_at(replaced, predict_rng_)` -- NOT hard-reject
   non-empty `new_data` with `Rcpp::stop`. The hard-reject pattern
   compiles + R-hat-passes but silently breaks predictions.

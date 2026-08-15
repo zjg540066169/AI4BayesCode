@@ -51,7 +51,7 @@ Create `include/AI4BayesCode/gp_block.hpp`:
   - `step(std::mt19937_64&)`: one kernel sweep.
   - `current() const -> const arma::vec&`: current latent f.
   - `set_current(arma::vec)`: write latent (if invertible;
-    otherwise `Rcpp::stop` and expose `set_X / set_Y` C++ setters
+    otherwise `ai4b::stop` and expose `set_X / set_Y` C++ setters
     for Tier A's dispatcher).
   - `name()`, `dim()`.
   - Any block-specific setters: `set_X`, `set_Y`, `set_lengthscale`, etc.
@@ -284,7 +284,7 @@ Before any PR touching Tier A / B / C lands:
       `AI4BAYESCODE_BIND_KERNEL_CONTROL(ClassName)` macro from
       `include/AI4BayesCode/kernel_control_mixin.hpp`. Companion
       PYBIND11_MODULE contains the three `.def(...)` lines or the
-      `AI4BAYESCODE_PYBIND_KERNEL_CONTROL(m, ClassName)` macro. See
+      `AI4BAYESCODE_PYBIND_KERNEL_CONTROL(ClassName)` macro. See
       Sec.1 kernel-control category + `validator.md Sec.26 (a)`.
 - [ ] **Check #26 (b) -- freeze() strict error paths.** R-level test:
       `m$freeze("unknown_block_name")` -> error; `m$freeze(character(0))`
@@ -319,7 +319,7 @@ Before any PR touching Tier A / B / C lands:
   **EXCEPTION**: kernel-control methods (separate category, NOT
   state methods) are allowed per Sec.1 / Sec.13. Kernel-control
   members in v1: `freeze` / `unfreeze` / `get_frozen` (always) +
-  `readapt_NUTS(n, reset, max_tree_depth)` (iff any NUTS-family
+  `readapt_NUTS(n, reset, max_tree_depth, target_accept)` (iff any NUTS-family
   child). Future kernel-control methods (e.g., a hypothetical
   `readapt_VI`) require an explicit Sec.1 amendment.
 - `Rcpp::stop("set_current not supported")` in a BART-family or any

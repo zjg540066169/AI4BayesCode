@@ -82,7 +82,7 @@ impl_->data().declare_dependencies(
   identity metric, collects samples, computes their sample
   covariance (Stan-style `n/(n+5)*Sigma + 1e-3*(5/(n+5))*I` regularization),
   inverts to the precision matrix (mcmclib's `precond_mat` IS the mass
-  matrix, so we pass Sigma^-^1), and uses dense metric for all subsequent
+  matrix, so we pass Sigma^-1), and uses dense metric for all subsequent
   sampling. Test coverage:
   `tests_autodiff/test_joint_nuts_dense_metric.cpp` -- on a 10-dim
   rho=0.95 correlated Gaussian, dense metric gives max split-R-hat

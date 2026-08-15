@@ -556,7 +556,8 @@ to parse `new_data`, place the supplied keys in a
 **Forbidden pattern A -- reject ALL non-empty newdata:**
 
 ```cpp
-Rcpp::List predict_at(Rcpp::List new_data) const {
+AI4BayesCode::history_map predict_at(
+        const AI4BayesCode::state_map& new_data) const {
     if (new_data.size() > 0) {
         Rcpp::stop("<ClassName>: predict_at takes empty list");
     }
@@ -660,7 +661,7 @@ per-draw `replaced["f_bart"]`, `replaced["tau"]`, etc.
 
 **Sibling check -- `set_current(X, y)` dispatcher must use the
 CURRENT n, not the construction-time N.** If a Tier-A wrapper's
-`set_current(Rcpp::List)` accepts an `X` or `y` key, the dispatcher
+`set_current(state_map)` accepts an `X` or `y` key, the dispatcher
 MUST validate against the current working n (refreshed every time
 X changes), not against a frozen `N_` cached at construction
 (system_design.md Sec.7 rule 4: "row count 50 does not match
@@ -748,7 +749,8 @@ branch that loops over ALL posterior draws and returns an
 pattern (no loop, single-draw output):**
 
 ```cpp
-Rcpp::List predict_at(Rcpp::List new_data) const {
+AI4BayesCode::history_map predict_at(
+        const AI4BayesCode::state_map& new_data) const {
     block_context replaced;
     /* ... parse new_data ... */
     auto result = impl_->predict_at(replaced, predict_rng_);
@@ -1085,7 +1087,7 @@ refreshers invoked from `predict_at`. They must not share state.
 ```cpp
 // WRONG: predict_at advances the MCMC rng_, so posterior-predictive
 //        calls change MCMC trajectory and destroy reproducibility.
-Rcpp::List predict_at(Rcpp::List) const {
+AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map&) const {
     return impl_->predict_at(replaced, rng_);  // rng_ is the MCMC RNG
 }
 
@@ -1095,7 +1097,7 @@ class MyModel {
     std::mt19937_64         rng_;          // MCMC
     mutable std::mt19937_64 predict_rng_;  // predict_at only
     // ...
-    Rcpp::List predict_at(Rcpp::List) const {
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map&) const {
         return impl_->predict_at(replaced, predict_rng_);  // separate stream
     }
 };
@@ -1197,8 +1199,9 @@ struct UserInverse {
     double operator()(double beta) const { /* user code from production cpp */ }
 };
 
-// [[Rcpp::export]]
-Rcpp::List verify_<ClassName>_bijection_v1() {
+// BACKEND-NEUTRAL throwaway: compiled and run directly (no Rcpp, no
+// pybind), so it works under any backend. DELETE on PASS.
+int main() {
     auto bij = make_templated_bijection_1d(UserForward{}, UserInverse{});
     const double TOL_ROUND   = 1e-10;
     const double TOL_JAC_MIN = 1e-12;
@@ -1217,11 +1220,10 @@ Rcpp::List verify_<ClassName>_bijection_v1() {
     bool pass = (max_round < TOL_ROUND) &&
                 (min_jac   > TOL_JAC_MIN) &&
                 (max_invpair < TOL_INVPAIR);
-    return Rcpp::List::create(
-        Rcpp::Named("pass")         = pass,
-        Rcpp::Named("max_round")    = max_round,
-        Rcpp::Named("min_jac")      = min_jac,
-        Rcpp::Named("max_invpair")  = max_invpair);
+    std::printf("%s  max_round=%.3e  min_jac=%.3e  max_invpair=%.3e\n",
+                pass ? "[BIJECTION PASS]" : "[BIJECTION FAIL]",
+                max_round, min_jac, max_invpair);
+    return pass ? 0 : 1;
 }
 ```
 
@@ -1555,7 +1557,7 @@ unchanged and the framework dispatches via a virtual hook) the new
 VI block's hook implementation.
 
 **(c) get_history() shape for VI children.** Tier A wrapper's
-`get_history()` returns an `Rcpp::List` with one entry per child. For
+`get_history()` returns a `history_map` (name -> arma::mat) with one entry per child. For
 each VI child, the entry must be:
 
 ```cpp
@@ -1906,7 +1908,7 @@ include either explicit `.method(` lines OR the
 `include/AI4BayesCode/kernel_control_mixin.hpp`. Missing any of the
 three -> FAIL. Companion pybind check: PYBIND11_MODULE MUST include the
 corresponding `.def(...)` lines OR the
-`AI4BAYESCODE_PYBIND_KERNEL_CONTROL(m, ClassName)` macro.
+`AI4BAYESCODE_PYBIND_KERNEL_CONTROL(ClassName)` macro.
 
 Grep:
 
@@ -2933,14 +2935,16 @@ the same construction seed.
 **Bayesian p-value:** `pv(T) = mean(T(y_rep_d) >= T(y_obs))` for each T.
 
 **Verdict (R3.a BPV is a GATE -- it FAILS the attempt, unlike the
-diagnostic-only R3.b PSIS-LOO below):**
-- every pv in (0.05, 0.95) -> PASS
-- exactly ONE statistic outside -> WARN, not a failure. With k test
-  statistics each has ~2*0.05 chance of landing outside under a
-  CORRECT model, so "at least one outside" is expected in roughly a
-  third of clean 4-statistic runs; gating on it would false-fail
-  correct samplers.
-- TWO OR MORE statistics outside simultaneously -> **FAIL** the
+diagnostic-only R3.b PSIS-LOO below). Gate on the CENTRAL statistics
+only** -- `mean`, `sd`, `q25`, `q75`. The order statistics `min` / `max`
+are legitimately extreme under a correct model, so they are PRINTED but
+never gated:
+- every central pv in (0.05, 0.95) -> PASS
+- exactly ONE central statistic outside -> WARN, not a failure. Each
+  has ~2*0.05 chance of landing outside under a CORRECT model, so "at
+  least one outside" is expected in roughly a third of clean
+  4-statistic runs; gating on it would false-fail correct samplers.
+- TWO OR MORE central statistics outside simultaneously -> **FAIL** the
   attempt (semantic bug: the posterior predictive does not reproduce
   the data). Route back to Layer 2 and retry per the attempt budget.
 - **Tighter threshold (0.02, 0.98) when the sampler uses
@@ -3000,12 +3004,15 @@ pv1 <- sapply(bp_stat, function(f)
 # Threshold tightens to (0.02, 0.98) if the sampler uses joint_nuts_block.
 pv_lo <- if (USES_JOINT_NUTS) 0.02 else 0.05
 pv_hi <- 1 - pv_lo
-n_out <- sum(pv1 <= pv_lo | pv1 >= pv_hi)
-# GATE: >= 2 statistics outside simultaneously fails R3. Exactly one is a
-# WARN -- with k statistics, one landing outside is expected under a correct
+# GATE on the CENTRAL statistics only; min / max are printed but never
+# gated (order statistics are legitimately extreme). >= 2 central
+# statistics outside simultaneously fails R3; exactly one is a WARN --
+# with k statistics, one landing outside is expected under a correct
 # model and gating on it would false-fail clean samplers.
-if (n_out == 1L) message("[R3.a WARN] one BPV statistic outside (",
-                         paste(round(pv1, 3), collapse = ", "), ")")
+central <- pv1[intersect(names(pv1), c("mean", "sd", "q25", "q75"))]
+n_out   <- sum(central <= pv_lo | central >= pv_hi)
+if (n_out == 1L) message("[R3.a WARN] one central BPV statistic outside (",
+                         paste(round(central, 3), collapse = ", "), ")")
 stopifnot(n_out < 2L)
 
 # --- R3.b PSIS-LOO (DIAGNOSTIC ONLY -- does NOT fail R3) ---

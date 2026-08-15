@@ -27,11 +27,11 @@ WHITELIST/BLACKLIST admission varies:
 | `stick_breaking_block` / `normal_gamma_cluster_gibbs_block` | `step()` skipped; stick lengths / cluster params held | valid conditional; alpha etc. still sample |
 | `rjmcmc_block` | **v1 supports whole-block freeze AND simultaneous dual sub-key freeze; partial single-sub-key freeze is REFUSED** (2026-07-20 tightening of the 2026-07-19 sub-key scope-bump). Whole-block via `freeze("<name>")` atomically suppresses BOTH the trans-dim gamma sweep AND the `continuous_update` beta refresh. Dual sub-key via `freeze({"<name>.gamma", "<name>.beta"})` in the same call also atomically pins both. **A single sub-key freeze (e.g. `freeze("<name>.gamma")` alone) is REFUSED at step time** with `std::runtime_error` carrying the message `"rjmcmc joint move requires either freezing both sub-keys (gamma AND beta) simultaneously or freezing the whole rjmcmc_block; single sub-key freeze does not preserve pinning under joint proposals"`. Rationale: the trans-dim birth/death move updates (gamma_j, beta_j) as an atomic pair, so pinning only one sub-key does not preserve pinning under the joint proposal (this is the R3.b intrinsic hazard previously documented; the block now refuses it explicitly instead of silently under-pinning). `dim()` compile-time-fixed at 2p keeps concatenation type-stable through any freeze/unfreeze. See DESIGN_NOTES Sec.6 + Sec.10.d. | Enforcement is a step-guard inside `rjmcmc_block::step()`: `freeze_sub` records the flag; the guard fires when exactly one of `gamma_frozen_` / `beta_frozen_` is set at the next `step()` call. This allows the batched `freeze({"<name>.gamma", "<name>.beta"})` path to succeed (composite calls `freeze_sub` for each, then the next `step()` sees both flags equal). |
 
-**BLACKLIST (freeze -> Rcpp::stop with reason):**
+**BLACKLIST (freeze -> ai4b::stop with reason):**
 
 | Family | Reason |
 |---|---|
-| `bart_block` | `set_current(arma::vec)` is `Rcpp::stop` -- no invertibility. Freezing means "hold current forest" but user cannot inject a specific forest state. Additionally: frozen BART leaves `f_bart` in shared_data stale under any subsequent `set_current(X = X_new)`, causing downstream sigma NUTS to adapt on stale residuals. Silent bias. Canonical error string (matches DESIGN_NOTES Sec.6): `"freezing bart_block not supported: a fitted tree ensemble cannot be restored from a stored value. To make predictions at new data without changing the fitted model, use predict_at()."`. |
+| `bart_block` | `set_current(arma::vec)` raises via `ai4b::stop` -- no invertibility. Freezing means "hold current forest" but user cannot inject a specific forest state. Additionally: frozen BART leaves `f_bart` in shared_data stale under any subsequent `set_current(X = X_new)`, causing downstream sigma NUTS to adapt on stale residuals. Silent bias. Canonical error string (matches DESIGN_NOTES Sec.6): `"freezing bart_block not supported: a fitted tree ensemble cannot be restored from a stored value. To make predictions at new data without changing the fitted model, use predict_at()."`. |
 | `genbart_block` | Same class as `bart_block`. Canonical error string (matches DESIGN_NOTES Sec.6): `"freezing genbart_block not supported: a fitted tree ensemble cannot be restored from a stored value. To make predictions at new data without changing the fitted model, use predict_at()."`. |
 | `hmm_block` | Latent state sequence z frozen while emission parameters sample yields mismatched conditioning (Baum-Welch forward pass depends on emissions). Silent bias. Canonical error string (matches DESIGN_NOTES Sec.6): `"freezing hmm_block not supported: the hidden state sequence has to be re-drawn whenever the emission parameters change, so holding it fixed would bias the other parameters."`. |
 | `vi_block` subclasses | Sec.18.4 invariant: composite writes `current_sample(rng)` (fresh q-draw) to shared_data each step, NOT `current()` (q-mean). Freezing VI breaks the hybrid q-sample stream -> MCMC siblings silently underestimate posterior variance. Error string: `"freezing VI blocks not supported: a frozen VI block would hand the same single draw to every other sampler, biasing their results."`. |
@@ -69,7 +69,7 @@ design matrix `X`. Updates happen via shared_data only -- NUTS
 kernels don't own X / y internally (they read from ctx). So no
 special Tier B setter for X / y; just push via shared_data.
 
-**Kernel-tuning method -- `readapt_NUTS(n, reset = false)`.** The 7th
+**Kernel-tuning method -- `readapt_NUTS(n, reset, max_tree_depth, target_accept)`.** A
 R-level method on any wrapper whose composite contains at least
 one NUTS-family child. Re-tunes the NUTS step size + dual-averaging
 state WITHOUT advancing the chain state. **Mass matrix (dense
@@ -103,7 +103,8 @@ iterations and restores state.
   -> bit-identical readapt trajectory regardless of
   predict_at / step() history.
 - **Composite dispatch.**
-  `composite_block::readapt_NUTS(int n, bool reset, std::mt19937_64& rng)`
+  `composite_block::readapt_NUTS(std::size_t n, bool reset, std::mt19937_64& rng,
+   std::size_t max_tree_depth_override = 0, double target_accept_override = -1.0)`
   iterates children; each block reports `supports_readapt()`. Non-
   NUTS-family blocks inherit default `supports_readapt() == false`
   and are silently skipped. NUTS-family blocks override to
@@ -224,7 +225,7 @@ projection.
   coverage 63/64 = 98%, 0.09s wall per chain.
 
 **Performance.** Per-step cost is dominated by sparse Cholesky
-factorization of Q (O(n * b_w^2) with b_w ~= O(sqrtn) for 2D lattice
+factorization of Q (O(n * b_w^2) with b_w ~= O(sqrt(n)) for 2D lattice
 GMRFs) plus an ESS shrink loop (typically 2-5 likelihood evaluations
 per step at well-conditioned posteriors, independent of likelihood
 scale per Murray 2010). At lattice sizes typical of spatial random-
@@ -419,7 +420,7 @@ stay in `bart_block` via backfitting + `weights_key` -- see the `bart_block`
 catalogue card.** Tier B setters:
 - `bart_block`: `set_X`, `set_Y`, `set_data`.
 - `genbart_block`: `set_X`, `set_Y`, `set_offset`, `set_data`.
-`set_current(arma::vec)` is `Rcpp::stop` on both -- the tree forest
+`set_current(arma::vec)` raises via `ai4b::stop` on both -- the tree forest
 has no unique inverse from fitted values. Tier A dispatcher's
 `set_current(list(...))` routes X / y / offset keys into these
 C++-only setters. Rejected keys: `f_bart` for `bart_block`; `r`
@@ -438,7 +439,7 @@ grep-audit does not flag them as violations. They are not part of the
 kernel-control category and not the target of Check #26.
 
 **BART freeze blacklist.** BART-family blocks are on the freeze
-blacklist -- `m$freeze("<bart_block_name>")` raises `Rcpp::stop`. See
+blacklist -- `m$freeze("<bart_block_name>")` raises via `ai4b::stop`. See
 the "Freeze semantics per family" table at the top of Sec.13 for
 rationale (non-invertible forest + stale derived state on subsequent
 `set_current(X = X_new)`). Sibling `nuts_block` children in a BART
