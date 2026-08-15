@@ -105,7 +105,16 @@ environment: same invariants, <=4 questions per batch, with an explicit
 ## 0b. Math rendering -- display blocks + plain ASCII, NEVER Unicode or inline `$...$`
 
 **Hard rule: NO raw Unicode anywhere** -- chat prose, table cells, OR generated code
-(identifiers, comments, strings). This chat renders `$$ ... $$` **display blocks** but NOT
+(identifiers, comments, strings).
+
+**Hard rule: generated files are ENGLISH-ONLY, regardless of the conversation
+language.** The chat may be conducted in Chinese (or any language the user
+prefers), but every DELIVERED artifact -- `.cpp` headers and comments, runner
+and example comments, strings, error messages, filenames -- is written in
+English, no exceptions. Never emit Chinese (or any non-English) comments into
+a generated file, even when quoting the user's own description: translate it.
+
+This chat renders `$$ ... $$` **display blocks** but NOT
 inline `$...$` (inline prints raw source). So EVERYWHERE in the codegen conversation -- the
 "read of your model", the Sec.1 confirm, the prior phase, the Sec.3 confirmation -- apply:
 

@@ -79,7 +79,9 @@ audience is applied researchers with NO programming background: one
 linear script, one visible call per action, no user-defined functions,
 no abstractions, and as short as correctness allows. Whenever a
 structural choice trades completeness or cleverness against
-readability, readability wins.
+readability, readability wins. All comments and strings in the
+delivered files are ENGLISH, regardless of the conversation language
+(codegen.md Sec.0b).
 
 NOT a stripped golden-path snippet, and NOT a copy of the Layer-3
 harness prefix. The delivered example drives chains EXCLUSIVELY
