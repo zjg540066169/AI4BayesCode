@@ -402,10 +402,15 @@ license header (AI4BayesCode is distributed under GPL-3.0+ -- see
 BART kernel in `bart_pure_cpp/` inherits GPL regardless). Do NOT emit an
 Apache-2.0 header; the core is no longer Apache.
 
+Generated files are standalone -- they do not ship with a COPYING /
+LICENSE file next to them, so the header must NOT point to "the repo
+root". The SPDX identifier plus the gnu.org URL is the complete,
+self-contained license reference.
+
 ```cpp
 // Copyright (C) 2026 AI4BayesCode.
 // Licensed under the GNU General Public License v3.0 or later
-// (GPL-3.0-or-later). See COPYING / LICENSE at the repo root.
+// (GPL-3.0-or-later; see https://www.gnu.org/licenses/gpl-3.0.html).
 // ============================================================================
 //  <ClassName>.cpp -- <one-line description of the model>
 //

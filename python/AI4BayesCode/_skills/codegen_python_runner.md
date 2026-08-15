@@ -2,8 +2,10 @@
 name: AI4BayesCode-codegen-python-runner
 description: |
   Python runner template for AI4BayesCode samplers -- AI4BayesCode.sourceCpp
-  setup, constructor-argument reference block, run_chain_<ClassName>()
-  helper with keep_history=True, Layer 3 validator wiring (R1 smoke
+  setup, constructor-argument reference block, the delivered
+  make_<ClassName>() factory + shipped AI4BayesCode.run_chains /
+  rhat_summary / diagnose flow (harness-internal run_chain_<ClassName>()
+  with keep_history=True is NOT shipped), Layer 3 validator wiring (R1 smoke
   check, R2 rank-normalized R-hat + ESS (AI4BayesCode numpy helpers), R3 Bayesian p-values
   + PSIS-LOO via arviz), AI4BayesCode.perf_hint call, joint-NUTS threshold
   tightening, and the reference-template catalogue (examples/*.cpp).
@@ -17,7 +19,9 @@ description: |
 
 Companion skill to `codegen.md`. Load this when writing the generated
 `.py` runner: `AI4BayesCode.sourceCpp` setup, constructor-argument
-reference block, `run_chain_<ClassName>()` helper, Layer 3 validator
+reference block, the delivered `make_<ClassName>()` factory + shipped
+`AI4BayesCode.run_chains` / `rhat_summary` / `diagnose` flow, the
+harness-internal `run_chain_<ClassName>()` helper, Layer 3 validator
 wiring (R-hat, ESS, Bayesian p-values, PSIS-LOO), `AI4BayesCode.perf_hint`,
 and the reference-template catalogue.
 
@@ -78,37 +82,71 @@ the runner deliverables are independent (`.R` + `.py`).
 
 ### Usage-example template (`example_<ClassName>.py`, default deliverable)
 
-Same cut-point rule as the R version: everything up to (but
-EXCLUDING) the first chain of the two-chain diagnostic
-(`chain1 = run_chain_<ClassName>(<data_args>, seed=101)`) is the
-delivered example; everything from there onward (R2 R-hat/ESS, R3
-BPV, PSIS-LOO, R1 smoke wiring) is the throwaway Layer-3 harness and
-is NOT shipped in the default case.
+Same rule as the R version: the delivered example drives chains
+EXCLUSIVELY through the SHIPPED helpers (`AI4BayesCode.run_chains`,
+`AI4BayesCode.rhat_summary`, `AI4BayesCode.diagnose`); the only
+generated helper is the tiny `make_<ClassName>()` constructor factory.
+The `run_chain_<ClassName>()` helper defined in the runner template
+below is HARNESS-INTERNAL (Layer-3 R1/R2/R3 + sim1 need its
+`pp = predict_at(...)` collection) and is NEVER copied into the
+delivered example; the whole harness (R2 R-hat/ESS, R3 BPV, PSIS-LOO,
+R1 smoke wiring) is throwaway and NOT shipped in the default case.
 
 The delivered `example_<ClassName>.py` MUST contain, in order:
 
 1. **Header comment** -- what the model is + a note that generation
    was validated by the Layer-3 harness (not shipped here). For everyday
-   use, point at the built-in `diagnosis=True` option on `run_chain_<ClassName>`
-   (model-independent R-hat / ESS / MCSE / summaries + trace+ACF+density via
-   arviz); regenerate with the harness only if you specifically need PSIS-LOO
-   (model-specific).
+   use, point at the shipped `AI4BayesCode.run_chains` /
+   `AI4BayesCode.rhat_summary` / `AI4BayesCode.diagnose` flow
+   (model-independent R-hat / ESS / MCSE / summaries + trace+ACF+density
+   via arviz); regenerate with the harness only if you specifically need
+   PSIS-LOO (model-specific).
 2. **AI4BayesCode.sourceCpp call** -- exact same form as in the runner
    template below.
 3. **Constructor reference block** -- identical to the runner.
-4. **The FULL `run_chain_<ClassName>()` body VERBATIM** (not a stub) --
-   including the `diagnosis` parameter and the `AI4BayesCode.diagnose()`
-   call. This is the SAME definition as in the runner template above;
-   ship the whole function body so the example runs self-contained.
+4. **The `make_<ClassName>()` constructor factory** -- the ONLY
+   generated helper. Takes ALL data inputs as parameters and returns
+   the one-argument seed callable that `AI4BayesCode.run_chains`
+   expects:
+
+   ```python
+   def make_<ClassName>(<data_args>):
+       def factory(seed):
+           m = mod.<ClassName>(<data_args>, rng_seed=int(seed),
+                               keep_history=True)
+           # kernel-control pins (if any) go here -- the factory body
+           # runs inside each worker, so per-worker re-issue is
+           # automatic:
+           #   m.set_current({"sigma": 1.0}); m.freeze(["sigma"])
+           return m
+       return factory
+   ```
+
+   HARD RULE -- do NOT emit a bespoke chain driver
+   (`run_chain_<ClassName>()` or any equivalent) in the delivered
+   example: no burn/collect/return wrapper and no
+   `for i in range(n_keep): m.step(1); m.get_current()` accumulation
+   loop (draws come from `keep_history=True` + `get_history()`, which
+   `AI4BayesCode.run_chains` already does internally). The
+   harness-internal `run_chain_<ClassName>()` stays in the throwaway
+   runner only.
 5. **Synthetic data block** -- produces the same fixtures the harness
    used so the example runs as-is.
-6. **Monolithic (non-stateful) single call** --
-   `mono = run_chain_<ClassName>(..., seed=1, n_burn=4000, n_keep=4000)`
-   with a `# Monolithic chain (non-stateful use)` comment, plus the
-   `diagnosis=True` variant showing `mono["diagnosis"]` (per-parameter
-   R-hat / ESS / MCSE / summaries) and `mono["diagnosis_plot"]()`
-   (trace + autocorrelation + density; needs `arviz`). No LOO (that is
-   model-specific).
+6. **Multi-chain usage + diagnostics (the everyday flow)** -- the
+   shipped helpers, nothing else:
+
+   ```python
+   chains = AI4BayesCode.run_chains(make_<ClassName>(<data_args>),
+                                    seeds=[101, 202, 303, 404],
+                                    n_burn=4000, n_keep=4000)
+   # hist includes the warmup draws (run_chains does not strip them),
+   # so ALWAYS pass the burn length explicitly:
+   print(AI4BayesCode.rhat_summary(chains, drop_burn=4000))
+   tbl, plot = AI4BayesCode.diagnose(chains[0]["hist"], n_burn=4000)
+   ```
+
+   Single-chain use is `seeds=[1]` (or the stateful API below); never
+   a bespoke wrapper. No LOO (that is model-specific).
 7. **Stateful-API usage**, in order: `model.step()`,
    `model.get_history()`, `model.get_current()`,
    `model.predict_at({"<X>": X_test})`, then
@@ -196,9 +234,12 @@ y_rep = model.predict_at({})["y_rep"]        # posterior predictive at training 
 # model.freeze(saved_frozen_names, quiet=True)
 ```
 
-### Python runner template -- standard body (DEFAULT)
+### Python runner template -- standard body (DEFAULT; harness-internal)
 
-This is the DEFAULT `run_chain_<ClassName>` body. Use it unless the
+This is the DEFAULT `run_chain_<ClassName>` body for the THROWAWAY
+Layer-3 harness (R1/R2/R3 + sim1 need the `pp = predict_at(...)`
+collection below, which the shipped `AI4BayesCode.run_chains` does not
+do). It is NEVER copied into the delivered example. Use it unless the
 composite has a NUTS-family child whose conditional posterior shifts
 across outer Gibbs sweeps -- in that case use the periodic-readapt body
 in the next subsection instead.
@@ -243,23 +284,28 @@ does NOT pre-slice and passes `n_burn=int(n_burn)` -- mixing these up (calling
 `diagnose(..., n_burn=int(n_burn))` on already-sliced draws, or vice versa) is
 an easy mistake that silently drops or double-strips warmup.
 
-**Return-shape contract.** `run_chain_<ClassName>` MUST return a dict
-whose `"hist"` is a dict of numpy arrays keyed by parameter name --
-scalars as `(n_keep,)` 1-D arrays, vectors as `(n_keep, dim)` 2-D
-arrays. NEVER a list-of-per-step-dicts (the R2 `_stack_param` helper
-branches on `arr.ndim == 1`, so a list breaks it). This is exactly what
-`model.get_history()` returns. For multi-chain R-hat, run 2+ chains with
-overdispersed init via `model.set_current(...)` after construction, then
-use `arviz` OR the shipped `AI4BayesCode.rhat_summary` (which exists but
-the rest of this skill never mentions).
+**Return-shape contract (harness helper).** `run_chain_<ClassName>`
+MUST return a dict whose `"hist"` is a dict of numpy arrays keyed by
+parameter name -- scalars as `(n_keep,)` 1-D arrays, vectors as
+`(n_keep, dim)` 2-D arrays. NEVER a list-of-per-step-dicts (the R2
+`_stack_param` helper branches on `arr.ndim == 1`, so a list breaks
+it). This is exactly what `model.get_history()` returns. Multi-chain
+R-hat in the DELIVERED example is always the shipped pair
+`AI4BayesCode.run_chains(make_<ClassName>(<data_args>), seeds=...)` +
+`AI4BayesCode.rhat_summary(chains, drop_burn=<n_burn>)` -- never a
+hand-rolled loop or a hand-assembled arviz call. Over-dispersed
+initial values, when needed, go through `model.set_current(...)`
+inside the factory closure.
 
 ### Constructor reference block
 
 The constructor block must list ALL arguments the user can pass, their
 types, and brief descriptions. If hyperparameters are exposed as
 constructor arguments (see `codegen.md` Sec.2 and `codegen_priors.md`),
-document those too with their defaults. Also document what
-`run_chain_<ClassName>()` returns (which keys, each array's shape).
+document those too with their defaults. Also document the history keys
+and array shapes `get_history()` returns -- this is exactly what
+`AI4BayesCode.run_chains` puts in each chain's `"hist"` (note it spans
+burn + keep; strip warmup via `drop_burn` / `n_burn` downstream).
 
 Concrete example -- the constructor block for a BART model:
 
@@ -281,9 +327,9 @@ Concrete example -- the constructor block for a BART model:
 #     .get_current()   -> {"f_bart": (N,), "sigma": float}
 #     .set_current(d)  -- overwrite sigma; f_bart is read-only
 #
-#   run_chain_<ClassName>() returns:
-#     out["hist"]["f_bart"] -- (n_keep, N) posterior draws of f
-#     out["hist"]["sigma"]  -- (n_keep,)   posterior draws of sigma
+#   get_history() keys (= run_chains chain["hist"]; spans burn + keep):
+#     hist["f_bart"] -- (n_iter, N) posterior draws of f
+#     hist["sigma"]  -- (n_iter,)   posterior draws of sigma
 # -------------------------------------------------------------------------
 ```
 

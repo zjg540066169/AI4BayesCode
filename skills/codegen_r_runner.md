@@ -2,9 +2,11 @@
 name: AI4BayesCode-codegen-r-runner
 description: |
   R runner template for AI4BayesCode samplers -- ai4bayescode_sourceCpp
-  setup, constructor-argument reference block,
-  run_chain_<ClassName>() helper with
-  keep_history = TRUE, Layer 3 validator wiring (R1 smoke check, R2
+  setup, constructor-argument reference block, the delivered
+  make_<ClassName>() factory + shipped ai4bayescode_run_chains /
+  ai4bayescode_rhat_summary / ai4bayescode_diagnose flow (the
+  harness-internal run_chain_<ClassName>() with keep_history = TRUE is
+  NOT shipped), Layer 3 validator wiring (R1 smoke check, R2
   rank-normalized R-hat + ESS via posterior, R3 Bayesian p-values +
   PSIS-LOO via loo), ai4bayescode_perf_hint call, joint-NUTS threshold
   tightening, and the reference-template catalogue (examples/*.cpp).
@@ -16,7 +18,10 @@ description: |
 
 Companion skill to `codegen.md`. Load this when writing the generated
 `.R` runner: ai4bayescode_sourceCpp setup, constructor-argument reference
-block, run_chain_<ClassName>() helper, Layer 3 validator wiring
+block, the delivered make_<ClassName>() factory + shipped
+`ai4bayescode_run_chains` / `ai4bayescode_rhat_summary` /
+`ai4bayescode_diagnose` flow, the harness-internal
+run_chain_<ClassName>() helper, Layer 3 validator wiring
 (R-hat, ESS,
 Bayesian p-values, PSIS-LOO), `ai4bayescode_perf_hint`, and the
 reference-template catalogue.
@@ -61,14 +66,16 @@ For the C++ file emission, see `codegen_cpp.md`.
 
 ### Usage-example template (`example_<ClassName>.R`, default deliverable)
 
-NOT a stripped golden-path snippet. It is **every part of the R
-runner up to (but EXCLUDING) the first chain of the two-chain
-diagnostic** -- i.e. the cut point is the line
-`c1 <- run_chain_<ClassName>(<data_args>, seed = 101L, ...)`.
-Everything before that cut is delivered; everything from that line
-onward (the 2-chain R2 diagnostic, R-hat/ESS, R3 BPV, PSIS-LOO,
-the R1 smoke wiring) is the throwaway Layer-3 harness and is NOT
-shipped in the default case.
+NOT a stripped golden-path snippet, and NOT a copy of the Layer-3
+harness prefix. The delivered example drives chains EXCLUSIVELY
+through the SHIPPED multi-chain helpers (`ai4bayescode_run_chains`,
+`ai4bayescode_rhat_summary`, `ai4bayescode_diagnose`); the only
+generated helper is a tiny constructor factory. The
+`run_chain_<ClassName>()` chain helper defined in the R runner
+template below is HARNESS-INTERNAL (Layer-3 R1/R2/R3 + sim1 need its
+`pp = predict_at(...)` collection) and is NEVER copied into the
+delivered example; the whole harness is throwaway and NOT shipped in
+the default case.
 
 The delivered `example_<ClassName>.R` MUST contain, in order, with
 the comments retained (do not strip comments -- they are the
@@ -89,21 +96,53 @@ documentation a first-time user reads):
    `new(<ClassName>, ...)` fails with 'object <ClassName> not found'.
 3. **Constructor reference block** -- one comment line per `new()`
    argument (name, type, default/range).
-4. **The full `run_chain_<ClassName>()` definition** -- verbatim the
-   SAME definition as in the R runner template above (data inputs as
-   args, `keep_history = TRUE` inside, the `diagnosis = FALSE`
-   parameter, and the `if (isTRUE(diagnosis))` block that calls the
-   shipped `ai4bayescode_diagnose()` and attaches `out$diagnosis`
-   + `out$diagnosis_plot`). Include the whole function body, not a stub.
-   The diagnostics TABLE and the trace+ACF+density PLOT both come from
-   `ai4bayescode_diagnose()` -- a SHIPPED library function. Do NOT
-   emit your own helper and do NOT inline a summary-only substitute (see
-   the HARD RULE box after the runner template).
+4. **The `make_<ClassName>()` constructor factory** -- the ONLY
+   generated helper. A factory-maker that takes ALL data inputs as
+   parameters and returns the one-argument seed closure that
+   `ai4bayescode_run_chains` expects:
+
+   ```r
+   make_<ClassName> <- function(<data_args>) {
+       function(seed) {
+           m <- new(<ClassName>, <data_args>, as.integer(seed), TRUE)  # keep_history = TRUE
+           # kernel-control (freeze / set_current pins) goes HERE --
+           # the factory body runs inside each worker, so per-worker
+           # re-issue is automatic:
+           #   m$set_current(list(sigma = 1)); m$freeze("sigma")
+           m
+       }
+   }
+   ```
+
+   HARD RULE -- do NOT emit a bespoke chain driver
+   (`run_chain_<ClassName>()` or any equivalent): no
+   burn/collect/return wrapper, and no
+   `for (i in ...) { m$step(1L); m$get_current() }` per-iteration
+   accumulation loop (draw collection is `keep_history = TRUE` +
+   `get_history()`, which `ai4bayescode_run_chains` already does
+   internally). Chain running, cross-chain R-hat/ESS, and per-chain
+   diagnostics ALL come from the SHIPPED library functions
+   (`ai4bayescode_run_chains` / `ai4bayescode_rhat_summary` /
+   `ai4bayescode_diagnose`); the harness-internal
+   `run_chain_<ClassName>()` stays in the throwaway runner only.
 5. **Simulation / toy-data code** -- generate `<data_args>` (+ a
    held-out `<X>_test` for the predict example), commented.
-6. **Monolithic (non-stateful) usage** -- one call:
-   `mono_chain <- run_chain_<ClassName>(<data_args>, seed = 1, n_burnin = 4000, n_keep = 4000)`
-   with a `# Monolithic chain (non-stateful use)` comment.
+6. **Multi-chain usage + diagnostics (the everyday flow)** -- the
+   shipped helpers, nothing else:
+
+   ```r
+   run <- ai4bayescode_run_chains(make_<ClassName>(<data_args>),
+                                  n_chains = 4L,
+                                  n_burn = 4000L, n_keep = 4000L)
+   # histories include the warmup draws (run_chains does not strip
+   # them), so ALWAYS pass the burn length explicitly:
+   ai4bayescode_rhat_summary(run, drop_burn = 4000)   # cross-chain R-hat / ESS
+   dg <- ai4bayescode_diagnose(run$histories[[1]], n_burn = 4000)
+   dg$summary; dg$plot
+   ```
+
+   Single-chain use is `n_chains = 1L` (or the stateful API below);
+   never a bespoke wrapper.
 7. **Stateful-API usage examples** -- commented, in this order:
    `new(<ClassName>, ..., keep_history = TRUE)`, `model$step()`,
    `model$get_history()`, `model$get_current()`, then
@@ -121,12 +160,13 @@ Skeleton (parameterized; mirror this structure, fill placeholders):
 ```r
 # Usage example for <ClassName>. Generation was validated by the full
 # Layer-3 harness (R-hat/ESS, posterior-predictive p-values, PSIS-LOO);
-# that harness is intentionally not shipped here. For everyday use, the
-# run_chain function below has a built-in `diagnosis = TRUE` option that
-# returns model-independent diagnostics (R-hat / ESS / MCSE / posterior
-# summaries + trace+ACF+density plots) -- see the diagnostics call below.
-# PSIS-LOO is NOT part of it (it needs a model-specific log-likelihood);
-# regenerate with the validation harness if you specifically need LOO.
+# that harness is intentionally not shipped here. For everyday use the
+# SHIPPED library helpers do all the chain work: ai4bayescode_run_chains
+# (parallel multi-chain), ai4bayescode_rhat_summary (cross-chain R-hat /
+# ESS), ai4bayescode_diagnose (per-chain summaries + trace+ACF+density
+# plots) -- see the calls below. PSIS-LOO is NOT part of them (it needs
+# a model-specific log-likelihood); regenerate with the validation
+# harness if you specifically need LOO.
 
 # Compile + load the C++ model (the class becomes available by name).
 # Packaged API -- no AI4BayesCode checkout / helper sourcing needed.
@@ -135,24 +175,19 @@ ai4bayescode_source("./<ClassName>/<ClassName>.cpp")
 
 # <constructor reference: one comment line per new() argument>
 
-# --- Full run_chain_<ClassName>() definition (verbatim from the
-#     R runner template; data inputs are args; keep_history = TRUE;
-#     `diagnosis = FALSE` param; returns a named list of posterior
-#     draws, plus out$diagnosis + out$diagnosis_plot when diagnosis). ---
-run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep,
-                                  diagnosis = FALSE) {
-    # ... identical body to the runner template's run_chain_<ClassName>
-    #     (construct -> step(n_burnin) -> collect n_keep draws -> build
-    #     the `out` list), then the diagnosis attach that CALLS the shipped
-    #     library function (do NOT write your own helper):
-    #   if (isTRUE(diagnosis)) {
-    #       dg <- ai4bayescode_diagnose(out$hist)
-    #       out$diagnosis <- dg$summary; out$diagnosis_plot <- dg$plot
-    #   }
-    #   ... return out ...
+# --- Constructor factory: the ONLY generated helper. Data inputs are
+#     parameters (never closed-over globals); returns the one-argument
+#     seed closure that ai4bayescode_run_chains expects. Chain running,
+#     draw collection, R-hat/ESS, and diagnostics all come from the
+#     SHIPPED library functions -- there is NO run_chain helper here. ---
+make_<ClassName> <- function(<data_args>) {
+    function(seed) {
+        m <- new(<ClassName>, <data_args>, as.integer(seed), TRUE)  # keep_history = TRUE
+        # kernel-control pins (if any) go here -- runs inside each worker:
+        #   m$set_current(list(sigma = 1)); m$freeze("sigma")
+        m
+    }
 }
-# NOTE: the diagnostics TABLE and the trace+ACF+density PLOT come from the
-# SHIPPED ai4bayescode_diagnose() -- there is NO helper to emit here.
 
 # Simulate a toy data set
 # <commented synthetic generation of <data_args> + a held-out X test>
@@ -170,18 +205,20 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep,
 # the model actually targets. If the model ships its own reference simulator
 # (e.g. a `simulate_data(seed)` in the model card), PREFER it over an invented DGP.
 
-# Monolithic chain (non-stateful use)
-mono_chain <- run_chain_<ClassName>(<data_args>, seed = 1,
-                                    n_burnin = 4000, n_keep = 4000)
+# Multi-chain run + diagnostics (the everyday flow; shipped helpers only)
+run <- ai4bayescode_run_chains(make_<ClassName>(<data_args>),
+                               n_chains = 4L,
+                               n_burn = 4000L, n_keep = 4000L)
 
-# Built-in posterior diagnostics (model-independent: R-hat / ESS / MCSE +
-# posterior summaries, and trace + autocorrelation + density plots). Pass
-# diagnosis = TRUE; no LOO (that needs a model-specific log-likelihood).
-mono_chain <- run_chain_<ClassName>(<data_args>, seed = 1,
-                                    n_burnin = 4000, n_keep = 4000,
-                                    diagnosis = TRUE)
-mono_chain$diagnosis        # per-parameter table: mean/sd/median/90% CI, R-hat, ESS
-mono_chain$diagnosis_plot   # trace + autocorrelation + density (prints; needs 'bayesplot')
+# Histories include the warmup draws (run_chains does not strip them),
+# so ALWAYS pass the burn length explicitly.
+ai4bayescode_rhat_summary(run, drop_burn = 4000)   # cross-chain R-hat / ESS per parameter
+
+# Per-chain summaries + trace + autocorrelation + density plots
+# (model-independent; no LOO -- that needs a model-specific log-likelihood).
+dg <- ai4bayescode_diagnose(run$histories[[1]], n_burn = 4000)
+dg$summary   # per-parameter table: mean/sd/median/90% CI, R-hat, ESS
+dg$plot      # trace + autocorrelation + density (prints; needs 'bayesplot')
 
 # Examples of stateful functions
 
@@ -283,10 +320,13 @@ model$predict_at(list(<X> = <X>_test))
 ```
 
 The example must run as-is on the synthetic shapes generated in the
-simulation block. Everything from `c1 <- run_chain_<ClassName>(...
-seed = 101L ...)` onward (the Layer-3 harness) is omitted in the
-default deliverable and deleted on PASS (shipped only under the
-opt-in).
+simulation block. The ENTIRE Layer-3 harness -- including its internal
+`run_chain_<ClassName>()` chain helper and everything from
+`c1 <- run_chain_<ClassName>(... seed = 101L ...)` onward -- is
+omitted from the default deliverable and deleted on PASS (shipped
+only under the opt-in). The delivered example never contains a
+bespoke chain driver; it uses `ai4bayescode_run_chains` +
+`ai4bayescode_rhat_summary` + `ai4bayescode_diagnose`.
 
 ### R runner template
 
@@ -353,14 +393,20 @@ ai4bayescode_source("<folder>/<ClassName>.cpp")   # relative path; no AI4BayesCo
 # HARD RULE (naming) -- everything is named after the model, i.e. the
 # Rcpp class `<ClassName>` (the same identifier used in
 # `new(<ClassName>, ...)` and `<ClassName>.cpp`). NO snake_case stems
-# anywhere. The chain helper is `run_chain_<ClassName>()` (e.g.
-# `run_chain_SpikeSlabLaplace` for `new(SpikeSlabLaplace, ...)`); the
-# delivered files are `run_<ClassName>.R` / `example_<ClassName>.R` --
-# all consistent with the existing `<ClassName>.cpp` convention. NOT
-# bare `run_chain()`. Rationale: a runner or example may be sourced
-# alongside others in one R session; a model-specific function name
-# prevents a later source() from clobbering an earlier `run_chain`.
+# anywhere. The HARNESS-INTERNAL chain helper is
+# `run_chain_<ClassName>()` (e.g. `run_chain_SpikeSlabLaplace` for
+# `new(SpikeSlabLaplace, ...)`); the delivered example's constructor
+# factory is `make_<ClassName>()`; the delivered files are
+# `run_<ClassName>.R` / `example_<ClassName>.R` -- all consistent with
+# the existing `<ClassName>.cpp` convention. NOT bare `run_chain()` /
+# `make_model()`. Rationale: a runner or example may be sourced
+# alongside others in one R session; model-specific function names
+# prevent a later source() from clobbering an earlier one.
 # All call sites below use the same `run_chain_<ClassName>` name.
+# REMINDER: run_chain_<ClassName>() exists ONLY for the throwaway
+# Layer-3 harness + sim1 (they need pp = predict_at() collected in the
+# worker); it is NEVER shipped in the delivered example, which drives
+# chains via ai4bayescode_run_chains(make_<ClassName>(<data_args>), ...).
 #
 # HARD RULE -- ALL data inputs MUST be function parameters of
 # run_chain_<ClassName>, NOT global-scope variables read from the
@@ -867,9 +913,13 @@ draws**, where scalar parameters are `numeric(n_keep)` vectors and
 vector parameters are `matrix(n_keep, dim)` matrices. Never return a
 list-of-lists that the user has to manually aggregate.
 
-For multi-chain R-hat diagnostics, run 2+ chains with different seeds
-and overdispersed initial values via `set_current()`, then compute
-`posterior::rhat` if available.
+Multi-chain R-hat in the DELIVERED example is always the shipped pair
+`ai4bayescode_run_chains(make_<ClassName>(<data_args>), n_chains = ...)`
++ `ai4bayescode_rhat_summary(run, drop_burn = <n_burn>)` -- never a
+hand-rolled loop or a hand-assembled `posterior::rhat` call.
+Over-dispersed initial values, when needed, go through `set_current()`
+inside the factory closure. (The Layer-3 harness computes its R2
+R-hat with the validator.md recipe -- that stays harness-internal.)
 
 ---
 
