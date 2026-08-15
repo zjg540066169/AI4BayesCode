@@ -86,8 +86,8 @@ failure.
 
 **BiDAG reference-implementation comparison:**
 `tests/audit_OrderMCMCBN_vs_BiDAG.R` -- head-to-head with
-`BiDAG::orderMCMC` (Kuipers-Moffa reference, source of the v1.2.1
-partition-MCMC track) on identical data and 4 matched chains.
+`BiDAG::orderMCMC` (Kuipers-Moffa reference, the same source as our
+shipped partition method) on identical data and 4 matched chains.
 Both implementations achieve **R-hat < 1.01** (ours 1.00073,
 BiDAG 1.00000). **Outcome (A): our code converges to the same
 target as the reference.**
@@ -101,9 +101,12 @@ set_current / predict_at / get_dag / get_history) plus the kernel-control
 category (freeze / unfreeze / get_frozen) per interface.md Sec.1.
 
 **Scope (v1.2 ship):**
-- **Discrete data only** with per-column cardinality vector (BDeu
-  with user-settable equivalent sample size alpha). Continuous /
-  mixed / hybrid BN deferred to v1.2.1.
+- **Discrete data** with per-column cardinality vector (BDeu with
+  user-settable equivalent sample size alpha), OR **continuous data**
+  via the BGe Gaussian score (`cfg.continuous_data` non-empty;
+  Geiger-Heckerman, tuned by `cfg.bge_am` / `cfg.bge_aw`). Works with
+  either sampling method. MIXED discrete + continuous (conditional
+  Gaussian networks, Lauritzen 1992) is still not implemented.
 - **Order MCMC**: any-pair + adjacent-swap mixture (default
   prob_adjacent_swap = 0.5).
 - FK Sec.4.2 three-tier candidate-parent heuristic (top-C parents
@@ -118,15 +121,14 @@ category (freeze / unfreeze / get_frozen) per interface.md Sec.1.
   (Markov-equivalent DAGs receive different prior weights). The
   algorithm faithfully recovers the **skeleton** (7 / 7 vs
   bnlearn on ASIA) but may flip directions within an equivalence
-  class. Fix is Kuipers-Moffa 2017 partition MCMC -- deferred to
-  v1.2.1 -- see "Deferred to v1.2.1".
+  class. Fix: set `cfg.method = method_t::partition` (Kuipers-Moffa
+  2017 partition MCMC, SHIPPED) -- it samples over labelled partitions
+  and removes this bias.
 
-**Deferred to v1.2.1:**
-- Kuipers & Moffa (2017) **partition MCMC** to remove the FK Sec.4.1
-  structure-prior bias inside Markov equivalence classes.
-- **Continuous / mixed-type data** (BGe Gaussian score per
-  Geiger-Heckerman 1994; mixed-discrete-Gaussian conditional
-  Gaussian networks per Lauritzen 1992).
+**Not implemented:**
+- **MIXED discrete + continuous data** (conditional Gaussian networks
+  per Lauritzen 1992). Pure-discrete (BDeu) and pure-continuous (BGe)
+  both ship.
 - **Edge-specific prior** (currently uniform DAG prior with hard
   max-parents cap).
 - **Tempered / parallel-tempered chains** for very multimodal

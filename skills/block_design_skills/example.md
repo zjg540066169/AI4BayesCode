@@ -24,8 +24,10 @@ This module loads ONLY after the user accepted the EXAMPLE gate (asked at the VA
 transition -- `validate.md Sec.6` / `00_flow.md Sec.4`: `(a) Yes (default) / (b) No -- skip to SKILL`).
 If you reached this module WITHOUT that gate having been asked -- you transitioned straight out of
 VALIDATE and "loaded the module" -- **STOP: fire the gate NOW** before doing anything here, and if
-the user says "no", go to `skill.md` and skip the example entirely. An example is **OPTIONAL** --
-some shipped core blocks have none; a block + passing library test is already a complete bundle.
+the user says "no", go to `skill.md` and skip the example entirely. An example is **OPTIONAL but
+STRONGLY RECOMMENDED** -- it is the cheapest end-to-end check of the block and what a future
+registry submission needs. Some shipped core blocks have none; a block + passing library test is
+already a complete bundle, so a decline is legitimate, not a defect.
 
 ## !!! TRI-MODULE RULE (non-negotiable) !!!
 

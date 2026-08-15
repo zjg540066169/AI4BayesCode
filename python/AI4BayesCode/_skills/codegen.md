@@ -1263,14 +1263,28 @@ run, and produce reasonable samples out of the box.
   scripts.
 - Never rename the six public methods (step, get_current, set_current,
   predict_at, get_dag, get_history).
-- **Never generate a sampler whose target has a dimension-changing
-  state space or strong discrete-discrete dependence.** Specifically
-  do NOT emit code for: Dirac spike-and-slab (beta_j  in  {0}  U  R),
+- **Never generate a NAIVE sampler for a target with a
+  dimension-changing state space or strong discrete-discrete
+  dependence** -- Dirac spike-and-slab (beta_j  in  {0}  U  R),
   model-size priors with unknown K, HMM / change-point with
   Markov-correlated latents, Ising / MRF. Both naive Gibbs (not
   irreducible) AND naive marginalize-gamma + NUTS (silently samples
   slab only, inclusion probability hallucinated with clean R-hat /
-  ESS / LOO) are broken on these targets. Follow `codegen_priors.md
+  ESS / LOO) are broken on these targets. This is a ROUTING rule, not
+  a refusal: the library ships a correct sampler for each of them, and
+  declining is the LAST resort, only when none of these fits.
+  - **HMM / change-point with Markov-correlated latents** ->
+    `hmm_block` (forward-filter backward-sample), template
+    `examples/HMMGaussian2State.cpp`.
+  - **Ising / Potts / discrete MRF** -> `ising_cluster_block`
+    (Swendsen-Wang cluster moves), templates `examples/IsingPrior.cpp`
+    and `examples/IsingHiddenPotts.cpp`.
+  - **Dirac spike-and-slab / non-BNP unknown K** -> `rjmcmc_block`,
+    template `examples/SpikeSlabRJMCMC.cpp`.
+  - **DAG-structure learning** -> `order_mcmc_block`
+    (`cfg.method = partition` for the unbiased sampler), template
+    `examples/OrderMCMCBN.cpp`.
+  Follow `codegen_priors.md
   Sec.3a` decision tree: propose Class 2a continuous spike / horseshoe;
   for unknown-K BNP mixtures (DP / PY / HDP) use the **truncated
   SBP** path shipped in `examples/DPGaussianMixture.cpp` /

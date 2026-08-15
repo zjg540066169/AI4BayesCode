@@ -2586,15 +2586,12 @@ No RCPP_MODULE, no PYBIND11_MODULE, no Rcpp dependency at all. Useful
 for benchmarking, embedding into a larger C++ program, or Docker
 deployment.
 
-### BART examples: R-only
+### BART examples are dual-module like everything else
 
-BART blocks (`bart_block`, `genbart_block`) store data as
-`Rcpp::NumericMatrix`/`NumericVector` internally because the vendored
-CRAN BART R package / genBART kernels use these types directly, and call
-into R's global RNG (via `arn`) for tree-structure proposals. A Python
-port would require refactoring both kernels to use `arma::mat`/
-`arma::vec` AND swapping `arn` for a portable RNG -- deferred for v1.
-For now, all BART-using examples (BartNoise, SoftBartNoise, and the 4 GBart* wrappers)
-ship with `AI4BAYESCODE_RCPP_MODULE` only. Python users who need
-BART-like nonparametric mean functions should use `GPRegression` or
-`GPClassification` as substitutes.
+The BART kernels were ported to pure C++ (`bart_pure_cpp/`): they store
+data as `arma::mat` / `arma::vec` and draw from a seedable
+`std::mt19937_64` (`bart_rng::set_seed`), so nothing about them is
+R-specific. Every BART-using example (BartNoise, SoftBartNoise, the four
+GBart* wrappers, VCBart) ships BOTH module blocks plus the standalone
+`int main()`, exactly like every other example. Generate BART models for
+a Python backend normally -- there is no substitution rule.

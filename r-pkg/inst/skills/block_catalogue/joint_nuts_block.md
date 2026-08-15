@@ -109,6 +109,10 @@ impl_->data().declare_dependencies(
      with large dim (e.g. `(sigma, eps_raw[M])`, or `(tau, u[J])`),
      identity-metric NUTS often fails (rhat ~= 1.28 at dim 42, ~= 2.1 at
      dim 54), so dense metric is FREQUENTLY needed -- but START DIAGONAL
+     (`cfg.use_diagonal_metric = true`, keeping
+     `cfg.use_dense_metric = false`; both default to false, which is the
+     IDENTITY metric -- so "start diagonal" means setting this flag, not
+     leaving the config alone)
      and escalate to `cfg.use_dense_metric = true` as a Check #18 step
      when per-parameter R-hat at 10k+10k (or R2/R3) shows diagonal is
      inadequate. Measure; do NOT gate dense on a dimension threshold

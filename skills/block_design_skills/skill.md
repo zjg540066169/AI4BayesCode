@@ -109,8 +109,10 @@ snippet as the template (config name = `<Block>_config`, `cfg.name`, the user ca
 the invariant flags). Show a one-line "typical composite" comment (what hyperparameter
 blocks it pairs with) -- do NOT write a full worked example here; that lives in `examples/`.
 
-**(f) Example path** -- `examples/<Model>.cpp`, the REQUIRED Tier-A reference example (every block
-ships exactly ONE -- the EXAMPLE phase is mandatory, `00_flow.md` Sec.1). The file is discovered as the
+**(f) Example path** -- `examples/<Model>.cpp`, the Tier-A reference example IF one was authored.
+The EXAMPLE phase is OPTIONAL but STRONGLY RECOMMENDED (`00_flow.md` Sec.1): it is the cheapest
+end-to-end check of the block and what a future registry submission needs, but the user may
+decline, in which case the bundle simply has no example. The file is discovered as the
 bundle's `examples/<Model>.cpp`; optionally record its path in the manifest's OPTIONAL `Example:`
 field (Sec.3.2) for non-standard names.
 
