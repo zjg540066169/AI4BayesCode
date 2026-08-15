@@ -13,16 +13,6 @@ ship as package data — **no local `AI4BayesCode/` folder needed**.
 remotes::install_github("zjg540066169/AI4BayesCode", subdir = "r-pkg")
 ```
 
-Alternatively, from r-universe:
-
-```r
-options(repos = c(
-    jz3183 = "https://jz3183.r-universe.dev",
-    getOption("repos")
-))
-install.packages("AI4BayesCode")
-```
-
 Or from a local source tree (from the repo root):
 
 ```r
@@ -72,7 +62,7 @@ model, and the thinking level **in the call**; nothing is saved.
 ```r
 res <- ai4bayescode_generate(
   "y ~ N(Xbeta, sigma^2), p(sigma^2) propto 1/sigma^2  (linear regression)",
-  API_key = "sk-ant-api03-XXXX",           # passed here, never saved
+  API_key = "sk-ant-...",                  # passed here, never saved
   LLM     = "claude-opus-4-8",   # or gpt-5.5, claude-sonnet-4-6, ...
   effort  = "high",              # thinking level, validated against this model's levels
   backend = "R", output_path = "./generated", max_attempts = 2L)
@@ -95,7 +85,7 @@ Prefer not to pass the key every call? Set it **once per session** (session-only
 never written to disk):
 
 ```r
-ai4bayescode_set_key("sk-ant-api03-XXXX", "anthropic")   # or "openai" / "google"
+ai4bayescode_set_key("sk-ant-...", "anthropic")   # or "openai" / "google"
 ai4bayescode_key_status()                              # shows what's set (masked)
 ai4bayescode_generate("Linear regression.", LLM = "gpt-5.5-codex")  # key picked up
 ```

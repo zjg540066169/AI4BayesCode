@@ -424,7 +424,7 @@ ai4bayescode_prompt <- function(model_description,
     writeLines(c(
         "No API key was available, so ai4bayescode_generate() emitted the prompt.",
         "  (A) Claude Code: \"Read AI4BayesCode/start.md first, then <model description>.\"",
-        "  (B) Online: set a key once with ai4bayescode_set_key(\"<your-key>\", \"anthropic\")",
+        "  (B) Online: set a key once with ai4bayescode_set_key(\"sk-ant-...\", \"anthropic\")",
         "      (or pass API_key= / LLM=), then re-run ai4bayescode_generate(...).",
         sprintf("Target class: %s   backend: %s", prompt$classname, prompt$backend)
     ), rf)
@@ -615,7 +615,9 @@ ai4bayescode_models <- function() {
 #' `API_key` argument is left `NULL` -- you no longer have to pass it on every
 #' call (you still can, to override per call).
 #'
-#' @param key Non-empty API-key string (e.g. `"sk-ant-api03-XXXX"`).
+#' @param key Non-empty API-key string (e.g. `"sk-ant-..."`). Placeholder
+#'   forms containing `...`, `<>`, or "YOUR KEY" are REJECTED on purpose, so a
+#'   copied-but-unedited example fails loudly instead of being stored as a key.
 #'   A Claude subscription key (`"sk-ant-oat..."` from `claude setup-token`) is
 #'   detected from the `sk-ant-oat` prefix, but subscription keys may be
 #'   rate-limited for API use (a 429) -- if that happens, try a regular API key
@@ -627,8 +629,8 @@ ai4bayescode_models <- function() {
 #' @seealso [ai4bayescode_key_status()], [ai4bayescode_generate()]
 #' @examples
 #' \dontrun{
-#' ai4bayescode_set_key("sk-ant-api03-XXXX", "anthropic")
-#' ai4bayescode_set_key("sk-proj-XXXX",       "openai")
+#' ai4bayescode_set_key("sk-ant-...", "anthropic")
+#' ai4bayescode_set_key("sk-...",     "openai")
 #' ai4bayescode_generate("Linear regression.", LLM = "gpt-5.5-codex")  # key picked up
 #' }
 #' @export
