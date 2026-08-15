@@ -290,12 +290,16 @@ consumes the majority of the context window before any work begins.
 Load each instruction file ONLY when entering its phase, and AT MOST
 once per session.
 
-**Paper as input -> read it in a SUBAGENT, not here.** If the user gives a
-paper / PDF / long document instead of a direct model description, do NOT
-pull the whole thing into this context -- it starves the generation window.
-Dispatch a subagent (where one is available, e.g. a Task/Agent tool) to read
-it and return the extracted spec in THIS template (it feeds the codegen.md
-Sec.2 confirmation table):
+**Paper as input -> read it in a SUBAGENT. MANDATORY, no exceptions.**
+If the user gives a paper / PDF / long document instead of a direct
+model description, you MUST dispatch a subagent (Task/Agent tool) to
+read it and return the extracted spec. NEVER pull the paper into the
+main context yourself -- papers are long, and a single full read can
+drown the context window that the entire generation (priors, C++
+emission, L2 checklist, validation) still has to fit in. Reading the
+paper inline is a protocol violation even if it "looks short". The
+subagent returns the extracted spec in THIS template (it feeds the
+codegen.md Sec.2 confirmation table):
 - Equations, grouped: observation / likelihood; latent / transition (if any);
   priors.
 - One row per symbol: `| name | type | distribution / value (EXACT
@@ -314,8 +318,12 @@ read-only with no side effects, so do NOT ask the user to confirm spawning it
 SPEC: treat it EXACTLY like a user-typed model description and run the initial
 model-confirmation gate (Phase 3) -- show the extracted model back to the user
 BEFORE any codegen (extraction can misread, so this gate matters MORE here),
-then run the remaining phases below. (No subagent tool available: extract the
-spec, drop the paper text, continue from the spec.)
+then run the remaining phases below. If the environment truly has NO
+subagent tool, still do NOT read the full paper into context: ask the
+user to point at the specific sections / pages that define the
+model(s), read ONLY those pages, extract the spec immediately, and
+discard the raw text as you go. "No subagent tool" is never a license
+for a full-paper inline read.
 
 **Multiple models in one paper -> one class per model, one spec per
 model (SAME single subagent).** Papers routinely define several models
