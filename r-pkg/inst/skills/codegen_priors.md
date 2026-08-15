@@ -1121,12 +1121,16 @@ Discrete latent z found?
       .cpp wrapper, e.g.:
         `cfg.use_structure_prior = false;   // per spec: uniform P(G)`
 
-      *Known limitations* (deferred to v1.2.1; see project roadmap):
-        - Kuipers-Moffa 2017 partition_mcmc_block (removes FK Sec.4.1
-          induced-structure-prior bias inside Markov equivalence
-          classes)
-        - BGe Gaussian score (continuous data)
-        - Mixed conditional-Gaussian BN (Lauritzen 1992)
+      SHIPPED since this text was first written -- use them:
+        - Kuipers-Moffa 2017 partition MCMC via `cfg.method =
+          method_t::partition` (removes the FK Sec.4.1 structure-prior
+          bias inside Markov equivalence classes)
+        - BGe Gaussian score for continuous data via
+          `cfg.continuous_data` (+ `cfg.bge_am` / `cfg.bge_aw`)
+
+      *Still not implemented*:
+        - Mixed discrete + continuous BN (conditional Gaussian networks,
+          Lauritzen 1992)
         - Edge-specific structural prior
         - Tempered / parallel-tempered chains
 
