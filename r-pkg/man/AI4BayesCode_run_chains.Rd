@@ -37,13 +37,19 @@ object exposing `step()` and `get_history()`. Must be deterministic in
 \item{verbose}{Logical; print a progress message. Defaults to `TRUE`.}
 }
 \value{
-A list with `histories` (list of per-chain `get_history()` returns),
+A list with `histories` (list of per-chain histories, keep-only:
+  each entry -- vector, matrix, or higher-dimensional array -- has its
+  first `n_burn` draws dropped along the first axis; an entry with a
+  single stored draw, i.e. `keep_history = FALSE`, is returned unchanged),
   `seeds`, and `wall` (per-chain seconds).
 }
 \description{
 Spawns `n_chains` chains (parallel via `parallel::mclapply` on
   POSIX, or sequential) from a deterministic constructor closure, runs warmup
-  + keep on each, and returns the per-chain `get_history()` results, the seeds
-  used, and the per-chain wall time. Each chain instantiates a fresh Rcpp
-  module object in its own worker, so object ownership is handled cleanly.
+  + keep on each, and returns the per-chain histories (KEEP-ONLY: the first
+  `n_burn` draws of every history entry are stripped along its first axis,
+  so downstream `ai4bayescode_rhat_summary()` / `ai4bayescode_diagnose()`
+  need no `drop_burn` / `n_burn` bookkeeping), the seeds used, and the
+  per-chain wall time. Each chain instantiates a fresh Rcpp module object
+  in its own worker, so object ownership is handled cleanly.
 }
