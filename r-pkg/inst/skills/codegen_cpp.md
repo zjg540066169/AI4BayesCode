@@ -493,14 +493,26 @@ Format (every line is a `//` comment; `doc()` strips the `// ` prefix):
 //   set.seed(1); N <- 200
 //   <DGP: simulate data VALID for THIS model's likelihood>
 //   ai4bayescode_sourceCpp("<ClassName>.cpp")   # compile+load; RELATIVE path ONLY
-//   m <- new(<ClassName>, <ctor args>, 1L, TRUE)   # comment what each arg is
+//   # ---- Everyday use: parallel chains + diagnosis ----
+//   run <- ai4bayescode_run_chains(
+//       function(seed) new(<ClassName>, <ctor args>, seed, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//   ai4bayescode_diagnose(run$histories[[1]])
+//   # ---- Advanced: stateful single-chain control ----
+//   m <- new(<ClassName>, <ctor args>, 7L, TRUE)   # comment what each arg is
 //   m$step(2000); str(m$get_current())
 // @example:python
 //   import numpy as np, AI4BayesCode
 //   rng = np.random.default_rng(1); N = 200
 //   <DGP: the same simulation in numpy>
 //   Mod = AI4BayesCode.source("<ClassName>.cpp")   # RELATIVE path ONLY
-//   m = Mod.<ClassName>(<ctor args>, 1, True); m.step(2000); print(m.get_current())
+//   # ---- Everyday use: parallel chains + diagnosis ----
+//   chains = AI4BayesCode.run_chains(
+//       lambda seed: Mod.<ClassName>(<ctor args>, seed, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000)
+//   AI4BayesCode.diagnose(chains[0]["hist"])
+//   # ---- Advanced: stateful single-chain control ----
+//   m = Mod.<ClassName>(<ctor args>, 7, True); m.step(2000); print(m.get_current())
 // @example:end
 ```
 
@@ -508,9 +520,7 @@ Rules:
 
 - **Emit ONLY the block(s) for the runtime backend chosen in Sec.1.** R -> just
   `@example:R`; Python -> just `@example:python`; Both R+Python -> both. (The
-  shipped library examples carry both; an R-bound model -- e.g. a `bart_block` /
-  `genbart` kernel that has no Python binding -- carries `@example:R` only, and
-  Python `doc()` falls back to the stub.)
+  shipped library examples carry both.)
 - **The DGP must produce data VALID for the model's likelihood** -- Bernoulli
   outcomes in {0,1}, Poisson / NB counts as non-negative integers, a simplex
   that sums to 1, a connected graph for ICAR (node_idx + edges + N_nodes
@@ -637,8 +647,10 @@ to its own key via `current_named_outputs()`.
   transform + log|Jacobian| internally. Mixing constraint types within
   a single block is fine; you do NOT need to split a positive / simplex
   parameter into a separate `nuts_block`.
-- In the R runner's comments and in the `.cpp` header, note that the
-  sampler uses joint NUTS and requires validator Check #11.
+- In the `.cpp` header (and the delivered example, if it helps), add the
+  plain-language joint-sampling NOTE from Sec.4a: which parameters are
+  sampled jointly and why. NO check number, no "requires Check #11" --
+  Check #11 is YOUR L2 obligation and has already passed by delivery.
 
 ---
 

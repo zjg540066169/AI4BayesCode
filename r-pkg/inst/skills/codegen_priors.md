@@ -590,7 +590,15 @@ inline slice-sampling code; they use the library block.
 
 ## 2c. Check #15 -- Gibbs-block parity test (Option A library-level)
 
-Every `*_gibbs_block` type shipped in the library has ONE block-level
+NOTE on current coverage: `tests_autodiff/block_tests/` holds SIX tests
+(beta_gibbs, frailty_gamma_gibbs, piecewise_exponential_gibbs,
+elliptical_slice_sampling, univariate_slice_sampling,
+interval_censored_survival_augmentation). Other Gibbs blocks are covered
+by tests under `tests/` or by their example's recovery check -- cite the
+test that actually exists, never assume a per-block file in this
+directory.
+
+The intent is that every `*_gibbs_block` type shipped in the library has ONE block-level
 parity test in `tests_autodiff/block_tests/test_<blockname>_gibbs_block.cpp`
 that verifies the SAMPLING MECHANISM: given fixed hyperparameters
 (e.g., {alpha=5, beta=10} for a Beta distribution), 10,000 draws

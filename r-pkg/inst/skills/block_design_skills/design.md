@@ -21,8 +21,9 @@ Claude Code: AskUserQuestion; elsewhere: the markdown labeled-option fallback fr
 Standing choice labeled **"(default)"**, never "(Recommended)". Always an **"Other"** escape.
 Decision-relevant numerical thresholds are **ELICITED** ("(default)"); mechanical test-numerics use recorded, overridable defaults (`validate.md` Sec.5). NOTHING is written
 to disk until the Stage-1-3 methodology is signed off (SECOND RULE). Then the
-`<Block>.hpp` is STAGED to a staging dir and MOVED to `blocks_local/<Block>/` only on explicit
-"go" (TOP RULE).
+`<Block>.hpp` is STAGED to a staging dir; compile, the library test, and the bundle MOVE to
+`blocks_local/<Block>/` then run AUTOMATICALLY on all-pass -- no "go" question (`00_flow.md`
+Sec.3, `validate.md` Sec.3). Staging is the delivery guard: a FAILED block is never moved.
 
 **Token discipline / how to read system_design.** Each sub-step below loads ONE module from
 `skills/system_design_skills/<module>.md` (resolved via "system_design Sec.N" -> the
@@ -369,9 +370,10 @@ The block choice is fixed at design time and NEVER swapped at runtime.
 **Output of this phase: the STAGED `<Block>.hpp`** -- the Tier-B class implementing the
 `block_sampler` contract (Stage 4), with the constraint/Jacobian discipline (Stage 3) and the
 wiring hooks (Stage 5) wired, the geometry/target declared in its header comment (Stage 1), and
-the Exception-4 justification comment present. It is written to a STAGING dir, NOT to
-`blocks_local/<Block>/` -- the MOVE, the compile, and the library test happen only on explicit
-"go" (TOP RULE; automation philosophy).
+the plain-language sampling note present. It is written to a STAGING dir, NOT
+straight to `blocks_local/<Block>/` -- the compile, the library test and the MOVE then run
+AUTOMATICALLY on all-pass, and the final path is reported (`00_flow.md` Sec.3,
+`validate.md` Sec.3). Staging is the delivery guard: a FAILED block is never moved.
 
 **The hard gate:** the `.hpp` is written ONLY AFTER Sign-offs 1-3 (geometry -> algorithm ->
 constraints) are locked -- methodology before code (SECOND RULE). Sign-offs 4-5 (interface,
