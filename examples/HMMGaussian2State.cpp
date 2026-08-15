@@ -46,7 +46,7 @@
 //   z <- integer(T); z[1] <- sample.int(2, 1, prob = pi0) - 1L
 //   for (t in 2:T) z[t] <- if (runif(1) < A[z[t-1]*2 + z[t-1] + 1]) z[t-1] else 1L - z[t-1]
 //   y <- mu[z + 1L] + sigma * rnorm(T)
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(HMMGaussian2State, y, A, pi0, mu, sigma, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -75,7 +75,7 @@
 //       z[t] = z[t-1] if rng.uniform() < A[z[t-1]*2 + z[t-1]] else 1 - z[t-1]
 //   y = mu[z] + sigma * rng.standard_normal(T)     # Gaussian emissions
 //   Mod = AI4BayesCode.example("HMMGaussian2State")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HMMGaussian2State(y, A, pi0, mu, sigma, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

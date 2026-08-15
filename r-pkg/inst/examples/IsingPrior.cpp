@@ -42,7 +42,7 @@
 //   # Pure-prior 2D Ising (Q=2) on a 16x16 periodic lattice, ferromagnetic
 //   # beta=0.44 (near the 2D critical coupling). No data: the proper discrete
 //   # MRF prior pi(x) is itself the target; we just sample the latent state x.
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(IsingPrior, 16L, 16L, 2L, 0.44, TRUE, FALSE, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -63,7 +63,7 @@
 //   # beta=0.44 (near the 2D critical coupling). No data: the proper discrete
 //   # MRF prior pi(x) is itself the target; we just sample the latent state x.
 //   Mod = AI4BayesCode.example("IsingPrior")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.IsingPrior(16, 16, 2, 0.44, True, False, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

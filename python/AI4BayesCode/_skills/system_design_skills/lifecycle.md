@@ -65,8 +65,11 @@ Write `examples/GPGaussian.cpp`:
 - Adds `gp_block` + any sibling blocks (e.g. a sigma `nuts_block`).
 - Implements the **core-6 state contract** (`step / get_current /
   set_current / predict_at / get_dag / get_history`).
-  `set_current(Rcpp::List)` dispatches on keys (`X`, `y`, `sigma`,
-  any GP hyperparams) into the relevant child block's C++ setters.
+  `set_current(const AI4BayesCode::state_map&)` dispatches on keys (`X`,
+  `y`, `sigma`, any GP hyperparams) into the relevant child block's C++
+  setters. The class body is compiled by BOTH the Rcpp and the pybind11
+  module, so the signature must be backend-neutral -- never `Rcpp::List`
+  (see `dataflow.md` Sec.7).
 - Inherits `AI4BayesCode::kernel_control_mixin<GPGaussian>` (CRTP)
   so it automatically exposes the **kernel-control category**
   (`freeze / unfreeze / get_frozen`) via the
@@ -120,7 +123,7 @@ A concrete illustration of the invariants above.
 
 ### The bug
 
-`BartNoise::set_current(Rcpp::List)` accepted only `sigma`.
+`BartNoise::set_current(...)` accepted only `sigma`.
 `bart_block::set_current(arma::vec)` hard-stopped. Passing
 `list(X = X_new)` or `list(y = r)` had no effect -- silently
 ignored. This made nested BART (the core use case for this
@@ -143,7 +146,7 @@ forward to Tier C and update cached Tier B state (`cfg_.x_train`,
 ships with `set_X`, `set_Y`, `set_offset`, `set_data` from its
 first commit.
 
-**Tier A:** extended `BartNoise::set_current(Rcpp::List)` to route
+**Tier A:** extended `BartNoise::set_current(state_map)` to route
 X / y / sigma keys into Tier B setters, atomically handle
 combinations (`list(X, y, sigma)`), reject `f_bart`, silently ignore
 unknown keys, and update shared_data (`bart_target`, `X`) in sync.

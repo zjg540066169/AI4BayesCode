@@ -41,7 +41,9 @@ you are asked to pick from that model's levels (interactive) or it errors.}
 
 \item{output_path}{Output folder (default `"./generated"`).}
 
-\item{backend}{`"R"`, `"Python"`, `"both"`. `NULL` (default) -> asked / `"R"`.}
+\item{backend}{`"R"`, `"Python"`, or `"both"`. `NULL` (the default) means
+ask interactively, defaulting to `"both"`; non-interactively it resolves
+straight to `"both"`.}
 
 \item{API_key}{Provider API key. `NULL` (default) -> provider env var, then
 asked interactively, else offline prompt emit.}

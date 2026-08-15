@@ -76,7 +76,7 @@
 //   data[, 1] <- as.integer(runif(N) < 0.5)             # X1 ~ Bernoulli(0.5)
 //   for (j in 2:n) data[, j] <- ifelse(runif(N) < flip, 1L - data[, j-1], data[, j-1])
 //   cards <- rep(2, n)                                  # all variables binary
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(OrderMCMCBN, data, cards, 1.0, 3L, 20L, 4000L, 10.0, 0.5, numeric(0), seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -96,7 +96,7 @@
 //   cards = np.full(n, 2.0)                                        # all binary
 //   Mod = AI4BayesCode.example("OrderMCMCBN")
 //   # bdeu_alpha, max_parents, top_C, cache_F, prune, p_adj, init_order(empty), seed, keep_history
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.OrderMCMCBN(data, cards, 1.0, 3, 20, 4000, 10.0, 0.5, np.zeros(0), seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

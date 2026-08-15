@@ -6,6 +6,8 @@ graft AI4BayesCode/_examples
 include AI4BayesCode/start.md
 include LICENSE
 include THIRD_PARTY_LICENSES.md
+global-exclude *.bak*
+global-exclude * [0-9].*
 global-exclude *.pyc
 global-exclude __pycache__/*
 global-exclude .DS_Store

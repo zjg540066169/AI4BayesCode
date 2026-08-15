@@ -93,7 +93,7 @@
 //   beta_true <- numeric(p); beta_true[c(1,4,7)] <- c(2.5, -1.8, 1.2)  # actives {1,4,7}
 //   X <- matrix(rnorm(N * p), N, p); X <- scale(X, center = TRUE, scale = FALSE)  # center cols (no intercept)
 //   y <- as.numeric(X %*% beta_true + rnorm(N, 0, sigma_true)); y <- y - mean(y)  # center y
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(SpikeSlabRJMCMC, X, y, 1.0, 1.0, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -108,7 +108,7 @@
 //   X = rng.standard_normal((N, p)); X = X - X.mean(axis=0)             # center cols (no intercept)
 //   y = X @ beta_true + rng.normal(0.0, sigma_true, N); y = y - y.mean()  # center y
 //   Mod = AI4BayesCode.example("SpikeSlabRJMCMC")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.SpikeSlabRJMCMC(X, y, 1.0, 1.0, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

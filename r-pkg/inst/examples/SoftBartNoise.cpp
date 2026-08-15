@@ -66,7 +66,7 @@
 //   X <- matrix(runif(N * 3L, -1, 1), N, 3L)      # x1,x2,x3 ~ Unif(-1,1)
 //   f <- sin(3 * X[,1]) + 0.5 * X[,2]^2 - X[,3]   # smooth low-dim mean
 //   y <- f + rnorm(N, 0, 0.5)                      # sigma_true = 0.5
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(SoftBartNoise, X, y, 50L, 2.0, 10.0, FALSE, seed, 3.0, FALSE, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -82,7 +82,7 @@
 //   f = np.sin(3 * X[:,0]) + 0.5 * X[:,1]**2 - X[:,2]   # smooth low-dim mean
 //   y = f + rng.normal(0, 0.5, size=N)              # sigma_true = 0.5
 //   Mod = AI4BayesCode.example("SoftBartNoise")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.SoftBartNoise(X, y, 50, 2.0, 10.0, False, seed, keep_history=True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

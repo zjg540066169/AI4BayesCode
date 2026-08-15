@@ -87,7 +87,7 @@
 //     wd <- vapply(z, function(k) sample.int(V, 1L, prob = phi_true[k, ]), 1L)  # w_n ~ Cat(phi_{z_n})
 //     w <- c(w, wd); doc <- c(doc, rep(d, Ld))
 //   }
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(LdaCollapsedGibbs, w, doc, M, V, K, rep(1, K), rep(1, V), seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -110,7 +110,7 @@
 //       w.extend(wd); doc.extend([d] * Ld)
 //   w = np.asarray(w, float); doc = np.asarray(doc, float)
 //   Mod = AI4BayesCode.example("LdaCollapsedGibbs")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.LdaCollapsedGibbs(w, doc, M, V, K, np.ones(K), np.ones(V), seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

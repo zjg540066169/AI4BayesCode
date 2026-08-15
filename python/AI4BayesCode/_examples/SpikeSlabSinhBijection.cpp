@@ -58,7 +58,7 @@
 //   N <- 80; beta_true <- 1.5; sigma <- 1.0; slab_sd <- 5.0; pi_incl <- 0.5
 //   x <- rnorm(N)
 //   y <- beta_true * x + rnorm(N, 0, sigma)        # known nonzero truth -> inclusion favored
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(SpikeSlabSinhBijection, y, x, sigma, slab_sd, pi_incl, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -78,7 +78,7 @@
 //   x = rng.normal(size=N)
 //   y = beta_true * x + rng.normal(0.0, sigma, N)   # known nonzero truth -> inclusion favored
 //   Mod = AI4BayesCode.example("SpikeSlabSinhBijection")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.SpikeSlabSinhBijection(y, x, sigma, slab_sd, pi_incl, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

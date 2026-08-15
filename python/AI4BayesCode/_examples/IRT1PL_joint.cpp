@@ -73,7 +73,7 @@
 //   eta   <- outer(theta, b, "-")                # eta_ij = theta_i - b_j   (N x J)
 //   Y     <- matrix(as.numeric(runif(N * J) < 1 / (1 + exp(-eta))), N, J)  # Bernoulli responses
 //   # ctor: Y (N x J), theta_init (len N), b_init (len J), sigma_b_init (>0), seed, keep_history
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(IRT1PL_joint, Y, numeric(N), numeric(J), 1.0, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -91,7 +91,7 @@
 //   Y     = (rng.random((N, J)) < 1 / (1 + np.exp(-eta))).astype(float)    # Bernoulli responses
 //   Mod = AI4BayesCode.example("IRT1PL_joint")
 //   # ctor: Y, theta_init (len N), b_init (len J), sigma_b_init (>0), seed, keep_history
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.IRT1PL_joint(Y, np.zeros(N), np.zeros(J), 1.0, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

@@ -33,7 +33,7 @@ returns the q-mean (point estimate), not a sample.
 | `set_variational_state(mu, log_sd)` | void | overwrites both |
 | `get_log_sd()` | `arma::vec` | current log sigma |
 | `current_elbo()` | double | last-step ELBO |
-| `history()` | `const vi_history_t&` | per-step (elbo, mu, log_sd, gamma, epoch) + final_khat |
+| `vi_history()` | `const vi_history_t&` | per-step (elbo, mu, log_sd, gamma, epoch) + final_khat |
 
 **Constraints**: uses `constraints::*::wrap` identical to
 `nuts_block`. The user's log-density lambda lives on the natural

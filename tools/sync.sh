@@ -22,9 +22,21 @@ cd "$(cd "$(dirname "$0")/.." && pwd)"
 
 sync_dir () { rm -rf "$2"; rsync -a --exclude '.DS_Store' "$1/" "$2/"; }
 
-echo "• skills/        -> r-pkg/inst/skills , python/_skills"
-sync_dir skills r-pkg/inst/skills
-sync_dir skills python/AI4BayesCode/_skills
+# The shipped skill corpus is what a USER receives. Two classes of file live
+# under skills/ but are not product and must not ship:
+#   sim*.md / sim*_workflow.md -- our own paper-experiment protocol
+#   *.bak*                     -- local editing backups
+# ai4bayescode_list_skills() / AI4BayesCode.list_skills() glob the shipped
+# directory, so anything copied here shows up in a user's skill listing.
+SKILL_EXCLUDES=(--exclude 'sim1.md' --exclude 'sim1_workflow.md'
+                --exclude 'sim2_workflow.md' --exclude 'sim3_workflow.md'
+                --exclude '*.bak*' --exclude '* [0-9].*')
+
+sync_skills () { rm -rf "$1"; rsync -a --exclude '.DS_Store' "${SKILL_EXCLUDES[@]}" skills/ "$1"/; }
+
+echo "• skills/        -> r-pkg/inst/skills , python/_skills (experiment + backup files excluded)"
+sync_skills r-pkg/inst/skills
+sync_skills python/AI4BayesCode/_skills
 
 echo "• include/ (+ celerite, libgp_kernels relocated from the repo root) -> r-pkg/inst/include"
 sync_dir include r-pkg/inst/include

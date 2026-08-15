@@ -459,7 +459,7 @@ def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
             AI4BayesCode.diagnose(out["hist"], n_burn=int(n_burn))
     return out
 
-# NOTE: ai4bayescode_diagnose (the diagnostics table + the trace/ACF/density plot) is a
+# NOTE: AI4BayesCode.diagnose (the diagnostics table + the trace/ACF/density plot) is a
 # SHIPPED function in the AI4BayesCode package -- the runner CALLS it (above);
 # it does NOT define its own copy. The summary uses rank-normalized
 # split-R-hat / ESS (numpy),
@@ -563,7 +563,7 @@ def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
     #   if diagnosis:
     #       out["diagnosis"], out["diagnosis_plot"] = \
     #           AI4BayesCode.diagnose(out["hist"], n_burn=int(n_burn))
-# NOTE: ai4bayescode_diagnose (table + trace/ACF/density plot) is SHIPPED in the
+# NOTE: AI4BayesCode.diagnose (table + trace/ACF/density plot) is SHIPPED in the
 # AI4BayesCode package -- there is NO helper to define here.
 
 # === R1. Smoke test ===
@@ -732,12 +732,24 @@ elif d["ess_ratio"] < 0.01:
 # would fail correct samplers. Gate rule: min / max are printed only; among
 # the CENTRAL statistics (mean, sd, q25, q75) one outside is a WARN and TWO OR
 # MORE simultaneously FAIL R3 (validator.md R3.a).
-bp_stat = {
-    "mean": np.mean, "sd": lambda x: np.std(x, ddof=1),
-    "min": np.min,   "max": np.max,
-    "q25": lambda x: np.quantile(x, 0.25),
-    "q75": lambda x: np.quantile(x, 0.75),
-}
+# The statistic SET depends on the support of y (validator.md R3.a). For a
+# BINARY y every replicate's q25 and q75 are 0 or 1, so both p-values pin at
+# 0 or 1 and two central statistics land outside -- failing a demonstrably
+# correct sampler. Pick the set from the data, not a fixed list.
+_y = np.asarray(y_obs, dtype=float)
+_uniq = np.unique(_y)
+if np.all(np.isin(_uniq, (0.0, 1.0))):                        # binary
+    bp_stat = {"mean": np.mean}
+elif np.all(_uniq >= 0) and np.all(_uniq == np.floor(_uniq)):  # count
+    bp_stat = {"mean": np.mean, "sd": lambda x: np.std(x, ddof=1),
+               "max": np.max}
+else:                                                          # continuous
+    bp_stat = {
+        "mean": np.mean, "sd": lambda x: np.std(x, ddof=1),
+        "min": np.min,   "max": np.max,
+        "q25": lambda x: np.quantile(x, 0.25),
+        "q75": lambda x: np.quantile(x, 0.75),
+    }
 y_rep = np.asarray(c1["pp"]["y_rep"])      # (n_keep x N)
 pv = {nm: float(np.mean(np.array([f(row) for row in y_rep]) >= f(y_obs)))
       for nm, f in bp_stat.items()}
@@ -899,13 +911,17 @@ out of the box:
 
 ## 10. Reference templates
 
-Python ports of selected `examples/*.cpp` live in
-`AI4BayesCode/examples_py/` when shipped. When unsure about a Python
-runner pattern (constructor calling conventions, predict_at usage,
-DAG inspection, etc.), grep that folder first. The 6 examples with
-`PYBIND11_MODULE` blocks (see `README.md` "Examples with Python
-support" for the current list) all expose the same 6-method API as R
-and serve as reference templates.
+The shipped examples are TRI-MODULE: one `.cpp` carries a standalone
+`int main`, an `RCPP_MODULE` block, AND a `PYBIND11_MODULE` block, so there
+is no separate Python port to look up. All 43 of them expose the same
+core-6 API from Python as from R, and each carries a tested
+`@example:python` block in its header comment.
+
+When unsure about a Python runner pattern (constructor calling conventions,
+predict_at usage, DAG inspection), read the `@example:python` block of the
+nearest example. In an installed wheel they live under
+`AI4BayesCode/_examples/`; reach them with
+`AI4BayesCode.examples_path("<Name>")` rather than a hard-coded path.
 
 For backend selection rules (R-only / Python-only / dual R+Python),
 load `codegen.md` Sec.1 and `codegen_cpp.md` Sec.9.

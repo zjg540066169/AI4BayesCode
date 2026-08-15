@@ -678,9 +678,20 @@ suppressPackageStartupMessages(library(loo))
 # "any statistic outside" would fail correct samplers. Gate rule: min / max are
 # printed only; among the CENTRAL statistics (mean, sd, q25, q75) one outside
 # is a WARN and TWO OR MORE simultaneously FAIL R3 (validator.md R3.a).
-bp_stat <- list(mean = mean, sd = sd, min = min, max = max,
-                q25 = function(x) quantile(x, 0.25, names = FALSE),
-                q75 = function(x) quantile(x, 0.75, names = FALSE))
+# The statistic SET depends on the support of y (validator.md R3.a). For a
+# BINARY y every replicate's q25 and q75 are 0 or 1, so both p-values pin at
+# 0 or 1 and two central statistics land outside -- failing a demonstrably
+# correct sampler. Pick the set from the data, not a fixed list.
+.y_uniq <- unique(as.numeric(y_obs))
+bp_stat <- if (all(.y_uniq %in% c(0, 1))) {
+    list(mean = mean)                                   # binary
+} else if (all(.y_uniq >= 0 & .y_uniq == floor(.y_uniq))) {
+    list(mean = mean, sd = sd, max = max)               # count
+} else {
+    list(mean = mean, sd = sd, min = min, max = max,    # continuous
+         q25 = function(x) quantile(x, 0.25, names = FALSE),
+         q75 = function(x) quantile(x, 0.75, names = FALSE))
+}
 pv <- sapply(bp_stat, function(f)
     mean(apply(c1$pp$y_rep, 1, f) >= f(y_obs)))
 cat("\n  Bayesian p-values: ",

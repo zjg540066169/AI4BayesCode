@@ -7,7 +7,7 @@
 ai4bayescode_set_key(key, provider = "anthropic", check = TRUE)
 }
 \arguments{
-\item{key}{Non-empty API-key string (e.g. `"sk-ant-api..."`, `"sk-YOUR-KEY-HERE"`).
+\item{key}{Non-empty API-key string (e.g. `"sk-ant-api03-XXXX"`).
 A Claude subscription key (`"sk-ant-oat..."` from `claude setup-token`) is
 detected from the `sk-ant-oat` prefix, but subscription keys may be
 rate-limited for API use (a 429) -- if that happens, try a regular API key
@@ -31,9 +31,9 @@ call (you still can, to override per call).
 }
 \examples{
 \dontrun{
-ai4bayescode_set_key("sk-ant-api-...", "anthropic")
-ai4bayescode_set_key("sk-YOUR-KEY-HERE",         "openai")
-ai4bayescode_generate("Linear regression.", LLM = "gpt-5.5")  # key picked up
+ai4bayescode_set_key("sk-ant-api03-XXXX", "anthropic")
+ai4bayescode_set_key("sk-proj-XXXX",       "openai")
+ai4bayescode_generate("Linear regression.", LLM = "gpt-5.5-codex")  # key picked up
 }
 }
 \seealso{

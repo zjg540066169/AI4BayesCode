@@ -14,7 +14,7 @@
 | z (length N) | `categorical_gibbs_block` | Class-1 conditional independence given (pi, mu, lambda) |
 | pi (length K_trunc) | `stick_breaking_block` | Per-stick Beta conjugate; user supplies a_fn/b_fn |
 | (mu, lambda) | `normal_gamma_cluster_gibbs_block` | Per-(k,d) Normal-Gamma conjugate; empty clusters draw from prior |
-| alpha (scalar) | `nuts_block` on `log(alpha)` | Beta likelihood x Gamma prior; closed-form Gamma alternative requires a future `gamma_gibbs_block` |
+| alpha (scalar) | `nuts_block` on the Antoniak (1974) (k, n) marginal | Reads `cluster_counts` (k = occupied clusters, n = observations), NOT the empty-tail sticks `stick_V` -- those Beta(1, alpha) draws are chain-specific and broke mixing (rank-R-hat ~ 1.42). Staying on NUTS also keeps the prior swappable. See `DPGaussianMixture.cpp`. |
 | (alpha derived) | `register_refresher("alpha", ...)` | Pattern shown in `DPGaussianMixture_DerivedAlpha.cpp` |
 
 Truncation choice: default `K_trunc = max(20, ceil(N / 5))`. The
@@ -38,11 +38,11 @@ chosen here keeps state fixed-dim and reuses existing
 `categorical_gibbs_block` directly -- that is the current Q5 lean
 (current design lean).
 
-**Split-merge (Jain & Neal 2004)**: not shipped at this version. The existing
-`rjmcmc_block` is structured for spike-and-slab (gamma, beta) partitions, not
-for cluster-allocation split-merge proposals. A future
-`split_merge_block` would implement Jain-Neal's restricted-Gibbs +
-MH-on-partitions directly. Truncated SBP mixes well enough on toy and
+**Split-merge (Jain & Neal 2004)**: shipped as `split_merge_block` -- see
+`block_catalogue/split_merge_block.md`. It implements Jain-Neal's
+restricted-Gibbs + MH-on-partitions directly; `rjmcmc_block` is the wrong
+tool here (it is structured for spike-and-slab (gamma, beta) partitions, not
+cluster-allocation split-merge proposals). Truncated SBP mixes well enough on toy and
 moderate-N problems that split-merge is an optimisation rather than a
 correctness requirement.
 

@@ -114,7 +114,12 @@ def plot_dag(
     dpi: int = 150,
     plate: bool = True,
 ) -> Optional[Path]:
-    """Render the model DAG as a PNG (or show interactively if out_path is None).
+    """Render the model DAG to a PNG file and return its path.
+
+    Always writes a file. With ``out_path=None`` the PNG goes to a temporary
+    directory and that path is returned -- nothing is displayed inline. (The R
+    helper ``ai4bayescode_plot_dag`` draws to the active graphics device
+    instead; open the returned path to view the Python output.)
 
     Parameters
     ----------
@@ -131,7 +136,7 @@ def plot_dag(
 
     Returns
     -------
-    Path to the generated PNG (or None if shown interactively).
+    Path to the generated PNG. Never None.
     """
     try:
         import networkx as nx

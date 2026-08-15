@@ -341,8 +341,8 @@ path (`contrib.md`).
 | Module | Role |
 |---|---|
 | `00_flow.md` | THIS router: 5-phase backbone, lazy-load schedule, sign-off gates |
-| `intake.md` | INTAKE: math spec * naming-uniqueness gate * `SelectWhen` * advisory novelty/benchmark * geometry classification + correctness gate |
-| `design.md` | DESIGN: algorithm spec (Gibbs/NUTS/slice-ESS/VI) * constraint mapping * three-tier interface impl |
+| `intake.md` | INTAKE: math spec * naming-uniqueness gate * `SelectWhen` * advisory novelty/benchmark |
+| `design.md` | DESIGN: **Stage 1 geometry classification + correctness gate (SIGN-OFF 1)** * algorithm spec (Gibbs/NUTS/slice-ESS/VI) * constraint mapping * three-tier interface impl |
 | `validate.md` | VALIDATE: library test scaffold * validator-check map (#1-#26) * automatic compile+test (mandatory T0-T4 + Check #12 AD-twin) * cross-chain R-hat < 1.01 fixed * heavy audit = submission-path extra |
 | `example.md` | EXAMPLE: **offered (ask first; default yes, skippable)** -- ONE **tri-module** demo `examples/<Model>.cpp` (`int main` + `RCPP_MODULE` + `PYBIND11_MODULE` + both TESTED `@example`; source-able in R AND Python; cheapest end-to-end check + needed for registry submission) |
 | `skill.md` | SKILL: block-local `skills/<Block>.md` (cites core) + `manifest.dcf` (13 fields) * Sec.5b doc-consistency * Sec.5c FINAL GPL-3 license check |

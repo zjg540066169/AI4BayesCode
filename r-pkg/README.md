@@ -120,7 +120,11 @@ generator (`ai4bayescode_generate()`, above). Still planned:
 
 - `m$sample(data = ..., chains = 4, ...)` — a CmdStanR-style high-level wrapper
 - Command-line interface (`ai4bayescode` CLI)
-- A Python package mirror — **already available** as the `ai4bayescode` wheel
+The Python mirror is **already available** — install it with:
+
+```bash
+pip install "git+https://github.com/zjg540066169/AI4BayesCode.git#subdirectory=python"
+```
 
 Besides `ai4bayescode_generate()`, AI codegen can also run via your preferred
 chat tool (Claude Code / Cursor / etc.) — point the agent at the bundled skills:

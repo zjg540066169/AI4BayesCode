@@ -74,7 +74,7 @@
 //   set.seed(601); N <- 80L; M <- 25L                 # sample size, basis count
 //   x <- runif(N, -3, 3)                              # 1-D inputs on [-3, 3]
 //   y <- 1.5 * sin(2 * x) + 0.3 * x + rnorm(N, 0, 0.4) # smooth truth + N(0,0.4)
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(HSGPRegression, y, x, M, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -88,7 +88,7 @@
 //   x = rng.uniform(-3, 3, N)                              # 1-D inputs on [-3, 3]
 //   y = 1.5*np.sin(2*x) + 0.3*x + rng.normal(0, 0.4, N)    # smooth truth + N(0,0.4)
 //   Mod = AI4BayesCode.example("HSGPRegression")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HSGPRegression(y, x, M, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

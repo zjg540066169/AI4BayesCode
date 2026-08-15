@@ -285,7 +285,7 @@ a "full vs concise SelectWhen" choice -- the concise trigger IS `SelectWhen`; th
 SAME sentence. Author once; reuse. If you sharpen one, sharpen the other.
 
 **Confirmation -- no new interruption.** The auto-selected block surfaces in the
-EXISTING model-confirmation gate (`codegen.md Sec.2`), with the alternative
+EXISTING model-confirmation gate (`codegen.md` Sec.3), with the alternative
 candidate blocks listed below the summary table for one-click switching. This phase does NOT
 add a picker prompt; it only ensures the manifest's `RoutingKey`/`SelectWhen` are good enough
 to make that auto-selection correct. (When the codegen skills are next edited, `codegen_priors

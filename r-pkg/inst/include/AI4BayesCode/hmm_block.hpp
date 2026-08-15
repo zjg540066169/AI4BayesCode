@@ -160,12 +160,28 @@ public:
         context_ = ctx;
     }
 
+    // Fetch a REQUIRED context key by name. Bare context_.at() throws
+    // "unordered_map::at: key not found", which names neither the block nor
+    // the key -- and a missing key here is almost always one forgotten entry
+    // in declare_dependencies(), the most common wiring mistake.
+    const arma::vec& require_(const std::string& key,
+                              const char* which) const {
+        auto it = context_.find(key);
+        if (it == context_.end()) {
+            throw std::runtime_error(
+                std::string("hmm_block '") + cfg_.name + "': " + which + " '" + key +
+                "' not found in context. Add it to "
+                "declare_dependencies(\"" + cfg_.name + "\", {...}).");
+        }
+        return it->second;
+    }
+
     void step(std::mt19937_64& rng) override {
         const std::size_t T = cfg_.T;
         const std::size_t K = cfg_.K;
 
-        const arma::vec& A_flat  = context_.at(cfg_.A_key);
-        const arma::vec& pi_flat = context_.at(cfg_.pi_key);
+        const arma::vec& A_flat  = require_(cfg_.A_key,  "A_key");
+        const arma::vec& pi_flat = require_(cfg_.pi_key, "pi_key");
         if (A_flat.n_elem != K * K) {
             throw std::runtime_error(
                 "hmm_block '" + cfg_.name +

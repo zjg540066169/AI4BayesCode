@@ -88,7 +88,7 @@
 //   y <- do.call(rbind, lapply(1:3, function(k)
 //            matrix(rnorm(N_k * d, mean = centers[k, ], sd = 0.7),
 //                   ncol = d, byrow = TRUE)))
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(DPGaussianMixture_DerivedAlpha, y, 8L, seed),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -108,7 +108,7 @@
 //   centers = np.array([[-4.0, -4.0], [0.0, 4.0], [5.0, -1.0]])
 //   y = np.vstack([rng.normal(centers[k], 0.7, size=(N_k, d)) for k in range(3)])
 //   Mod = AI4BayesCode.example("DPGaussianMixture_DerivedAlpha")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DPGaussianMixture_DerivedAlpha(y, 8, seed),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

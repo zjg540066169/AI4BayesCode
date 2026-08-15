@@ -77,8 +77,8 @@ FAILED, JUSTIFY the multimodal claim with the evidence above; an unjustified
 
 ## Check number registry (all 26)
 
-Checks #1-#26 are Layer-2 semantic audits (#14-#17 are defined in
-sibling skill files; the rest in this file). The Layer-3 R2-VI
+Checks #1-#26 are Layer-2 semantic audits (#15-#17 are defined in
+`codegen_priors.md` Sec.2c-2e; the rest in this file). The Layer-3 R2-VI
 PSIS-k-hat diagnostic (no registry number) is also defined here. This
 registry is the authoritative cross-reference.
 
@@ -111,8 +111,9 @@ registry is the authoritative cross-reference.
 | 25 | Trans-dimensional / Dirac-spike must use `rjmcmc_block` (reducibility + silent-slab guard) | Semantic | validator.md Sec.25 + codegen_priors.md Sec.3a Class 2b/4 | model is Sec.3a Class 2b (Dirac point-mass spike) or Class 4 (parameter-space dimension is a random variable) -- i.e. posterior support is a union of manifolds of different dimension |
 | 26 | Kernel-control conformance (freeze / unfreeze / get_frozen present + whitelist/blacklist gate + refreeze warning + stale-derived warning) | Semantic | validator.md Sec.26 | always (kernel-control is a universal wrapper category per interface.md Sec.1) |
 
-**Check #12 status note:** Check #12 is the ONE execution-based Layer-2
-check -- the AI writes a throwaway `tests_autodiff/verify_<ClassName>.cpp`
+**Check #12 status note:** Check #12 is the one Layer-2 check that runs a
+numerical comparison (#14 and #15 also compile a throwaway file, but their
+verdict is a code-level one) -- the AI writes a throwaway `tests_autodiff/verify_<ClassName>.cpp`
 during generation, confirms max-diff tolerances, and deletes the file
 on PASS. See Sec.12 below for the full template.
 
@@ -129,9 +130,10 @@ overall gate.
 Twenty-six checks. **Checks #1-#11, #13, #18, #19, #20, #21, #22,
 #23, #25, and #26 are static** -- the AI audits them by reading the
 generated `.cpp` (plus, for #23 readapt_NUTS and #26 freeze/unfreeze,
-R-level round-trip tests in the runner), no execution required. Checks #14-#17 are
-defined in sibling skill files. **Check #12 (gradient verification via autodiff) is
-the one execution-based semantic check** -- the AI writes a throwaway
+R-level round-trip tests in the runner), no execution required. Checks #15-#17 are
+defined in `codegen_priors.md` Sec.2c-2e. **Checks #12, #14 and #15 compile a
+throwaway file; #12 (gradient verification via autodiff) is the one that
+executes a numerical comparison** -- the AI writes a throwaway
 companion file `tests_autodiff/verify_<ClassName>.cpp` that copies the
 production hand-written log-density verbatim and adds
 `autodiff::var`-compatible templated versions, compiles it, runs a
@@ -3002,9 +3004,19 @@ lo        <- loo::loo(LLarr, r_eff = rel_n_eff, cores = 1)
 # Uses c1, c2 produced by R2.
 
 # --- R3.a Bayesian p-values ---
-bp_stat <- c(mean = mean, sd = sd, min = min, max = max,
-             q25 = function(x) quantile(x, 0.25, names = FALSE),
-             q75 = function(x) quantile(x, 0.75, names = FALSE))
+# The statistic SET follows the support of y (see the table above). A BINARY y
+# makes every replicate's q25 and q75 equal to 0 or 1, pinning both p-values at
+# 0 or 1 -- two central statistics outside, failing a correct sampler.
+y_uniq <- unique(as.numeric(y_obs))
+bp_stat <- if (all(y_uniq %in% c(0, 1))) {
+    c(mean = mean)                                     # binary
+} else if (all(y_uniq >= 0 & y_uniq == floor(y_uniq))) {
+    c(mean = mean, sd = sd, max = max)                 # count
+} else {
+    c(mean = mean, sd = sd, min = min, max = max,      # continuous
+      q25 = function(x) quantile(x, 0.25, names = FALSE),
+      q75 = function(x) quantile(x, 0.75, names = FALSE))
+}
 pv1 <- sapply(bp_stat, function(f)
     mean(apply(c1$pp$y_rep, 1, f) >= f(y_obs)))
 # Pass band narrows to (0.10, 0.90) if the sampler uses joint_nuts_block.

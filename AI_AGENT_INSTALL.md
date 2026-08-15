@@ -63,7 +63,8 @@ fi
 mkdir -p "$TARGET"
 if command -v rsync >/dev/null 2>&1; then
   rsync -a --exclude '.git/' --exclude '.block_design_staging/' --exclude 'generated/' \
-        --exclude '*.bak*' --exclude '__pycache__/' --exclude '.DS_Store' ./ "$TARGET"/
+        --exclude '*.bak*' --exclude '__pycache__/' --exclude '.DS_Store' \
+        --exclude '* [0-9].*' --exclude '* [0-9]' ./ "$TARGET"/
 else
   cp -R . "$TARGET"/
 fi
@@ -89,7 +90,8 @@ fi
 mkdir -p "$TARGET"
 if command -v rsync >/dev/null 2>&1; then
   rsync -a --exclude '.git/' --exclude '.block_design_staging/' --exclude 'generated/' \
-        --exclude '*.bak*' --exclude '__pycache__/' --exclude '.DS_Store' ./ "$TARGET"/
+        --exclude '*.bak*' --exclude '__pycache__/' --exclude '.DS_Store' \
+        --exclude '* [0-9].*' --exclude '* [0-9]' ./ "$TARGET"/
 else
   cp -R . "$TARGET"/
 fi

@@ -351,7 +351,8 @@ if (identical(backend, "both"))
 #' bundled skill corpus and a set of settings. Pure and offline.
 #'
 #' @param model_description Model description (string) or a `.txt`/`.md` path.
-#' @param backend `"R"` (default), `"Python"`, or `"both"`.
+#' @param backend `"both"` (default -- ONE .cpp usable from BOTH R and Python),
+#'   `"R"`, or `"Python"`.
 #' @param output_path Output folder the generated files target.
 #' @param classname C++/Rcpp class name; default derived from the description.
 #' @param priors `"noninformative"` (default), `"weakly"`, `"interactive"`, or a
@@ -1424,7 +1425,9 @@ ai4bayescode_stream_check <- function(LLM = "claude-opus-4-8", API_key = NULL,
 #'   OpenAI uses `minimal..high`). If `effort` is not a valid level for the model,
 #'   you are asked to pick from that model's levels (interactive) or it errors.
 #' @param output_path Output folder (default `"./generated"`).
-#' @param backend `"R"`, `"Python"`, `"both"`. `NULL` (default) -> asked / `"R"`.
+#' @param backend `"R"`, `"Python"`, or `"both"`. `NULL` (the default) means
+#'   ask interactively, defaulting to `"both"`; non-interactively it resolves
+#'   straight to `"both"`.
 #' @param API_key Provider API key. `NULL` (default) -> provider env var, then
 #'   asked interactively, else offline prompt emit.
 #' @param interactive If `TRUE` (default = [interactive()]), ask for missing

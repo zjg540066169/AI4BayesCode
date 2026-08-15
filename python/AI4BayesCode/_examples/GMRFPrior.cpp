@@ -51,7 +51,7 @@
 //   # Pure-prior 2D ICAR: x ~ N(0, (kappa R)^{-1}) with sum(x)=0 on a
 //   # 4x4 lattice. No data -- x is drawn directly (Rue 2001 sparse-Cholesky),
 //   # so each step is an exact i.i.d. prior draw (no observation likelihood).
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(GMRFPrior, 4L, 4L, 2.0, FALSE, FALSE, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -71,7 +71,7 @@
 //   # Pure-prior 2D ICAR: x ~ N(0, (kappa R)^{-1}) with sum(x)=0 on a 4x4
 //   # lattice. No data -- x is an exact sparse-Cholesky prior draw each step.
 //   Mod = AI4BayesCode.example("GMRFPrior")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GMRFPrior(4, 4, 2.0, False, False, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

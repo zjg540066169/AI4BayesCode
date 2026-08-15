@@ -53,7 +53,7 @@
 //   p_true <- 1 / (1 + exp(-f_true))             # Bernoulli success prob
 //   y <- as.numeric(runif(N) < p_true)           # 0/1 labels
 //   X <- matrix(x, ncol = 1)                     # N x 1 design matrix
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(GPClassification, X, y, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -71,7 +71,7 @@
 //   y = (rng.uniform(size=N) < p_true).astype(float)   # 0/1 labels
 //   X = x.reshape(N, 1)                            # N x 1 design matrix
 //   Mod = AI4BayesCode.example("GPClassification")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GPClassification(X, y, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

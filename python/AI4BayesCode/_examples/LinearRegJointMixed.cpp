@@ -35,7 +35,7 @@
 //   alpha <- 1.5; beta <- c(2.0, -1.0, 0.5); sigma <- 0.8
 //   X <- matrix(rnorm(N * p), N, p)                     # iid N(0,1) design
 //   y <- as.numeric(alpha + X %*% beta + rnorm(N, 0, sigma))
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(LinearRegJointMixed, y, X, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -51,7 +51,7 @@
 //   X = rng.standard_normal((N, p))                     # iid N(0,1) design
 //   y = alpha + X @ beta + rng.standard_normal(N) * sigma
 //   Mod = AI4BayesCode.example("LinearRegJointMixed")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.LinearRegJointMixed(y, X, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

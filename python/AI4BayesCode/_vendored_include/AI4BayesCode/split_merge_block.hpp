@@ -231,11 +231,27 @@ public:
         context_ = ctx;
     }
 
+    // Fetch a REQUIRED context key by name. Bare context_.at() throws
+    // "unordered_map::at: key not found", which names neither the block nor
+    // the key -- and a missing key here is almost always one forgotten entry
+    // in declare_dependencies(), the most common wiring mistake.
+    const arma::vec& require_(const std::string& key,
+                              const char* which) const {
+        auto it = context_.find(key);
+        if (it == context_.end()) {
+            throw std::runtime_error(
+                std::string("split_merge_block '") + cfg_.name + "': " + which + " '" + key +
+                "' not found in context. Add it to "
+                "declare_dependencies(\"" + cfg_.name + "\", {...}).");
+        }
+        return it->second;
+    }
+
     void step(std::mt19937_64& rng) override {
         // Read state from context.
-        const arma::vec& y_flat = context_.at(cfg_.y_key);
-        const arma::vec& pi     = context_.at(cfg_.pi_key);
-        const arma::vec& mu     = context_.at(cfg_.mu_key);
+        const arma::vec& y_flat = require_(cfg_.y_key,  "y_key");
+        const arma::vec& pi     = require_(cfg_.pi_key, "pi_key");
+        const arma::vec& mu     = require_(cfg_.mu_key, "mu_key");
         const std::size_t N = cfg_.N;
         const std::size_t K = cfg_.K_trunc;
         const std::size_t d = cfg_.d;
@@ -253,12 +269,12 @@ public:
         const arma::vec* lam_ptr = nullptr;
         const arma::vec* sig_ptr = nullptr;
         if (is_diagonal_) {
-            lam_ptr = &context_.at(cfg_.lambda_key);
+            lam_ptr = &require_(cfg_.lambda_key, "lambda_key");
             if (lam_ptr->n_elem != K * d)
                 throw std::runtime_error(
                     "split_merge_block: lambda length mismatch");
         } else {
-            sig_ptr = &context_.at(cfg_.sigma_key);
+            sig_ptr = &require_(cfg_.sigma_key, "sigma_key");
             if (sig_ptr->n_elem != K * d * d)
                 throw std::runtime_error(
                     "split_merge_block: sigma length mismatch");

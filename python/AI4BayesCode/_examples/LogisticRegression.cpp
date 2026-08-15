@@ -59,7 +59,7 @@
 //   X <- cbind(1, matrix(rnorm(N * (p - 1)), N, p - 1))   # col1 intercept, rest N(0,1)
 //   prob <- 1 / (1 + exp(-(X %*% beta_true)))             # sigmoid(X beta)
 //   y <- as.numeric(runif(N) < prob)                      # Bernoulli 0/1
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(LogisticRegression, X, y, 10.0, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -74,7 +74,7 @@
 //   prob = 1.0 / (1.0 + np.exp(-(X @ beta_true)))                       # sigmoid(X beta)
 //   y = (rng.random(N) < prob).astype(float)                           # Bernoulli 0/1
 //   Mod = AI4BayesCode.example("LogisticRegression")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.LogisticRegression(X, y, 10.0, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

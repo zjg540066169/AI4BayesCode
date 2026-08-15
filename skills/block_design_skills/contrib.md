@@ -62,8 +62,10 @@ the vetted core `include/`:
  Local is a dev area; "shipping a block" is the [FUTURE] registry/submission path. (Same
  rule as the `.bak` / `_archive` dev-only strip: dev content stays in dev, never ships.)
 - Compile include-path wiring for `ai4bayescode_sourceCpp` (putting `blocks_local/*/` on
- `-I`) is an [OPEN] integration detail -- staging/compile is a Stage-4/5 "go" action, not
- something this reference resolves.
+ `-I`) is handled by `ai4bayescode_source()`, which emits `-I` for
+ `./blocks_local/<block>/` and each `vendor/*` automatically (see
+ `r-pkg/R/install_block.R`). Staging and compile run automatically, with no
+ "go" gate.
 
 ---
 
@@ -120,7 +122,7 @@ SelectWhen + descriptions.
 ### 4a. Confirmation folds into the EXISTING model-confirmation gate
 
 No new interruption is added. The auto-selected block surfaces in the EXISTING
-model-confirmation summary (`start.md` Stage 3 / `codegen.md` Sec.2 -- inline DAG + summary table +
+model-confirmation summary (`start.md` Phase 3 / `codegen.md` Sec.3 -- inline DAG + summary table +
 sign-off). Below the summary table, **LIST the alternative candidate blocks** (a plain list for
 switching -- no per-block rejection prose):
 

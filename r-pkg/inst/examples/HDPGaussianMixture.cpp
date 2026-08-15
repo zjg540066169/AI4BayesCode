@@ -122,7 +122,7 @@
 //   }
 //   y <- rbind(draw_group(0L), draw_group(1L))
 //   group_idx <- c(rep(0L, Ng), rep(1L, Ng))
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(HDPGaussianMixture, y, group_idx, 6L, c(0, 0), 0.1, diag(d), 4.0, 1.0, 1.0, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -152,7 +152,7 @@
 //   y = np.vstack([draw_group(0), draw_group(1)])
 //   group_idx = np.concatenate([np.zeros(Ng), np.ones(Ng)])   # 0/1 group labels
 //   Mod = AI4BayesCode.example("HDPGaussianMixture")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HDPGaussianMixture(y, group_idx, 6, np.zeros(d), 0.1, np.eye(d), 4.0, 1.0, 1.0, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

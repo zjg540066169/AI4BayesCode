@@ -65,7 +65,7 @@
 //   x <- (0:(N-1))/(N-1); knots <- (1:K_s)/(K_s+1)             # grid + interior knots
 //   Bsp <- outer(x, knots, function(a,b) pmax(a-b, 0))         # truncated-power basis (N x K_s)
 //   y <- 0.4*sin(8*x) + 0.2*x^2 + rnorm(N, 0, 0.3)             # smooth(x) + N(0,0.3)
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(BSplineRegression, y, Bsp, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -80,7 +80,7 @@
 //   Bsp = np.maximum(x[:,None] - knots[None,:], 0.0)           # truncated-power basis (N x K_s)
 //   y = 0.4*np.sin(8*x) + 0.2*x**2 + rng.normal(0, 0.3, N)     # smooth(x) + N(0,0.3)
 //   Mod = AI4BayesCode.example("BSplineRegression")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.BSplineRegression(y, Bsp, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

@@ -116,7 +116,7 @@
 //   mu_true <- rbind(c(-4, -4), c(0, 4), c(4, -2))
 //   z_true  <- sample.int(3L, N, replace = TRUE)
 //   y <- mu_true[z_true, ] + matrix(rnorm(N * d, sd = 0.7), N, d)
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(PYGaussianMixture, y, 12L, 0.0, seed),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -136,7 +136,7 @@
 //   z_true  = rng.integers(0, 3, size=N)
 //   y = mu_true[z_true] + rng.normal(0.0, 0.7, size=(N, d))
 //   Mod = AI4BayesCode.example("PYGaussianMixture")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.PYGaussianMixture(y, 12, 0.0, seed),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

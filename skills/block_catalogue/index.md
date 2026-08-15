@@ -65,7 +65,7 @@ by block count):
   see `validator.md` ("Contributed-block checks").
 
 **Confirm it.** Surface the selected block + the alternative candidates in the
-existing model-confirmation gate (`codegen.md Sec.2` / `start.md` Stage 3) so the user
+existing model-confirmation gate (`codegen.md` Sec.3 / `start.md` Phase 3) so the user
 can switch. (Full design: `block_design_skills/contrib.md`.)
 
 ## Block type table
@@ -96,6 +96,7 @@ can switch. (Full design: `block_design_skills/contrib.md`.)
 | **LDA token topic assignment z_n in {1..K} + theta_d (M-doc simplex) + phi_k (V-vocab simplex), Dirichlet hyperpriors** | **`lda_collapsed_gibbs_block`** (Griffiths-Steyvers 2004 collapsed Gibbs) | **(none -- joint output of z, theta, phi)** |
 | **Bernoulli response (logistic reg)** | **`pg_logistic_block` (PG augmentation)** | **(none)** |
 | Gaussian mean f, **constant** noise (standard BART) -- **DEFAULT for any real-valued response with constant variance; the FAST conjugate BART** | `bart_block` | (none, GPL-2.0+) |
+| Gaussian mean f, constant noise, response surface expected to be **SMOOTH** in the covariates (dose-response, growth, spatial trend) -- Soft BART's logistic splits fit a smooth curve with far fewer trees than hard BART's staircase | **`softbart_block`** (Linero & Yang 2018 Soft BART) | **(none -- f is unconstrained)** |
 | **NON-Gaussian response ONLY** (Poisson / NB / logistic / heteroscedastic / AFT / beta / gamma_shape / beta_binomial / custom) -- a likelihood `bart_block` cannot express **even after the reduction ladder** (Gaussian direct / augmentation / backfitting / known-weights / working-response -- see the `genbart_block` card "When to use") | **`genbart_block` + `genbart::lik::*`** -- WARNING generic RJMCMC (Laplace leaf proposals), **much slower** than `bart_block`; **NEVER use `genbart_block + normal_lik` for plain Gaussian regression -- use `bart_block`** | **(none, GPL-2.0+)** |
 | **Poisson-multinomial gamma augmentation (log_phi ~ Gamma)** | **`poisson_multinomial_aug_block`** | **(none)** |
 | **tightly-coupled real parameters (shift-invariance, additive linear mean, fixed+random effect)** | **`joint_nuts_block`** | **(none -- identity; current scope is real only)** |
@@ -175,6 +176,7 @@ for its full configuration / discipline (do NOT read them all):
 - **`rjmcmc_block`** -> `block_catalogue/rjmcmc_block.md`
 - **`bart_block`** -> `block_catalogue/bart_block.md`
 - **`genbart_block`** -> `block_catalogue/genbart_block.md`
+- **`softbart_block`** -> `block_catalogue/softbart_block.md`
 - **`poisson_multinomial_aug_block`** -> `block_catalogue/poisson_multinomial_aug_block.md`
 - **`elliptical_slice_sampling_block`** -> `block_catalogue/elliptical_slice_sampling_block.md`
 - **`univariate_slice_sampling_block`** -> `block_catalogue/univariate_slice_sampling_block.md`

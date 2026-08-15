@@ -54,7 +54,7 @@ prior?" -- that option is always on offer.
 moves to the model-confirmation step (DAG image + summary table in
 `codegen.md` Sec.4), the DAG shown to the user MUST be a PREDICTION
 DAG (generative / causal direction), NEVER a Gibbs / dependency
-DAG.** This is the same MANDATORY rule stated in `codegen.md` Sec.4(b);
+DAG.** This is the same MANDATORY rule stated in `codegen.md` Sec.3(b);
 it is repeated here so that prior-elicitation transitions cannot
 accidentally produce a Gibbs-style diagram. Concretely: edges go
 from parents to children in the data-generating story, sibling
@@ -62,7 +62,7 @@ priors get no edges between them even when their Gibbs full
 conditionals read each other (canonical counter-example:
 spike-and-slab Laplace, where sigma and tau^2 are siblings -- both parents
 of beta -- with no sigma<->tau^2 edge despite the slab term sigma^2tau^2 making the
-Gibbs conditionals mutually dependent). See `codegen.md` Sec.4(b) for
+Gibbs conditionals mutually dependent). See `codegen.md` Sec.3(b) for
 the full rule and `system_design.md` Sec.4 for the Gibbs-vs-Predict
 DAG distinction.
 

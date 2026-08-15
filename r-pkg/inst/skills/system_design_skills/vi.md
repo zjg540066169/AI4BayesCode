@@ -12,7 +12,7 @@ family entry in Sec.13's "VI-family" subsection and for
 designing or modifying any `vi_block` subclass.
 
 VI is OPT-IN. Default for every codegen-produced sampler is MCMC
-(see `skills/codegen.md` Sec.2 VI trigger question). VI is the
+(see `skills/codegen.md` Sec.1 question #6, the sampler-engine question). VI is the
 escape hatch for models MCMC handles poorly: high-dim posteriors
 with explicit symmetries (BNN), tractable continuous parameters
 with no useful conditional structure, anything where the user has
@@ -96,7 +96,7 @@ public:
   arma::vec get_log_sd() const;                              // current log sigma
   double current_elbo() const;                               // last-step ELBO
   // history hook: pushes (elbo, mu, log sigma, gamma, epoch) when keep_history=true
-  const vi_history_t& history() const;
+  const vi_history_t& vi_history() const;   // pure virtual on vi_block
 };
 ```
 
@@ -323,7 +323,7 @@ warns + flags, FAIL stops).
 ### 18.9 Caveats -- when to NOT use VI
 
 Documented for the codegen agent to show during the VI trigger
-question (`skills/codegen.md` Sec.2). All from Bishop Sec.10.1.2 /
+question (`skills/codegen.md` Sec.1 #6). All from Bishop Sec.10.1.2 /
 Blei 2017:
 
 1. **Mean-field underestimates posterior variance.** The q*
@@ -422,10 +422,13 @@ Deferred to v2+ (each individually a substantial project):
   contract reduced the cognitive load and made outer
   composition code uniform.
 
-- **set_current as Rcpp::List, not typed method.** Rcpp modules
-  don't support C++ function overloading -- multi-type
-  dispatch needs a list / variant. Rcpp::List with key-based
-  routing is the most ergonomic match.
+- **set_current as a key-value map, not a typed method.** Rcpp modules
+  don't support C++ function overloading -- multi-type dispatch needs a
+  keyed container. The shipped signature is
+  `set_current(const AI4BayesCode::state_map&)`; it is backend-neutral, so
+  the same class body compiles under Rcpp and pybind11 (`dataflow.md`
+  Sec.7). (Pre-tri-module drafts used `Rcpp::List` here; that no longer
+  compiles under the Python backend.)
 
 - **Three-tier split.** Pre-2026-04-12, Tier A and Tier B were
   sometimes merged ("just expose the underlying kernel directly

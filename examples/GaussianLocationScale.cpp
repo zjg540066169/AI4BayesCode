@@ -41,7 +41,7 @@
 //   ai4bayescode_example("GaussianLocationScale")
 //   set.seed(42); N <- 200
 //   y <- rnorm(N, mean = 3, sd = 2)                # DGP: true mu=3, sigma=2
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(GaussianLocationScale, y, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -54,7 +54,7 @@
 //   rng = np.random.default_rng(42); N = 200
 //   y = rng.normal(3.0, 2.0, N)                    # DGP: true mu=3, sigma=2
 //   Mod = AI4BayesCode.example("GaussianLocationScale")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GaussianLocationScale(y, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

@@ -174,8 +174,9 @@ public:
         if (!(total > 0.0) || !std::isfinite(total)) {
             throw std::runtime_error(
                 "dirichlet_gibbs_block '" + cfg_.name
-                + "': gamma draws underflowed to zero (try raising the "
-                "prior concentration or switching to simplex_nuts_block)");
+                + "': gamma draws underflowed to zero. Raise the prior "
+                "concentration, or sample the simplex with a "
+                "joint_nuts_block using a SIMPLEX component.");
         }
         for (std::size_t k = 0; k < cfg_.n_categories; ++k) {
             values_[k] = g[k] / total;

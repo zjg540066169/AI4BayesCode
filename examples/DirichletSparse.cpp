@@ -43,7 +43,7 @@
 //   s_true <- c(0.50, 0.25, 0.15, 0.05, 0.03, 0.02)  # sparse P=6 simplex
 //   N      <- 1000L                                   # multinomial trials (N >> P)
 //   y      <- as.numeric(rmultinom(1, N, s_true))     # observed category counts
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(DirichletSparse, y, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -58,7 +58,7 @@
 //   N = 1000                                                 # multinomial trials (N >> P)
 //   y = rng.multinomial(N, s_true).astype(float)             # observed category counts
 //   Mod = AI4BayesCode.example("DirichletSparse")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DirichletSparse(y, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

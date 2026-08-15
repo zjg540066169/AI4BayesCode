@@ -49,7 +49,7 @@
 //   alpha_true <- 1.0; sigma_true <- 0.5
 //   X <- matrix(rnorm(N * p), N, p)                 # NO intercept column (alpha is built in)
 //   Y <- as.numeric(alpha_true + X %*% beta_true + sigma_true * rnorm(N))
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(ARDLasso, X, Y, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -66,7 +66,7 @@
 //   X = rng.normal(size=(N, p))                      # NO intercept column (alpha is built in)
 //   Y = alpha_true + X @ beta_true + sigma_true * rng.normal(size=N)
 //   Mod = AI4BayesCode.example("ARDLasso")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.ARDLasso(X, Y, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

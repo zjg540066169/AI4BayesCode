@@ -540,7 +540,7 @@ private:
                 cands += matched_dotpaths[i];
             }
             throw std::runtime_error(
-                "sub-name '" + name + "' is ambiguous: matches slots [" +
+                "sub-name '" + name + "' is ambiguous: matches components [" +
                 cands + "]; use dot-path to disambiguate");
         }
 
@@ -584,8 +584,8 @@ private:
         }
 
         throw std::runtime_error(
-            "name '" + name + "' does not resolve to any child (direct, "
-            "slot, or dot-path); valid names include: " +
+            "name '" + name + "' does not resolve to any child (direct name, "
+            "component, or dot-path); valid names include: " +
             join_(valid_freeze_names_()));
     }
 
@@ -635,7 +635,7 @@ private:
                 cands += matched_dotpaths[i];
             }
             throw std::runtime_error(
-                "sub-name '" + name + "' is ambiguous: matches slots [" +
+                "sub-name '" + name + "' is ambiguous: matches components [" +
                 cands + "]; use dot-path to disambiguate");
         }
 

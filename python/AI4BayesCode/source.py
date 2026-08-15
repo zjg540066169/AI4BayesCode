@@ -17,7 +17,7 @@ Standalone Armadillo: unlike R (which gets Armadillo via RcppArmadillo), the
 Python build needs a standalone Armadillo header tree. It is discovered from
 ``ARMADILLO_INCLUDE_DIR`` or common system/brew locations; if not found, pass
 ``extra_cppflags=["-I/path/to/armadillo/include"]``. This is a documented
-system dependency for v0.10.
+system dependency.
 """
 
 from __future__ import annotations

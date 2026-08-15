@@ -43,7 +43,7 @@
 //   cats  <- sample.int(K, N, replace = TRUE, prob = theta_true)
 //   y     <- tabulate(cats, nbins = K)          # category counts (length K)
 //   alpha <- rep(1, K)                          # flat Dirichlet prior
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(DirichletSimplex, y, alpha, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -60,7 +60,7 @@
 //   y = np.bincount(cats, minlength=K).astype(float)   # category counts
 //   alpha = np.ones(K)                                  # flat Dirichlet prior
 //   Mod = AI4BayesCode.example("DirichletSimplex")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DirichletSimplex(y, alpha, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

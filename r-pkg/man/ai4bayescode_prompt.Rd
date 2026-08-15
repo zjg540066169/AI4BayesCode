@@ -19,7 +19,8 @@ ai4bayescode_prompt(
 \arguments{
 \item{model_description}{Model description (string) or a `.txt`/`.md` path.}
 
-\item{backend}{`"R"` (default), `"Python"`, or `"both"`.}
+\item{backend}{`"both"` (default -- ONE .cpp usable from BOTH R and Python),
+`"R"`, or `"Python"`.}
 
 \item{output_path}{Output folder the generated files target.}
 

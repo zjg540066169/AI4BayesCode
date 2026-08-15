@@ -67,7 +67,7 @@
 //   X <- matrix(runif(N * p, -1.5, 1.5), N, p)           # covariates ~ U(-1.5,1.5)
 //   r <- 0.8 * sin(2 * X[,1]) + 0.6 * X[,2] - 0.4 * X[,3]# true log-rate surface
 //   y <- rpois(N, exp(r))                                # y ~ Poisson(exp(r))
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(GBartPoisson, X, y, 50L, seed, FALSE, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -83,7 +83,7 @@
 //   r = 0.8 * np.sin(2 * X[:,0]) + 0.6 * X[:,1] - 0.4 * X[:,2]  # true log-rate
 //   y = rng.poisson(np.exp(r)).astype(float)             # y ~ Poisson(exp(r))
 //   Mod = AI4BayesCode.example("GBartPoisson")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GBartPoisson(X, y, 50, seed, False, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

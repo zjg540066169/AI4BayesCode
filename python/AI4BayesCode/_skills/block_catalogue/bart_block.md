@@ -130,14 +130,16 @@ wrapping BART inside a spike-and-slab selector -- it gets sparsity "for
 free" from the tree prior.
 
 **Decision-flow recipe** for the codegen skill:
+- **DART is INERT on `bart_block`.** The vendored `stdbart::bart_model`
+  hardcodes `dart = false` with no public activator, so setting `cfg.dart`
+  only logs a warning (`bart_block.hpp` config docs). Do NOT ask the user
+  whether to enable it -- the question has no effect.
 - If the user's model description includes words like "variable selection",
   "which features matter", "sparse", "feature importance", or "high-
-  dimensional", AskUserQuestion whether to enable DART.
-- Defaults when the user opts in: **`dart = TRUE, aug = FALSE`**. Do NOT
-  ask the user about `aug` -- it is an internal mixing accelerator with a
-  per-sweep cost, and the audience has no basis to choose. Set it
-  yourself: FALSE by default, TRUE only if DART mixing measures poorly.
-- Expose `dart` and `aug` as constructor arguments to the generated
+  dimensional", route to **`genbart_block`**, which implements the
+  Linero (2018) Dirichlet split prior for real.
+- The `dart` / `aug` fields remain in the config for source compatibility;
+  do NOT expose them as constructor arguments to the generated
   R wrapper **only if the user opts into DART** -- otherwise hardcode
   both to `false` inside the class body and do NOT surface them to R.
   See `examples/BartNoise.cpp` -- they are positional args 9 and 10 in

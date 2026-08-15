@@ -262,9 +262,11 @@ later, at Sec.2 and Sec.3. **Once the model is confirmed**, ask the upfront ques
    was loaded from), so RESOLVE the path to that root automatically and use `<skill-root>/include`
    for the compile `-I` (substitute the actual absolute path for the bare `AI4BayesCode/` prefix in
    every compile recipe). Only ASK when NOT running from the installed skill (a local checkout):
-   then default `./AI4BayesCode`. Reuse from earlier in the session if already known. (FUTURE: an
-   R / Python package install resolves this even more cleanly -- `system.file("include", package =
-   "AI4BayesCode")` / the Python package path -- no question at all.)
+   then default `./AI4BayesCode`. Reuse from earlier in the session if already known.
+   **Detect the installed package FIRST and skip this question entirely when it is present**
+   (`start.md` Sec.4 makes this mandatory): in R, `requireNamespace("AI4BayesCode")` ->
+   `ai4bayescode_include_path()`; in Python, `importlib.util.find_spec("AI4BayesCode")` ->
+   `AI4BayesCode.vendored_include_path()`. Both ship in 1.0.0.
 5. **Model description** (if not already given; normally the model is already captured +
    confirmed at Step 0 above).
 
@@ -278,26 +280,24 @@ later, at Sec.2 and Sec.3. **Once the model is confirmed**, ask the upfront ques
    > "Sampler engine for this model:"
    >
    > Options:
-   > - **(a) Let codegen recommend after seeing the model spec (default)**
-   >   -- codegen inspects parameter dims / symmetries after the model is
-   >   spec'd and recommends MCMC vs VI vs hybrid. Most users should pick
-   >   this; codegen surfaces a recommendation with explanation at Sec.X
-   >   (VI sub-flow) and the user can accept or override.
-   > - **(b) MCMC for all parameters** -- proceed straight to standard
-   >   MCMC code gen.
-   > - **(c) VI** -- codegen will follow up at Sec.X (VI sub-flow) on
-   >   pure vs hybrid, which parameters get VI, and the per-block VI
-   >   family (mean-field / full-rank / categorical / structured).
+   > - **(a) Decide after seeing the model (default)** -- the parameter
+   >   dimensions and symmetries are inspected once the model is written
+   >   down, then a choice of MCMC, VI, or a mix is proposed with the
+   >   reasoning, and you accept or override it.
+   > - **(b) MCMC for all parameters** -- go straight to MCMC.
+   > - **(c) Variational inference** -- a follow-up covers pure vs mixed,
+   >   which parameters use VI, and which VI family (mean-field,
+   >   full-rank, categorical, structured).
 
    **Conditional follow-ups based on this answer:**
-   - **(a)** -> Sec.X VI sub-flow runs after model confirmation and may
+   - **(a)** -> the Sec.3 VI sub-flow runs after model confirmation and may
      still recommend VI based on the spec. The block plan is proposed by
      the skill and reviewed at the Sec.3 gate (see #7 below).
-   - **(b)** -> Sec.X VI sub-flow is skipped entirely; block plan
+   - **(b)** -> the Sec.3 VI sub-flow is skipped entirely; block plan
      proposed + reviewed at the Sec.3 gate as above.
    - **(c)** -> block-plan review at Sec.3 is about the VI family
-     instead; hybrid follow-up at Sec.X handles which params get VI and
-     which stay MCMC.
+     instead; the hybrid follow-up in the Sec.3 VI sub-flow handles which
+     params get VI and which stay MCMC.
 
 7. **Sampler / block preferences: NEVER asked upfront -- the system
    PROPOSES first.** Do NOT ask "do you have a preferred block?" as an
@@ -709,8 +709,8 @@ List all parameters, data, and fixed constants:
 |------|------|--------------|-----------|-------------|
 | y | data | observed | -- | -- |
 | X | data | observed | -- | -- |
-| mu | param | Normal(0, 100) | nuts_block (real) | hardcoded |
-| sigma | param | HalfNormal(0, sd) | nuts_block (positive) | `sd` exposed |
+| mu | param | Normal(0, 100) | joint_nuts_block (real component) | hardcoded |
+| sigma | param | HalfNormal(0, sd) | joint_nuts_block (positive component) | `sd` exposed |
 | nu | fixed | 3 | -- | -- |
 
 The Hyperparams column clarifies whether prior hyperparameters are
@@ -782,16 +782,19 @@ Blei 2017, never skipped):
 - Label-switching behavior differs from MCMC -- VI on a mixture
   converges to ONE component assignment per seed; MCMC bounces
   between them. Both are diseases of underlying non-identification.
-- Hybrid convergence: no joint convergence criterion in v1 -- the
-  runner just runs the user's outer iteration budget and reports
-  per-child diagnostics. If hybrid mixing is suspect, fall back
-  to all-MCMC or pure VI.
+- In a mixed run, each block is judged on its own terms: the run
+  executes the iteration budget you set and reports a convergence
+  diagnostic per block, rather than one number for the whole model.
+  The MCMC blocks and the VI blocks answer different questions, so
+  they are reported separately.
 
-**Layer-3 diagnostic implications**: VI blocks use joint PSIS-k-hat
-(< 0.7) instead of R-hat (Yao 2018, Dhaka 2021). Hybrid samplers
-report BOTH -- R-hat on MCMC children, k-hat on VI children, plus an
-ELBO trajectory plot. See `validator.md` for the VI-specific
-portion of Layer-3 R2.
+**Layer-3 diagnostic implications (AGENT-ONLY -- do NOT print any of this
+paragraph to the user; no check numbers, no layer names, no skill paths):**
+VI blocks use joint PSIS-k-hat (< 0.7) instead of R-hat (Yao 2018,
+Dhaka 2021). Hybrid samplers report BOTH -- R-hat on MCMC children, k-hat
+on VI children, plus an ELBO trajectory plot. See `validator.md` for the
+VI-specific portion of Layer-3 R2. What the USER sees is the diagnostic
+table and the plots, labelled in plain words.
 
 ---
 

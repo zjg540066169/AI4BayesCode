@@ -269,9 +269,32 @@ ratio. Sanity-check `birth_logR == -death_logR` on a fixed pair.
 > SEPARATE** -- conflating them is the recurring error.
 
 **The new block class implements the C++ `block_sampler` contract (Tier B).** It is a subclass of
-`block_sampler` (`include/AI4BayesCode/block_sampler.hpp`) overriding the pure-virtual contract:
-`set_context(const block_context&)`, `step(std::mt19937_64&)`, `current()`, `set_current(arma::vec)`,
-`name()`, `dim()`, and `engine_kind()` (default `MCMC`; override to `VI` for a VI block). This is
+`block_sampler` (`include/AI4BayesCode/block_sampler.hpp`).
+
+**Pure virtual -- you MUST override all five:** `set_context(const block_context&)`,
+`step(std::mt19937_64&)`, `current()`, `set_current(arma::vec)`, `dim()`.
+
+**Defaulted -- override only if the default is wrong:** `name()` (returns the
+config name), `engine_kind()` (default `MCMC`; override to `VI` for a VI block),
+and **`record_held_history()`**.
+
+**`record_held_history()` is REQUIRED for any block that owns a history buffer
+AND allows freeze.** `composite_block::step()` skips a frozen child's `step()`,
+so its normal per-sweep history append is skipped too; the hook supplies the
+held value instead. Leave it at the base no-op and the frozen block's history
+stalls while its siblings grow, and `predict_at` over the joint history throws
+"inconsistent history sizes". The two-line shape:
+
+```cpp
+void record_held_history() override {
+    if (keep_history_) history_buf_.push_back(current());
+}
+```
+
+A block with SEVERAL history buffers pushes to each of them; a block that is
+freeze-BLACKLISTED (`supports_freeze()` returns false) does not need the hook.
+
+This is
 C++-only machinery -- NONE of these get a `.method()` and R never sees them (interface.md Sec.2,
 Tier B). The lifecycle to follow is `lifecycle.md` Sec.14's 7-step (Tier C kernel + license-gate ->
 Tier B block -> Tier A wrapper -> skills/catalogue -> tests -> validator -> cross-chain audit); for
@@ -306,7 +329,9 @@ on `-I` and need no per-block declaration.
 > (`freeze / unfreeze / get_frozen` always via `AI4BAYESCODE_BIND_KERNEL_CONTROL` macro +
 > `kernel_control_mixin` CRTP; `readapt_NUTS` iff NUTS-family child; BART tree-serialization
 > carve-out iff BART-family child), with set_current-as-dispatcher and zero state-method leaks;
-> confirm the license gate for any vendored kernel.
+> confirm the license gate for any vendored kernel. **If the block owns a history buffer and is
+> not freeze-blacklisted, confirm `record_held_history()` is overridden** -- without it, freeze
+> plus `predict_at` throws "inconsistent history sizes".
 
 ---
 

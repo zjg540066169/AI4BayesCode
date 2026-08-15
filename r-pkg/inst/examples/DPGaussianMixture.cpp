@@ -113,7 +113,7 @@
 //   mu_true <- rbind(c(-3, -3), c(3, 3))                  # 2 well-separated clusters, sd 0.7
 //   y <- rbind(matrix(rnorm(n_per * d, 0, 0.7), n_per, d) + rep(mu_true[1, ], each = n_per),
 //              matrix(rnorm(n_per * d, 0, 0.7), n_per, d) + rep(mu_true[2, ], each = n_per))
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(DPGaussianMixture, y, 60L, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -133,7 +133,7 @@
 //   y = np.vstack([rng.normal(0.0, 0.7, (n_per, d)) + mu_true[0],
 //                  rng.normal(0.0, 0.7, (n_per, d)) + mu_true[1]])
 //   Mod = AI4BayesCode.example("DPGaussianMixture")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DPGaussianMixture(y, 60, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

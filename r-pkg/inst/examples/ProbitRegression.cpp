@@ -59,7 +59,7 @@
 //   X <- cbind(1, matrix(rnorm(N * (p - 1)), N, p - 1))   # intercept + 2 covars
 //   eta <- as.numeric(X %*% beta_true)
 //   y <- as.numeric(runif(N) < pnorm(eta))   # y ~ Bernoulli(Phi(X beta))
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(ProbitRegression, X, y, 10, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -75,7 +75,7 @@
 //   X = np.column_stack([np.ones(N), rng.standard_normal((N, p - 1))])
 //   y = (X @ beta_true + rng.standard_normal(N) > 0).astype(float)  # probit latent DGP = Bernoulli(Phi(Xb))
 //   Mod = AI4BayesCode.example("ProbitRegression")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.ProbitRegression(X, y, 10, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)

@@ -127,8 +127,6 @@ category (freeze / unfreeze / get_frozen) per interface.md Sec.1.
 - **MIXED discrete + continuous data** (conditional Gaussian networks
   per Lauritzen 1992). Pure-discrete (BDeu) and pure-continuous (BGe)
   both ship.
-- **Edge-specific prior** (currently uniform DAG prior with hard
-  max-parents cap).
 - **Tempered / parallel-tempered chains** for very multimodal
   posteriors.
 - **Predict_at v2**: forward simulation under sampled DAG (v1 is

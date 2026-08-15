@@ -179,7 +179,7 @@ run automatically without asking.
 | Ship-ready confirmation ("save final files and finish?") | YES |
 | **Procedural workflow steps** | NO -- run automatically |
 | Compile the generated `.cpp` (`ai4bayescode_sourceCpp(...)` in R, equivalent in Python) | NO |
-| L3 R1 smoke test (10 steps, finiteness, `predict_at` non-mutation, throwaway `verify_*.cpp` Check #12) | NO |
+| L3 R1 smoke test (10 steps, finiteness, `predict_at` non-mutation, freeze -> `predict_at` history) | NO |
 | L3 R2 two-chain diagnostic (4k+4k, R-hat, ESS) | NO |
 | L3 R3 posterior-predictive Bayesian p-values + PSIS-LOO | NO |
 | Render the prediction DAG inline (Mermaid / edge list) for the Sec.3 step | NO |
@@ -303,7 +303,7 @@ drown the context window that the entire generation (priors, C++
 emission, L2 checklist, validation) still has to fit in. Reading the
 paper inline is a protocol violation even if it "looks short". The
 subagent returns the extracted spec in THIS template (it feeds the
-codegen.md Sec.2 confirmation table):
+codegen.md Sec.3 confirmation table):
 - Equations, grouped: observation / likelihood; latent / transition (if any);
   priors.
 - One row per symbol: `| name | type | distribution / value (EXACT
@@ -362,7 +362,7 @@ class), not separate classes.
 | 0. Entry | session start | `start.md` (this file) -- already in progress |
 | 1. Upfront questions | after reading this file | `skills/codegen.md` Sec.1 |
 | 2. Prior elicitation | when a user prior is missing / ambiguous | `skills/codegen_priors.md` |
-| 3. Model confirmation | before writing any code | `skills/codegen.md` Sec.2 (inline DAG + summary table) |
+| 3. Model confirmation | before writing any code | `skills/codegen.md` Sec.3 (inline DAG + summary table) |
 | 4. C++ emission | when starting to write `.cpp` | `skills/codegen_cpp.md` |
 | 5. L1 compile + L2 semantic validation | after `.cpp` is written, BEFORE any runner file exists | `skills/validator.md` (L2 semantic checklist + AD-twin Check #12); PRINT the per-check verdict table |
 | 6. R / Python runner emission | ONLY after the printed L2 verdict PASSES | `skills/codegen_r_runner.md` (R backend) / `skills/codegen_python_runner.md` (Python backend; load whichever the chosen backend needs) |
@@ -513,12 +513,12 @@ if it's not the default.
 When the model-confirmation phase needs a DAG, render it **inline in
 chat** as Mermaid / Graphviz `dot` source / edge list. Do NOT spawn
 R / igraph / external rendering -- that wastes tokens and time. See
-`codegen.md` Sec.2(b) for the exact templates.
+`codegen.md` Sec.3(b) for the exact templates.
 
 The DAG you show MUST be a **prediction DAG** (generative / causal
 direction), not a Gibbs / dependency DAG. Edges mean "A produces B
 in the data-generating story", not "block B reads A during MCMC
-sampling". See `codegen.md` Sec.2(b) MANDATORY note.
+sampling". See `codegen.md` Sec.3(b) MANDATORY note.
 
 ## 3b. Math: DISPLAY-block LaTeX for equations; ASCII for inline symbols (NEVER raw Unicode)
 

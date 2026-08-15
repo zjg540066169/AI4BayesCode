@@ -55,7 +55,7 @@
 //   # (mu0=0, mu1=2, sigma=1). Partial decoupling delta=0.6 keeps the SW
 //   # cluster move mixing despite the strong data field. We sample z; the
 //   # emission field breaks the 0<->1 symmetry so there is no label switching.
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(IsingHiddenPotts, 16L, 0.7, 0.6, 0.0, 2.0, 1.0,
 //                          2024L, seed, 0L),
@@ -82,7 +82,7 @@
 //   # cluster move mixing despite the strong data field. We sample z; the
 //   # emission field breaks the 0<->1 symmetry so there is no label switching.
 //   Mod = AI4BayesCode.example("IsingHiddenPotts")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.IsingHiddenPotts(16, 0.7, 0.6, 0.0, 2.0, 1.0,
 //                                         2024, seed, 0),

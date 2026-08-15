@@ -68,9 +68,9 @@ correctly diagnosed by PSIS-k-hat.
 
 **Caveats (Bishop Sec.10.1.2, validated by k-hat diagnostic)**:
 - Marginals recovered well; joint covariance NOT captured by MF
-- For tightly coupled targets (large beta, dense graph), use Block 5
-  (`structured_categorical_vi_block`, v1.2 future) with user-specified
-  clique factorisation, OR drop to MCMC
+- For tightly coupled targets (large beta, dense graph), use
+  `structured_categorical_vi_block` (SHIPPED) with user-specified clique
+  factorisation, OR drop to MCMC
 
 **Scope (v1.2 ship):**
 - Cardinality `K_i >= 2` per variable, arbitrary mix across nodes
@@ -78,8 +78,7 @@ correctly diagnosed by PSIS-k-hat.
 - Both exact and Monte Carlo gradient modes
 - RAABBVI optimizer + PSIS-k-hat Layer-3 diagnostic
 
-**Deferred to v1.2.1:**
-- Structured factorisation via user-specified cliques (this is Block 5)
+**Not implemented:**
 - CAVI closed-form updates when `log_density` is exp-family (faster
   alternative for that special case)
 - Continuous-relaxation alternatives (Concrete / Gumbel-softmax) --

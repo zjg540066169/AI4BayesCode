@@ -164,9 +164,12 @@ Run ONLY the checks the block's mechanism actually triggers. Each points to `val
 | **trans-dimensional / RJ block** (composes `rjmcmc_block`) | **Check #14** (trans-dim proposal Jacobian is library-owned: identity-coordinate `|det J|=1`, library 1-D transforms, or runtime-AD on a templated forward + analytic inverse -- `jacobian.md` Sec.10.2; `rjmcmc_block_config` has NO `jacobian_fn`). Verify the proposal is Jacobian-free by construction; for a conjugate-marginalized model with a constant `propose_logq`, check `birth_logR == -death_logR` on a fixed pair. |
 | **vendors an external KERNEL / library** (INTAKE Step 5; manifest `KernelTier: vendored`) | **Vendored-kernel STATEFUL-compatibility check** (Sec.1, additional to the vendored-correctness regime): external code is NOT written for the stateful-block contract -- verify NO hidden global / `static` mutable state (cross-instance leakage), determinism under the block's `rng` (same seed -> same output), correct cache rebuild on `set_context`, and instance-isolated state. Runnable two-instance + same-seed + refresh regime in `test_<Block>.cpp` + a static grep of the used vendored headers. |
 
-**Family-silence notes (state explicitly, do not let silence read as a pass):**
+**Family-silence notes -- for the INTERNAL L2 verdict table, NOT for the user.** Record
+each of these in the verdict table so a silent check is never mistaken for a check that ran
+and passed. If any of it reaches the user, say it in plain words with no check numbers
+("this block has no hand-written gradient, so no gradient check was needed"):
 - **#18 is silent for an ESS / Gibbs / direct-draw block** -- there is no mass metric to
- justify, so #18 simply does not fire. That is correct, not a clean bill.
+ justify, so #18 simply does not fire.
 - **#12 / T1b is silent for a block with NO hand-written gradient** (pure Gibbs/ESS) -- there
  is no gradient to verify; #12 does not fire.
 - **#24 is silent unless the block is funnel-shaped or `joint_nuts`-like.**
@@ -214,12 +217,13 @@ What to surface as you start (a heads-up, NOT a gate):
  -I include -I include/mcmclib \
  -I include/mcmclib/BaseMatrixOps/include -I include/eigen \
  -I /Library/Frameworks/R.framework/Versions/Current/Resources/library/RcppArmadillo/include \
- -I ./blocks_local/<Block> \
+ -I ./.block_design_staging/<Block> \
  -DMCMC_ENABLE_ARMA_WRAPPERS -DARMA_DONT_USE_WRAPPER \
- -o /tmp/test_<Block> ./blocks_local/<Block>/test_<Block>.cpp -framework Accelerate
+ -o /tmp/test_<Block> ./.block_design_staging/<Block>/test_<Block>.cpp -framework Accelerate
  ```
- Two non-obvious points an author WILL hit: (1) `-I ./blocks_local/<Block>` is
- REQUIRED so `#include "<Block>.hpp"` resolves; (2) the arma backend needs
+ Two non-obvious points an author WILL hit: (1) `-I ./.block_design_staging/<Block>`
+ is REQUIRED so `#include "<Block>.hpp"` resolves -- and it is the STAGING dir,
+ not `blocks_local/`, because the bundle only moves there after every check passes; (2) the arma backend needs
  `-DMCMC_ENABLE_ARMA_WRAPPERS -DARMA_DONT_USE_WRAPPER` + RcppArmadillo's include dir on `-I`
  + `-framework Accelerate` (macOS; on Linux use `-lblas -llapack` instead). The block header
  `#include "AI4BayesCode/block_sampler.hpp"`; the test `#include "<Block>.hpp"`.

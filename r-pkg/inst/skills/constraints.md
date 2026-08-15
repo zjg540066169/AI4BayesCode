@@ -18,8 +18,15 @@ description: |
 | `upper_bounded` | (-inf, U) | log(U - x) | No |
 | `interval` | (L, U) | logit | Tight intervals: Yes |
 | `ordered` | x1 < x2 < ... | log-increments | **Yes** (0.05) |
-| `cholesky_corr` | Cholesky of corr matrix | hyperspherical | **Yes** (0.05) |
+| `cholesky_corr` | Cholesky of corr matrix | tanh partial correlations | **Yes** (0.05) |
 | `unit_vector` | ||x||=1 | auxiliary Gaussian | No |
+| `positive_ordered` | 0 < x1 < x2 < ... | log first + log-increments | **Yes** (0.05) |
+| `offset_multiplier` | R (affine reparam) | offset + multiplier * u | No |
+| `sum_to_zero` | sum(x) = 0, K-1 free dims | orthogonal sum-to-zero basis | No |
+| `cholesky_factor_cov` | lower-triangular Cholesky of a cov matrix | log-diagonal + free off-diagonal | **Yes** (0.05) |
+| `corr_matrix` | K x K correlation matrix R = L L^T | composes `cholesky_corr` | **Yes** (0.05) |
+| `cov_matrix` | K x K SPD covariance matrix | `cholesky_corr` + log scales | **Yes** (0.05) |
+| `stochastic_column` | M x N, every COLUMN a simplex | per-column stick-breaking | **Yes** (0.05) |
 
 ## Usage pattern
 
@@ -44,7 +51,10 @@ For `real` blocks, omit `constrain`/`unconstrain` (identity transform).
 
 ## Step-size seeding
 
-For `simplex`, `ordered`, `cholesky_corr`, and tight `interval`:
+For `simplex`, `ordered`, `positive_ordered`, `cholesky_corr`, and tight
+`interval` -- and for the matrix-valued transforms built on top of them
+(`cholesky_factor_cov`, `corr_matrix`, `cov_matrix`, `stochastic_column`,
+which reuse the same stick-breaking / tanh-partial-correlation geometry):
 
 ```cpp
 cfg.initial_step_size   = 0.05;   // bypass FindReasonableEpsilon
@@ -56,8 +66,10 @@ region for tight constrained geometries, causing NaN step sizes.
 
 **Symptom:** chain stuck at initial value, step size is NaN or huge.
 
-For `real`, `positive`, `unit_vector`, `lower_bounded`, `upper_bounded`:
-leave `initial_step_size` at default 0 (auto path works fine).
+For `real`, `positive`, `unit_vector`, `lower_bounded`, `upper_bounded`,
+`offset_multiplier`, and `sum_to_zero`: leave `initial_step_size` at default 0
+(auto path works fine). The last two are affine / linear maps, so they do not
+introduce the tight curvature that defeats the epsilon heuristic.
 
 ## Special notes
 

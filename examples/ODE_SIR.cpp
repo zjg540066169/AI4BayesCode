@@ -65,7 +65,7 @@
 //     k3<-sir(y+h/2*k2,c(beta_t,gamma_t)); k4<-sir(y+h*k3,c(beta_t,gamma_t))
 //     y <- y + h/6*(k1+2*k2+2*k3+k4); I_true[k] <- y[2] }
 //   I_obs <- I_true * exp(sigma_t * rnorm(15))              # LogNormal noise
-//   # ---- Recommended: parallel chains + convergence diagnosis ----
+//   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(ODE_SIR, S0, I0, R0, t_obs, I_obs, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
@@ -88,7 +88,7 @@
 //       y = y + (k1+2*k2+2*k3+k4)/6.0; I_true[k] = y[1]
 //   rng = np.random.default_rng(1); I_obs = I_true * np.exp(sigma_t * rng.standard_normal(15))
 //   Mod = AI4BayesCode.example("ODE_SIR")
-//   # ---- Recommended: parallel chains + diagnosis ----
+//   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.ODE_SIR(S0, I0, R0, t_obs, I_obs, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
