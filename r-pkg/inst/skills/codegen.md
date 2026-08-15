@@ -1423,12 +1423,15 @@ run, and produce reasonable samples out of the box.
   CHOLESKY_CORR / COV_MATRIX / ... per slice). Do NOT concatenate real
   + log(pos) manually -- that bypasses the block's transform bookkeeping
   and fails validator Check #11.3.
-- **When the sampler uses `joint_nuts_block`**, emit a header comment at the top of the
-  generated `.cpp` stating which parameters are joint and why, and
-  emit in the R runner's comments the "requires validator Check #11"
-  note shown in `codegen_cpp.md Sec.4a`. Set `USES_JOINT_NUTS <- TRUE`
-  in the runner so R3's Bayesian-p-value threshold tightens from
-  (0.05, 0.95) to (0.02, 0.98).
+- **When the sampler uses `joint_nuts_block`**, emit a short
+  plain-language header comment at the top of the generated `.cpp`
+  stating which parameters are sampled jointly and why (the neutral
+  template in `codegen_cpp.md Sec.4a` -- NO validator jargon, NO
+  bug-surface talk, NO "verify Check #11" instructions in any
+  delivered file; that pressure is internal). Set
+  `USES_JOINT_NUTS <- TRUE` in the throwaway harness runner so R3's
+  Bayesian-p-value threshold tightens from (0.05, 0.95) to
+  (0.02, 0.98).
 - **Always emit `ai4bayescode_perf_hint(...)` at the end of the R
   runner** (see `codegen_r_runner.md Sec.9` template). The helper emits
   a friendly escape-hatch hint if per-sweep time is slow. Set

@@ -243,22 +243,29 @@ based on Sec.4a + Sec.4b purely from coupling / conjugacy / efficiency
 considerations -- independent of the label-switching question; prefer handling
 label switching downstream in the runner.
 
-### Warn the user when using joint_nuts_block
+### Note the joint sampling choice (plain language, no validator talk)
 
-Whenever the generated sampler uses `joint_nuts_block`, add a comment
-at the top of the `.cpp` stating which parameters are joint and why,
-and emit in the R runner's comments:
+Whenever the generated sampler uses `joint_nuts_block`, add a short
+comment at the top of the `.cpp` and in the delivered example stating
+WHICH parameters are sampled jointly and WHY, in words the
+non-programmer audience can read:
 
 ```
-# NOTE: this sampler uses joint_nuts_block for (<names>) due to tight
-# coupling in the likelihood. Joint NUTS has a higher semantic-bug
-# surface than modular NUTS; verify with validator Check #11
-# (skills/validator.md) before relying on results for production.
+# NOTE: <names> are sampled jointly with NUTS -- they are tightly
+# coupled through the likelihood, and joint updates mix better than
+# one-at-a-time updates.
 ```
 
-This tightens the validator burden (Check #11 explicitly audits the
-slicing, prior completeness, Jacobian, and write-back offsets in any
-joint block).
+Do NOT emit validator jargon into delivered files: no "semantic-bug
+surface", no "modular NUTS" comparisons, no "verify with Check #11"
+instructions. That risk assessment is aimed at YOU, the generating
+agent -- Check #11 (slicing, prior completeness, Jacobian, write-back
+offsets) is YOUR L2 burden and has already PASSED by the time any file
+is delivered; telling the user to go verify it is stale the moment
+they read it, and warning them their sampler is "higher bug surface"
+undermines the system's own default choice. The internal pressure
+stays internal: the joint-NUTS correctness checklist above + validator
+Check #11.
 
 ### Post-run performance hint (in the R runner)
 
