@@ -364,6 +364,22 @@ class), not separate classes.
 | 6. R / Python runner emission | ONLY after the printed L2 verdict PASSES | `skills/codegen_r_runner.md` (R backend) / `skills/codegen_python_runner.md` (Python backend; load whichever the chosen backend needs) |
 | 7. L3 runtime verification | after the runner compiles | `skills/validator.md` Layer 3 (R1 smoke -> R2 two-chain -> R3) |
 
+**Phase 3 -- the model confirmation -- is the single most important
+gate in this table. It is NOT optional, NOT skippable, NOT a
+courtesy.** Every later layer (L1 compile, L2 semantic checks, L3
+runtime validation) verifies the code against the AI'S UNDERSTANDING
+of the model. None of them can detect that the understanding itself is
+wrong. The confirmation display (formulas + DAG + parameter table,
+codegen.md Sec.3) is the ONLY point in the whole pipeline where the
+user can catch a misread likelihood, a wrong parametrization, or a
+misplaced prior BEFORE any code exists -- if the AI understood the
+model wrong, everything generated afterwards is wrong, no matter how
+cleanly it compiles, passes the checklist, and converges. Therefore:
+ALWAYS render the full confirmation (never ask "do you want to see
+it?"), re-render it after EVERY human-in-the-loop revision, and never
+move to Phase 4 without an explicit user sign-off on a summary the
+user has actually SEEN.
+
 The phase split above is deliberate: the L2 checklist must be loaded,
 run, and its verdict PRINTED before the Layer-3 runtime harness (which
 lives inside the runner file) is even written. Loading the runner
