@@ -1015,9 +1015,10 @@ alongside the production `.cpp`. The companion contains:
     functions (both versions come from the same LLM think; drift is
     negligible);
   - templated (`autodiff::var`-compatible) versions of the same math;
-  - a verify function `verify_<ClassName>_grad(...)` that samples
-    random theta points and compares hand-written grad vs autodiff grad
-    for each NUTS block.
+  - a self-contained `int main()` (backend-neutral -- no Rcpp, no
+    pybind) that samples random theta points, compares hand-written grad
+    vs autodiff grad for each NUTS block, prints a PASS/FAIL line per
+    block, and exits non-zero on failure.
 
 For blocks whose log-density uses `lgamma` / `digamma` / other
 special functions that `autodiff.hpp` doesn't overload, the AI falls
@@ -1509,7 +1510,7 @@ override IS a violation regardless of context.
 
 **Trigger:** any `vi_block` subclass (`mean_field_gaussian_vi_block`,
 `full_rank_gaussian_vi_block`, future VI blocks) referenced anywhere
-in the generated `.cpp`'s `composite_block::add_block(...)` calls.
+in the generated `.cpp`'s `composite_block::add_child(...)` calls.
 
 **Static review on the generated `.cpp`** -- verify all four
 sub-points:

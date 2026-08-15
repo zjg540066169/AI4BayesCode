@@ -10,8 +10,7 @@ cfg.dependencies     = {"y", "X"};
 cfg.exact_enumeration = false;
 cfg.n_mc_samples      = 16;
 cfg.optimizer         = vi_optimizer::raabbvi_config{};
-auto blk = std::make_shared<structured_categorical_vi_block>(cfg);
-impl_->add_child(std::move(blk));
+impl_->add_child(std::make_unique<structured_categorical_vi_block>(cfg));
 ```
 
 **What it does**: implements **Saul-Jordan 1996** "structured" (a.k.a.

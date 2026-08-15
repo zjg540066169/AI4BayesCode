@@ -12,8 +12,7 @@ cfg.dependencies     = {"y", "X"};
 cfg.exact_enumeration = false;                    // MC by default
 cfg.n_mc_samples      = 16;                       // gradient MC samples
 cfg.optimizer         = vi_optimizer::raabbvi_config{};
-auto blk = std::make_shared<mean_field_categorical_vi_block>(cfg);
-impl_->add_child(std::move(blk));
+impl_->add_child(std::make_unique<mean_field_categorical_vi_block>(cfg));
 ```
 
 **What it does**: maintains `q(z) = prod_i Categorical(z_i; phi_i)` over

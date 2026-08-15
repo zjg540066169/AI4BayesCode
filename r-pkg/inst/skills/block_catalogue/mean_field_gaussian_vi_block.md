@@ -10,8 +10,7 @@ cfg.unconstrain    = constraints::positive::unconstrain;     // omit for real
 cfg.log_density_grad = /* same lambda you'd write for nuts_block */;
 cfg.dependencies     = {"y", "X", ...};   // shared_data keys this block reads
 cfg.optimizer        = vi_optimizer::raabbvi_config{};  // default: RAABBVI
-auto blk = std::make_shared<mean_field_gaussian_vi_block>(cfg);
-impl_->add_block(blk);
+impl_->add_child(std::make_unique<mean_field_gaussian_vi_block>(cfg));
 ```
 
 **What it does**: maintains q(eta) = prod_i N(eta_i; mu_i, sigma_i^2) on the

@@ -1030,7 +1030,7 @@ impl_->data().register_stochastic_refresher(
 Thread it into every `impl_->predict_at(replaced, predict_rng_)` call.
 `predict_at` stays `const`.
 
-**3. In the Rcpp `predict_at(Rcpp::List)` method**, the `y_rep` key will
+**3. In the `predict_at(state_map)` method**, the `y_rep` key will
 already be in the returned `block_context` -- just convert to
 `Rcpp::NumericVector` and add it to the output list. No special case
 needed on the wrapper side.
@@ -1372,13 +1372,13 @@ verification code.
      - Copies the hand-written log-density functions verbatim from step 1
        (both come from the same LLM think, so drift is negligible)
      - Adds templated (autodiff::var-compatible) versions of the same math
-     - Adds a single `verify_MyModel_grad(...)` function with [[Rcpp::export]]
+     - Adds a self-contained `int main()` (NO Rcpp / pybind -- the file is
+       compiled and run directly, so the check works under any backend)
 
-  3. AI compiles + runs:
-       ai4bayescode_sourceCpp("tests_autodiff/verify_MyModel.cpp", ...)
-       r <- verify_MyModel_grad(synthetic_data, n_points = 5, seed = 12345)
-     Assert every `max_diff_<block> < 1e-8` for AD-differentiable
-     blocks, `< 1e-5` for FD-based blocks (see "Fallback" below).
+  3. AI compiles + runs it with a plain c++ invocation (see the template
+     below). The file asserts its own thresholds and exits non-zero on
+     failure: `max_diff_<block> < 1e-8` for AD-differentiable blocks,
+     `< 1e-5` for FD-based blocks (see "Fallback" below).
 
   4. On PASS:   AI deletes tests_autodiff/verify_MyModel.cpp AND
                 runs `rmdir tests_autodiff/` to remove the (now empty)
@@ -1470,12 +1470,17 @@ arma::vec fd_grad(const arma::vec& theta_unc, WrapFn wrap_fn,
 
 } // anonymous namespace
 
-// [[Rcpp::export]]
-Rcpp::List verify_<ClassName>_grad(/* data args... */,
-                                    int n_points = 5,
-                                    int seed     = 12345) {
-    // Build one block_context per NUTS block, populate with data + any
-    // other blocks' current values (fixed to reasonable defaults).
+// BACKEND-NEUTRAL: a self-contained int main(). No Rcpp, no pybind --
+// this file is compiled and RUN directly (see "At generation time" below),
+// so the check works identically whether the user's backend is R, Python,
+// or neither. It is throwaway: DELETE it on PASS.
+int main() {
+    const int n_points = 20;
+    const int seed     = 42;
+
+    // Build the synthetic data this model needs, then one block_context per
+    // NUTS block, populated with data + any other blocks' current values
+    // (fixed to reasonable defaults).
 
     std::mt19937_64 rng(static_cast<std::uint64_t>(seed));
     std::uniform_real_distribution<double> unif_real(-2.0, 2.0);
@@ -1520,11 +1525,20 @@ Rcpp::List verify_<ClassName>_grad(/* data args... */,
         }
     }
 
-    return Rcpp::List::create(
-        Rcpp::Named("max_diff_<block1>") = max_diff_<block1>,
-        // ...one entry per block...
-        Rcpp::Named("n_points") = n_points,
-        Rcpp::Named("seed")     = seed);
+    // Verdict in-file: AD-backed blocks < 1e-8, FD-backed blocks < 1e-5.
+    bool ok = true;
+    auto report = [&](const char* nm, double d, double tol) {
+        const bool pass = (d < tol);
+        ok = ok && pass;
+        std::printf("  [%s] %-28s max_diff = %.3e  (tol %.0e)\n",
+                    pass ? "PASS" : "FAIL", nm, d, tol);
+    };
+    report("<block1>",        max_diff_<block1>,        1e-8);
+    // ...one report() per block; use 1e-5 for FD-backed blocks...
+
+    std::printf("%s  (n_points = %d, seed = %d)\n",
+                ok ? "[CHECK 12 PASS]" : "[CHECK 12 FAIL]", n_points, seed);
+    return ok ? 0 : 1;
 }
 ```
 
@@ -1607,22 +1621,20 @@ edges. A non-finite lp or FD/AD mismatch = unstable there; rewrite (don't clamp)
 
 ### At generation time, the AI runs
 
-```r
-ai4bayescode_sourceCpp("tests_autodiff/verify_<ClassName>.cpp")
+Compile and run it directly -- no R, no Python, no package install:
 
-# Synthetic data matching the model's shape
-set.seed(1)
-y <- rnorm(100)   # adapt per model
+```bash
+c++ -std=c++17 -O2 -I<include> -I<include>/mcmclib \
+    -I<include>/mcmclib/BaseMatrixOps/include -I<include>/eigen \
+    -DMCMC_ENABLE_ARMA_WRAPPERS -DARMA_DONT_USE_WRAPPER \
+    tests_autodiff/verify_<ClassName>.cpp -o /tmp/verify_<ClassName> \
+    -framework Accelerate        # macOS; use -lblas -llapack on Linux
+/tmp/verify_<ClassName>
+```
 
-r <- verify_<ClassName>_grad(y, 20L, 42L)
-cat("Check #12 results:\n"); print(r)
-
-# Pass: AD-backed blocks < 1e-8; FD-backed blocks < 1e-5.
-ad_diffs <- r[grepl("^max_diff_.*(?<!_fd)$", names(r), perl = TRUE)]
-fd_diffs <- r[grepl("^max_diff_.*_fd$",   names(r))]
-if (any(unlist(ad_diffs) >= 1e-8) || any(unlist(fd_diffs) >= 1e-5)) {
-    stop("Check #12 FAILED -- see which max_diff exceeded threshold")
-}
+It prints one PASS/FAIL line per block and exits non-zero on failure, so
+the thresholds live in the file (AD-backed < 1e-8, FD-backed < 1e-5)
+rather than in a language-specific driver.
 cat("Check #12 PASS\n")
 # => AI deletes tests_autodiff/verify_<ClassName>.cpp at this point.
 ```
@@ -1798,50 +1810,46 @@ appears as a `set_current` key:
 ### Canonical template
 
 ```cpp
-void set_current(Rcpp::List params) {
+void set_current(const AI4BayesCode::state_map& params) {
     // ... handle non-data keys first (sigma, beta, gamma, tau2, ...) ...
 
-    const bool has_X = params.containsElementNamed("X");
-    const bool has_y = params.containsElementNamed("y");
+    // state_map is a name -> arma::vec map, so a design MATRIX arrives
+    // FLATTENED: recover N as X.n_elem / p (p is fixed by block state).
+    auto it_X = params.find("X");
+    auto it_y = params.find("y");
 
     // -------- X branch --------
-    if (has_X) {
-        Rcpp::NumericMatrix X_new =
-            Rcpp::as<Rcpp::NumericMatrix>(params["X"]);
-
-        if (static_cast<std::size_t>(X_new.ncol()) != p_) {
-            Rcpp::stop("set_current: X has %d columns but model was "
-                       "constructed with p = %zu. p is fixed by internal "
-                       "block state; reconstruct the wrapper to change p.",
-                       X_new.ncol(), p_);
+    if (it_X != params.end()) {
+        const arma::vec& X_new = it_X->second;
+        if (X_new.n_elem == 0 || X_new.n_elem % p_ != 0) {
+            throw std::runtime_error(
+                "set_current: X length " + std::to_string(X_new.n_elem) +
+                " is not a positive multiple of p = " + std::to_string(p_) +
+                ". p is fixed by internal block state; reconstruct the "
+                "wrapper to change p.");
         }
-        const std::size_t N_new = static_cast<std::size_t>(X_new.nrow());
+        const std::size_t N_new = X_new.n_elem / p_;
 
-        // Cross-check y if also in this call.
-        if (has_y) {
-            Rcpp::NumericVector y_new =
-                Rcpp::as<Rcpp::NumericVector>(params["y"]);
-            if (static_cast<std::size_t>(y_new.size()) != N_new) {
-                Rcpp::stop("set_current: X has %zu rows but y has length "
-                           "%d -- provide matching dimensions.",
-                           N_new, y_new.size());
-            }
+        // Cross-check y if it arrived in the same call.
+        if (it_y != params.end() && it_y->second.n_elem != N_new) {
+            throw std::runtime_error(
+                "set_current: X implies N = " + std::to_string(N_new) +
+                " but y has length " +
+                std::to_string(it_y->second.n_elem));
         }
 
-        arma::mat X_mat(X_new.begin(), X_new.nrow(), X_new.ncol(), false);
-        impl_->data().set("X", arma::vectorise(X_mat));
+        impl_->data().set("X", X_new);
 
         if (N_new != N_) {
-            // y_rep slot resize so refresher writes into the right-sized
-            // buffer. The refresher reads N dynamically from X.n_elem /
-            // p; do NOT capture N from constructor scope (validator
-            // scope).
+            // y_rep slot resize so the refresher writes into a
+            // right-sized buffer. The refresher reads N dynamically from
+            // X.n_elem / p; do NOT capture N from constructor scope.
             impl_->data().set("y_rep", arma::vec(N_new, arma::fill::zeros));
-            // History buffers from previous N are now incomparable.
+            // History buffers from the previous N are now incomparable.
             if (keep_history_ && impl_->history_size() > 1) {
-                Rcpp::warning("set_current: X row count changed from %zu "
-                              "to %zu -- clearing history buffers (mixed-N "
-                              "history is unsupported).", N_, N_new);
+                ai4b::warning(
+                    "set_current: X row count changed -- clearing history "
+                    "buffers (mixed-N history is unsupported).");
                 impl_->clear_history();
             }
         }
@@ -1849,11 +1857,12 @@ void set_current(Rcpp::List params) {
     }
 
     // -------- y branch --------
-    if (has_y) {
-        arma::vec y_new = Rcpp::as<arma::vec>(params["y"]);
+    if (it_y != params.end()) {
+        const arma::vec& y_new = it_y->second;
         if (y_new.n_elem != N_) {
-            Rcpp::stop("set_current: y length %zu != current N = %zu",
-                       y_new.n_elem, N_);
+            throw std::runtime_error(
+                "set_current: y length " + std::to_string(y_new.n_elem) +
+                " != current N = " + std::to_string(N_));
         }
         impl_->data().set("y", y_new);
     }
@@ -2079,8 +2088,10 @@ proactively; only honor an explicit ask.
 
 ### predict_at method
 
-Every generated class MUST include a `predict_at(Rcpp::List) const`
-method. The behavior depends on (1) whether the model has data
+Every generated class MUST include a backend-neutral
+`AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map&) const`
+method (NEVER `Rcpp::List` -- see "Return BACKEND-NEUTRAL types" above;
+all 43 shipped examples use this signature). The behavior depends on (1) whether the model has data
 inputs and (2) whether the class supports `keep_history`.
 
 **WARNING Critical #1 (data_input forwarding):** if the constructor calls
@@ -2174,42 +2185,46 @@ which uses the same two-branch pattern with `bart_child.predict()`
 and `bart_child.predict_history()` for history-mode):
 
 ```cpp
-Rcpp::List predict_at(Rcpp::List new_data) const {
+AI4BayesCode::history_map predict_at(
+        const AI4BayesCode::state_map& new_data) const {
     // ---- Parse `new_data` once (shared by both modes) -------------
-    bool has_X = new_data.size() > 0;
+    // state_map is name -> arma::vec, so a design MATRIX arrives
+    // FLATTENED (column-major, N_test * p).
+    bool has_X = false;
     arma::vec x_flat;
-    if (has_X) {
-        Rcpp::CharacterVector names = new_data.names();
-        for (R_xlen_t i = 0; i < new_data.size(); ++i) {
-            std::string key = Rcpp::as<std::string>(names[i]);
-            // Membership test: shared_data_t exposes data_input_keys() (a
-            // std::set of the declared data-input keys); there is NO
-            // is_data_input(key) member. Test membership with .count(key).
-            if (impl_->data().data_input_keys().count(key) == 0u) {
-                Rcpp::stop("<ClassName>::predict_at: unknown key '%s'. "
-                           "Valid keys: <list>.", key.c_str());
-            }
+    for (const auto& kv : new_data) {
+        // Membership test: shared_data_t exposes data_input_keys() (a
+        // std::set of the declared data-input keys); there is NO
+        // is_data_input(key) member. Test membership with .count(key).
+        if (impl_->data().data_input_keys().count(kv.first) == 0u) {
+            throw std::runtime_error(
+                "<ClassName>::predict_at: unknown key '" + kv.first +
+                "'. Valid keys: <list>.");
         }
-        Rcpp::NumericMatrix X_new =
-            Rcpp::as<Rcpp::NumericMatrix>(new_data["X"]);
-        if (X_new.ncol() != static_cast<int>(p_)) {
-            Rcpp::stop("<ClassName>::predict_at: X_new has %d cols, "
-                       "training X has %zu.", X_new.ncol(), p_);
-        }
-        x_flat = arma::vec(X_new.begin(), X_new.nrow() * X_new.ncol());
     }
+    auto it_X = new_data.find("X");
+    if (it_X != new_data.end()) {
+        x_flat = it_X->second;
+        if (x_flat.n_elem == 0 || x_flat.n_elem % p_ != 0) {
+            throw std::runtime_error(
+                "<ClassName>::predict_at: X must be vectorised "
+                "N_test * p (column-major); p = " + std::to_string(p_));
+        }
+        has_X = true;
+    }
+
+    AI4BayesCode::history_map out;
 
     if (!keep_history_) {
         // ---- Stateful mode: single predict at current draw --------
         block_context replaced;
         if (has_X) replaced["X"] = x_flat;
-        auto result = impl_->predict_at(replaced, predict_rng_);
-        Rcpp::List out;
+        block_context result = impl_->predict_at(replaced, predict_rng_);
         for (const auto& kv : result) {
-            Rcpp::NumericVector v(kv.second.n_elem);
-            for (std::size_t i = 0; i < kv.second.n_elem; ++i)
-                v[i] = kv.second[i];
-            out[kv.first] = v;
+            arma::mat m(1, kv.second.n_elem);
+            for (std::size_t j = 0; j < kv.second.n_elem; ++j)
+                m(0, j) = kv.second[j];
+            out.emplace(kv.first, std::move(m));
         }
         return out;
     }
@@ -2243,8 +2258,8 @@ Rcpp::List predict_at(Rcpp::List new_data) const {
         }
     }
 
-    Rcpp::List out;
-    out["y_rep"] = yrep_mat;
+    AI4BayesCode::history_map out;
+    out.emplace("y_rep", std::move(yrep_mat));
     return out;
 }
 ```
@@ -2275,11 +2290,12 @@ Use this template ONLY when the constructor has no
 `declare_data_input(...)` call:
 
 ```cpp
-Rcpp::List predict_at(Rcpp::List new_data) const {
+AI4BayesCode::history_map predict_at(
+        const AI4BayesCode::state_map& new_data) const {
     if (new_data.size() > 0) {
         Rcpp::stop("This model has no covariate inputs.");
     }
-    return Rcpp::List::create();
+    return AI4BayesCode::history_map();
 }
 ```
 

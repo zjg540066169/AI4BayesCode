@@ -10,8 +10,7 @@ cfg.unconstrain = constraints::positive::unconstrain;
 cfg.log_density_grad = /* same lambda as nuts_block / mean-field VI */;
 cfg.dependencies     = {"y", "X", ...};
 cfg.optimizer        = vi_optimizer::raabbvi_config{};
-auto blk = std::make_shared<full_rank_gaussian_vi_block>(cfg);
-impl_->add_block(blk);
+impl_->add_child(std::make_unique<full_rank_gaussian_vi_block>(cfg));
 ```
 
 **What it does**: maintains q(eta) = N(eta; mu, LL^T) on the unconstrained
