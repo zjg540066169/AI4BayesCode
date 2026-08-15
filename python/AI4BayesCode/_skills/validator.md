@@ -99,7 +99,7 @@ registry is the authoritative cross-reference.
 | 13 | RNG separation (MCMC vs predict_at) | Semantic | validator.md Sec.13 | any wrapper with a stochastic refresher |
 | 14 | Bijection sanity probes (round-trip + Jacobian non-singularity + fwd/rev inverse-pair) | Semantic | validator.md Sec.14 | `rjmcmc_block` with `templated_bijection_1d` (user-supplied custom bijection) |
 | 15 | Library parity test (Gibbs + specialized samplers) | Semantic | codegen_priors.md Sec.2c | any example using a `*_gibbs_block`, `*_slice_sampling_block`, `elliptical_slice_sampling_block`, `poisson_multinomial_aug_block`, or hand-written Gibbs in an rjmcmc hook |
-| 16 | Inline Gibbs-exception justification comment | Semantic | codegen_priors.md Sec.2d | any `*_gibbs_block` construction site or hand-written Gibbs in rjmcmc hook |
+| 16 | Inline plain-language sampling note at Gibbs sites | Semantic | codegen_priors.md Sec.2d | any `*_gibbs_block` construction site or hand-written Gibbs in rjmcmc hook |
 | 17 | No hand-written Gibbs samplers outside whitelist | Semantic | codegen_priors.md Sec.2e | always |
 | 18 | Dense metric justification + pilot scaling | Semantic | validator.md Sec.18 | joint block with `cfg.use_dense_metric = true` |
 | 19 | Vectorized gradient computation (BLAS compliance) | Semantic | validator.md Sec.19 | any `nuts_block` / `joint_nuts_block*` whose log-density reads a design matrix from ctx |
@@ -1300,8 +1300,13 @@ diagonal, escalate on diagnostics.
 1. **Inline justification comment** within 20 lines above the
    `cfg.use_dense_metric = true` line:
    ```
-   // JUSTIFICATION (Check #18): <reason> -- <specific evidence>.
+   // Sampling note: <plain reason this model needs the richer metric>.
    ```
+   The delivered comment is plain language only (e.g. "// Sampling note:
+   the group mean and the raw effects are strongly correlated, so the
+   sampler uses a full covariance metric."). The check number and the
+   measured evidence (R-hat / ess_ratio before and after, at which
+   budget) go in the L2 verdict table, never in the shipped file.
    Acceptable reasons:
    - **Reparameterization explored and ruled out** (preferred fix
      for anisotropy; see `codegen_cpp.md Sec.4a` "Dense metric: opt-in
@@ -1401,8 +1406,10 @@ or the full joint pattern in `codegen_cpp.md Sec.6.1` "Joint case".
 
 2. **Inline justification comment** within 5 lines above the loop:
    ```
-   // JUSTIFICATION (Check #19): <reason>.
+   // Sampling note: <plain reason the scalar loop is kept>.
    ```
+   Plain language only -- no check number in the delivered file; the
+   Check #19 exception is recorded in the L2 verdict table.
    Acceptable reasons:
    - Per-coefficient slicing in an `rjmcmc_block` `continuous_update`
      hook (per-`j` `xtx_j` / `xtr_j` accumulation); but the hook

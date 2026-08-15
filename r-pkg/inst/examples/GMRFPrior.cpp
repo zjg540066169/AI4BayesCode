@@ -4,7 +4,7 @@
 // ============================================================================
 //  GMRFPrior.cpp
 //
-//  Pure-prior 2D ICAR sampler — first specialised-block demo for the
+//  Pure-prior 2D ICAR sampler -- first specialised-block demo for the
 //  Block 2 v1.2 ship. Wires gmrf_precision_block (Rue 2001 sparse-
 //  Cholesky direct sampling) through composite_block + a DUAL frontend
 //  (RCPP_MODULE for R, PYBIND11_MODULE for Python).
@@ -19,27 +19,27 @@
 //      R[i, j] = -1   if i ~ j       (adjacent in the lattice)
 //      R[i, j] =  0   otherwise
 //  R has a 1-dim null space spanned by the constant vector 1, hence
-//  "intrinsic" GMRF (Rue & Held 2005 §3.3.2). Identifiability is
+//  "intrinsic" GMRF (Rue & Held 2005 Sec.3.3.2). Identifiability is
 //  restored by the sum-to-zero constraint, enforced inside
-//  gmrf_precision_block via Rue 2001 §3.1.3 (simplified single-
+//  gmrf_precision_block via Rue 2001 Sec.3.1.3 (simplified single-
 //  constraint case).
 //
 //  Parameters
 //  ----------
-//      x        latent field (length L_x * L_y) — sampled by
+//      x        latent field (length L_x * L_y) -- sampled by
 //               gmrf_precision_block
-//      kappa    precision scale (scalar, > 0) — fixed at construction
+//      kappa    precision scale (scalar, > 0) -- fixed at construction
 //               by default; can be overwritten via set_current("kappa")
 //
-//  No observation likelihood — pure prior demo. predict_at returns an
-//  empty history_map. Documented exception per system_design.md §5.
+//  No observation likelihood -- pure prior demo. predict_at returns an
+//  empty history_map. Documented exception per system_design.md Sec.5.
 //
-//  JUSTIFICATION (Check #16): Fixed-dim continuous Gaussian with sparse
-//  precision (system_design.md §11.1 class 1, specialised efficiency
+//  Sampling note: Fixed-dim continuous Gaussian with sparse
+//  precision (system_design.md Sec.11.1 class 1, specialised efficiency
 //  path). gmrf_precision_block is the library-blessed sparse-Cholesky
-//  direct sampler (Rue 2001 §2 + §3.1.2 + §3.1.3 simplified). Check
+//  direct sampler (Rue 2001 Sec.2 + Sec.3.1.2 + Sec.3.1.3 simplified). Check
 //  #15 parity tests:
-//    tests/test_gmrf_precision_block.cpp — 5 sub-tests covering
+//    tests/test_gmrf_precision_block.cpp -- 5 sub-tests covering
 //      diagonal Q sanity, AR(1) Cov vs dense inverse, b ≠ 0 mean shift,
 //      IGMRF sum-to-zero (exact constraint + projected-Cov match),
 //      two-init R-hat across 4 chains on n=50.
@@ -49,7 +49,7 @@
 //   library(AI4BayesCode)
 //   ai4bayescode_example("GMRFPrior")
 //   # Pure-prior 2D ICAR: x ~ N(0, (kappa R)^{-1}) with sum(x)=0 on a
-//   # 4x4 lattice. No data — x is drawn directly (Rue 2001 sparse-Cholesky),
+//   # 4x4 lattice. No data -- x is drawn directly (Rue 2001 sparse-Cholesky),
 //   # so each step is an exact i.i.d. prior draw (no observation likelihood).
 //   # ---- Recommended: parallel chains + convergence diagnosis ----
 //   run <- ai4bayescode_run_chains(
@@ -69,7 +69,7 @@
 // @example:python
 //   import numpy as np, AI4BayesCode
 //   # Pure-prior 2D ICAR: x ~ N(0, (kappa R)^{-1}) with sum(x)=0 on a 4x4
-//   # lattice. No data — x is an exact sparse-Cholesky prior draw each step.
+//   # lattice. No data -- x is an exact sparse-Cholesky prior draw each step.
 //   Mod = AI4BayesCode.example("GMRFPrior")
 //   # ---- Recommended: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
@@ -194,7 +194,7 @@ public:
             const double k = ctx.at("kappa")[0];
             return k * R;
         };
-        // b_fn left unset — pure prior, zero mean.
+        // b_fn left unset -- pure prior, zero mean.
         cfg.sum_to_zero = true;
         // ridge_epsilon auto-set to 1e-8 in block constructor.
         impl_->add_child(std::make_unique<gmrf_precision_block>(std::move(cfg)));
@@ -245,9 +245,9 @@ public:
         }
     }
 
-    // GMRFPrior has no observation model — no y_rep, no data inputs.
+    // GMRFPrior has no observation model -- no y_rep, no data inputs.
     // predict_at always returns an empty history_map (documented exception
-    // per system_design.md §5). Non-empty input is rejected.
+    // per system_design.md Sec.5). Non-empty input is rejected.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
         if (!new_data.empty()) {
@@ -280,8 +280,7 @@ RCPP_MODULE(GMRFPrior_module) {
             "scale, > 0), periodic (bool, wrap edges), eight_nn (bool, "
             "include diagonals), rng_seed, keep_history. Pure-prior 2D "
             "ICAR via gmrf_precision_block sparse-Cholesky direct "
-            "sampling (Rue 2001). Sum-to-zero constraint enforced. "
-            "Check #15 parity tests under tests/test_gmrf_precision_block.cpp.")
+            "sampling (Rue 2001). Sum-to-zero constraint enforced.")
         .method("step", (void (GMRFPrior::*)())    &GMRFPrior::step, "Run one sweep.")
         .method("step", (void (GMRFPrior::*)(int)) &GMRFPrior::step, "Run n sweeps.")
         .method("get_current", &GMRFPrior::get_current)
@@ -327,7 +326,7 @@ PYBIND11_MODULE(GMRFPrior, m) {
 //  Active only when NEITHER binding macro is defined, so this same file is a
 //  valid dual-module (R/Python) source AND a runnable standalone demo.
 //
-//  GMRFPrior is a PURE-PRIOR sampler — there is no observation likelihood, so
+//  GMRFPrior is a PURE-PRIOR sampler -- there is no observation likelihood, so
 //  "recovery" means: the draws must reproduce the prior's KNOWN moments.
 //
 //  For the ICAR prior  x ~ N(0, (κ R)^{-1})  with the sum-to-zero constraint,
@@ -338,7 +337,7 @@ PYBIND11_MODULE(GMRFPrior, m) {
 //        Cov(x) = (1/κ) · R^+ ,
 //
 //  where R^+ is the pseudo-inverse of R restricted to range(R) = 1^⊥
-//  (Rue & Held 2005 §3.3.2 / §3.4.2). We check three things against this
+//  (Rue & Held 2005 Sec.3.3.2 / Sec.3.4.2). We check three things against this
 //  closed form:
 //    (1) every draw is exactly sum-to-zero (constraint honoured);
 //    (2) the empirical mean is ≈ 0;

@@ -158,9 +158,9 @@ public:
     // and silently underestimate posterior variance. Reject upfront.
     bool supports_freeze() const noexcept override { return false; }
     std::string freeze_not_supported_reason() const override {
-        return "freezing VI blocks not supported "
-               "(breaks q-sample stream invariant); freeze the entire "
-               "VI wrapper at composite level instead";
+        return "freezing VI blocks not supported: a frozen VI block "
+               "would hand the same single draw to every other sampler, "
+               "biasing their results.";
     }
 
     // ---- VI-specific public interface ------------------------------------

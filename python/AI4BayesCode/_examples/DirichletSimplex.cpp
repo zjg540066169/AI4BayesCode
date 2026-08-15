@@ -5,7 +5,7 @@
 //  DirichletSimplex_v2.cpp
 //
 //  JOINT-NUTS rewrite of DirichletSimplex.cpp. Same model, same priors,
-//  same posterior — but theta is sampled by ONE joint_nuts_block with a
+//  same posterior -- but theta is sampled by ONE joint_nuts_block with a
 //  single SIMPLEX sub-param instead of a single nuts_block with
 //  constraints::simplex::wrap. This is the trivial conversion case: only one
 //  continuous parameter block, so the joint block holds exactly one sub-param.

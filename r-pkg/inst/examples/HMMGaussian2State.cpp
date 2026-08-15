@@ -25,11 +25,10 @@
 //    - sigma   : nuts_block with Jeffreys prior
 //    - z       : hmm_block (this file)
 //
-//  JUSTIFICATION (Check #16): Exception 1 from codegen.md §2b — z is
+//  Sampling note: Exception 1 from codegen.md Sec.2b -- z is
 //  DISCRETE (state sequence over a finite alphabet); NUTS cannot target
 //  discrete measures. hmm_block is the library-blessed forward-backward
-//  sampler. Check #15 parity test at
-//    tests_autodiff/test_hmm_block.cpp
+//  sampler. Its parity test
 //  verifies FFBS marginals against analytical Baum-Welch smoothing to
 //  max_abs_err < 0.2% (10k draws).
 // ============================================================================
@@ -342,8 +341,7 @@ RCPP_MODULE(HMMGaussian2State_module) {
             "transition row-major), pi (length 2 initial), mu (length 2 "
             "emission means), sigma (common emission sd), seed, "
             "keep_history. Runs forward-filter backward-sample on z "
-            "via hmm_block (Check #15 parity test at "
-            "tests_autodiff/test_hmm_block.cpp).")
+            "via hmm_block.")
         .method("step", (void (HMMGaussian2State::*)())    &HMMGaussian2State::step, "Run one sweep.")
         .method("step", (void (HMMGaussian2State::*)(int)) &HMMGaussian2State::step, "Run n sweeps.")
         .method("get_current", &HMMGaussian2State::get_current)
@@ -390,7 +388,7 @@ PYBIND11_MODULE(HMMGaussian2State, m) {
 //  Simulates a 2-state Gaussian HMM from a KNOWN transition matrix, initial
 //  distribution, emission means and sd, AND a known latent state path z*.
 //  Then fits the hmm_block (A / pi / mu / sigma FIXED at truth, exactly as the
-//  model intends — only z is sampled) and checks that the per-timestep
+//  model intends -- only z is sampled) and checks that the per-timestep
 //  posterior-mode state path recovers z*.
 //
 //  State is read through the FULL CONTRACT get_current() (key "z").

@@ -17,7 +17,7 @@
 //  β | counts as a stick-breaking conditional with a_fn = 1 + Σ_j n_jt
 //  and b_fn = γ + Σ_j (Σ_{s>t} n_js). This is NOT the rigorous HDP
 //  posterior. The full HDP requires per-(j, t) auxiliary "table counts"
-//  m_jt sampled from the Antoniak distribution (Teh et al. 2006 §5.1),
+//  m_jt sampled from the Antoniak distribution (Teh et al. 2006 Sec.5.1),
 //  with β | m_·1, ..., m_·T ~ Dirichlet(γ/T + m_·1, ..., γ/T + m_·T).
 //
 //  For a v0 demonstration of the COMPOSITION PATTERN, the heuristic
@@ -59,12 +59,12 @@
 //  (K_active, sorted occupied-atom proportions / mu / beta order statistics)
 //  converge as-is (2-chain rank-R-hat ~1.0). The two concentrations gamma_0 and
 //  alpha are FIXED constants in this v0 model (not sampled), hence trivially
-//  label-invariant — there is NO concentration-mixing problem to fix (unlike the
+//  label-invariant -- there is NO concentration-mixing problem to fix (unlike the
 //  DP example where alpha is sampled by NUTS on the Antoniak (k,n) marginal).
 //
-//  THIS SAMPLER STAYS RAW — no in-sampler canonicalizer. The raw per-slot
+//  THIS SAMPLER STAYS RAW -- no in-sampler canonicalizer. The raw per-slot
 //  beta[t] / mu[t] / pi_{g,t} are exchangeable across the T atoms and not
-//  identified, so their raw R-hat looks high (measured ~1.83 on raw beta[t]) —
+//  identified, so their raw R-hat looks high (measured ~1.83 on raw beta[t]) --
 //  that is benign label switching, not a mixing failure. The label-invariant
 //  summaries (K_active, sorted occupied-atom proportions / mu / beta order
 //  statistics) converge as-is (~1.0). Resolve labelling POST-MCMC via
@@ -96,7 +96,7 @@
 //  - counts_jt length G * T, group-major row-major
 //  - counts_t  length T
 //
-//  JUSTIFICATION (Check #16):
+//  Sampling note:
 //  - z         categorical_gibbs_block. Class-1 conditional independence
 //              given (π_j, μ, Σ).
 //  - π_g       dirichlet_gibbs_block. Conjugate on the simplex.
@@ -106,7 +106,6 @@
 //
 //  No hand-written log-density (no NUTS); all 3 + G sampling children are
 //  conjugate Gibbs / MH-deterministic.
-//  Check #12 vacuous.
 //
 // @example:R
 //   library(AI4BayesCode)
@@ -419,7 +418,7 @@ public:
         impl_->data().declare_invalidates("z", {"counts_jt", "counts_t"});
 
         // ---- Predict DAG --------------------------------------------
-        // (No declare_data_input here — y is an observed terminal,
+        // (No declare_data_input here -- y is an observed terminal,
         // not a replaceable covariate. The y_rep refresher reads
         // pi/mu/sigma/z, NOT y.)
         std::vector<std::string> edges_to_yrep =
@@ -670,7 +669,7 @@ public:
     // Backend-neutral set_current. Overwrite z, alpha, gamma_0, or y from a
     // state_map. A "y" entry is a vectorised (column-major from numpy/R's
     // matrix caster) length-(N*d) flat vector; here it represents the N x d
-    // data matrix and is read row-major (y[i*d + j]) — callers pass the same
+    // data matrix and is read row-major (y[i*d + j]) -- callers pass the same
     // cluster-major flattening get_current uses, OR a flat vector built from
     // the original N x d matrix row-major. (set_current("y") is an internal
     // refit hook; N and d are fixed at construction.)
@@ -678,7 +677,7 @@ public:
         auto it_y = params.find("y");
         if (it_y != params.end()) {
             const arma::vec& y_new = it_y->second;
-            // STRICT-N legitimate (Check #21): z allocation length-N
+            // STRICT-N legitimate: z allocation length-N
             // + per-group sufficient stats; HDP also fixes group count.
             if (y_new.n_elem != N_ * d_)
                 ai4b::stop("set_current: HDPGaussianMixture fixes N and d at "

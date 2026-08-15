@@ -4,7 +4,7 @@
 //  Copyright (C) 2026 AI4BayesCode.
 //  Licensed under GPL-3.0-or-later (uses genbart_block.hpp, which is GPL-2.0-or-later).
 //
-//  REFERENCE TEMPLATE for Linero 2022 §4.2 heteroscedastic BART. This
+//  REFERENCE TEMPLATE for Linero 2022 Sec.4.2 heteroscedastic BART. This
 //  is the marquee example where RJMCMC beats conjugate backfitting
 //  (paper reports RMSE 3.25 vs 5.71 for rbart vs 6.67 for bartMachine).
 //
@@ -19,7 +19,7 @@
 //
 //  Both the mean AND the variance are modelled jointly via r(x) -- the
 //  variance scales with the mean through the (g = exp, V = identity)
-//  choice of Linero 2022 eqs §4.2. This is a simple mean-variance
+//  choice of Linero 2022 eqs Sec.4.2. This is a simple mean-variance
 //  relationship that does remarkably well on skewed / heavy-tail data
 //  that breaks ordinary BART.
 //
@@ -162,7 +162,7 @@ public:
         // y > 0 (only the mean m = exp(r) > 0, which is automatic).
         // Negative Y is mathematically valid but typically indicates
         // model misspecification for the (g=exp, V=identity) link;
-        // most real datasets in Linero 2022 §4.2 are positive by
+        // most real datasets in Linero 2022 Sec.4.2 are positive by
         // construction (rates, counts-as-continuous, etc.).
         if (!(phi_init > 0.0)) {
             ai4b::stop("GBartHeteroscedastic: phi_init must be positive");
@@ -308,14 +308,14 @@ public:
     //       construction-time dimensions.
     //   r : SILENTLY IGNORED -- derived from the trees (no unique inverse).
     //       Use set_tree(...) to restore a forest.
-    // Unknown keys are silently ignored per system_design.md §7 so that
+    // Unknown keys are silently ignored per system_design.md Sec.7 so that
     // set_current(get_current()) round-trips cleanly.
     void set_current(const AI4BayesCode::state_map& params) {
         auto* blk = dynamic_cast<genbart_block*>(&impl_->child(0));
 
         // r is read-only output; silently ignored on input so that
         // round-trip set_current(get_current()) is supported per
-        // system_design.md §7 / §16. Use set_tree() to restore the forest.
+        // system_design.md Sec.7 / Sec.16. Use set_tree() to restore the forest.
 
         const auto it_X = params.find("X");
         const auto it_y = params.find("y");
@@ -611,7 +611,7 @@ PYBIND11_MODULE(GBartHeteroscedastic, m) {
 #endif
 
 // ============================================================================
-//  Standalone demo: simulate Linero 2022 §4.2 heteroscedastic data, fit,
+//  Standalone demo: simulate Linero 2022 Sec.4.2 heteroscedastic data, fit,
 //  print finite recovery of the dispersion phi and the fitted mean.
 // ============================================================================
 

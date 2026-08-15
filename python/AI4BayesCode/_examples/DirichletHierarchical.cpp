@@ -5,7 +5,7 @@
 //  DirichletHierarchical_joint.cpp
 //
 //  JOINT-NUTS rewrite of DirichletHierarchical.cpp. Same model, same priors,
-//  same posterior — but (s, kappa, theta) are sampled by ONE joint_nuts_block
+//  same posterior -- but (s, kappa, theta) are sampled by ONE joint_nuts_block
 //  instead of three separate single nuts_blocks updated Gibbs-style. This
 //  collapses the three tightly-coupled parameters (s and kappa share a
 //  kappa*s_i argument to lgamma, and s and theta share the Dirichlet prior
@@ -37,7 +37,7 @@
 //    - The theta conditional also contains (theta/P-1)*sum_i log s_i (already
 //      in the s block sum), so theta contributes ONLY its normalizer and prior.
 //
-//  Gradients (natural scale, no Jacobians — joint_nuts_block adds them):
+//  Gradients (natural scale, no Jacobians -- joint_nuts_block adds them):
 //    d/d s_i   = -K*kappa*psi(kappa*s_i) + kappa*L_i + (theta/P-1)/s_i
 //    d/d kappa = K*psi(kappa) - K*sum_i s_i*psi(kappa*s_i) + sum_i s_i*L_i - 1
 //    d/d theta = psi(theta) - psi(theta/P) + (1/P)*sum_i log s_i
@@ -339,8 +339,6 @@ public:
         // (Same stochastic refresher as DirichletHierarchical.cpp.)
         impl_->data().set("y_rep", arma::vec(static_cast<arma::uword>(K),
                                               arma::fill::zeros));
-        // Check #17 whitelist: std::gamma_distribution used inside
-        // register_stochastic_refresher (one of the three whitelisted contexts).
         impl_->data().register_stochastic_refresher(
             "y_rep",
             [](const AI4BayesCode::shared_data_t& d,
@@ -384,7 +382,7 @@ public:
             // Simplex + two positive params at very different scales; diagonal
             // metric adapts independently per dimension.
             cfg.use_diagonal_metric = true;
-            // Give the joint block more warmup runway — adapting over (P+2)
+            // Give the joint block more warmup runway -- adapting over (P+2)
             // dimensions with heterogeneous scales (simplex vs. positive)
             // needs more trajectory exploration than a single-param block.
             cfg.n_warmup_first_call = 800;
@@ -469,7 +467,7 @@ public:
 
         // History mode: s and kappa are sub-outputs of the joint block (keyed
         // by sub-param name in get_history()). Compute y_rep manually per
-        // draw (cf. IRT1PL_joint.cpp — composite predict_at rejects sub-param
+        // draw (cf. IRT1PL_joint.cpp -- composite predict_at rejects sub-param
         // keys as replaced context for joint sub-outputs).
         AI4BayesCode::history_map hist = impl_->get_history();
         const arma::mat& s_hist     = hist.at("s");      // n_draws x P

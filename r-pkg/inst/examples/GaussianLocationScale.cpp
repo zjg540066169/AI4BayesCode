@@ -5,7 +5,7 @@
 //  GaussianLocationScale.cpp
 //
 //  JOINT-NUTS rewrite of GaussianLocationScale.cpp. Same model, same priors,
-//  same posterior — but mu and sigma are sampled by ONE joint_nuts_block
+//  same posterior -- but mu and sigma are sampled by ONE joint_nuts_block
 //  instead of two separate single nuts_blocks updated Gibbs-style. This is the
 //  "collapse a bunch of single nuts_blocks into one joint_nuts_block" refactor.
 //
@@ -184,7 +184,7 @@ public:
         impl_->data().set("sigma", arma::vec{sigma_init});
 
         // The joint block's dependencies are keyed under the JOINT BLOCK NAME
-        // ("mu_sigma_joint"), NOT the sub-param names — the composite builds the
+        // ("mu_sigma_joint"), NOT the sub-param names -- the composite builds the
         // block's context by looking up dependencies under the block name (cf.
         // IRT1PL_joint). It is the union of what mu and sigma each read from
         // data(): just y (mu, sigma come from the block's own concatenated draw).

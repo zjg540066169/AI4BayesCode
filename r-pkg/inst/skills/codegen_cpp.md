@@ -209,10 +209,14 @@ separable / scalar parameter (the low-priority fallback).
 
 Document in the header comment:
 
-- If shipping joint (the default), write:
-  `// JOINT JUSTIFICATION: <coupling argument>; subset = {<names>}; metric = <identity/dense>; log-posterior terms verified: <list>.`
+- If shipping joint (the default), write the plain-language NOTE defined
+  in Sec.4a: `// NOTE: <names> are sampled jointly with NUTS -- they are
+  tightly coupled through the likelihood, and joint updates mix better
+  than one-at-a-time updates.` (The subset / metric / verified-terms
+  bookkeeping goes in the L2 verdict table, not the delivered file.)
 - If shipping a standalone modular `nuts_block` (fallback), write:
-  `// MODULAR NOTE: <param> is genuinely scalar / separable because <reason>.`
+  `// NOTE: <param> is sampled on its own -- it is separable from the
+  rest because <plain reason>.`
 
 ### Label switching: prefer post-hoc; in-sampler constraints are a discouraged fallback
 
@@ -357,7 +361,7 @@ mixed cleanly).
      `block_catalogue/index.md`.
 
    Enabling triggers Check #18, which requires:
-   - inline `// JUSTIFICATION (Check #18): ...` comment
+   - inline plain-language `// Sampling note: ...` comment (no check number)
    - `dense_metric_pilot_iters >= max(2000, 100 * d)`
    - `n_warmup_first_call >= pilot_iters + 1000`
    - `dense_metric_adapt_iters >= 2000`
@@ -560,24 +564,24 @@ double joint_theta_b_log_density(const arma::vec& theta_cat,
     const std::size_t N = /* ... from ctx or captured ... */;
     const std::size_t J = /* ... from ctx or captured ... */;
     if (theta_cat.n_elem != N + J) {
-        return -std::numeric_limits<double>::infinity();  // Check #11.6
+        return -std::numeric_limits<double>::infinity();  // size guard
     }
-    auto theta = theta_cat.subvec(0,     N - 1);        // Check #11.1 slice align
+    auto theta = theta_cat.subvec(0,     N - 1);        // layout: [theta (N); b (J)]
     auto b     = theta_cat.subvec(N, N + J - 1);
 
     double lp = 0.0;
     if (grad) { grad->set_size(N + J); grad->zeros(); }
 
-    // (1) every sub-param's prior contributes -- Check #11.2
-    // (2) all entries on REAL scale (no mixed scales) -- Check #11.3
-    // (3) identity transform -> no Jacobian -- Check #11.4
+    // (1) every sub-param's prior contributes
+    // (2) all entries on REAL scale (no mixed scales)
+    // (3) identity transform -> no Jacobian
     // (4) likelihood: write d/dtheta_i to grad[i],
-    //     write d/db_j to grad[N + j]                  // Check #11.1
+    //     write d/db_j to grad[N + j]
     // (5) compute likelihood and gradient via BLAS per Sec.6.1; the slice
     //     convention in (4) applies to where the gradient is ASSIGNED,
     //     NOT to how it's computed. See Sec.6.1 "Joint case" for the
     //     canonical (regular BLAS slice + irregular gather/scatter)
-    //     pattern. Validator Check #19.
+    //     pattern.
 
     if (!std::isfinite(lp)) return -std::numeric_limits<double>::infinity();
     return lp;
@@ -793,7 +797,7 @@ linear model with `g_idx[n]  in  {0..G-1}` mapping observation n to
 its group, `theta_cat = [alpha (1); beta (p); u (G)]`:
 
 ```cpp
-// Slice the concatenated vector -- Check #11.1 layout.
+// Slice the concatenated vector -- must match the sub_params order.
 const double alpha = theta_cat[0];
 auto beta = theta_cat.subvec(1,         1 + p - 1);
 auto u    = theta_cat.subvec(1 + p, 1 + p + G - 1);
@@ -1831,7 +1835,7 @@ void set_current(Rcpp::List params) {
             // y_rep slot resize so refresher writes into the right-sized
             // buffer. The refresher reads N dynamically from X.n_elem /
             // p; do NOT capture N from constructor scope (validator
-            // Check #6 / #19).
+            // scope).
             impl_->data().set("y_rep", arma::vec(N_new, arma::fill::zeros));
             // History buffers from previous N are now incomparable.
             if (keep_history_ && impl_->history_size() > 1) {
@@ -2154,7 +2158,7 @@ impl_->data().declare_predict_edges("X",     {"y_rep"});     // X -> y_rep (NEW)
 impl_->data().declare_predict_edges("beta",  {"y_rep"});     // beta -> y_rep
 impl_->data().declare_predict_edges("sigma", {"y_rep"});     // sigma -> y_rep
 // Refresher reads d.get("X"), d.get("beta"), d.get("sigma") -- exactly
-// the three declared parents. Check #6 condition (C) satisfied.
+// the three declared parents.
 ```
 
 **Also correct** (X feeds an intermediate non-data-input node, BART-

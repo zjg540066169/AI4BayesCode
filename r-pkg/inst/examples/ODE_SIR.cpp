@@ -22,7 +22,7 @@
 //      sigma ~ Jeffreys             =>  -log(sigma)
 //
 //  JOINT natural-scale log-density over x = [beta, gamma, sigma] (each model
-//  term exactly ONCE — no double-counting):
+//  term exactly ONCE -- no double-counting):
 //
 //    log p(beta, gamma, sigma | data) =
 //        -N * log(sigma) - 0.5 * SSE / sigma^2        (LogNormal likelihood)
@@ -141,7 +141,7 @@ namespace ode         = AI4BayesCode::ode;
 
 namespace {
 
-// SIR RHS — identical to ODE_SIR.cpp.
+// SIR RHS -- identical to ODE_SIR.cpp.
 inline arma::vec sir_rhs(double /*t*/, const arma::vec& y,
                          const arma::vec& theta_ode) {
     const double beta  = theta_ode[0];
@@ -340,7 +340,7 @@ public:
         // ---- Dependency DAG -----------------------------------------------
         // The joint block's dependencies are keyed under the JOINT BLOCK NAME
         // ("theta_sigma_joint"). They are the union of what the original two
-        // blocks read from data() — only the true external data() inputs:
+        // blocks read from data() -- only the true external data() inputs:
         //   theta block read: y0, t_obs, I_obs  (sigma came from ctx/block state)
         //   sigma block read: y0, t_obs, I_obs  (theta came from ctx/block state)
         // Together: {y0, t_obs, I_obs}. theta and sigma now come from the
@@ -706,7 +706,7 @@ int main() {
     const double sigma_err = std::abs(sigma_bar - sigma_true);
 
     // Naive baseline: prior mean for the half-Normal(0,1) on beta/gamma is
-    // sqrt(2/pi) ~ 0.7979 — the no-data guess. The posterior must beat it.
+    // sqrt(2/pi) ~ 0.7979 -- the no-data guess. The posterior must beat it.
     const double prior_mean = std::sqrt(2.0 / M_PI);
     const double naive_beta_err  = std::abs(prior_mean - beta_true);
     const double naive_gamma_err = std::abs(prior_mean - gamma_true);

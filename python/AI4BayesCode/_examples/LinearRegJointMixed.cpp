@@ -6,7 +6,7 @@
 //
 //  Linear regression with a joint NUTS block over MIXED REAL + POSITIVE
 //  slices: (alpha, beta) are REAL and sigma is POSITIVE, all sampled by ONE
-//  unified joint_nuts_block (no separate "_mixed" block class is needed —
+//  unified joint_nuts_block (no separate "_mixed" block class is needed --
 //  joint_nuts_block handles per-slice constraints directly).
 //
 //  Model
@@ -358,7 +358,7 @@ public:
             impl_->data().set("beta",  beta_cur);
             impl_->data().set("sigma", sigma_cur);
         }
-        // Dynamic-N canonical pattern (codegen_cpp.md §7a).
+        // Dynamic-N canonical pattern (codegen_cpp.md Sec.7a).
         auto it_X = params.find("X");
         auto it_y = params.find("y");
         if (it_X != params.end()) {
@@ -423,7 +423,7 @@ public:
         }
 
         // History mode: alpha / beta / sigma are sub-outputs of the
-        // "abs_joint" joint_nuts_block — NOT block names. Use
+        // "abs_joint" joint_nuts_block -- NOT block names. Use
         // manual-compute pattern (cf. SpikeSlabRJMCMC.cpp).
         AI4BayesCode::history_map hist = impl_->get_history();
         const arma::mat& alpha_hist = hist.at("alpha");  // n_draws x 1

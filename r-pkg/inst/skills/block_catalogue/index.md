@@ -139,8 +139,9 @@ NUTS-wasteful efficiency profile):**
 2. The `params_fn` you write must match a textbook pattern above;
    if it has any conditional logic (e.g., `if gamma[j] == 1`) or
    active-subset indexing, you ALSO need a per-usage parity test.
-3. Inline justification comment (Check #16) required at the block
-   construction site, stating which Exception applies.
+3. A plain-language "// Sampling note: <one line>" comment required at
+   the block construction site. Which Exception applies is recorded in
+   the L2 verdict table, not in the delivered file.
 
 Prefer `nuts_block` with `constraints::interval::wrap(0, 1)` when:
 - The conditional is NOT exactly Beta (e.g. p enters a logistic link,

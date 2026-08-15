@@ -15,7 +15,7 @@
 //      sigma^2          ~ InverseGamma(nu/2, nu*lambda/2)
 //                         with lambda = sigest^2 * qchisq(0.1, nu) / nu,
 //                         the BART::wbart default (sigquant = 0.9).
-//                         This is the default — the simple
+//                         This is the default -- the simple
 //                         model y ~ N(BART(X), sigma^2) has non-
 //                         identifiability issues under a non-informative
 //                         prior (a larger tree fit can be compensated
@@ -41,7 +41,7 @@
 //  ai4b::stop. The BART IG-prior calibration `R::qchisq(0.1, nu, ...)`
 //  resolves to R's math library under the Rcpp backend and to the
 //  kernel's `namespace R { qchisq(...) }` (bart_pure_cpp/src/r_compat.h,
-//  ~5e-14 vs R) under pybind / standalone — same calibrated lambda
+//  ~5e-14 vs R) under pybind / standalone -- same calibrated lambda
 //  across all three.
 //
 //  LICENSE WARNING
@@ -135,7 +135,7 @@ namespace constraints = AI4BayesCode::constraints;
 // ============================================================================
 //  Natural-scale log-density for sigma, given the BART fit.
 //
-//  Prior (default — BART::wbart calibration, sigquant = 0.9):
+//  Prior (default -- BART::wbart calibration, sigquant = 0.9):
 //      sigma^2 ~ InverseGamma(nu/2, nu*lambda/2)
 //      lambda  = sigest^2 * qchisq(0.1, nu) / nu
 //  The combined log-density of sigma (after the d sigma^2 / d sigma
@@ -255,8 +255,8 @@ public:
         impl_->data().declare_data_input("X");
 
         // ---- Declare predict DAG (generative direction) -----------------
-        // X → f_bart  (BART tree traversal)
-        // f_bart → y_rep, sigma → y_rep  (observation layer, y ~ N(f_bart, sigma^2))
+        // X -> f_bart  (BART tree traversal)
+        // f_bart -> y_rep, sigma -> y_rep  (observation layer, y ~ N(f_bart, sigma^2))
         impl_->data().declare_predict_edges("X",      {"f_bart"});
         impl_->data().declare_predict_edges("f_bart", {"y_rep"});
         impl_->data().declare_predict_edges("sigma",  {"y_rep"});
@@ -547,7 +547,7 @@ public:
     //   f_bart : SILENTLY IGNORED -- derived from trees + fmean (no
     //            unique inverse). Use the tree round-trip
     //            (get_tree / set_tree at the block level) instead.
-    // Unknown keys are silently ignored per system_design.md §7 so
+    // Unknown keys are silently ignored per system_design.md Sec.7 so
     // that set_current(get_current()) round-trips cleanly.
     //
     // NOTE: tree restoration is exposed via the block-level get_tree() /
@@ -562,7 +562,7 @@ public:
 
         // f_bart is read-only output; silently ignored on input so
         // that round-trip set_current(get_current()) is supported per
-        // system_design.md §7 / §16.
+        // system_design.md Sec.7 / Sec.16.
 
         const auto it_X = params.find("X");
         const auto it_y = params.find("y");
@@ -635,8 +635,8 @@ public:
 
     /// 7th method: re-tune NUTS metric (mass matrix + step size + dual
     /// averaging) without advancing chain state. Available because the
-    /// composite contains NUTS-family children. See system_design.md §13
-    /// NUTS-family + validator.md §24.
+    /// composite contains NUTS-family children. See system_design.md Sec.13
+    /// NUTS-family + validator.md Sec.24.
     // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
     // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
     // C++ default args so both arities are also exposed as separate

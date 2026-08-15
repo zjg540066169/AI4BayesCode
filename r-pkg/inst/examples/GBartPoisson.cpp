@@ -250,7 +250,7 @@ public:
         cfg.ntrees       = static_cast<std::size_t>(ntrees);
         cfg.y_key        = "";                         // y is fixed training data
         cfg.offset_key   = "";
-        // Hypers default to Linero 2022 §3.3 (half-Cauchy c = 1/sqrt(T),
+        // Hypers default to Linero 2022 Sec.3.3 (half-Cauchy c = 1/sqrt(T),
         // adaptive sigma_mu, no DART).
 
         impl_->add_child(std::make_unique<genbart_block>(std::move(cfg)));
@@ -294,14 +294,14 @@ public:
     //   X : FLATTENED column-major n x p matrix (length n*p).
     //   r : SILENTLY IGNORED -- tree forest has no unique inverse. Use
     //       the tree round-trip (get_tree / set_tree) instead.
-    // Unknown keys are silently ignored per system_design.md §7 so that
+    // Unknown keys are silently ignored per system_design.md Sec.7 so that
     // set_current(get_current()) round-trips cleanly.
     void set_current(const AI4BayesCode::state_map& params) {
         auto* blk = dynamic_cast<genbart_block*>(&impl_->child(0));
 
         // r is read-only output; silently ignored on input so that
         // round-trip set_current(get_current()) is supported per
-        // system_design.md §7 / §16. Use set_tree() to restore the forest.
+        // system_design.md Sec.7 / Sec.16. Use set_tree() to restore the forest.
 
         const auto it_X = params.find("X");
         const auto it_y = params.find("y");

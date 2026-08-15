@@ -504,8 +504,12 @@ specialized or conjugate-Gibbs block fits the model, AND (b) neither
 bespoke tree ensemble, or a novel trans-dimensional / discrete-structure
 move that NUTS cannot express), the generator MAY author its own
 block/sampler. This is the LAST resort -- exhaust the specialized blocks
-and the joint-NUTS default first. It MUST carry an inline justification:
-`// JUSTIFICATION (Check #17): Exception 4 -- no blessed block fits because <...>; joint/single NUTS structurally inapplicable because <...>; custom scheme = <...>; targets the correct posterior because <...>.`
+and the joint-NUTS default first. It MUST carry an inline plain-language note in the delivered file:
+`// Sampling note: <what this custom sampler does for THIS model, one line>.`
+The full Exception-4 justification (why no library block fits, why NUTS is
+structurally inapplicable, why the scheme targets the correct posterior)
+belongs in the L2 verdict table, NOT in the delivered .cpp -- check
+numbers, Exception numbering, and skill paths never ship to the user.
 Within Exception 4, still PREFER a NUTS-based custom log-density over any
 hand-written Gibbs -- hand-rolled conjugacy stays the most error-prone
 path and remains governed by the Check #17 ban; Exception 4 is NOT a
@@ -630,13 +634,16 @@ an `rjmcmc_block` hook must have an inline comment above the block
 construction / hook definition stating which Exception (from Sec.2b
 above) justifies the choice. Format:
 
-    // JUSTIFICATION (Check #16): Exception <N> from codegen_priors.md Sec.2b --
-    // <short one-line reason>. Per Check #15, covered by
-    // <path-to-parity-test>.
+    // Sampling note: <plain one-line reason about THIS model>.
+
+e.g. `// Sampling note: z is a discrete cluster label, drawn exactly from
+its closed-form conditional.` NO check numbers, NO "Exception <N>", NO
+skill-file or test paths -- the delivered file is read by a
+non-programmer. The Exception number and the Check #15 parity-test path
+are recorded in the L2 verdict table instead.
 
 Validator static check: grep for `*_gibbs_block` usage without an
-accompanying "JUSTIFICATION" or "Exception" mention within 20 lines
-above -> Layer 2 FAIL.
+accompanying "Sampling note:" within 20 lines above -> Layer 2 FAIL.
 
 ## 2e. Check #17 -- No hand-written Gibbs samplers outside whitelist
 
@@ -656,7 +663,7 @@ posterior draw, `Rcpp::rbeta`, `Rcpp::rgamma`, `Rcpp::rdirichlet`,
 - Inside library internal code (`include/AI4BayesCode/*_gibbs_block.hpp`
   and friends)
 - Inside a Sec.2c Exception 4 custom block/sampler carrying the
-  `// JUSTIFICATION (Check #17): Exception 4 -- ...` comment (structural-gap
+  `// Sampling note: ...` comment (structural-gap
   last resort: no blessed block fits AND NUTS is structurally
   inapplicable). Hand-rolled conjugate Gibbs where a blessed block or
   NUTS would work is NOT covered by this carve-out.

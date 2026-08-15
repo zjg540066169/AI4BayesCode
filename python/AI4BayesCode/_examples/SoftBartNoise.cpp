@@ -380,7 +380,7 @@ public:
     //   f_softbart : SILENTLY IGNORED -- derived from trees (no unique
     //            inverse). Use the tree round-trip (get_tree / set_tree)
     //            instead.
-    // Unknown keys are silently ignored per system_design.md §7 so that
+    // Unknown keys are silently ignored per system_design.md Sec.7 so that
     // set_current(get_current()) round-trips cleanly.
     void set_current(const AI4BayesCode::state_map& params) {
         auto* sb_blk = dynamic_cast<softbart_block*>(&impl_->child(0));
@@ -388,7 +388,7 @@ public:
 
         // f_softbart is read-only output; silently ignored on input so
         // that round-trip set_current(get_current()) is supported per
-        // system_design.md §7 / §16. Use set_tree() to restore the forest.
+        // system_design.md Sec.7 / Sec.16. Use set_tree() to restore the forest.
 
         const auto it_X = params.find("X");
         const auto it_y = params.find("y");
@@ -597,8 +597,8 @@ public:
 
     /// 7th method: re-tune NUTS metric (mass matrix + step size + dual
     /// averaging) without advancing chain state. Available because the
-    /// composite contains NUTS-family children. See system_design.md §13
-    /// NUTS-family + validator.md §24.
+    /// composite contains NUTS-family children. See system_design.md Sec.13
+    /// NUTS-family + validator.md Sec.24.
     // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
     // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
     // C++ default args so both arities are also exposed as separate

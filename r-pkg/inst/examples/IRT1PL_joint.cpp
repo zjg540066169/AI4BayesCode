@@ -7,7 +7,7 @@
 //  One-parameter logistic IRT (Rasch) model with a NON-CENTERED
 //  reparameterization (NCR) for the item-difficulty hierarchy.  This
 //  resolves the funnel geometry in IRT1PL_joint.cpp, which samples
-//  (theta, b) jointly but leaves sigma_b in a SEPARATE nuts_block —
+//  (theta, b) jointly but leaves sigma_b in a SEPARATE nuts_block --
 //  splitting the (sigma_b, b) funnel across two Gibbs blocks.
 //
 //  Mode 1 fix (joint_nuts_failure.md): fold sigma_b INTO the joint block
@@ -25,7 +25,7 @@
 //  ----------------------
 //      b_j = sigma_b * z_b_j,   z_b_j ~ Normal(0, 1)
 //
-//  Block decomposition (ONE joint block — no separate sigma_b nuts_block)
+//  Block decomposition (ONE joint block -- no separate sigma_b nuts_block)
 //  -----------------------------------------------------------------------
 //      joint_nuts_block "theta_zb_sigma_joint":
 //          sub_params:
@@ -47,8 +47,8 @@
 //         + sum_{(i,j) in Obs} [Y_ij*eta_ij - log1pexp(eta_ij)]  (likelihood)
 //      where eta_ij = theta_i - sigma_b * z_b_j.
 //
-//  NO Jacobian for sigma_b — the POSITIVE slice in joint_nuts_block adds
-//  +log(sigma_b) internally (system_design.md §10.1 / validator Check #5).
+//  NO Jacobian for sigma_b -- the POSITIVE slice in joint_nuts_block adds
+//  +log(sigma_b) internally.
 //
 //  Gradients (natural scale):
 //      d/d theta_i  =  sum_{j: (i,j) in Obs} [Y_ij - p_ij] - theta_i
@@ -61,16 +61,6 @@
 //
 //  VALIDATOR CONTRACT
 //  ------------------
-//  Passes Check #11 (joint_nuts_block audit):
-//    1. Grad slices: [0,N) = d/dtheta, [N,N+J) = d/dz_b, [N+J] = d/dsigma_b.
-//    2. All priors present (theta, z_b, sigma_b) with correct signs.
-//    3. All REAL sub-params + one POSITIVE sub-param: mixed scale allowed by
-//       joint_constraint enum.
-//    4. No Jacobian written — block handles POSITIVE slice.
-//    5. Write-back offsets match sub-param layout.
-//    6. dim assert: N+J+1 == initial_cat.n_elem.
-//  Passes Check #25 (joint-NUTS NCR): sigma_b is in the SAME joint block as
-//    z_b; no funnel split.
 // ============================================================================
 
 // @example:R
@@ -176,7 +166,7 @@ inline double sigmoid(double x) {
 //  theta_cat layout:
 //      [0 .. N-1]   = theta_i     (student abilities, REAL)
 //      [N .. N+J-1] = z_b_j       (standardised item difficulties, REAL)
-//      [N+J]        = sigma_b     (item-difficulty scale, POSITIVE — block enforces > 0)
+//      [N+J]        = sigma_b     (item-difficulty scale, POSITIVE -- block enforces > 0)
 //
 //  lp = -0.5*sum theta_i^2                        (theta ~ N(0,1))
 //       -0.5*sum z_b_j^2                           (z_b ~ N(0,1))
@@ -184,8 +174,8 @@ inline double sigmoid(double x) {
 //       + sum_{observed (i,j)} [Y_ij * eta_ij - log1pexp(eta_ij)]
 //  where  eta_ij = theta_i - sigma_b * z_b_j.
 //
-//  NO +log(sigma_b) Jacobian here — the POSITIVE slice in joint_nuts_block
-//  adds it automatically (validator Check #5).
+//  NO +log(sigma_b) Jacobian here -- the POSITIVE slice in joint_nuts_block
+//  adds it automatically.
 //
 //  Gradient (natural scale):
 //      d/d theta_i  =  sum_{j: obs} (Y_ij - p_ij) - theta_i
@@ -202,7 +192,7 @@ double joint_theta_zb_sigma_log_density(const arma::vec& theta_cat,
     const std::size_t J = static_cast<std::size_t>(ctx.at("J")[0]);
 
     if (theta_cat.n_elem != N + J + 1) {
-        // Defensive — dim-assert in joint_nuts_block constructor is primary.
+        // Defensive -- dim-assert in joint_nuts_block constructor is primary.
         if (grad_nat) grad_nat->set_size(N + J + 1);
         return -std::numeric_limits<double>::infinity();
     }
@@ -446,7 +436,7 @@ public:
 
             cfg.log_density_grad = &joint_theta_zb_sigma_log_density;
 
-            // NCR removes the funnel geometry — diagonal metric is sufficient.
+            // NCR removes the funnel geometry -- diagonal metric is sufficient.
             // More warmup runway than per-param NUTS since dim = N+J+1.
             cfg.use_diagonal_metric  = true;
             cfg.n_warmup_first_call  = 800;
@@ -578,7 +568,7 @@ public:
 
         // History mode: theta, z_b, sigma_b, b are sub-outputs of the
         // "theta_zb_sigma_joint" joint_nuts_block. Reconstruct b per-draw
-        // and generate y_rep manually (same as IRT1PL_joint.cpp §history).
+        // and generate y_rep manually (same as IRT1PL_joint.cpp Sec.history).
         AI4BayesCode::history_map hist = impl_->get_history();
         const arma::mat& theta_hist   = hist.at("theta");    // n_draws x N
         const arma::mat& zb_hist      = hist.at("z_b");      // n_draws x J
@@ -712,7 +702,7 @@ PYBIND11_MODULE(IRT1PL_joint, m) {
 //      b_j     = sigma_b * z_b_j   (item difficulties, j = 1..J)
 //      Y_ij    ~ Bernoulli(sigmoid(theta_i - b_j))
 //  then fits the joint-NUTS NCR sampler and checks posterior-mean recovery of
-//  the item difficulties b (identifiable up to the global mean — abilities and
+//  the item difficulties b (identifiable up to the global mean -- abilities and
 //  difficulties trade off an overall shift). We therefore compare the CENTERED
 //  difficulties (b - mean(b)) against the centered truth, and require the
 //  joint-NUTS estimate to beat a naive all-zero baseline.

@@ -4,7 +4,7 @@
 // ============================================================================
 //  IsingPrior.cpp
 //
-//  Pure-prior 2D Ising / Potts sampler — first specialized-block demo for
+//  Pure-prior 2D Ising / Potts sampler -- first specialized-block demo for
 //  AI4BayesCode v1.2. Wires ising_cluster_block (Swendsen-Wang cluster
 //  sweep) through composite_block + RCPP_MODULE.
 //
@@ -18,35 +18,22 @@
 //  Parameters
 //  ----------
 //      x       latent state vector (length L_x · L_y, entries in
-//              {0..Q-1}) — sampled by ising_cluster_block
-//      beta    interaction strength (scalar, ≥ 0) — fixed at construction
+//              {0..Q-1}) -- sampled by ising_cluster_block
+//      beta    interaction strength (scalar, >= 0) -- fixed at construction
 //              by default; can be overwritten via set_current("beta") to
 //              enable hierarchical use (a sibling block sampling β).
 //
-//  No observation likelihood — this is a PRIOR-ONLY demo. predict_at()
-//  returns an empty list. Documented exception per system_design.md §5
+//  No observation likelihood -- this is a PRIOR-ONLY demo. predict_at()
+//  returns an empty list. Documented exception per system_design.md Sec.5
 //  (no observation model ⇒ no y_rep / Layer-3 R3 posterior-predictive
 //  diagnostic).
 //
-//  JUSTIFICATION (Check #16): Discrete-MRF target with strong local
-//  dependence — per system_design.md §11.2(b) this is exactly the
+//  Sampling note: Discrete-MRF target with strong local
+//  dependence -- per system_design.md Sec.11.2(b) this is exactly the
 //  class where per-site Gibbs mixes catastrophically and a specialised
 //  cluster-move algorithm (Swendsen-Wang 1987) is the standard remedy.
 //  ising_cluster_block is the library-blessed SW sweep.
 //
-//  Check #15 parity tests live at:
-//    tests/test_ising_cluster_block.cpp              (4×4 enumeration,
-//                                                     Q=3 Potts symmetry,
-//                                                     two-init mixing)
-//    tests/test_ising_cluster_block_diagnostics.cpp  (4-chain split-R-hat,
-//                                                     batch-means ESS,
-//                                                     17-bucket Pearson χ²,
-//                                                     energy moments)
-//    tests/test_ising_sw_vs_single_site.cpp          (SW vs single-site
-//                                                     Metropolis efficiency
-//                                                     comparison)
-//  All ground truth is closed-form / exact enumeration; zero external
-//  package dependency in the shipped tree.
 // ============================================================================
 
 // @example:R
@@ -166,7 +153,7 @@ public:
         impl_->data().declare_dependencies("x", {"beta"});
 
         // Generative-DAG context edge (VIZ-ONLY): β is the only
-        // hyperparameter; arrow β → x in the generative DAG.
+        // hyperparameter; arrow β -> x in the generative DAG.
         impl_->data().declare_context_edges("beta", {"x"});
 
         // No predict DAG / stochastic refresher: no observation model,
@@ -234,9 +221,9 @@ public:
 
     AI4BayesCode::history_map predict_at(
         const AI4BayesCode::state_map& new_data) const {
-        // IsingPrior has no observation model — no y_rep, no data input
+        // IsingPrior has no observation model -- no y_rep, no data input
         // refreshers. predict_at always returns an empty map. Documented
-        // exception per system_design.md §5.
+        // exception per system_design.md Sec.5.
         if (!new_data.empty()) {
             ai4b::stop("IsingPrior::predict_at: no valid keys to replace "
                        "(no observation model); pass an empty map/list.");
@@ -267,8 +254,7 @@ RCPP_MODULE(IsingPrior_module) {
             "≥3=Potts), beta (interaction strength, ≥ 0), periodic (bool, "
             "wrap edges), eight_nn (bool, include diagonals), rng_seed, "
             "keep_history. Pure-prior 2D Ising / Potts via Swendsen-Wang "
-            "cluster sweep (ising_cluster_block). Check #15 parity tests "
-            "under tests/test_ising_cluster_block*.cpp.")
+            "cluster sweep (ising_cluster_block).")
         .method("step", (void (IsingPrior::*)())    &IsingPrior::step, "Run one sweep.")
         .method("step", (void (IsingPrior::*)(int)) &IsingPrior::step, "Run n sweeps.")
         .method("get_current", &IsingPrior::get_current)

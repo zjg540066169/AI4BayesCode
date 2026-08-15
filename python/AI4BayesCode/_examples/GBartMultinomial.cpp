@@ -482,7 +482,7 @@ public:
     //       match construction).
     // r / probs / log_phi are read-only outputs; silently ignored on
     // input so that round-trip set_current(get_current()) is supported per
-    // system_design.md §7 / §16. Use set_tree(...) for forest restoration.
+    // system_design.md Sec.7 / Sec.16. Use set_tree(...) for forest restoration.
     void set_current(const AI4BayesCode::state_map& params) {
         auto* aug_blk =
             dynamic_cast<poisson_multinomial_aug_block*>(&impl_->child(0));

@@ -4,7 +4,7 @@
 // ============================================================================
 //  IsingHiddenPotts.cpp
 //
-//  Hidden-Potts image segmentation demo — exercises the v1.2.1
+//  Hidden-Potts image segmentation demo -- exercises the v1.2.1
 //  ising_cluster_block EXTERNAL FIELD + PARTIAL DECOUPLING path.
 //  Tri-module build: RCPP_MODULE / PYBIND11_MODULE / standalone int main().
 //
@@ -20,12 +20,12 @@
 //  via `field_key`: a sibling emission block would publish log p(y_i | θ_k)
 //  to shared_data each sweep; here μ, σ are fixed so the field is published
 //  once. Partial decoupling δ < 1 keeps the cluster move mixing well despite
-//  the strong data field (Higdon §2.3.2) — with δ = 1 the SW clusters form
+//  the strong data field (Higdon Sec.2.3.2) -- with δ = 1 the SW clusters form
 //  ignoring the field and mix poorly.
 //
 //  Parameters
 //  ----------
-//      z       latent label vector (length L·L, entries in {0,1}) —
+//      z       latent label vector (length L·L, entries in {0,1}) --
 //              sampled by ising_cluster_block. THIS is the only sampled
 //              state (get_current() returns {"z"}). The synthetic truth
 //              z* is NOT a parameter and is not exposed in get_current().
@@ -33,21 +33,18 @@
 //  No observation likelihood is *sampled* here (μ, σ are fixed, the emission
 //  field is precomputed once), so predict_at() returns an empty map and
 //  rejects non-empty input, matching IsingPrior. Documented exception per
-//  system_design.md §5.
+//  system_design.md Sec.5.
 //
 //  Validation (demo, not a unit test): with a well-separated, spatially
 //  coherent truth the posterior label marginals recover the segmentation
 //  with high accuracy, and two independent chains (init all-0 vs all-1)
-//  agree (two-chain R-hat < 1.01 — the field breaks the 0↔1 symmetry, so
+//  agree (two-chain R-hat < 1.01 -- the field breaks the 0↔1 symmetry, so
 //  there is NO label switching to confound the diagnostic).
 //
-//  JUSTIFICATION (Check #16): discrete-MRF target with strong local
-//  dependence + external field — system_design.md §11.2(b). SW cluster
+//  Sampling note: discrete-MRF target with strong local
+//  dependence + external field -- system_design.md Sec.11.2(b). SW cluster
 //  moves with partial decoupling are the standard remedy (Higdon 1998).
 //
-//  Check #15 parity tests: tests/test_ising_cluster_block.cpp
-//    (T6 external field vs enumeration, T7 per-edge β, T8 partial-
-//     decoupling target-invariance; each gated on two-chain R-hat < 1.01).
 // ============================================================================
 
 // @example:R
@@ -242,9 +239,9 @@ public:
 
     AI4BayesCode::history_map predict_at(
         const AI4BayesCode::state_map& new_data) const {
-        // No *sampled* observation model — μ, σ are fixed and the emission
+        // No *sampled* observation model -- μ, σ are fixed and the emission
         // field is precomputed once at construction. predict_at always
-        // returns an empty map. Documented exception per system_design.md §5.
+        // returns an empty map. Documented exception per system_design.md Sec.5.
         if (!new_data.empty()) {
             ai4b::stop("IsingHiddenPotts::predict_at: no valid keys to replace "
                        "(no sampled observation model); pass an empty map/list.");
@@ -279,8 +276,7 @@ RCPP_MODULE(IsingHiddenPotts_module) {
             "data_seed (synthetic-truth/noise seed), rng_seed, init_label "
             "(initial label, 0 or 1). Samples latent labels z via a "
             "Swendsen-Wang cluster sweep (ising_cluster_block) with a "
-            "precomputed Gaussian emission field + partial decoupling. "
-            "Check #15 parity tests under tests/test_ising_cluster_block.cpp.")
+            "precomputed Gaussian emission field + partial decoupling.")
         .method("step", (void (IsingHiddenPotts::*)())    &IsingHiddenPotts::step, "Run one sweep.")
         .method("step", (void (IsingHiddenPotts::*)(int)) &IsingHiddenPotts::step, "Run n sweeps.")
         .method("get_current", &IsingHiddenPotts::get_current)

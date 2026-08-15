@@ -5,7 +5,7 @@
 //  HierarchicalLM_joint_v2.cpp
 //
 //  NCR refactor of HierarchicalLM_joint.cpp.  Same model, same priors,
-//  same posterior — but tau and sigma are FOLDED INTO the single
+//  same posterior -- but tau and sigma are FOLDED INTO the single
 //  joint_nuts_block alongside the non-centered random effects z_u.
 //
 //  Model (identical to HierarchicalLM_joint.cpp)

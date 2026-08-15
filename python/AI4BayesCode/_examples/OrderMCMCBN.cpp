@@ -13,7 +13,7 @@
 //  P(≺ | D) over orderings ≺ of n variables, with closed-form marginal
 //  likelihood
 //
-//      P(D | ≺) = ∏_i Σ_{U ⊆ pred_i(≺), |U| ≤ k} score(X_i, U | D)
+//      P(D | ≺) = ∏_i Σ_{U ⊆ pred_i(≺), |U| <= k} score(X_i, U | D)
 //
 //  Score is BDe (Heckerman-Geiger-Chickering 1995 Eq 28) with BDeu
 //  pseudocounts (Buntine 1991): N'_ijk = α / (r_i × q_i). Per-family
@@ -34,14 +34,14 @@
 //  "order_mcmc"), NOT the learned Bayesian network DAG. The learned BN
 //  DAG is in `get_current()$sampled_DAG`.
 //
-//  KNOWN BIAS (FK 2003 §4.1)
+//  KNOWN BIAS (FK 2003 Sec.4.1)
 //  -------------------------
 //  Order MCMC's induced structure prior is NOT hypothesis-equivalent
 //  (Markov-equivalent DAGs receive different prior weights). Fix is
 //  Kuipers-Moffa 2017 partition MCMC, deferred to v1.2.1.
 //
-//  JUSTIFICATION (Check #16): Discrete latent (BN structure) with
-//  combinatorial state space. system_design.md §11.2(b) lists this as
+//  Sampling note: Discrete latent (BN structure) with
+//  combinatorial state space. system_design.md Sec.11.2(b) lists this as
 //  the canonical Block 3. order_mcmc_block is the v1.2 implementation.
 //
 //  DUAL-BACKEND (R + Python)
@@ -59,7 +59,7 @@
 //                                    stub returning the current sampled DAG
 //                                    as a 1 x n² matrix (column-major). Full
 //                                    posterior-predictive simulation deferred
-//                                    to v1.2.1 per spec §5.5.
+//                                    to v1.2.1 per spec Sec.5.5.
 //  Constructor takes arma::mat data (N x n, integer-valued, rounded to
 //  category indices 0..r-1), arma::vec cardinalities (length n), and an
 //  arma::vec initial_order (EMPTY = random init; otherwise a 1-based length-n
@@ -191,7 +191,7 @@ public:
 
         n_ = static_cast<std::size_t>(n);
 
-        // Convert (integer-valued) arma::mat → arma::imat by rounding.
+        // Convert (integer-valued) arma::mat -> arma::imat by rounding.
         arma::imat data_arma(N, n);
         for (int i = 0; i < N; ++i)
             for (int j = 0; j < n; ++j)
@@ -310,7 +310,7 @@ public:
         // v1: stub. Returns the current sampled_DAG as a 1 x n² matrix
         // (column-major flattening, matching get_current()'s "sampled_DAG").
         // Full posterior-predictive simulation deferred to v1.2.1 per
-        // spec §5.5. OrderMCMCBN has no covariate inputs.
+        // spec Sec.5.5. OrderMCMCBN has no covariate inputs.
         if (!new_data.empty())
             ai4b::stop("OrderMCMCBN has no covariate inputs. "
                        "predict_at() takes an empty map/list.");

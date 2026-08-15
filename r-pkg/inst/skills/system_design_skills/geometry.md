@@ -330,10 +330,11 @@ obligations:
   written Gibbs in rjmcmc hooks. Tolerance 5% mean / 10% variance
   on 10k draws.
 
-- **Check #16** -- inline "JUSTIFICATION (Check #16): Exception N
-  from codegen_priors.md Sec.2b -- ..." comment above every gibbs usage stating
-  which Exception 1/2/3 applies. Validator static grep flags missing
-  comments.
+- **Check #16** -- a plain-language "// Sampling note: <one line about
+  THIS model>" comment above every gibbs usage. Which Exception 1/2/3
+  applies is recorded in the L2 verdict table, NOT in the delivered file
+  (no check numbers / Exception numbering / skill paths ship to the
+  user). Validator static grep flags a missing note.
 
 - **Check #17** -- no hand-written distribution samplers
   (`std::gamma_distribution`, `Rcpp::rbeta`, etc.) in example code

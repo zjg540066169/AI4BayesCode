@@ -14,36 +14,36 @@
 //      log p~(z) = sum_e beta_e * I[z_u = z_v]
 //                + sum_i h_i[k] * I[z_i = k]
 //
-//  Variational family q(z) = prod_C q_C(z_C) — user-specified clique
+//  Variational family q(z) = prod_C q_C(z_C) -- user-specified clique
 //  partition. Each q_C is a JOINT Categorical over the clique's joint
 //  state space (size prod_{i in C} K_i). Optimised via RAABBVI on
 //  the analytical clique-sum-over-state gradient (Saul-Jordan 1996
-//  §2.2 style).
+//  Sec.2.2 style).
 //
 //  This is a PURE-VI demo. predict_at(list(n_draws=N)) returns N fresh
 //  q-samples (matrix of integer indices, n_draws × n).
 //
 //  Validation
 //  ----------
-//    tests/test_structured_categorical_vi_block.cpp — basic unit tests
-//      including singleton-clique → Block 4 and grand-clique → exact
+//    tests/test_structured_categorical_vi_block.cpp -- basic unit tests
+//      including singleton-clique -> Block 4 and grand-clique -> exact
 //      degeneracies.
-//    tests/test_structured_categorical_vi_chain.cpp — head-to-head with
+//    tests/test_structured_categorical_vi_chain.cpp -- head-to-head with
 //      Block 4 fully factorised MF: structured ELBO tighter to log Z,
 //      pairwise KL ~5 orders of magnitude smaller within clique.
-//    tests/test_structured_categorical_vi_cavi_cross.cpp — 4-path
+//    tests/test_structured_categorical_vi_cavi_cross.cpp -- 4-path
 //      cross-check (VI / clique-CAVI / Gibbs / exact) + R-hat
 //      convergence diagnostics.
 //
-//  JUSTIFICATION (Check #16): discrete latents with strong local
-//  dependence (system_design.md §11.2(b)). Structured MF refines Block
+//  Sampling note: discrete latents with strong local
+//  dependence (system_design.md Sec.11.2(b)). Structured MF refines Block
 //  4 by preserving intra-clique correlation exactly while factorising
 //  ACROSS cliques (Saul-Jordan 1996). Gives demonstrably tighter
 //  approximations than Block 4 when the user can identify
 //  strong-coupling clusters; degenerates to Block 4 with singleton
 //  cliques, to exact inference with a single all-encompassing clique.
 //
-//  Reference: Saul-Jordan 1996 (NIPS); Bishop PRML §10.1.
+//  Reference: Saul-Jordan 1996 (NIPS); Bishop PRML Sec.10.1.
 //
 //  Backend-neutral I/O (DUAL R + Python)
 //  -------------------------------------
@@ -167,7 +167,7 @@ public:
         if (n_nodes < 2) ai4b::stop("n_nodes must be >= 2");
         if (K < 2)       ai4b::stop("K must be >= 2");
 
-        // ---- Edges (1-based in R/Python → 0-based internal) --------
+        // ---- Edges (1-based in R/Python -> 0-based internal) --------
         if (edges_mat.n_cols != 2) ai4b::stop("edges must be a (n_edges × 2) matrix");
         const std::size_t E = edges_mat.n_rows;
         if (edge_strengths_in.n_elem != E)
@@ -491,8 +491,8 @@ PYBIND11_MODULE(StructuredPottsVI, m) {
 //
 //  Strong intra-triangle coupling (beta = 1.5) + a single weak bridge edge
 //  (3--6, beta = 0.2) + a small external field that breaks the label
-//  symmetry. The clique partition is {1,2,3} and {4,5,6} — exactly the two
-//  triangles — so the structured mean field captures all the strong coupling
+//  symmetry. The clique partition is {1,2,3} and {4,5,6} -- exactly the two
+//  triangles -- so the structured mean field captures all the strong coupling
 //  exactly and only mean-fields the weak bridge.
 //
 //  GROUND TRUTH is computed in main() by full enumeration of all 2^6 = 64
@@ -508,7 +508,7 @@ PYBIND11_MODULE(StructuredPottsVI, m) {
 
 namespace {
 
-// Edge list (0-based) and per-edge coupling strengths — used ONLY by the
+// Edge list (0-based) and per-edge coupling strengths -- used ONLY by the
 // exact-enumeration ground truth below. The StructuredPottsVI class receives
 // the SAME edges 1-based.
 struct DemoEdge { std::size_t u, v; double beta; };
@@ -587,7 +587,7 @@ int main() {
     const arma::vec& elbo_v    = gc.at("elbo");
     const arma::vec& conv_v    = gc.at("converged");
     const arma::vec& epoch_v   = gc.at("epoch");
-    // Column-major (n × K): q(z_i = 1) is column index 1 → offset kN + i.
+    // Column-major (n × K): q(z_i = 1) is column index 1 -> offset kN + i.
     arma::vec vi_marg1(kN);
     for (std::size_t i = 0; i < kN; ++i)
         vi_marg1[i] = marg_flat[kN + i];

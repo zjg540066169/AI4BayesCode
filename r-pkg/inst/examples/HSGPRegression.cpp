@@ -18,7 +18,7 @@
 //      formula; (2) (amp, zs) form a Neal funnel because f scales as
 //      amp * zs; (3) (Intercept, sum(zs * phi)) is a marginal ridge.
 //  Any agent generating an HSGP cpp without these three guards will get
-//  rhat = 2+ and ESS = 1-3 on amp/ell — exactly what we observed in the
+//  rhat = 2+ and ESS = 1-3 on amp/ell -- exactly what we observed in the
 //  GP-class test set under sim3 ablation.
 //
 //  Architectural choices DEMONSTRATED here (must transfer)
@@ -598,7 +598,7 @@ public:
     /// 7th R-level method: re-tune NUTS metric (mass matrix + step size +
     /// dual averaging) without advancing chain state. Available because
     /// the composite contains NUTS-family children. See system_design.md
-    /// §13 NUTS-family + validator.md §24.
+    /// Sec.13 NUTS-family + validator.md Sec.24.
     // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
     // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
     // C++ default args so both arities are also exposed as separate

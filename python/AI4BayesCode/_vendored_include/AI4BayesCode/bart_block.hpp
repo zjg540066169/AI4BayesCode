@@ -409,11 +409,10 @@ public:
     // Rcpp::stops when the user tries to freeze a bart_block child.
     bool supports_freeze() const noexcept override { return false; }
     std::string freeze_not_supported_reason() const override {
-        return "freezing bart_block not supported "
-               "(forest is non-invertible + derived-state hazard on "
-               "subsequent set_current(X=...) updates); use predict_at "
-               "for held-out prediction, drop the BART child from composite "
-               "for ablation";
+        return "freezing bart_block not supported: a fitted tree "
+               "ensemble cannot be restored from a stored value. To make "
+               "predictions at new data without changing the fitted model, "
+               "use predict_at().";
     }
 
     std::size_t dim() const noexcept override {

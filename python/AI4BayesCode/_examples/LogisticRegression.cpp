@@ -15,16 +15,16 @@
 //  Why pg_logistic_block?
 //  ---------------------
 //  Logistic regression with NUTS on beta (via `nuts_block` + interval
-//  constraints on sigmoid) is feasible but slow — the gradient
+//  constraints on sigmoid) is feasible but slow -- the gradient
 //  sigmoid'(X beta) X is expensive, and NUTS needs many leapfrogs per
 //  step to navigate correlated beta posterior.
 //
-//  Hard scope: LINEAR LOGISTIC ONLY — NOT LOGISTIC BART
+//  Hard scope: LINEAR LOGISTIC ONLY -- NOT LOGISTIC BART
 //  ----------------------------------------------------
 //  This example (and the underlying `pg_logistic_block`) is for
 //  parametric linear logistic regression: y_i ~ Bernoulli(sigmoid(
 //  X_i' beta)) with a FIXED design matrix X. DO NOT attempt to plug a
-//  BART mean function f(X_i) in place of X_i' beta — PG augmentation
+//  BART mean function f(X_i) in place of X_i' beta -- PG augmentation
 //  has a non-identifiability issue with BART tree kernels (the
 //  PG-augmented pseudo-response κ = y - 0.5 breaks BART's
 //  Gaussian-observation assumption that anchors its tree location).
@@ -45,14 +45,11 @@
 //  -------------------
 //      beta : pg_logistic_block  (single block, owns ω internally)
 //
-//  JUSTIFICATION (Check #16): Exception 1 from codegen.md §2b — PG
+//  Sampling note: Exception 1 from codegen.md Sec.2b -- PG
 //  augmentation introduces a discrete-measure component (ω) that is
 //  sampled via library-blessed pg_logistic_block (the block owns the
 //  PG sampler and the Gaussian beta update internally). The user does
 //  NOT hand-write any sampling; the block is fully library-provided.
-//  Check #15 parity test at
-//    tests_autodiff/test_pg_logistic_block.cpp
-//  (verifies PG(1, z) mean matches analytical + beta recovery).
 // ============================================================================
 
 // @example:R
@@ -167,7 +164,7 @@ public:
         // declare_invalidates("beta", {eta, prob}) (order matters: eta
         // before prob). This is required because stateful
         // predict_at(list()) has an empty changed-set, so Pass-1 does NOT
-        // recompute deterministic nodes — y_rep's Pass-2 must read an
+        // recompute deterministic nodes -- y_rep's Pass-2 must read an
         // already-current prob. Behaviour-preserving vs the old collapsed
         // y_rep (same lin = X*beta, same per-i uniform draw order, so
         // y_rep is bit-identical under a fixed predict RNG).
@@ -265,7 +262,7 @@ public:
             beta_blk->set_current(bnew);
             impl_->data().set("beta", bnew);
         }
-        // X / y: canonical dynamic-N pattern (codegen_cpp.md §7a).
+        // X / y: canonical dynamic-N pattern (codegen_cpp.md Sec.7a).
         // p is strict (beta length); N is dynamic, derived from
         // X.n_elem / p when X is supplied.
         auto it_X = params.find("X");
@@ -313,9 +310,9 @@ public:
     }
 
     // predict_at: optional X = arma::vec (vectorised N_test*p, column-major).
-    //   * keep_history = FALSE: single predict at current draw — refreshed
+    //   * keep_history = FALSE: single predict at current draw -- refreshed
     //     key returned as 1 x N matrix.
-    //   * keep_history = TRUE:  loops over ALL posterior draws of beta —
+    //   * keep_history = TRUE:  loops over ALL posterior draws of beta --
     //     refreshed key returned as n_draws x N matrix (posterior predictive).
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
         // Parse optional X once (shared by both modes).

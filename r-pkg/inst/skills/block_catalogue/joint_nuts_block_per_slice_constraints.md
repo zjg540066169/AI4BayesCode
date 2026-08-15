@@ -70,12 +70,9 @@ cfg.initial_cat = arma::join_cols(arma::vec{gamma_init},
                                    eps_raw_init);
 cfg.log_density_grad = &joint_log_density_natural;
 
-// Dense metric is FREQUENTLY needed for HierLM coupling at large dim, but it is a
-// Check #18 ESCALATION (measured) -- START DIAGONAL and enable this only if R2/R3
-// shows diagonal is inadequate; do NOT gate on dimension (there is no Check #11.7).
-// When you DO enable it, Check #18 minimums apply.
 const std::size_t d = 1 + 1 + M;   // joint-block unconstrained dim
-// JUSTIFICATION (Check #18): documented diagonal R-hat failure on this coupling.
+// Sampling note: the group means and raw effects are strongly correlated,
+// so the sampler uses a full covariance metric rather than a per-axis one.
 cfg.use_dense_metric         = true;
 cfg.dense_metric_pilot_iters = std::max<std::size_t>(2000, 100 * d);
 cfg.dense_metric_adapt_iters = 2000;

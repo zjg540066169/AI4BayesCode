@@ -6,18 +6,17 @@
 //
 //  Automatic Relevance Determination (ARD) LASSO for D=1.
 //
-//  **LEGACY self-contained example** (pre-dates AI4BayesCode's block system) —
+//  **LEGACY self-contained example** (pre-dates AI4BayesCode's block system) --
 //  all full conditionals are Jeffreys-based conjugate closed forms drawn
 //  inline, and the class manages its own state, history, and DAG without
 //  `composite_block` / `nuts_block` / `declare_dependencies` / `refresher`.
 //  This is the ONE documented exception to the "compose typed blocks"
-//  invariant and to Check #17 (no hand-rolled distribution samplers in
-//  examples) — both `std::gamma_distribution` (for InvGamma σ² and Gamma
+//  invariant -- both `std::gamma_distribution` (for InvGamma σ² and Gamma
 //  ψ² draws) and `std::normal_distribution` (for α and β conditionals) are
 //  used inline. These are all textbook conjugate conditionals and derivations
 //  have been formally verified against Park & Casella 2008 (Bayesian LASSO).
-//  When generating new samplers, DO NOT copy this pattern — use the block
-//  system (nuts_block + rjmcmc_block + ... as per `skills/codegen.md §2b`).
+//  When generating new samplers, DO NOT copy this pattern -- use the block
+//  system (nuts_block + rjmcmc_block + ... as per `skills/codegen.md Sec.2b`).
 //  This file remains here as a reference implementation of the pre-block
 //  ARD Gibbs pattern; modernizing it is tracked in `todo/todo.md`.
 //
@@ -333,7 +332,7 @@ public:
     }
 
     // History returned as a history_map (name -> arma::mat). ARDLasso doesn't
-    // use a composite, so we build it by hand — matches the structure
+    // use a composite, so we build it by hand -- matches the structure
     // composite_block's merged bundle would produce for the same parameters.
     //   $beta   : n_draws x p matrix
     //   $alpha  : n_draws x 1 matrix

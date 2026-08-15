@@ -36,7 +36,7 @@
 //  the z-update step and re-sampled afterwards). Splitting it back
 //  into separate categorical_gibbs + dirichlet_gibbs siblings would
 //  recreate the slow-mixing problem this block was created to solve
-//  (system_design.md §11.2(b)).
+//  (system_design.md Sec.11.2(b)).
 //
 //  Refreshers
 //  ----------
@@ -61,33 +61,16 @@
 //  z init). Cross-implementation alignment uses Stephens 2000 in
 //  R-level sim1 alignment code. See `skills/label_switching.md`.
 //
-//  JUSTIFICATION (Check #16):
-//  - z is DISCRETE (Exception 1 from codegen_priors.md §2b). NUTS
+//  Sampling note:
+//  - z is DISCRETE (Exception 1 from codegen_priors.md Sec.2b). NUTS
 //    cannot target a discrete measure. Collapsed Gibbs is the
-//    specialized sampler called for in system_design.md §11.2(b).
+//    specialized sampler called for in system_design.md Sec.11.2(b).
 //  - theta, phi posteriors are EXACTLY Dirichlet given z (Exception 1
 //    pattern, applied to multiple Dirichlets per sweep). The same
 //    gamma-normalization mechanism as `dirichlet_gibbs_block` is used
 //    inside `lda_collapsed_gibbs_block`; correctness inherits from the
-//    block's Check #15 parity test
-//    `tests_autodiff/block_tests/test_lda_collapsed_gibbs_block.cpp`.
+//    block's own parity test.
 //
-//  Check #15 parity coverage:
-//    tests_autodiff/block_tests/test_lda_collapsed_gibbs_block.cpp
-//      compares the block's marginal n_dk frequency table after
-//      10k iterations against an independent in-test
-//      Griffiths-Steyvers reference at K=2 with 5%/10% tolerance
-//      (tighter than the §11.7 default 5%/10% only for the dominant
-//      topic per doc).
-//
-//  Check #12: vacuous. No hand-written log-density / gradient pair
-//  in this example or in the underlying block (closed-form Dirichlet
-//  draws + counts only).
-//
-//  Check #17: satisfied. Inline `std::*_distribution` usages in this
-//  file are confined to the `y_rep` stochastic refresher
-//  (whitelisted). The block itself uses `std::gamma_distribution`
-//  for theta/phi sampling (library-internal, also whitelisted).
 // ============================================================================
 
 // @example:R
@@ -279,12 +262,12 @@ public:
 
         // ---- Predict DAG + y_rep stochastic refresher -------------
         // `doc` is observed at construction and never replaced at
-        // predict_at v0 (would require new-doc support — see Heinrich
-        // 2009 §3.2). We do NOT call declare_data_input("doc"),
+        // predict_at v0 (would require new-doc support -- see Heinrich
+        // 2009 Sec.3.2). We do NOT call declare_data_input("doc"),
         // because doing so would mark doc as needing explicit
         // replacement before y_rep's BFS can traverse to it. Instead,
         // y_rep's stochastic refresher reads doc directly from
-        // shared_data — that works without any predict-DAG edge.
+        // shared_data -- that works without any predict-DAG edge.
         // y_rep's predict-DAG parents are just theta and phi, both
         // non-data-input keys (= available by default).
         impl_->data().declare_predict_edges("theta", {"y_rep"});
@@ -399,7 +382,7 @@ public:
         // them with the next step() call. Setting theta or phi alone
         // is incoherent with the count tables in the block, so we
         // reject them with a clear message. Unknown keys are silently
-        // ignored (system_design.md §7).
+        // ignored (system_design.md Sec.7).
         if (params.count("theta") || params.count("phi")) {
             ai4b::stop(
                 "LdaCollapsedGibbs::set_current: cannot overwrite theta "
@@ -465,7 +448,7 @@ public:
             impl_->data().set("w",   w_arma);
             impl_->data().set("doc", doc_arma);
             // The block caches w/doc at first set_context, but it
-            // re-queries on every set_context call — composite_block
+            // re-queries on every set_context call -- composite_block
             // installs a fresh context every step(). However the
             // block's own internal w_int_/doc_int_ arrays were filled
             // at first set_context. We need to force re-initialization.

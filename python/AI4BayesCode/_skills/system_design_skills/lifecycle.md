@@ -227,9 +227,10 @@ Before any PR touching Tier A / B / C lands:
       `rjmcmc_block::continuous_update` hooks.
 - [ ] **Check #16 -- inline Gibbs justification.** Every
       `*_gibbs_block` construction site and every hand-written Gibbs
-      call inside an `rjmcmc_block` hook has an inline comment
-      naming which Exception 1/2/3 from `codegen_priors.md Sec.2b` justifies
-      the choice.
+      call inside an `rjmcmc_block` hook has a plain-language
+      "// Sampling note: ..." comment about THIS model. Which Exception
+      1/2/3 from `codegen_priors.md Sec.2b` applies is recorded in the L2
+      verdict table, not in the delivered file.
 - [ ] **Check #17 -- no hand-written Gibbs samplers in examples.**
       `grep -E "std::gamma_distribution|std::normal_distribution.*\(.+\)|Rcpp::r(beta|gamma|dirichlet|invgamma)"`
       on `examples/*.cpp`: any hit must be inside the whitelist

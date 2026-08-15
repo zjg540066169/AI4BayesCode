@@ -9,7 +9,7 @@
 //  required: `genbart::lik::logistic_lik` implements
 //  p(y | lambda) = sigmoid(lambda)^y * (1 - sigmoid(lambda))^(1-y)
 //  directly and genBART's RJMCMC samples the trees under that non-
-//  conjugate likelihood via Laplace proposals (Linero 2022 §4.1).
+//  conjugate likelihood via Laplace proposals (Linero 2022 Sec.4.1).
 //
 //  This is the SIMPLER path for C = 2 outcomes. For multinomial
 //  (C >= 2 generic, or when you specifically want the C-1 coupled-
@@ -279,7 +279,7 @@ public:
     //   y : length-N 0/1 vector. New working response.
     //   r : SILENTLY IGNORED -- read-only output derived from the trees (no
     //       unique inverse). Use set_tree(...) to restore a forest.
-    // Unknown keys are silently ignored per system_design.md §7 so that
+    // Unknown keys are silently ignored per system_design.md Sec.7 so that
     // set_current(get_current()) round-trips cleanly.
     void set_current(const AI4BayesCode::state_map& params) {
         auto* blk = dynamic_cast<genbart_block*>(&impl_->child(0));

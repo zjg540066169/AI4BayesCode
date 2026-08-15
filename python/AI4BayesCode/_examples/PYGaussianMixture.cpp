@@ -16,7 +16,7 @@
 //
 //  When discount == 0 this reduces exactly to the DP. When discount > 0
 //  (in [0, 1)), the marginal distribution of the number of distinct
-//  clusters has a heavier (power-law) tail than DP — useful for data
+//  clusters has a heavier (power-law) tail than DP -- useful for data
 //  with many small components.
 //
 //  PRACTICAL DISCOUNT VALUES
@@ -34,7 +34,7 @@
 //  - discount > 0.7     : extreme; rarely useful in practice.
 //
 //  The 4-chain audit (`tests_autodiff/audit_py_gaussian_4chain.R`)
-//  verifies discount = 0 (PASS) AND discount = 0.5 (DIAGNOSTIC FAIL —
+//  verifies discount = 0 (PASS) AND discount = 0.5 (DIAGNOSTIC FAIL --
 //  chains find K = 5–8 instead of truth 3 because of the heavy-tail
 //  prior; mechanics correct, modal K is not a function of truth alone).
 //
@@ -42,7 +42,7 @@
 //  Sampling discount jointly with alpha would require a `joint_nuts_block_mixed`
 //  with an INTERVAL constraint on discount in (0, 1); that constraint
 //  family is NOT in v1 of `joint_nuts_block_mixed` (constraints.md
-//  joint_constraint table — only REAL + POSITIVE shipped). Two options:
+//  joint_constraint table -- only REAL + POSITIVE shipped). Two options:
 //    - sample discount via a separate `nuts_block` with interval(0, 1)
 //      constraint, OR
 //    - keep it fixed (this file) and explore by re-running the chain at
@@ -56,7 +56,7 @@
 //      child(2) pi             stick_breaking_block (PY a_fn / b_fn)
 //      child(3) alpha          nuts_block (positive constraint, log scale)
 //
-//  alpha log-density (PY version — COLLAPSED EPPF marginal on (k, n, d))
+//  alpha log-density (PY version -- COLLAPSED EPPF marginal on (k, n, d))
 //  ---------------------------------------------------------------------
 //  alpha is sampled conditional on its SUFFICIENT STATISTICS via the
 //  Pitman-Yor EPPF (Pitman & Yor 1997), NOT on the truncated sticks:
@@ -75,13 +75,13 @@
 //        + digamma(alpha + 1) - digamma(alpha + n)
 //
 //  At discount = 0 this reduces EXACTLY to the DP Antoniak (k, n)
-//  concentration marginal (Antoniak 1974; Escobar & West 1995) —
+//  concentration marginal (Antoniak 1974; Escobar & West 1995) --
 //  cf. DPGaussianMixture_DerivedAlpha.cpp.
 //
 //  WHY NOT condition on the sticks? The previous version read `stick_V`
 //  and summed over all K_trunc-1 sticks, INCLUDING the empty truncation
-//  tail. Each empty stick is a pure Beta(1-d, alpha+(j+1)d) PRIOR draw —
-//  chain-specific noise — so alpha was fit to noise and 2-chain rank-R-hat
+//  tail. Each empty stick is a pure Beta(1-d, alpha+(j+1)d) PRIOR draw --
+//  chain-specific noise -- so alpha was fit to noise and 2-chain rank-R-hat
 //  was ~1.83 (chains landed at alpha ~9.4 vs ~1.7). The cluster
 //  PROPORTIONS already converged; only alpha (and pi coupled to it)
 //  failed. Conditioning on (k, n, d) decouples alpha from the empty
@@ -94,15 +94,7 @@
 //  alpha >> n asymptotic for alpha > 1e6 to avoid catastrophic
 //  cancellation (mirrors DPGaussianMixture_DerivedAlpha.cpp).
 //
-//  Check #12 (autodiff verify): the alpha log-density gradient is
-//  finite-difference verified at gen-time by
-//  tests_autodiff/verify_PYGaussianMixture.cpp; verify file is DELETED
-//  on PASS per codegen.md hard rule.
-//
-//  Check #15 inheritance: same as DPGaussianMixture (same Tier-B
-//  blocks; only a_fn / b_fn closures change).
-//
-//  LABEL SWITCHING — PY STAYS A RAW SAMPLER (NO in-sampler canonicalizer)
+//  LABEL SWITCHING -- PY STAYS A RAW SAMPLER (NO in-sampler canonicalizer)
 //  ---------------------------------------------------------------------
 //  Label switching for this PY mixture is resolved POST-MCMC on the
 //  recorded draws (skills/label_switching.md): simple-sort the OCCUPIED
@@ -110,7 +102,7 @@
 //  components), NOT in-sampler. The sampler stays a clean raw
 //  exchangeable-component sampler. The CONVERGENCE TARGET is alpha +
 //  occupied-cluster params (mu, lambda, proportion = count/N) +
-//  proportions — all label-invariant or post-MCMC-relabeled — NOT the raw
+//  proportions -- all label-invariant or post-MCMC-relabeled -- NOT the raw
 //  stick weights of the empty truncation slots, which are slot-position
 //  noise and do NOT converge on their own. alpha and the likelihood are
 //  label-invariant and converge as-is.
@@ -241,7 +233,7 @@ inline double psi(double x) {
     return r;
 }
 
-/// log p(alpha | k, n, discount) (NATURAL scale, no Jacobian) — the
+/// log p(alpha | k, n, discount) (NATURAL scale, no Jacobian) -- the
 /// COLLAPSED Pitman-Yor concentration conditional via the PY EPPF
 /// (Pitman & Yor 1997). alpha's SUFFICIENT STATISTICS are
 ///     k = #OCCUPIED clusters   and   n = #observations,
@@ -317,7 +309,7 @@ double alpha_natural_log_density(const arma::vec& alpha_nat,
     double grad = (a_prior - 1.0) / a - b_prior;
 
     // ---- PY EPPF cluster factor: sum_{i=1}^{k-1} log(alpha + i*d) -------
-    //      (empty when k <= 1; computed directly — fine for any alpha).
+    //      (empty when k <= 1; computed directly -- fine for any alpha).
     for (std::size_t i = 1; i + 1 <= k; ++i) {   // i = 1 .. k-1
         const double term = a + static_cast<double>(i) * discount;
         lp   += std::log(term);
@@ -513,7 +505,7 @@ public:
             {"cluster_counts", "a_alpha", "b_alpha", "discount"});
         impl_->data().declare_invalidates("z", {"cluster_counts"});
 
-        // (No declare_data_input here — y is an observed terminal,
+        // (No declare_data_input here -- y is an observed terminal,
         // not a replaceable covariate. The y_rep refresher reads
         // pi/mu/lambda, NOT y.)
         impl_->data().declare_predict_edges("pi",     {"y_rep"});
@@ -723,7 +715,7 @@ public:
         auto it_y = params.find("y");
         if (it_y != params.end()) {
             const arma::vec& y_new = it_y->second;
-            // STRICT-N legitimate (Check #21): z allocation length-N.
+            // STRICT-N legitimate: z allocation length-N.
             // y arrives column-major flattened (N_ x d_), length N_ * d_.
             if (y_new.n_elem != N_ * d_)
                 ai4b::stop("set_current: PYGaussianMixture fixes N and d at "
@@ -840,7 +832,7 @@ public:
     /// 7th R-level method: re-tune NUTS metric (mass matrix + step size +
     /// dual averaging) without advancing chain state. Available because
     /// the composite contains NUTS-family children. See system_design.md
-    /// §13 NUTS-family + validator.md §24.
+    /// Sec.13 NUTS-family + validator.md Sec.24.
     // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
     // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
     // C++ default args so both arities are also exposed as separate

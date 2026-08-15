@@ -348,13 +348,17 @@ appropriate. Exhaust the specialized blocks and the joint-NUTS default FIRST; wi
 still PREFER a NUTS-based custom log-density over hand-written Gibbs (the Check #17 ban on inline
 distribution samplers still holds -- Exception 4 is not a backdoor for it).
 
-The block MUST carry the inline justification comment (verbatim form from `codegen_priors Sec.2b`):
+The block MUST carry a plain-language note in the delivered file (form
+from `codegen_priors Sec.2b`):
 
 ```cpp
-// JUSTIFICATION (Check #17): Exception 4 -- no blessed block fits because <...>;
-// joint/single NUTS structurally inapplicable because <...>; custom scheme = <...>;
-// targets the correct posterior because <...>.
+// Sampling note: <what this sampler does for THIS model, one line>.
 ```
+
+The full Exception-4 justification -- why no library block fits, why NUTS
+is structurally inapplicable, what the custom scheme is, and why it
+targets the correct posterior -- goes in the L2 verdict table, never in
+the delivered file.
 
 The block choice is fixed at design time and NEVER swapped at runtime.
 

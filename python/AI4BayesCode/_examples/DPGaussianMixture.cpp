@@ -8,8 +8,8 @@
 //  modelling via the Dirichlet Process. Uses the TRUNCATED STICK-
 //  BREAKING REPRESENTATION (Ishwaran & James 2001) at level K_trunc;
 //  each component carries a diagonal-Gaussian likelihood with
-//  conjugate Normal-Gamma cluster prior (Bishop PRML §2.3.6 / Murphy
-//  2007 §4).
+//  conjugate Normal-Gamma cluster prior (Bishop PRML Sec.2.3.6 / Murphy
+//  2007 Sec.4).
 //
 //  Model
 //  -----
@@ -17,7 +17,7 @@
 //      z_i      ~ Categorical(pi)
 //      pi       ~ truncated stick-breaking (DP)
 //        V_k    iid ~ Beta(1, alpha)         k = 0..K_trunc-2
-//        V_{K_trunc-1} = 1                   (forced — Ishwaran-James)
+//        V_{K_trunc-1} = 1                   (forced -- Ishwaran-James)
 //        pi_k = V_k * prod_{j<k}(1 - V_j)    k = 0..K_trunc-1
 //      (mu_k, lambda_k) iid ~ NormalGamma(mu_0, kappa_0,
 //                                          a_lambda_0, b_lambda_0)
@@ -29,7 +29,7 @@
 //                         log_probs[i, k] = log(pi_k)
 //                                           + sum_d log N(y_id | mu_kd, 1/lambda_kd)
 //                         (z_i conditional independence holds because pi is
-//                          sampled SEPARATELY — this is the truncated SBP
+//                          sampled SEPARATELY -- this is the truncated SBP
 //                          regime, not Neal Alg 2 CRP-marginal.)
 //
 //      child(1) cluster_params  normal_gamma_cluster_gibbs_block
@@ -56,7 +56,7 @@
 //  Refreshers
 //  ----------
 //      cluster_counts   register_refresher (deterministic)
-//                       counts_from_z(z, K_trunc) — declared invalidated by z
+//                       counts_from_z(z, K_trunc) -- declared invalidated by z
 //      y_rep            register_stochastic_refresher (predict-time only)
 //                       For each i: z_rep_i ~ Categorical(pi); then
 //                       y_rep_i ~ N(mu_{z_rep_i}, diag(1/lambda_{z_rep_i})).
@@ -66,7 +66,7 @@
 //  LABEL SWITCHING
 //  ---------------
 //  DEFAULT / RECOMMENDED: resolve label switching POST-MCMC on the recorded
-//  draws. Per `skills/label_switching.md` §3, post-MCMC relabeling is the
+//  draws. Per `skills/label_switching.md` Sec.3, post-MCMC relabeling is the
 //  standard route for per-component posterior summaries:
 //
 //      - Audit / cross-implementation R-hat: apply Stephens 2000 with
@@ -77,7 +77,7 @@
 //
 //  THIS SAMPLER STAYS RAW (no in-sampler canonicalizer). The K_trunc slots are
 //  exchangeable, so the raw per-slot pi[slot]/mu[slot] are NOT identified and
-//  their raw R-hat will look high — that is benign label switching, not a mixing
+//  their raw R-hat will look high -- that is benign label switching, not a mixing
 //  failure. The label-INVARIANT summaries (cluster proportions count/N, sorted
 //  occupied centres, occupied-cluster count) converge as-is (2-chain rank-R-hat
 //  ~1.001). Resolve labelling POST-MCMC: ai4bayescode_run_chains(...) then
@@ -88,14 +88,14 @@
 //
 //  Truncation choice
 //  -----------------
-//  Default K_trunc = max(20, ceil(N / 5)). Ishwaran & James 2001 §2
+//  Default K_trunc = max(20, ceil(N / 5)). Ishwaran & James 2001 Sec.2
 //  show truncation error decays exponentially in K_trunc for moderate
 //  alpha. For data whose true cluster count >> 20 you must supply a
 //  larger K_trunc explicitly.
 //
-//  JUSTIFICATION (Check #16):
+//  Sampling note:
 //      - z is DISCRETE; categorical_gibbs_block is the only valid path
-//        (Exception 1 from `skills/codegen_priors.md §2b`). Conditional
+//        (Exception 1 from `skills/codegen_priors.md Sec.2b`). Conditional
 //        independence holds in the truncated SBP regime.
 //      - cluster_params: NEW Tier-B block normal_gamma_cluster_gibbs_block
 //        (this PR). Conjugate Normal-Gamma posterior is the
@@ -105,18 +105,6 @@
 //      - alpha: nuts_block per Q9 lean (NUTS preferred over Escobar-West
 //        1995 auxiliary trick to keep the example free of new
 //        block types).
-//
-//  Check #15 (library parity tests):
-//      - tests_autodiff/block_tests/test_bnp_utils.cpp
-//      - tests_autodiff/block_tests/test_stick_breaking_block.cpp
-//      - tests_autodiff/block_tests/test_normal_gamma_cluster_gibbs_block.cpp
-//      - tests_autodiff/block_tests/test_beta_gibbs_block.cpp (covers the
-//        gamma-normalization mechanism shared by stick_breaking_block).
-//
-//  Check #12 (autodiff verify): the alpha log-density gradient is
-//  analytic and verified by tests_autodiff/verify_DPGaussianMixture.cpp
-//  at gen-time; verify file is DELETED on PASS per the codegen.md hard
-//  rule (production .cpp stays scaffolding-free).
 //
 // @example:R
 //   library(AI4BayesCode)
@@ -479,7 +467,7 @@ public:
         // alpha writes alpha; no derived keys.
 
         // ---- Predict DAG + y_rep stochastic refresher --------------
-        // (No declare_data_input here — y is an observed terminal,
+        // (No declare_data_input here -- y is an observed terminal,
         // not a replaceable covariate. The y_rep refresher reads
         // pi/mu/lambda, NOT y; N/d/K are captured at construction.)
         impl_->data().declare_predict_edges("pi",     {"y_rep"});
@@ -680,13 +668,12 @@ public:
     void set_current(const AI4BayesCode::state_map& params) {
         // Backend-neutral: any subset of (z, pi, mu, lambda, alpha, y).
         // Matrix-valued keys (y is N x d; mu, lambda are K_trunc x d) arrive
-        // as a VECTORISED column-major arma::vec under their key — element
+        // as a VECTORISED column-major arma::vec under their key -- element
         // (row, col) lives at col*nrow + row. We convert back to the internal
         // ROW/cluster-major storage (flat[row*ncol + col]).
         if (params.count("y")) {
             const arma::vec& y_new = params.at("y");
-            // STRICT-N legitimate use (validator Check #21 / codegen_cpp.md
-            // §7a): DPGaussianMixture's categorical_gibbs_block holds the
+            // STRICT-N: DPGaussianMixture's categorical_gibbs_block holds the
             // allocation vector z of length N, and the cluster_gibbs_block
             // holds per-cluster sufficient stats sized for N observations.
             // To change N, reconstruct the wrapper. (y arrives flat col-major;
@@ -849,7 +836,7 @@ public:
     /// 7th R-level method: re-tune NUTS metric (mass matrix + step size +
     /// dual averaging) without advancing chain state. Available because
     /// the composite contains NUTS-family children. See system_design.md
-    /// §13 NUTS-family + validator.md §24.
+    /// Sec.13 NUTS-family + validator.md Sec.24.
     // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
     // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
     // C++ default args so both arities are also exposed as separate
