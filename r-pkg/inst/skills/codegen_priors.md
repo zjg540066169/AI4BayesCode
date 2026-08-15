@@ -886,8 +886,8 @@ Example interaction:
 > a 0.5-2.0 unit change in outcome Y. I suggest:
 >   (a) Moderately informative: beta ~ Normal(1.0, 1.0)
 >   (b) Weakly informative: beta ~ Normal(0, 10)
-> I recommend (b) unless you have strong domain knowledge, since
-> literature-derived priors can be overconfident. Which do you prefer?"
+> (b) is the default unless you have strong domain knowledge supporting
+> the literature values. Which would you like? Which do you prefer?"
 
 ## Exposing hyperparameters as constructor arguments
 

@@ -645,8 +645,9 @@ You should now:
    prompt for the model -- the routing picker is all that fires until the model
    spec is sent.
 3. **Once the user sends the model description** (sampler branch), load
-   `skills/codegen.md` and emit your first structured-question prompt -- batch the
-   upfront questions. Each
+   `skills/codegen.md` and run its **Step 0 FIRST**: render the captured
+   model back and fire the model-structure confirm gate. Only after that
+   gate emit the upfront-question batch. Each
    question MUST be its own labeled-option block. Required format
    when using the markdown fallback (no structured-question tool):
 
@@ -667,11 +668,12 @@ You should now:
    (a) <a sensible model-derived suggestion> (default)
    (b) Other / custom
 
-   Sampler / block preference? (codegen.md Sec.1.6)
-   (a) Skip -- let the skill auto-pick blocks (default)
-   (b) I have a suggestion -- describe here: ___
+   Sampler engine? (codegen.md Sec.1 #6)
+   (a) Let codegen recommend after seeing the model (default)
+   (b) MCMC for all parameters
+   (c) Variational inference
 
-   Max generate->validate attempts? (codegen.md Sec.1.7)
+   Max generate->validate attempts? (codegen.md Sec.1 #8)
    (a) 5 (default)
    (b) 10
    (c) 20
@@ -686,8 +688,8 @@ You should now:
    parse and can't pick by letter):
 
    - Prose paragraph listing the questions: [NO] "Please provide:
-     runtime backend, output folder, class name, AI4BayesCode
-     path, sampler preference, max attempts."
+     runtime backend, output folder, class name, sampler engine,
+     max attempts."
    - Comma-separated defaults: [NO] "Standing defaults are: R,
      ./generated/<X>/, <ClassName>, ./AI4BayesCode, let the
      workflow choose, 5."

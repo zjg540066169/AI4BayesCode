@@ -326,8 +326,7 @@ the constructor. When true:
 - BART-family blocks ALSO serialize the live tree ensemble
   (`serialize_live_trees()`) so predict_at can replay per-draw
   predictions;
-- memory grows ~linearly with iteration count -- document this in
-  the wrapper header so users don't OOM themselves.
+- memory grows ~linearly with iteration count.
 
 `get_history()` returns an aggregated `Rcpp::List` with one entry
 per block (scalar history -> `NumericVector` of length n_draws,

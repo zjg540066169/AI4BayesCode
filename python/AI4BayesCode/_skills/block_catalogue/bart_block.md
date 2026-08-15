@@ -133,11 +133,10 @@ free" from the tree prior.
 - If the user's model description includes words like "variable selection",
   "which features matter", "sparse", "feature importance", or "high-
   dimensional", AskUserQuestion whether to enable DART.
-- Recommended defaults when the user opts in: **`dart = TRUE, aug = FALSE`**.
-  Describe `aug` in one sentence (mixing accelerator for the
-  concentration parameter, adds per-sweep cost, turn on only if DART
-  mixing is slow) and let the user pick. Offer `dart = FALSE` when the
-  goal is pure prediction.
+- Defaults when the user opts in: **`dart = TRUE, aug = FALSE`**. Do NOT
+  ask the user about `aug` -- it is an internal mixing accelerator with a
+  per-sweep cost, and the audience has no basis to choose. Set it
+  yourself: FALSE by default, TRUE only if DART mixing measures poorly.
 - Expose `dart` and `aug` as constructor arguments to the generated
   R wrapper **only if the user opts into DART** -- otherwise hardcode
   both to `false` inside the class body and do NOT surface them to R.

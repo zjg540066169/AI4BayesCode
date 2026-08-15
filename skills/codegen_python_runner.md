@@ -242,7 +242,7 @@ y_rep = model.predict_at({})["y_rep"]        # posterior predictive at training 
 # model.readapt_NUTS(500)                         # re-tune metric (defaults: reset=False, max_tree_depth=-1, target_accept=-1.0)
 # model.readapt_NUTS(500, reset=True)             # reset=True if data change is dramatic
 # model.readapt_NUTS(500, target_accept=0.55)    # 4th kwarg: target_accept in (0,1] overrides the block's dual-averaging
-                                                  # target (default 0.55; behaves like Stan adapt_delta -- raise 0.8-0.99 for divergent/stiff geometries. An accept-stat bug that made raising it collapse the step size was FIXED 2026-08-10, so raising is now safe); sentinel <= 0 keeps current
+                                                  # target (default 0.55; behaves like Stan adapt_delta -- raise to 0.8-0.99 for difficult geometries); sentinel <= 0 keeps current
 
 # freeze() / unfreeze() / get_frozen() -- kernel-control, always available on every wrapper.
 #
@@ -274,7 +274,8 @@ y_rep = model.predict_at({})["y_rep"]        # posterior predictive at training 
 #                                 fixed={"sigma": 1.0})
 
 # Advanced names (all valid in freeze / unfreeze / ctor helper's fixed keys):
-#   "<slot_name>"                          -- joint_nuts_block slot-level freeze (Sec.10.a)
+#   "<component_name>"                     -- hold one component of a joint block
+#   "<component_name>[k]"                  -- hold a single element of that component
 #   "<outer>.<inner_leaf>"                 -- nested composite dot-path (Sec.10.c)
 #   "<rjmcmc_name>.gamma" / ".beta"        -- rjmcmc sub-key freeze (Sec.10.d)
 
@@ -714,13 +715,13 @@ elif d["ess_ratio"] < 0.01:
 # R3.a Bayesian p-values on (up to) 6 summary statistics. y_rep is the
 # posterior-predictive draw matrix (n_keep x N) from predict_at(). The p-value
 # for statistic T is P(T(y_rep) >= T(y_obs)) over posterior-predictive draws.
-# DIAGNOSTIC ONLY -- print, WARN on an EGREGIOUS excursion, but NEVER assert /
-# gate on it. A posterior-predictive p-value is ~Uniform(0, 1) even for a
-# perfectly-sampled, CORRECTLY-specified model, so across 6 statistics ~22% of
-# CORRECT samplers would land at least one outside (0.02, 0.98) by chance, and
-# order statistics (min / max) are legitimately extreme. Sampler correctness is
-# gated by rank-R-hat (R2); a Bayesian p-value is a MODEL-FIT check the user
-# owns, not a sampler gate. (Mirrors R3.b PSIS-LOO, also diagnostic-only.)
+# This IS a gate (unlike R3.b PSIS-LOO below), but only on the CENTRAL
+# statistics: a posterior-predictive p-value is ~Uniform(0, 1) even for a
+# perfectly-sampled, CORRECTLY-specified model, and the order statistics
+# (min / max) are legitimately extreme, so gating on "any statistic outside"
+# would fail correct samplers. Gate rule: min / max are printed only; among
+# the CENTRAL statistics (mean, sd, q25, q75) one outside is a WARN and TWO OR
+# MORE simultaneously FAIL R3 (validator.md R3.a).
 bp_stat = {
     "mean": np.mean, "sd": lambda x: np.std(x, ddof=1),
     "min": np.min,   "max": np.max,
@@ -732,13 +733,16 @@ pv = {nm: float(np.mean(np.array([f(row) for row in y_rep]) >= f(y_obs)))
       for nm, f in bp_stat.items()}
 print("\n  Bayesian p-values: " +
       "  ".join(f"{nm}={p:.2f}" for nm, p in pv.items()))
-_bpv_extreme = {nm: p for nm, p in pv.items() if p < 0.005 or p > 0.995}
-if _bpv_extreme:
+# Gate on the CENTRAL statistics only; min / max stay diagnostic.
+pv_lo = 0.02 if USES_JOINT_NUTS else 0.05
+pv_hi = 1.0 - pv_lo
+_central = {nm: p for nm, p in pv.items() if nm in ("mean", "sd", "q25", "q75")}
+_n_out = sum(1 for p in _central.values() if p <= pv_lo or p >= pv_hi)
+if _n_out == 1:
     import warnings
-    warnings.warn(
-        f"[R3.a] Bayesian p-value(s) near 0/1 (DIAGNOSTIC, NOT a failure): "
-        f"{_bpv_extreme}. Expected for order statistics; investigate model fit "
-        f"only if a CENTRAL statistic (mean / sd) is extreme AND R-hat flags.")
+    warnings.warn(f"[R3.a WARN] one central Bayesian p-value outside "
+                  f"({pv_lo}, {pv_hi}): {_central}")
+assert _n_out < 2, f"[R3.a FAIL] {_n_out} central Bayesian p-values outside ({pv_lo}, {pv_hi}): {_central}"
 
 # R3.b PSIS-LOO (DIAGNOSTIC ONLY -- NEVER gates). Pareto-k_hat measures LOO
 # importance-weight reliability, NOT sampler correctness; GP latent-variable

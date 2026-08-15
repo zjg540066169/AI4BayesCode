@@ -1710,8 +1710,8 @@ The wrapper's `readapt_NUTS` body should reference ONLY
 `readapt_rng_`. See `system_design.md Sec.8` for the three-RNG
 discipline.
 
-**(c) R-level round-trip test.** The wrapper's runner /
-`example_<ClassName>.R` must include the following bitwise
+**(c) R-level round-trip test.** The throwaway Layer-3 runner
+(`run_<ClassName>.R`) must include the following bitwise
 identity test (or a test of equivalent form):
 
 ```r
@@ -1916,8 +1916,8 @@ grep -E '\.def\("freeze"|\.def\("unfreeze"|\.def\("get_frozen"|AI4BAYESCODE_PYBI
      examples/<ClassName>.cpp   # must find all three (or the macro)
 ```
 
-**(b) Whitelist / blacklist gate -- runtime R test.** The wrapper's
-runner / `example_<ClassName>.R` must include:
+**(b) Whitelist / blacklist gate -- runtime R test.** The throwaway
+Layer-3 runner (`run_<ClassName>.R`) must include:
 
 ```r
 m <- new(<ClassName>, ...)
@@ -2056,14 +2056,13 @@ Also test the checkpoint restore round-trip closure (v1 feature per
 DESIGN_NOTES Sec.10.b + Sec.10.c ordering + Sec.10.d sub-key preservation):
 
 ```r
-# Freeze a mix of forms first (slot + rjmcmc sub-key + nested dot-path
-# if the composite supports them; use whatever's available in the wrapper)
-targets <- character(0)
-if (any(sapply(m$get_dag()$blocks, function(b) b$family == "joint_nuts")))
-    targets <- c(targets, "<slot_name>")
-if (any(sapply(m$get_dag()$blocks, function(b) b$family == "rjmcmc")))
-    targets <- c(targets, "<rj_name>.gamma")
-targets <- c(targets, "<whitelist_block_name>")
+# Freeze a mix of forms first. get_dag() exposes the DAG edges
+# (gibbs_reads / gibbs_invalidates / predict_edges / context_edges /
+# data_inputs) -- NOT a block list, so pick the targets from the
+# composition you just generated: add "<component_name>" if the model
+# has a joint_nuts_block, "<rj_name>.gamma" if it has an rjmcmc_block,
+# and always the whitelisted block name.
+targets <- c("<whitelist_block_name>")   # + the forms this model supports
 m$freeze(targets)
 
 # Snapshot get_frozen output (dot-paths preserved; DFS pre-order per Sec.10.b/c)

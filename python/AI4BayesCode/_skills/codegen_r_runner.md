@@ -234,11 +234,6 @@ ai4bayescode_source("./<ClassName>/<ClassName>.cpp")
 # Full constructor / methods / prior reference:
 #   ai4bayescode_doc(<ClassName>)
 
-# (No helper functions here on purpose: chain running, draw collection,
-#  R-hat/ESS, and diagnostics all come from the SHIPPED library
-#  functions, and the model constructor goes INLINE in the
-#  ai4bayescode_run_chains call below.)
-
 # Simulate a toy data set
 # <commented synthetic generation of <data_args> + a held-out X test>
 #
@@ -321,7 +316,7 @@ model$predict_at(list(<X> = <X>_test))
 ## model$step(1L)               ## refresh derived state -- hybrid composites only
 ## model$readapt_NUTS(500L, FALSE, -1L)         ## 3-arg backward-compat form: reset=FALSE, max_tree_depth=-1 = configured depth
 ## ## model$readapt_NUTS(500L, TRUE, -1L)         ## reset=TRUE if data change is dramatic
-## ## model$readapt_NUTS(500L, FALSE, -1L, 0.55) ## 4-arg form: 4th = target_accept in (0,1] (default 0.55; behaves like Stan adapt_delta -- raise 0.8-0.99 for divergent/stiff geometries. An accept-stat bug that made raising it collapse the step size was FIXED 2026-08-10, so raising is now safe; sentinel <= 0 keeps current)
+## ## model$readapt_NUTS(500L, FALSE, -1L, 0.55) ## 4-arg form: 4th = target_accept in (0,1] (default 0.55; behaves like Stan adapt_delta -- raise to 0.8-0.99 for difficult geometries; sentinel <= 0 keeps the current value)
 
 ## freeze() / unfreeze() / get_frozen() -- kernel-control, always available on every wrapper.
 ##
@@ -703,14 +698,13 @@ if (max_rhat >= 1.01)
 # ---- Layer 3 R3: posterior predictive p-values + PSIS-LOO ---------------
 suppressPackageStartupMessages(library(loo))
 
-# R3.a Bayesian p-values on 6 (or fewer) summary stats. DIAGNOSTIC ONLY --
-# print, and warn on an EGREGIOUS excursion, but NEVER stopifnot / gate on it.
-# A posterior-predictive p-value is ~Uniform(0, 1) even for a perfectly-sampled,
-# CORRECTLY-specified model, so across 6 statistics ~22% of CORRECT samplers
-# would land at least one outside (0.02, 0.98) by chance, and order statistics
-# (min / max) are legitimately extreme. Sampler correctness is gated by
-# rank-R-hat (R2); a Bayesian p-value is a MODEL-FIT check the user owns, not a
-# sampler gate. (Mirrors R3.b PSIS-LOO, also diagnostic-only.)
+# R3.a Bayesian p-values. This IS a gate (unlike R3.b PSIS-LOO below), but
+# only on the CENTRAL statistics: a posterior-predictive p-value is
+# ~Uniform(0, 1) even for a perfectly-sampled, CORRECTLY-specified model, and
+# the order statistics (min / max) are legitimately extreme, so gating on
+# "any statistic outside" would fail correct samplers. Gate rule: min / max are
+# printed only; among the CENTRAL statistics (mean, sd, q25, q75) one outside
+# is a WARN and TWO OR MORE simultaneously FAIL R3 (validator.md R3.a).
 bp_stat <- list(mean = mean, sd = sd, min = min, max = max,
                 q25 = function(x) quantile(x, 0.25, names = FALSE),
                 q75 = function(x) quantile(x, 0.75, names = FALSE))
@@ -718,10 +712,15 @@ pv <- sapply(bp_stat, function(f)
     mean(apply(c1$pp$y_rep, 1, f) >= f(y_obs)))
 cat("\n  Bayesian p-values: ",
     paste(sprintf("%s=%.2f", names(pv), pv), collapse = "  "), "\n")
-.bpv_extreme <- pv[pv < 0.005 | pv > 0.995]
-if (length(.bpv_extreme))
-    warning(sprintf("[R3.a] Bayesian p-value(s) near 0/1 (DIAGNOSTIC, NOT a failure): %s. Expected for order statistics; investigate model fit only if a CENTRAL statistic (mean/sd) is extreme AND R-hat flags.",
-                    paste(sprintf("%s=%.3f", names(.bpv_extreme), .bpv_extreme), collapse = ", ")))
+# Gate on the CENTRAL statistics only; min / max stay diagnostic.
+pv_lo   <- if (USES_JOINT_NUTS) 0.02 else 0.05
+pv_hi   <- 1 - pv_lo
+.central <- pv[intersect(names(pv), c("mean", "sd", "q25", "q75"))]
+.n_out   <- sum(.central <= pv_lo | .central >= pv_hi)
+if (.n_out == 1L)
+    warning(sprintf("[R3.a WARN] one central Bayesian p-value outside (%.2f, %.2f): %s",
+                    pv_lo, pv_hi, paste(sprintf("%s=%.3f", names(.central), .central), collapse = ", ")))
+stopifnot(.n_out < 2L)
 
 # R3.b PSIS-LOO (DIAGNOSTIC ONLY -- does NOT fail R3).
 # Pareto-k_hat measures LOO importance-weight reliability, NOT sampler
