@@ -317,32 +317,28 @@ BEFORE any codegen (extraction can misread, so this gate matters MORE here),
 then run the remaining phases below. (No subagent tool available: extract the
 spec, drop the paper text, continue from the spec.)
 
-**Multiple models in one paper -> one class per model, extracted
-SEPARATELY.** Papers routinely define several models (baseline +
-extensions, competing specifications, simulation-study vs application
-variants). The default is ONE generated class per model -- never merge
-them into a single class, and never silently generate only one of them.
-Flow:
-1. SCOUT first: the first subagent returns ONLY the model inventory --
-   for each model its name, a one-line description, and where it lives
-   (section / equation numbers). No equations yet.
-2. Show the inventory to the user and confirm which models to generate.
-   Default: ALL of them, one class each.
-3. EXTRACT separately: dispatch ONE subagent PER selected model
-   (in parallel where the tool allows), each returning the full spec
-   template above for ITS model only. Separate extraction keeps each
-   spec focused and prevents symbol collisions -- the same symbol often
-   means different things in different models of one paper.
-4. Each returned spec then runs the normal per-model gates (Phase-3
-   confirmation, priors, generation, validation) and produces its own
-   `<ClassName>.cpp`. Shared data preprocessing may be described once
-   and referenced from each spec.
+**Multiple models in one paper -> one class per model, one spec per
+model (SAME single subagent).** Papers routinely define several models
+(baseline + extensions, competing specifications, simulation-study vs
+application variants). The default is ONE generated class per model --
+never merge them into a single class, and never silently generate only
+one of them. Instruct the ONE paper-reading subagent above that when
+the paper defines several models it must return:
+- a short model INVENTORY header: per model its name, a one-line
+  description, and where it lives (section / equation numbers); then
+- ONE SEPARATE spec (the full template above) PER model, each
+  self-contained with its own symbol table -- per-model tables prevent
+  symbol collisions, since the same symbol often means different
+  things in different models of one paper. Shared data preprocessing
+  may be described once and referenced from each spec.
+Show the inventory to the user and confirm which models to generate
+(default: ALL of them, one class each). Each confirmed spec then runs
+the normal per-model gates (Phase-3 confirmation, priors, generation,
+validation) and produces its own `<ClassName>.cpp`.
 Distinguish MODELS from VARIANTS: alternative parametrizations of the
 SAME model (centered vs non-centered, shape-rate vs shape-scale) are
 methodology forks WITHIN one spec (surface them at the fork gate, one
-class), not separate classes. When a single paper-reading subagent was
-already dispatched and its spec reveals multiple models mid-flight,
-fall back to steps 2-4 from that inventory.
+class), not separate classes.
 
 | Phase | When | Instruction file to load |
 |---|---|---|
