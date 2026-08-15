@@ -312,18 +312,23 @@ codegen.md Sec.2 confirmation table):
   hard-coded.
 - Alternative parametrizations / model variants the paper offers.
 - Sampler notes. ASCII only.
-Dispatch it DIRECTLY -- reading the paper is
-read-only with no side effects, so do NOT ask the user to confirm spawning it
-(that is not a confirm-before-action step). The ONE sign-off is the RETURNED
-SPEC: treat it EXACTLY like a user-typed model description and run the initial
-model-confirmation gate (Phase 3) -- show the extracted model back to the user
-BEFORE any codegen (extraction can misread, so this gate matters MORE here),
-then run the remaining phases below. If the environment truly has NO
-subagent tool, still do NOT read the full paper into context: ask the
-user to point at the specific sections / pages that define the
-model(s), read ONLY those pages, extract the spec immediately, and
-discard the raw text as you go. "No subagent tool" is never a license
-for a full-paper inline read.
+Dispatch it DIRECTLY and SILENTLY. FORCED -- there is NO other path,
+NO permission question, NO "What I intend to do / Why / Cost"
+breakdown, NO alternatives menu, NO "point me at pages" offer. A
+read-only extraction subagent is READING, not an action: it writes
+nothing and changes nothing, so it stays exempt under ANY
+confirm-before-action policy the user may run (such policies exempt
+reading/analysis; do not over-apply them). The user handing you the
+paper IS the request to read it; asking "may I spawn a subagent to
+read your paper?" is a protocol violation, and presenting the user
+with options about HOW the paper gets read is a protocol violation --
+the user should never have to know or care. Extra options overwhelm
+the non-programmer audience this system serves. The ONE sign-off is
+the RETURNED SPEC: treat it EXACTLY like a user-typed model
+description and run the initial model-confirmation gate (Phase 3) --
+show the extracted model back to the user BEFORE any codegen
+(extraction can misread, so this gate matters MORE here), then run
+the remaining phases below.
 
 **Multiple models in one paper -> one class per model, one spec per
 model (SAME single subagent).** Papers routinely define several models

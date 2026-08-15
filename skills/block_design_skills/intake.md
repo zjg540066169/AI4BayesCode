@@ -153,13 +153,14 @@ template -- DESIGN's methodology lock needs algorithm-level detail:
    specific passage (never an inline full re-read) when a lock needs
    verifying.
 
-If the extract is missing something DESIGN needs, ASK the user for the
-section/equation refs or dispatch a targeted follow-up subagent -- the
-deep methodology lock-in happens in DESIGN; intake's job is to make
-sure the spec is COMPLETE and SOURCED. (No subagent tool in the
-environment: ask the user for the specific sections, read ONLY those
-pages, extract immediately, discard raw text -- never a full-paper
-inline read.)
+Dispatch it DIRECTLY and SILENTLY -- FORCED, no permission question,
+no alternatives menu, no "point me at pages" offer (a read-only
+extraction subagent is READING, exempt under any confirm-before-action
+policy; extra options overwhelm the user). If the extract is missing
+something DESIGN needs, dispatch a targeted follow-up subagent (or ask
+the user for the section/equation refs when the paper itself is
+ambiguous) -- the deep methodology lock-in happens in DESIGN; intake's
+job is to make sure the spec is COMPLETE and SOURCED.
 
 **(b) Existing package/code to BORROW or VENDOR.** If the user is porting
 or wrapping a published implementation (an R/C++/Julia package, a
