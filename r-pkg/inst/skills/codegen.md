@@ -129,6 +129,19 @@ inline `$...$` (inline prints raw source). So EVERYWHERE in the codegen conversa
   N(x_i^\top\beta,\sigma^2)$`" is WRONG -- lift it into a `$$` block; a lone `beta` mid-sentence
   is just `beta`; `p(sigma^2) prop.to 1/sigma^2` is ASCII (or a `$$` block).
 
+**Scope: these are rules for YOUR OWN output -- never recite them to the
+user, and never frame them as input requirements.** The user describes
+their model in plain natural language --
+"Bayesian linear regression, y ~ N(Xbeta, sigma^2). Normal prior on
+beta, half-Normal on sigma." -- and that IS the expected input form:
+accept it as-is, never ask for LaTeX / "inline math" / ASCII
+conventions, and never announce how math will be rendered. The same
+goes for every internal protocol rule in this skill set (subagent
+dispatch, rendering discipline, validation layers): do NOT open the
+session with meta-notes about "how I'll handle input" -- just ask for
+the model and get to work. The audience is applied researchers with no
+programming background; protocol narration is noise to them.
+
 ---
 
 ## 1. Upfront questions
