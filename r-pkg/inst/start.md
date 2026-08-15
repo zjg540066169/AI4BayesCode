@@ -379,6 +379,13 @@ sentence traces back to a skill file rather than to the user's model,
 it does not belong. When in doubt about a comment, LEAVE IT OUT --
 a confusing comment is worse than no comment.
 
+Scope: this governs the DEFAULT deliverables -- the clean
+`example_<ClassName>.*` and the `.cpp` comments a user reads. The
+OPT-IN validation harness (`run_<ClassName>.R` / `.py` kept because
+the user explicitly chose to ship the validation code) is exempt: a
+user who asks for the validation internals is asking to see them, and
+validator vocabulary is appropriate THERE -- and only there.
+
 **Phase 3 -- the model confirmation -- is the single most important
 gate in this table. It is NOT optional, NOT skippable, NOT a
 courtesy.** Every later layer (L1 compile, L2 semantic checks, L3
