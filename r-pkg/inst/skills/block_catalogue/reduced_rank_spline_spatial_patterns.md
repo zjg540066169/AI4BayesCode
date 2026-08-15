@@ -30,6 +30,27 @@ behaviour at moderate chain lengths. Log-transform the positive scalars
 to REAL and turn on the dense metric so the Welford pilot covariance can
 capture the off-diagonal coupling.
 
+**This family is a MEASURED exception to the "START DIAGONAL" default**
+(`codegen_cpp.md` Sec.4a). Adjacent spline bases have overlapping
+support, so the coefficients are strongly correlated by construction --
+the coupling is OFF-DIAGONAL and a per-axis metric cannot represent it.
+Measured on the shipped `BSplineRegression` example (N = 100, 10 interior
+knots, 13 parameters; 2 chains at different seeds, 1500 warmup + 2000
+kept draws, cross-chain rank R-hat):
+
+| metric | max rank R-hat | min ess_ratio | wall (2 chains) |
+|---|---|---|---|
+| adapted diagonal | 1.0288 (`z[8]`) | 0.0059 (`z[8]`) | 3.3s + 2.9s |
+| **dense (shipped)** | **1.0017** (`sds`) | **0.3488** (`sds`) | **0.9s + 0.8s** |
+
+Dense wins on all three axes: **59x the effective sample size**, R-hat
+inside the strict 1.01 bar where diagonal misses it, and 3.6x FASTER --
+diagonal mixes so poorly that NUTS builds much deeper trees per draw.
+Note the diagonal `ess_ratio = 0.0059` sits right at the 0.005
+escalation floor, i.e. diagonal is not merely slower, it is close to
+failing the runtime gate outright. Start dense here; do NOT "start
+diagonal and escalate" for this pattern.
+
 **Why not separate blocks per parameter**: blocking
 `(Intercept | log_amp | log_ell | z)` separately preserves the
 within-block strong correlations as cross-block conditionals, and the

@@ -357,6 +357,16 @@ mixed cleanly).
         table row "Multivariate hierarchical", WHERE R2/R3 diagnostics show
         the diagonal metric is inadequate (measured, not gated on a fixed
         dimension threshold);
+     4. **Reduced-rank basis smoothers -- spline / HSGP / ICAR**
+        (`block_catalogue/reduced_rank_spline_spatial_patterns.md`).
+        Adjacent bases have overlapping support, so the coefficients are
+        correlated BY CONSTRUCTION and the coupling is off-diagonal --
+        a per-axis metric cannot represent it. Measured on the shipped
+        `BSplineRegression` example (13 params, 2 chains, 1500 + 2000):
+        diagonal gives max rank R-hat 1.0288 and ess_ratio 0.0059 (at the
+        0.005 escalation floor), dense gives 1.0017 and 0.3488 -- 59x the
+        effective sample size AND 3.6x faster wall clock. START DENSE for
+        this family; do not "start diagonal and escalate".
    - The model class is documented to require dense in
      `block_catalogue/index.md`.
 
