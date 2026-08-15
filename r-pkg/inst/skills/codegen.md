@@ -512,28 +512,25 @@ system's core guarantee.
 
 Deliverable on PASS:
 - **No (default):** the production `<ClassName>.cpp` (which already
-  contains zero validation code) **plus a usage example**
-  `example_<ClassName>.R`. This is NOT a stripped snippet -- it is
-  the R runner content **up to (excluding) the first two-chain
-  diagnostic chain** (`c1 <- run_chain_<ClassName>(... seed=101 ...)`),
-  WITH comments retained: header comment, `source(AI4BayesCode
-  helpers)` + `ai4bayescode_sourceCpp(...)`, the constructor
-  reference block, the **full `run_chain_<ClassName>()` definition**
-  (WITH its `diagnosis = FALSE` parameter, whose diagnosis branch CALLS
-  the shipped `ai4bayescode_diagnose()` -- the diagnostics table AND
-  the trace+ACF+density plot are a library function, NOT a hand-emitted
-  helper),
-  simulation/toy-data code, a monolithic non-stateful
-  `run_chain_<ClassName>()` call PLUS a `diagnosis = TRUE` call that
-  exposes `mono_chain$diagnosis` and `mono_chain$diagnosis_plot`, and
-  commented stateful-API usage
-  (`new(..., keep_history=TRUE)`, `step`, `get_history`,
-  `get_current`, `set_current(list(...))`, `predict_at(list(...))`).
-  Everything from the first diagnostic chain onward (R1/R2/R3,
-  R-hat/ESS, BPV, PSIS-LOO) is the throwaway Layer-3 harness and is
-  DELETED on PASS (same rule as the smoke test: "Delete on PASS. No
-  exceptions."). Exact template: `codegen_r_runner.md` "Usage-example
-  template".
+  contains zero validation code) **plus a clean usage example**
+  `example_<ClassName>.R` / `.py`.
+
+  **The runner skills own the example's exact shape -- do not re-specify
+  it here.** Follow the "Usage-example template" section of
+  `codegen_r_runner.md` / `codegen_python_runner.md` verbatim. Its
+  load-bearing points: readability is the highest rule (the audience has
+  no programming background); the example defines NO helper functions at
+  all -- the constructor goes INLINE into `ai4bayescode_run_chains` /
+  `AI4BayesCode.run_chains`, followed by `rhat_summary` and `diagnose`;
+  a compact constructor reference plus a `doc()` pointer replaces any
+  long comment wall; and no skill text, validator vocabulary, or
+  reliability hedging appears in the file.
+
+  The whole Layer-3 harness -- `run_<ClassName>.R` / `.py`, including
+  its internal `run_chain_<ClassName>()` helper, the two-chain
+  diagnostic, R-hat/ESS, posterior-predictive checks -- is throwaway and
+  is DELETED on PASS (same rule as the smoke test: "Delete on PASS. No
+  exceptions."). It is never copied into the delivered example.
 - **Yes:** ship the full `run_<ClassName>.R` Layer-3 runner
   (the `codegen_r_runner.md` template) as today.
 
@@ -551,20 +548,27 @@ contract -- run:
 
 ```bash
 # R:
-grep -q 'ai4bayescode_diagnose' example_<ClassName>.R && grep -q 'diagnosis_plot' example_<ClassName>.R
+grep -q 'ai4bayescode_run_chains' example_<ClassName>.R && grep -q 'ai4bayescode_diagnose' example_<ClassName>.R
 # Python:
-grep -q 'ai4bayescode_diagnose' example_<ClassName>.py && grep -q 'diagnosis_plot' example_<ClassName>.py
+grep -q 'AI4BayesCode.run_chains'  example_<ClassName>.py && grep -q 'AI4BayesCode.diagnose'  example_<ClassName>.py
 ```
 
-If either grep fails, the runner is non-compliant -- REWRITE it so it:
-(1) CALLS `ai4bayescode_diagnose()` (R) / `AI4BayesCode.diagnose()`
-(Python) -- never an inline reimplementation; (2) takes `diagnosis = FALSE`;
-(3) attaches BOTH `$diagnosis` (the returned summary) AND `$diagnosis_plot`
-(the returned plot). This is INDEPENDENT of how the runner collects draws
--- whatever named draw list you built (`get_history` slice,
-`clear_history()`+loop, or `get_current()` loop), pass THAT to the library
-function, e.g. `ai4bayescode_diagnose(list(beta = beta, sigma = sigma))`.
-Do NOT deliver until both greps pass.
+Also assert the example carries NO hand-rolled chain machinery:
+
+```bash
+# must find NOTHING (R and Python respectively):
+grep -nE 'run_chain_|make_[A-Z]' example_<ClassName>.R
+grep -nE 'run_chain_|def make_'  example_<ClassName>.py
+```
+
+If a required grep fails, or a forbidden one matches, the example is
+non-compliant -- REWRITE it to the runner skills' usage-example template:
+the chains come from the SHIPPED `ai4bayescode_run_chains` /
+`AI4BayesCode.run_chains` with the constructor passed INLINE, convergence
+from `rhat_summary`, and summaries + plots from the shipped
+`ai4bayescode_diagnose` / `AI4BayesCode.diagnose` -- never an inline
+reimplementation, never a generated factory or chain driver.
+Do NOT deliver until all four greps agree.
 
 On FAIL within `max_attempts`: stop-and-report (per "Generation
 attempt budget" above) -- do NOT silently ship the usage example.
@@ -573,10 +577,12 @@ PASS. Treat silence / no answer as the default (No / minimal
 example). Orthogonal to `max_attempts` (that caps attempts; this
 governs only what a passing run delivers).
 
-If the user picks "Yes" (or does not respond -- treat silence as "Yes"),
-present the confirmation below. If "No", skip to code generation but
-still print a one-line summary of what you understood (e.g. "Generating
-a 3-block sampler: mu (real), sigma (positive), theta (simplex)...").
+Present the confirmation below UNCONDITIONALLY -- there is no "do you
+want to review it?" question and no path that skips it (Sec.3 top;
+`start.md` phase table: Phase 3 is the single most important gate,
+because every later layer verifies the code against the AI's
+understanding and none can detect that the understanding itself is
+wrong). Re-render it in full after EVERY revision round.
 
 The confirmation has three parts:
 
@@ -1379,8 +1385,12 @@ run, and produce reasonable samples out of the box.
   -> Configuration discipline" for the full table of which fields
   code-gen may set; `validator.md` Check #20 catches violations.
 - **Never write a custom conjugate-Gibbs block.** Continuous parameters
-  MUST be sampled by `nuts_block` regardless of whether a conjugate
-  closed-form update is available. The ONLY Gibbs blocks you are allowed
+  MUST be sampled by the NUTS family -- `joint_nuts_block` is the
+  DEFAULT (collect every continuous parameter not claimed by a
+  specialized block into ONE joint block; `codegen_priors.md` Sec.2b),
+  with a standalone `nuts_block` as the low-priority fallback for a
+  genuinely scalar / deliberately isolated parameter -- regardless of
+  whether a conjugate closed-form update is available. The ONLY Gibbs blocks you are allowed
   to instantiate are the `*_gibbs_block` types already shipped as header
   files in `include/AI4BayesCode/` -- see `skills/block_catalogue/index.md` for
   the authoritative list. Use whichever of those headers exist in the

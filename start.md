@@ -195,8 +195,12 @@ DO.
 ### Failure-recovery policy: auto-retry up to N attempts (default N = 5), then report
 
 On a procedural-step failure (compile error, R-hat >= 1.05 at the
-budget, BPV out of range, LOO Pareto-k too high, etc.), **do NOT
-pause to ask the user**. Auto-retry up to N attempts total
+budget, two or more BPV statistics out of range, etc.), **do NOT
+pause to ask the user**. (PSIS-LOO Pareto-k is DIAGNOSTIC-ONLY and
+never triggers a retry -- it is unreliable for BNP / mixture models
+where high k reflects the model class, not a sampler bug. The
+posterior-predictive p-value gate does not have that problem and DOES
+fail; see `validator.md` R3.a / R3.b.) Auto-retry up to N attempts total
 (including attempt #1), escalating the fix between attempts --
 e.g., compile error -> fix the syntax / typo / missing include and
 recompile; R-hat fail at 4k+4k -> re-run at 20k+20k; still fails ->
@@ -451,10 +455,30 @@ runtime -- it decides the compile call AND whether to even ask for a library pat
 - **SKIP the "Path to AI4BayesCode folder?" upfront question** -- it is not needed.
 - **NEVER** emit `AI4BayesCode_path=`, a `source(".../AI4BayesCode_helpers.R")`
   runner line, or an absolute `/Users/...` / `C:\...` path anywhere (compile call,
-  runner, or `@example`) -- the packaged API needs none of them, and absolute /
-  checkout paths break on another machine or if the folder moves. (Working from a
-  raw git checkout instead of an installed package? Install it first --
-  `remotes::install_github(...)` / `pip install ...` -- then use the packaged form.)
+  runner, or `@example`) -- the packaged API needs none of them, and absolute
+  paths break on another machine or if the folder moves.
+
+**If the package is NOT installed (R checkout mode) -- do NOT assume it is:**
+
+- R only (Python has no checkout mode: if `AI4BayesCode` is missing there, say
+  so and stop -- `pip install ...` is the only path).
+- Emit exactly TWO checkout-specific lines, then the SAME flow as the installed
+  branch:
+  ```r
+  source("<path>/AI4BayesCode/R/AI4BayesCode_helpers.R")
+  ai4bayescode_sourceCpp("<ClassName>.cpp", AI4BayesCode_path = "<path>/AI4BayesCode")
+  ```
+  `AI4BayesCode_path=` is REQUIRED here (the helpers cannot locate the headers
+  otherwise) -- this is the ONE case where it is correct. Ask the user for the
+  checkout path once and reuse it.
+- Everything after the compile is IDENTICAL to the installed branch:
+  `ai4bayescode_run_chains` / `ai4bayescode_rhat_summary` /
+  `ai4bayescode_diagnose` are all provided by the checkout helpers too, so the
+  delivered example has the same shape in both modes -- only the first one or
+  two lines differ. Never generate a different example structure for checkout
+  users.
+- Absolute paths ARE unavoidable here (the checkout lives somewhere specific);
+  the ban above applies to the installed branch.
 
 The generated `@example` header block (what `doc()` shows) ALWAYS uses the
 installed-package form when the package is present -- the clean relative

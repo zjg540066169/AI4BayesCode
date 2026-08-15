@@ -108,11 +108,24 @@ documentation a first-time user reads):
    numbers), no explanations of what the example does NOT contain --
    an acronym with no context, or an absence-explanation, only
    confuses the audience.
-2. **Compile** -- the packaged API compiles the class from a bare RELATIVE
-   filename: `ai4bayescode_sourceCpp("<ClassName>.cpp")` (equivalently
-   `ai4bayescode_source("<ClassName>.cpp")`). NEVER `AI4BayesCode_path=`, NEVER a
-   `source(".../*_helpers.R")` line, NEVER an absolute `/Users/...` path (all three
-   break on another machine or if the folder moves).
+2. **Compile** -- two branches, decided by the `start.md` Sec.1b install
+   detection (never assume the package is installed):
+   - **Package installed (recommended):** the packaged API compiles from a bare
+     RELATIVE filename -- `library(AI4BayesCode)` then
+     `ai4bayescode_sourceCpp("<ClassName>.cpp")` (equivalently
+     `ai4bayescode_source(...)`). Here NEVER emit `AI4BayesCode_path=`, a
+     `source(".../*_helpers.R")` line, or an absolute `/Users/...` path (all
+     three break on another machine or if the folder moves).
+   - **R checkout mode (package NOT installed):** emit
+     `source("<path>/AI4BayesCode/R/AI4BayesCode_helpers.R")` followed by
+     `ai4bayescode_sourceCpp("<ClassName>.cpp", AI4BayesCode_path = "<path>/AI4BayesCode")`.
+     `AI4BayesCode_path=` is REQUIRED in this branch -- the helpers cannot find
+     the headers without it.
+
+   Everything AFTER the compile is identical in both branches: the checkout
+   helpers ship `ai4bayescode_run_chains` / `ai4bayescode_rhat_summary` /
+   `ai4bayescode_diagnose` too, so the example's shape never changes -- only
+   these first one or two lines do.
    IMPORTANT -- where the class binds: `ai4bayescode_sourceCpp()` /
    `ai4bayescode_source()` bind the compiled class into the CALLER'S frame
    (`env = parent.frame()`). So compile at the TOP LEVEL of the runner. If you wrap

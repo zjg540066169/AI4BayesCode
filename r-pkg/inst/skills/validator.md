@@ -2923,10 +2923,17 @@ the same construction seed.
 
 **Bayesian p-value:** `pv(T) = mean(T(y_rep_d) >= T(y_obs))` for each T.
 
-**Verdict:**
-- pv  in  (0.05, 0.95) -> OK
-- outside [0.05, 0.95] -> WARN (one statistic outside is usually fine;
-  two or more simultaneously is a semantic bug)
+**Verdict (R3.a BPV is a GATE -- it FAILS the attempt, unlike the
+diagnostic-only R3.b PSIS-LOO below):**
+- every pv in (0.05, 0.95) -> PASS
+- exactly ONE statistic outside -> WARN, not a failure. With k test
+  statistics each has ~2*0.05 chance of landing outside under a
+  CORRECT model, so "at least one outside" is expected in roughly a
+  third of clean 4-statistic runs; gating on it would false-fail
+  correct samplers.
+- TWO OR MORE statistics outside simultaneously -> **FAIL** the
+  attempt (semantic bug: the posterior predictive does not reproduce
+  the data). Route back to Layer 2 and retry per the attempt budget.
 - **Tighter threshold (0.02, 0.98) when the sampler uses
   `joint_nuts_block`** -- silent
   miscalibration bugs in concatenate-and-slice code are more insidious
@@ -2984,7 +2991,13 @@ pv1 <- sapply(bp_stat, function(f)
 # Threshold tightens to (0.02, 0.98) if the sampler uses joint_nuts_block.
 pv_lo <- if (USES_JOINT_NUTS) 0.02 else 0.05
 pv_hi <- 1 - pv_lo
-stopifnot(all(pv1 > pv_lo & pv1 < pv_hi))
+n_out <- sum(pv1 <= pv_lo | pv1 >= pv_hi)
+# GATE: >= 2 statistics outside simultaneously fails R3. Exactly one is a
+# WARN -- with k statistics, one landing outside is expected under a correct
+# model and gating on it would false-fail clean samplers.
+if (n_out == 1L) message("[R3.a WARN] one BPV statistic outside (",
+                         paste(round(pv1, 3), collapse = ", "), ")")
+stopifnot(n_out < 2L)
 
 # --- R3.b PSIS-LOO (DIAGNOSTIC ONLY -- does NOT fail R3) ---
 # Pareto-k_hat measures LOO importance-weight reliability, NOT sampler
