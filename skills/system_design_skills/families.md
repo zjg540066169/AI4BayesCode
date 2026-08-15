@@ -10,8 +10,8 @@ Each family has its own setter naming; keep within the family.
 ### Freeze semantics per family (kernel-control, interface.md Sec.1)
 
 Every wrapper exposes `freeze(names)` / `unfreeze(names = <missing>)` /
-`get_frozen()` as kernel-control methods (see interface.md Sec.1 amendment +
-DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md for the full contract). The per-family
+`get_frozen()` as kernel-control methods (see `interface.md` Sec.1 for the
+full contract). The per-family
 semantics of what "freezing" does are uniform in principle -- skip the child's
 `step()` and hold its shared_data key at the last-set value -- but the
 WHITELIST/BLACKLIST admission varies:
@@ -21,19 +21,19 @@ WHITELIST/BLACKLIST admission varies:
 | Family | Freeze effect | Notes |
 |---|---|---|
 | `nuts_block` | `step()` skipped; kernel state (mass matrix, step size) preserved; `readapt_NUTS` also no-op on this child | canonical use case (probit / sigma-fixed extension) |
-| `joint_nuts_block` | **v1: BOTH whole-block AND slot-level** (scope-bumped 2026-07-19). Passing the block's own name freezes all slots atomically; passing a slot name (sub-parameter in `slot_specs_`) freezes ONLY that slot -- the remaining slots continue to sample jointly, with the mass matrix re-projected onto the free-slot subspace (Welford covariance skips frozen rows/cols; leapfrog zeros momentum/gradient on frozen dims; constraint chain rule outputs are masked). This unblocks the probit / partial-fix extension pattern (freeze `log_sigma` slot inside `joint_nuts_block({beta, log_sigma})` to pin sigma at 1). Dim-changing slots (SIMPLEX / CHOLESKY_* / CORR_ / COV_) freeze via the `unc_offset` / `unc_dim` dual-offset scheme. See DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md Sec.10.a for the integrator + Welford + constraint chain rule details. | `readapt_NUTS` on a slot-frozen joint block still runs; mass-matrix re-adaptation skips frozen dims. Whole-block freeze -> `readapt_NUTS` also no-op. |
+| `joint_nuts_block` | **v1: BOTH whole-block AND slot-level** (scope-bumped 2026-07-19). Passing the block's own name freezes all slots atomically; passing a slot name (sub-parameter in `slot_specs_`) freezes ONLY that slot -- the remaining slots continue to sample jointly, with the mass matrix re-projected onto the free-slot subspace (Welford covariance skips frozen rows/cols; leapfrog zeros momentum/gradient on frozen dims; constraint chain rule outputs are masked). This unblocks the probit / partial-fix extension pattern (freeze `log_sigma` slot inside `joint_nuts_block({beta, log_sigma})` to pin sigma at 1). Dim-changing slots (SIMPLEX / CHOLESKY_* / CORR_ / COV_) freeze via the `unc_offset` / `unc_dim` dual-offset scheme. See Sec.13 below for the integrator + Welford + constraint chain rule details. | `readapt_NUTS` on a slot-frozen joint block still runs; mass-matrix re-adaptation skips frozen dims. Whole-block freeze -> `readapt_NUTS` also no-op. |
 | `*_gibbs_block` (dirichlet / beta / binary / categorical / survival trio) | `step()` skipped; last draw held in shared_data | uniform; no derived-state hazard |
 | `gmrf_precision_block` / `gmrf_whitened_ess_block` | `step()` skipped; latent `x` held at last draw | mild derived state via `Q_fn(ctx)` -- if a hyperparam feeding Q moves while `x` is frozen, the effective conditional on `x` still makes sense (Gibbs-condition-on-x variant) |
 | `stick_breaking_block` / `normal_gamma_cluster_gibbs_block` | `step()` skipped; stick lengths / cluster params held | valid conditional; alpha etc. still sample |
-| `rjmcmc_block` | **v1 supports whole-block freeze AND simultaneous dual sub-key freeze; partial single-sub-key freeze is REFUSED** (2026-07-20 tightening of the 2026-07-19 sub-key scope-bump). Whole-block via `freeze("<name>")` atomically suppresses BOTH the trans-dim gamma sweep AND the `continuous_update` beta refresh. Dual sub-key via `freeze({"<name>.gamma", "<name>.beta"})` in the same call also atomically pins both. **A single sub-key freeze (e.g. `freeze("<name>.gamma")` alone) is REFUSED at step time** with `std::runtime_error` carrying the message `"rjmcmc joint move requires either freezing both sub-keys (gamma AND beta) simultaneously or freezing the whole rjmcmc_block; single sub-key freeze does not preserve pinning under joint proposals"`. Rationale: the trans-dim birth/death move updates (gamma_j, beta_j) as an atomic pair, so pinning only one sub-key does not preserve pinning under the joint proposal (this is the R3.b intrinsic hazard previously documented; the block now refuses it explicitly instead of silently under-pinning). `dim()` compile-time-fixed at 2p keeps concatenation type-stable through any freeze/unfreeze. See DESIGN_NOTES Sec.6 + Sec.10.d. | Enforcement is a step-guard inside `rjmcmc_block::step()`: `freeze_sub` records the flag; the guard fires when exactly one of `gamma_frozen_` / `beta_frozen_` is set at the next `step()` call. This allows the batched `freeze({"<name>.gamma", "<name>.beta"})` path to succeed (composite calls `freeze_sub` for each, then the next `step()` sees both flags equal). |
+| `rjmcmc_block` | **v1 supports whole-block freeze AND simultaneous dual sub-key freeze; partial single-sub-key freeze is REFUSED** (2026-07-20 tightening of the 2026-07-19 sub-key scope-bump). Whole-block via `freeze("<name>")` atomically suppresses BOTH the trans-dim gamma sweep AND the `continuous_update` beta refresh. Dual sub-key via `freeze({"<name>.gamma", "<name>.beta"})` in the same call also atomically pins both. **A single sub-key freeze (e.g. `freeze("<name>.gamma")` alone) is REFUSED at step time** with `std::runtime_error` carrying the message `"rjmcmc joint move requires either freezing both sub-keys (gamma AND beta) simultaneously or freezing the whole rjmcmc_block; single sub-key freeze does not preserve pinning under joint proposals"`. Rationale: the trans-dim birth/death move updates (gamma_j, beta_j) as an atomic pair, so pinning only one sub-key does not preserve pinning under the joint proposal (this is the R3.b intrinsic hazard previously documented; the block now refuses it explicitly instead of silently under-pinning). `dim()` compile-time-fixed at 2p keeps concatenation type-stable through any freeze/unfreeze. | Enforcement is a step-guard inside `rjmcmc_block::step()`: `freeze_sub` records the flag; the guard fires when exactly one of `gamma_frozen_` / `beta_frozen_` is set at the next `step()` call. This allows the batched `freeze({"<name>.gamma", "<name>.beta"})` path to succeed (composite calls `freeze_sub` for each, then the next `step()` sees both flags equal). |
 
 **BLACKLIST (freeze -> ai4b::stop with reason):**
 
 | Family | Reason |
 |---|---|
-| `bart_block` | `set_current(arma::vec)` raises via `ai4b::stop` -- no invertibility. Freezing means "hold current forest" but user cannot inject a specific forest state. Additionally: frozen BART leaves `f_bart` in shared_data stale under any subsequent `set_current(X = X_new)`, causing downstream sigma NUTS to adapt on stale residuals. Silent bias. Canonical error string (matches DESIGN_NOTES Sec.6): `"freezing bart_block not supported: a fitted tree ensemble cannot be restored from a stored value. To make predictions at new data without changing the fitted model, use predict_at()."`. |
-| `genbart_block` | Same class as `bart_block`. Canonical error string (matches DESIGN_NOTES Sec.6): `"freezing genbart_block not supported: a fitted tree ensemble cannot be restored from a stored value. To make predictions at new data without changing the fitted model, use predict_at()."`. |
-| `hmm_block` | Latent state sequence z frozen while emission parameters sample yields mismatched conditioning (Baum-Welch forward pass depends on emissions). Silent bias. Canonical error string (matches DESIGN_NOTES Sec.6): `"freezing hmm_block not supported: the hidden state sequence has to be re-drawn whenever the emission parameters change, so holding it fixed would bias the other parameters."`. |
+| `bart_block` | `set_current(arma::vec)` raises via `ai4b::stop` -- no invertibility. Freezing means "hold current forest" but user cannot inject a specific forest state. Additionally: frozen BART leaves `f_bart` in shared_data stale under any subsequent `set_current(X = X_new)`, causing downstream sigma NUTS to adapt on stale residuals. Silent bias. Canonical error string: `"freezing bart_block not supported: a fitted tree ensemble cannot be restored from a stored value. To make predictions at new data without changing the fitted model, use predict_at()."`. |
+| `genbart_block` | Same class as `bart_block`. Canonical error string: `"freezing genbart_block not supported: a fitted tree ensemble cannot be restored from a stored value. To make predictions at new data without changing the fitted model, use predict_at()."`. |
+| `hmm_block` | Latent state sequence z frozen while emission parameters sample yields mismatched conditioning (Baum-Welch forward pass depends on emissions). Silent bias. Canonical error string: `"freezing hmm_block not supported: the hidden state sequence has to be re-drawn whenever the emission parameters change, so holding it fixed would bias the other parameters."`. |
 | `vi_block` subclasses | Sec.18.4 invariant: composite writes `current_sample(rng)` (fresh q-draw) to shared_data each step, NOT `current()` (q-mean). Freezing VI breaks the hybrid q-sample stream -> MCMC siblings silently underestimate posterior variance. Error string: `"freezing VI blocks not supported: a frozen VI block would hand the same single draw to every other sampler, biasing their results."`. |
 
 **All FOUR error strings above contain the substring `"not supported"` verbatim** -- validator Check #26(b) uses `grepl("not supported", ...)` as a uniform blacklist-error test.
@@ -41,8 +41,7 @@ WHITELIST/BLACKLIST admission varies:
 **Composite-of-composite (nested wrappers).** freeze/unfreeze accept
 dot-path names for descending into nested composite children:
 `m$freeze("outer_composite_child.inner_leaf_block")` walks
-`composite_block` -> child (itself a composite) -> child's leaf. See
-DESIGN_NOTES Sec.10.c for the exact resolution rules; get_frozen()
+`composite_block` -> child (itself a composite) -> child's leaf; get_frozen()
 returns dot-path names for nested frozen children so round-trip via
 `freeze(get_frozen(), quiet=TRUE)` works uniformly across depths.
 
@@ -50,7 +49,6 @@ returns dot-path names for nested frozen children so round-trip via
 suppresses the redundant-refreeze warning path (unknown-name /
 blacklist errors still fire). Use for checkpoint restore where the
 saved `frozen` set is expected to overlap the current frozen set.
-See DESIGN_NOTES Sec.10.b.
 
 Validator Check #26 tests presence + gate + refreeze warning + stale-derived warning.
 
@@ -256,8 +254,16 @@ diagnostics and adjust** -- you (the agent) are expected to re-tune, not to obey
 number. The only firm, code-enforced invariant is the diagonal+3-phase ban.
 
 **Escalation ladder (the actual decision procedure):**
-1. START: **diagonal + single-pilot** -- cheapest, and sufficient for the common
-   case (uncorrelated / weakly-correlated / merely scale-heterogeneous posteriors).
+0. MEASURED EXCEPTION -- a reduced-rank BASIS SMOOTHER (spline / HSGP / ICAR)
+   starts **DENSE + single-pilot**, not diagonal. Adjacent bases overlap, so the
+   coefficients are correlated BY CONSTRUCTION and the coupling is off-diagonal.
+   Measured on `BSplineRegression` (13 params): diagonal rank-R-hat 1.0288 /
+   ess_ratio 0.0059 vs dense 1.0017 / 0.3488 -- 59x ESS, and 3.6x FASTER, since a
+   badly-mixing diagonal metric makes NUTS build much deeper trees. See
+   `block_catalogue/reduced_rank_spline_spatial_patterns.md`.
+1. START (everything else): **diagonal + single-pilot** -- cheapest, and sufficient
+   for the common case (uncorrelated / weakly-correlated / merely
+   scale-heterogeneous posteriors).
 2. If runtime VALIDATION shows it is inadequate -- R-hat > 1.01, low ESS,
    max-tree-depth saturation, or low E-BFMI -- **try DENSE (still single-pilot).**
    Dense rotates a correlation ridge a diagonal metric cannot; this is the main

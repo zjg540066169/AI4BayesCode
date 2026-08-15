@@ -29,7 +29,7 @@ library test** at L3 and runs the **FULL** by-mechanism sweep at L2.
 |---|---|---|
 | **L1 Syntactic** | does it compile | Sec.3 -- compile the staged block + test (exact recipe) |
 | **L2 Semantic** | code-level checks for silent bugs | Sec.2 -- the by-mechanism `validator.md` checks #1-#26 the block triggers, **including the mandatory Check #12 AD-twin** for any hand-written gradient (the FULL sweep, not codegen's subset) |
-| **L3 Runtime** | codegen: R1 smoke * R2 2-chain R-hat * R3 BPV/LOO | Sec.1 -- the **ground-truth library-test ladder T0-T4** (run via Sec.3 on "go"); SUBSUMES codegen's L3 and ADDS the primitive extra: **T0** sanity * **T1a** parity / **T1b** FD-gradient * **T2** recovery-from-known-truth * **T3** cross-chain R-hat **< 1.01** (stricter than codegen's 1.05) * **T4** stress/funnel |
+| **L3 Runtime** | codegen: R1 smoke * R2 2-chain R-hat * R3 BPV/LOO | Sec.1 -- the **ground-truth library-test ladder T0-T4** (run via Sec.3); SUBSUMES codegen's L3 and ADDS the primitive extra: **T0** sanity * **T1a** parity / **T1b** FD-gradient * **T2** recovery-from-known-truth * **T3** cross-chain R-hat **< 1.01** (stricter than codegen's 1.05) * **T4** stress/funnel |
 
 The block-design EXTRA = everything codegen skips because its inputs are pre-audited: the
 ground-truth regimes (T0/T1a/T1b/T2/T4) and the full #1-#26 sweep. That extra is the point -- a
@@ -179,16 +179,16 @@ mode unique to THIS block becomes a numbered block-local check with the SAME ana
 check: **Trigger** (what makes it apply) * **Why** (the silent bug it catches, and why it passes
 R-hat / ESS / LOO) * **What to look for** (a `// WRONG` vs `// RIGHT` pair, a `grep -nE` static
 pattern, or a runtime assertion) * **Fix**. ID them `BL1`, `BL2`, ... -- block-scoped, so they
-never collide with core `#1`-`#25`. ELICIT them from the Stage 1-3 design (the callback
+never collide with core `#1`-`#26`. ELICIT them from the Stage 1-3 design (the callback
 contracts, the invariants the algorithm must hold, the kernel's scope assumptions) and APPLY
 each one:
-- **runnable** items -> an assertion / regime in `test_<Block>.cpp` (run on "go" with the ladder);
+- **runnable** items -> an assertion / regime in `test_<Block>.cpp` (run with the ladder);
 - **static** items -> a code-review grep / `WRONG`-vs-`RIGHT`, recorded for review.
 
 They live in a **SEPARATE block-local validation skill** `skills/<Block>_validation.md`, pointed
 to by the manifest **`ValidationSkill:`** field (kept OUT of the main `skills/<Block>.md` so block
 selection / use don't pay for them). During VALIDATE, **load that file ONLY if the manifest has a
-`ValidationSkill:`** -- if the field is absent the block has no `BL#` and only the core `#1`-`#25`
+`ValidationSkill:`** -- if the field is absent the block has no `BL#` and only the core `#1`-`#26`
 apply (lazy-load = token saving). The `BL#` IDs are listed in the manifest `ChecksApplicable`
 alongside the core `#N` the block faces. They travel with the bundle and are NEVER edited into core
 `validator.md`. If a `BL#` turns out to be GENERAL (applies to a CLASS of
@@ -211,8 +211,8 @@ What to surface as you start (a heads-up, NOT a gate):
 - **the exact compile command.** Verified-working recipe (run from the repo root):
  ```
  c++ -std=c++17 -O2 -Wno-unused-parameter \
- -I AI4BayesCode/include -I AI4BayesCode/include/mcmclib \
- -I AI4BayesCode/include/mcmclib/BaseMatrixOps/include -I AI4BayesCode/include/eigen \
+ -I include -I include/mcmclib \
+ -I include/mcmclib/BaseMatrixOps/include -I include/eigen \
  -I /Library/Frameworks/R.framework/Versions/Current/Resources/library/RcppArmadillo/include \
  -I ./blocks_local/<Block> \
  -DMCMC_ENABLE_ARMA_WRAPPERS -DARMA_DONT_USE_WRAPPER \

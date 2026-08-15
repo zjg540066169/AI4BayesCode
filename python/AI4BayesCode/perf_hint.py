@@ -38,19 +38,12 @@ def perf_hint(wall_sec: float,
             "  Possible causes: (a) N * J grad eval is genuinely expensive,\n"
             "  (b) NUTS tree depth maxing out -> try raising n_warmup_first_call\n"
             "      or seeding cfg.initial_step_size,\n"
-            "  (c) mass-matrix adaptation not yet converged -> longer warmup.\n"
-            "  Validator reminder: joint_nuts_block usage requires Check #11.")
+            "  (c) mass-matrix adaptation not yet converged -> longer warmup.")
         return
     print(
         "[AI4BayesCode perf] per-sweep time is high.\n"
         "  If this sampler has tightly-coupled continuous parameters in the\n"
         "  likelihood (e.g. additive linear mean, shift invariance,\n"
         "  fixed+random effects sharing mean), consider regenerating with\n"
-        "  joint_nuts_block over the coupled parameters:\n"
-        "    -> see skills/codegen.md Section 4a (Coupling analysis)\n"
-        "    -> see examples/IRT1PL_joint.cpp for a reference\n"
-        "  WARNING: joint_nuts_block has a higher semantic-bug surface than\n"
-        "  modular NUTS (concatenate-and-slice code is easier to get\n"
-        "  subtly wrong). Any joint sampler you generate must pass\n"
-        "  validator Check #11 (grad slicing, prior completeness, scale\n"
-        "  consistency, Jacobian, write-back offsets, dim asserts).")
+        "  joint_nuts_block over the coupled parameters. For a reference\n"
+        '  model, see AI4BayesCode.example("IRT1PL_joint").')

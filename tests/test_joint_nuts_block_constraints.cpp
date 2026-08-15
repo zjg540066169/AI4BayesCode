@@ -224,7 +224,7 @@ static void C6_round_trip() {
 // Beta(2,5) recovers mean = 2/7 exactly). We therefore use non-singular targets
 // here for seed-robustness, plus one Beta(2,5) on a known-mixing seed to confirm
 // direction on a singular target. Mitigation for users: smoother parameterization
-// / more warmup / dense-metric + 3-phase. See DESIGN_NOTES_JOINT_CONSTRAINT_TYPES.
+// / more warmup / dense-metric + 3-phase.
 static double recover_mean(joint_nuts_block& blk, std::mt19937_64& rng,
                            int burn, int M, double* var_out, bool* in_support,
                            double lo, double up) {

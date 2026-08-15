@@ -403,7 +403,7 @@ public:
 
     const std::string& name() const noexcept override { return cfg_.name; }
 
-    // Kernel-control freeze BLACKLIST (DESIGN_NOTES Sec.6): non-invertible
+    // Kernel-control freeze BLACKLIST (families.md): non-invertible
     // forest + derived-state hazard (f_bart stales under set_current(X=...)
     // if BART step() is skipped). composite_block::freeze() checks this and
     // Rcpp::stops when the user tries to freeze a bart_block child.

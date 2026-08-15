@@ -26,7 +26,7 @@
  *  `impl_` of type std::unique_ptr<AI4BayesCode::composite_block>. This is
  *  the standard shape codegen_cpp.md Sec.8 already emits.
  *
- *  See DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md Sec.10 for the full
+ *  See skills/system_design_skills/interface.md Sec.1 for the full
  *  contract and rationale.
  *================================================================================*/
 

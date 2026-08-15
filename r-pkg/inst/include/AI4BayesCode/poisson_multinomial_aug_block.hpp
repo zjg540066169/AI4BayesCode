@@ -509,6 +509,14 @@ public:
 
     void clear_history() override { history_log_phi_.clear(); }
 
+
+    // Hold-in-place history append for a frozen block: keeps this block's
+    // draw count aligned with every sibling's when composite_block::step()
+    // skips its step(). See block_sampler::record_held_history.
+    void record_held_history() override {
+        if (keep_history_) history_log_phi_.push_back(log_phi_);
+    }
+
 private:
     void recompute_u_indicators_() {
         for (std::size_t j = 0; j < cfg_.C - 1; ++j) {

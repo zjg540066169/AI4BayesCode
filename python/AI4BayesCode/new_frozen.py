@@ -1,7 +1,5 @@
 """Ctor helper: construct wrapper + set + freeze in one call.
 
-DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md Sec.10.e.
-
 Equivalent to the two-step form:
     m = module_class(*args, **kwargs)
     m.set_current(fixed)

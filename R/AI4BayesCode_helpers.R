@@ -576,7 +576,7 @@ ai4bayescode_perf_hint <- function(wall_sec,
 # autocorrelation + density plot (via bayesplot, base-R fallback). No PSIS-LOO
 # (that needs a model-specific pointwise log-likelihood).
 # ----------------------------------------------------------------------------
-ai4bayescode_diagnose <- function(hist, plot = TRUE) {
+ai4bayescode_diagnose <- function(hist, n_burn = 0, plot = TRUE, order_components = FALSE) {
     if (!requireNamespace("posterior", quietly = TRUE)) {
         stop("ai4bayescode_diagnose() needs the 'posterior' package. ",
              "Install it with install.packages('posterior').", call. = FALSE)
@@ -586,9 +586,49 @@ ai4bayescode_diagnose <- function(hist, plot = TRUE) {
              "(scalars as vectors, vector parameters as matrices).",
              call. = FALSE)
     }
+    # Drop the first n_burn draws of EVERY key (scalars: leading elements; matrices:
+    # leading rows). get_history() returns burn-in + keep, so callers pass the
+    # burn-in length; n_burn = 0 leaves hist untouched. Mirrors Python diagnose()'s
+    # `np.asarray(x)[n_burn:]` + the "no post-burn-in draws" ValueError.
+    n_burn <- as.integer(n_burn)
+    if (is.na(n_burn) || n_burn < 0L)
+        stop("`n_burn` must be a non-negative integer.", call. = FALSE)
+    if (n_burn > 0L) {
+        drop_burn_key <- function(x) {
+            if (is.null(dim(x))) {
+                n <- length(x)
+                if (n_burn >= n) return(x[integer(0)])
+                x[(n_burn + 1L):n]
+            } else {
+                n <- nrow(x)
+                if (n_burn >= n) return(x[integer(0), , drop = FALSE])
+                x[(n_burn + 1L):n, , drop = FALSE]
+            }
+        }
+        hist <- lapply(hist, drop_burn_key)
+        lens <- vapply(hist, function(x)
+            if (is.null(dim(x))) length(x) else nrow(x), integer(1))
+        if (length(lens) && min(lens) == 0L)
+            stop(sprintf(
+"ai4bayescode_diagnose: n_burn=%d leaves no post-burn-in draws (the shortest history key has <= %d draws). Reduce n_burn.",
+                n_burn, n_burn), call. = FALSE)
+    }
+    # Detect label switching on the RAW draws (before any ordering).
+    label_switch <- .ai4b_label_switch_scan(hist)
+    if (length(label_switch) && !isTRUE(order_components)) {
+        ex <- label_switch[[1L]]
+        message(sprintf(
+"ai4bayescode_diagnose: %s MIGHT have LABEL SWITCHING -- ordering components within each\n  draw brings R-hat down to a converged level (e.g. %s: %.2f -> %.2f), so the high raw\n  R-hat MAY be a labelling artefact rather than non-convergence. Pass order_components =\n  TRUE for a label-invariant summary, or canonicalize the labels in the sampler.",
+            paste(names(label_switch), collapse = ", "),
+            names(label_switch)[1L], ex$raw, ex$ordered))
+    }
+    # order_components: sort each draw's components within every matrix key (order
+    # statistics) -> a label-invariant per-component summary for exchangeable params.
+    sort_key <- function(x) if (is.null(dim(x)) || ncol(x) < 2L) x else t(apply(x, 1L, sort))
+    hist_use <- if (isTRUE(order_components)) lapply(hist, sort_key) else hist
     cols <- list()
-    for (nm in names(hist)) {
-        x <- hist[[nm]]
+    for (nm in names(hist_use)) {
+        x <- hist_use[[nm]]
         if (is.null(dim(x))) cols[[nm]] <- as.numeric(x)
         else for (j in seq_len(ncol(x))) cols[[sprintf("%s[%d]", nm, j)]] <- x[, j]
     }
@@ -598,7 +638,20 @@ ai4bayescode_diagnose <- function(hist, plot = TRUE) {
     plt <- NULL
     if (isTRUE(plot)) {
         if (requireNamespace("bayesplot", quietly = TRUE)) {
-            plt <- bayesplot::mcmc_combo(drw, combo = c("trace", "acf", "dens"))
+            # bayesplot's ACF panel can ABORT the whole plot (e.g. "Too few
+            # iterations for lags=20") on degenerate / near-constant columns --
+            # empty mixture components in DP/PY/HDP models, constant params. The
+            # diagnostic plot is secondary; never let it crash the diagnose (the
+            # summary + R-hat/ESS are the point). Fall back to trace+dens, then none.
+            plt <- tryCatch(
+                bayesplot::mcmc_combo(drw, combo = c("trace", "acf", "dens")),
+                error = function(e) tryCatch(
+                    bayesplot::mcmc_combo(drw, combo = c("trace", "dens")),
+                    error = function(e2) {
+                        warning("ai4bayescode_diagnose: diagnostic plot skipped (",
+                                conditionMessage(e2), ").", call. = FALSE)
+                        NULL
+                    }))
         } else {
             message("Install 'bayesplot' for a ready-to-print diagnostic plot; ",
                     "returning a base-R plotting function instead.")
@@ -616,25 +669,24 @@ ai4bayescode_diagnose <- function(hist, plot = TRUE) {
             }
         }
     }
-    list(summary = summary, plot = plt)
+    list(summary = summary, plot = plt, label_switch = label_switch)
 }
 
 # ----------------------------------------------------------------------------
-# ai4bayescode_new_frozen  (DESIGN_NOTES Sec.10.e)
+# ai4bayescode_new_frozen
 #
-# Ctor helper: construct a wrapper and immediately set + freeze the sub-
-# kernels listed in `fixed`, in one call. Equivalent to the two-step form:
+# Ctor helper: construct a model and immediately set + freeze the components
+# listed in `fixed`, in one call. Equivalent to the three-step form:
 #     m <- new(module_class, ...)
 #     m$set_current(fixed)
 #     m$freeze(names(fixed), quiet = quiet_freeze)
 #
-# Scope: `fixed` keys must be FLAT (top-level child block names or
-# joint_nuts_block slot names -- whatever set_current() would accept).
+# Scope: `fixed` keys must be FLAT (a top-level child block name, or a
+# component of a joint_nuts_block -- whatever set_current() accepts).
 # Dot-path names (nested composite descent, rjmcmc sub-key) are REJECTED
-# because set_current does not route dot-path keys -- freezing a value
-# that was never actually set would silently produce wrong posteriors.
-# For dot-path freezes, use the two-step post-construction form with the
-# set_current call at the correct composite level.
+# because set_current does not route dot-path keys: freezing a value that
+# was never set would give a wrong posterior. To freeze at a dot path, call
+# set_current() at the matching composite level and then freeze().
 #
 # Args
 # ----

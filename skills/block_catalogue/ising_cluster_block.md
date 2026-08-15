@@ -19,20 +19,19 @@ external field.
 
 **JUSTIFICATION (Check #16):** discrete-MRF target with strong local
 dependence (Exception Sec.11.2(b)). Algorithm is Swendsen-Wang 1987
-(physics) / Higdon 1998 (statistician framing). Check #15 parity panel
-under `tests/`:
-- `test_ising_cluster_block.cpp` -- 4x4 enumeration vs MC at beta=0.5 and
+(physics) / Higdon 1998 (statistician framing). Check #15 parity panel:
+- Correctness -- 4x4 enumeration vs MC at beta=0.5 and
   beta=1.0; beta=0 iid-Uniform boundary; two-init mixing; Q=3 Potts
   symmetry; **T6** external-field per-site marginals vs 2^16 enumeration
   (delta=1, Case B); **T7** per-edge beta_ij agreement vs enumeration; **T8**
   partial-decoupling delta=0.5 (Case C) recovering the SAME enumeration
   (target-invariance). 8 sub-tests; each v1.2.1 test also gates on
   split-R-hat < 1.01.
-- `test_ising_cluster_block_diagnostics.cpp` -- split-R-hat across
+- Diagnostics -- split-R-hat across
   4 chains (incl. ordered-phase mode-mixing test on signed m);
   batch-means ESS; 17-bucket Pearson chi^2 vs enumeration; energy
   moments. 8 sub-tests.
-- `test_ising_sw_vs_single_site.cpp` -- quantified >= 5x per-sweep
+- Efficiency -- quantified >= 5x per-sweep
   efficiency advantage over single-site Metropolis at beta=1.0 ordered
   phase (empirically 6x on 10x10).
 

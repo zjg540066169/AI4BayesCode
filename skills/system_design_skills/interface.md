@@ -66,16 +66,14 @@ freeze       (Rcpp::CharacterVector names, bool quiet = false) -- always
    * names must be non-empty valid child block names OR joint_nuts_block
      sub-parameter (slot) names OR nested dot-path names for composite-
      of-composite structures (`"outer.inner.child"`) OR rjmcmc_block
-     sub-keys (`"<rjmcmc_name>.gamma"` / `"<rjmcmc_name>.beta"`) -- see
-     DESIGN_NOTES Sec.10.a / 10.c / 10.d for the override semantics per case;
+     sub-keys (`"<rjmcmc_name>.gamma"` / `"<rjmcmc_name>.beta"`);
    * unknown-name / blacklist-family / no-arg -> ai4b::stop;
    * already-frozen name -> Rcpp::warning (idempotent) UNLESS quiet=true;
    * quiet=true suppresses redundant-refreeze warnings -- use for
      checkpoint restore where freezing an already-frozen set is
      expected. Unknown-name / blacklist errors still fire; only the
      redundant-warning path is silenced;
-   * see DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md for full contract
-     and Sec.13 "Freeze semantics per family" for the whitelist /
+   * see Sec.13 "Freeze semantics per family" for the whitelist /
      blacklist per block family.
 
 unfreeze     (Rcpp::Nullable<Rcpp::CharacterVector> = R_NilValue) -- always

@@ -237,7 +237,7 @@ public:
 
     const std::string& name() const noexcept override { return cfg_.name; }
 
-    // Kernel-control freeze BLACKLIST (DESIGN_NOTES Sec.6): same class as
+    // Kernel-control freeze BLACKLIST (families.md): same class as
     // bart_block (non-invertible forest + derived-state hazard).
     bool supports_freeze() const noexcept override { return false; }
     std::string freeze_not_supported_reason() const override {

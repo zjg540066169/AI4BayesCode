@@ -150,7 +150,7 @@ public:
         return engine_kind_t::VI;
     }
 
-    // Kernel-control freeze BLACKLIST (DESIGN_NOTES Sec.6): Sec.18.4
+    // Kernel-control freeze BLACKLIST (families.md): Sec.18.4
     // invariant -- the composite writes current_sample(rng) (a fresh
     // q-draw) to shared_data each step, NOT current() (q-mean). Freezing
     // a VI block (skipping step()) means shared_data keeps ONE q-sample

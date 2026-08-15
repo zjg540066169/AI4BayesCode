@@ -20,9 +20,8 @@ efficiency path). Direct conjugate draw -- alternative to NUTS on
 high-dim Gaussian latents in hierarchical models (spatial smoothing,
 RW1 / RW2 splines, ICAR / BYM2 disease mapping, lattice GP
 approximations). `gmrf_precision_block` is the library-blessed
-sparse-Cholesky direct sampler. Check #15 parity panel under
-`tests/`:
-- `test_gmrf_precision_block.cpp` -- 5 sub-tests: diagonal Q sanity,
+sparse-Cholesky direct sampler. Check #15 parity panel:
+- 5 sub-tests -- diagonal Q sanity,
   AR(1) n=5 Cov vs dense Q^{-1}, canonical b != 0 mean shift, IGMRF
   1D random walk sum-to-zero (exact constraint + projected-Cov
   match), two-init R-hat across 4 chains on n=50.

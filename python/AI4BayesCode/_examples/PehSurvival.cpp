@@ -50,12 +50,12 @@
 //   run <- ai4bayescode_run_chains(
 //       model_ctor = function(seed) new(PehSurvival, t_obs, delta, edges, 0.01, 0.01, seed, TRUE),
 //       n_chains = 4, n_burn = 3000, n_keep = 5000)
-//   diag <- ai4bayescode_diagnose(run)
+//   diag <- ai4bayescode_diagnose(run$histories[[1]])
 //   print(diag$summary)   # posterior mean lambda_k, R-hat, ESS
 
 // @example:python
 //   import numpy as np, AI4BayesCode as ai
-//   PehSurvival = ai.example("PehSurvival")
+//   Mod = ai.example("PehSurvival")
 //   n, edges, lam_true = 200, np.array([0.0, 2.0, 5.0, 10.0]), np.array([0.5, 1.0, 1.5])
 //   rng = np.random.default_rng(2026)
 //   u = rng.uniform(size=n); Ht = -np.log1p(-u)
@@ -67,9 +67,9 @@
 //       else:      T[i] = edges[k] + (Ht[i]-cumH[k])/lam_true[k]
 //   censor = 8.0; delta = (T <= censor).astype(float); t_obs = np.minimum(T, censor)
 //   run = ai.run_chains(
-//       factory = lambda seed: PehSurvival(t_obs, delta, edges, 0.01, 0.01, seed, True),
+//       factory = lambda seed: Mod.PehSurvival(t_obs, delta, edges, 0.01, 0.01, seed, True),
 //       seeds = (101, 202, 303, 404), n_burn=3000, n_keep=5000)
-//   diag = ai.diagnose(run); print(diag['summary'])
+//   summary, plot_fn = ai.diagnose(run[0]["hist"]); print(summary)
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS

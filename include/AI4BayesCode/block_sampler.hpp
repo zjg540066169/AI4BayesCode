@@ -411,7 +411,7 @@ public:
 
     // ---- Kernel-control freeze interface (kernel-control category) ----------
     //
-    // See DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md for the full contract.
+    // See skills/system_design_skills/interface.md Sec.1 for the full contract.
     // freeze() sets a flag consulted by composite_block::step() and
     // composite_block::readapt_NUTS() to skip this child; the block's own
     // step() is NEVER called while frozen (composite iterates children and
@@ -429,7 +429,8 @@ public:
      * genbart_block, hmm_block, all vi_block subclasses) override to
      * return false, causing composite_block::freeze(name) to raise
      * Rcpp::stop with a "not supported" reason string when name matches
-     * this block.  See DESIGN_NOTES Sec.6 blacklist rationale.
+     * this block.  See skills/system_design_skills/families.md for the
+     * per-family blacklist rationale.
      */
     virtual bool supports_freeze() const noexcept {
         return true;

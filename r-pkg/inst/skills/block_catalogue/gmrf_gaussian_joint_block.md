@@ -21,8 +21,8 @@ full-conditional precision `Q = kappa R + sigma2^{-1} I`; then it draws
 **JUSTIFICATION (Check #16):** fixed-dim continuous Gaussian latent + strongly
 coupled scale hyperparameter (`system_design.md` Sec.11.1). The collapsed joint
 update is the textbook remedy for the (x, kappa) mixing pathology. Check #15
-parity panel under `tests/`:
-- `test_gmrf_gaussian_joint_block.cpp` -- sampled `kappa` posterior mean+sd and
+parity panel:
+- Sampled `kappa` posterior mean+sd and
   `E[x|y]` matched to a **dense fine-grid** computation of the exact posterior
   `p(kappa|y) prop.to Gamma(kappa;a,b) p(y|kappa)` and
   `E[x|y] = int mu(kappa) p(kappa|y) dkappa`; plus two-chain Gelman-Rubin

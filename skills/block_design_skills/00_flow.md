@@ -170,7 +170,7 @@ phase loads exactly ONE `block_design_skills/<phase>.md` module on entry.
  example + the Sec.5b checks, immediately before the auto-delivery move): every authored file -- `.hpp` / test /
  example / manifest `License:` / skill / `ValidationSkill` -- carries `GPL-3.0-or-later`, closing the
  Sec.0.5 gate; vendored code keeps its upstream license UNCHANGED. A doc / license mismatch is a HARD FIX
- before "go". Closes out the bundle.
+ before the delivery move. Closes out the bundle.
 
 ---
 
@@ -343,7 +343,7 @@ path (`contrib.md`).
 | `00_flow.md` | THIS router: 5-phase backbone, lazy-load schedule, sign-off gates |
 | `intake.md` | INTAKE: math spec * naming-uniqueness gate * `SelectWhen` * advisory novelty/benchmark * geometry classification + correctness gate |
 | `design.md` | DESIGN: algorithm spec (Gibbs/NUTS/slice-ESS/VI) * constraint mapping * three-tier interface impl |
-| `validate.md` | VALIDATE: library test scaffold * validator-check map (#1-#26) * compile+test on "go" (mandatory T0-T4 + Check #12 AD-twin) * cross-chain R-hat < 1.01 fixed * heavy audit = submission-path extra |
+| `validate.md` | VALIDATE: library test scaffold * validator-check map (#1-#26) * automatic compile+test (mandatory T0-T4 + Check #12 AD-twin) * cross-chain R-hat < 1.01 fixed * heavy audit = submission-path extra |
 | `example.md` | EXAMPLE: **offered (ask first; default yes, skippable)** -- ONE **tri-module** demo `examples/<Model>.cpp` (`int main` + `RCPP_MODULE` + `PYBIND11_MODULE` + both TESTED `@example`; source-able in R AND Python; cheapest end-to-end check + needed for registry submission) |
 | `skill.md` | SKILL: block-local `skills/<Block>.md` (cites core) + `manifest.dcf` (13 fields) * Sec.5b doc-consistency * Sec.5c FINAL GPL-3 license check |
 | `vendor.md` | VENDOR sub-skill (loaded ONLY if the block vendors a kernel): STATEFUL adaptation of the borrowed code -- isolate global/`static` state, thread the block's `rng`, rebuild caches on `set_context` * minimal-diff staging + `PATCHES.md` * upstream license kept verbatim |

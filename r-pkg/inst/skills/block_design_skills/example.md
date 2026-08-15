@@ -124,7 +124,7 @@ blocks, and the fence copy as-is.
    `#ifdef AI4BAYESCODE_RCPP_MODULE #include <RcppArmadillo.h> #else #include <armadillo> #endif`
    switch, then `block_sampler.hpp`, `backend_neutral.hpp`, `shared_data.hpp`, the NEW block header
    (by its bundle path -- the compile phase puts `blocks_local/<Block>/` on `-I`), `composite_block.hpp`,
-   `constraints.hpp`, `rcpp_wrap.hpp`, plus `<random>` / `<cmath>` / `<cstdio>`. Other C++ libraries
+   `constraints.hpp`, `kernel_control_mixin.hpp`, `rcpp_wrap.hpp`, plus `<random>` / `<cmath>` / `<cstdio>`. Other C++ libraries
    (Eigen, celerite, libgp, autodiff) are fine if the block needs them.
 4. **(optional) anonymous-namespace free functions** -- e.g. a log-density/grad closure, file-local.
 5. **The neutral driver class** -- wires data + DAG + the new block child; inherits
@@ -138,7 +138,8 @@ blocks, and the fence copy as-is.
    `kernel_control_mixin.hpp` -- do NOT write them by hand.
 7. **PYBIND11_MODULE block** -- `#ifdef AI4BAYESCODE_PYBIND_MODULE` ... `#include
    "AI4BayesCode/pybind_casters.hpp"` ... `PYBIND11_MODULE(<Model>, m){
-   AI4BayesCode::register_ai4bayescode_types(m); pybind11::class_<<Model>>(m,"<Model>") .def(init<...>())
+   AI4BayesCode::register_ai4bayescode_types(m); pybind11::class_<<Model>>(m,"<Model>")
+   .def(pybind11::init<...>())
    ... AI4BAYESCODE_PYBIND_KERNEL_CONTROL(<Model>); }` ... `#endif`. Companion macro to
    the Rcpp one.
 8. **`int main()`** -- `#if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)`

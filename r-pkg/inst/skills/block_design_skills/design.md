@@ -95,7 +95,7 @@ class). Each family has its own setter naming and Tier-B contract (Sec.13):
 **Building a NUTS-gradient block -- compose a child `nuts_block`, do NOT hand-roll NUTS.** The
 clean Tier-B pattern for the NUTS-gradient row is to internally OWN a child `nuts_block` (or
 `joint_nuts_block`) and feed it your natural-scale log-density + analytic gradient -- not to
-re-implement the sampler. Read `AI4BayesCode/include/AI4BayesCode/nuts_block.hpp` for the config
+re-implement the sampler. Read `include/AI4BayesCode/nuts_block.hpp` for the config
 contract; the load-bearing pieces:
 - the oracle `log_density_grad(const arma::vec& theta, const block_context& ctx, arma::vec* grad)`
   returns `logp` and writes the **natural-scale** gradient into `*grad` (Check #5: NO hand
@@ -277,8 +277,9 @@ Tier B). The lifecycle to follow is `lifecycle.md` Sec.14's 7-step (Tier C kerne
 Tier B block -> Tier A wrapper -> skills/catalogue -> tests -> validator -> cross-chain audit); for
 block_design, Steps 4-7 land in the `blocks_local/<Block>/` bundle, NOT in core.
 
-**The R wrapper contract is a SEPARATE thing (Tier A).** A Tier-A example wrapper (part of the
-REQUIRED `examples/<Model>.cpp` -- every block ships exactly ONE example; see the EXAMPLE phase)
+**The R wrapper contract is a SEPARATE thing (Tier A).** A Tier-A example wrapper (part of
+`examples/<Model>.cpp` -- optional but strongly recommended, at most ONE per block; see the
+EXAMPLE phase)
 exposes to R the **core-six state methods**
 (`step / get_current / set_current / predict_at / get_dag / get_history`) plus the
 **kernel-control category**: `freeze / unfreeze / get_frozen` UNCONDITIONALLY (via the

@@ -1475,8 +1475,8 @@ run, and produce reasonable samples out of the box.
   bug-surface talk, NO "verify Check #11" instructions in any
   delivered file; that pressure is internal). Set
   `USES_JOINT_NUTS <- TRUE` in the throwaway harness runner so R3's
-  Bayesian-p-value threshold tightens from (0.05, 0.95) to
-  (0.02, 0.98).
+  Bayesian-p-value PASS BAND narrows from (0.05, 0.95) to
+  (0.10, 0.90) -- a statistic has to sit closer to the middle to pass.
 - **Always emit `ai4bayescode_perf_hint(...)` at the end of the R
   runner** (see `codegen_r_runner.md Sec.9` template). The helper emits
   a friendly escape-hatch hint if per-sweep time is slow. Set

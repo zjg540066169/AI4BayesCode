@@ -62,11 +62,11 @@
 //       model_ctor = function(seed) new(PehSharedFrailty, t_obs, delta, as.numeric(z), G,
 //                                       edges, theta, 0.01, 0.01, seed, TRUE),
 //       n_chains = 4, n_burn = 3000, n_keep = 5000)
-//   print(ai4bayescode_diagnose(run)$summary)
+//   print(ai4bayescode_diagnose(run$histories[[1]])$summary)
 
 // @example:python
 //   import numpy as np, AI4BayesCode as ai
-//   PehSharedFrailty = ai.example("PehSharedFrailty")
+//   Mod = ai.example("PehSharedFrailty")
 //   G, n_per, K = 10, 20, 3; edges = np.array([0., 2., 5., 30.])
 //   lam_true = np.array([0.5, 1.0, 1.5]); theta = 2.0
 //   rng = np.random.default_rng(2026)
@@ -81,10 +81,10 @@
 //       else:      T[i] = edges[k] + (Hb - cumH[k]) / lam_true[k]
 //   censor = 20.; delta = (T <= censor).astype(float); t_obs = np.minimum(T, censor)
 //   run = ai.run_chains(
-//       factory = lambda seed: PehSharedFrailty(t_obs, delta, z.astype(float), G, edges,
-//                                               theta, 0.01, 0.01, seed, True),
+//       factory = lambda seed: Mod.PehSharedFrailty(t_obs, delta, z.astype(float), G, edges,
+//                                                   theta, 0.01, 0.01, seed, True),
 //       seeds = (101, 202, 303, 404), n_burn=3000, n_keep=5000)
-//   print(ai.diagnose(run)['summary'])
+//   summary, plot_fn = ai.diagnose(run[0]["hist"]); print(summary)
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS

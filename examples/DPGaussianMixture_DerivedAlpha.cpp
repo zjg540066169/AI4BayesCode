@@ -4,11 +4,9 @@
 // ============================================================================
 //  DPGaussianMixture_DerivedAlpha.cpp
 //
-//  REFERENCE TEMPLATE for the "alpha-as-function-of-other-params" pattern
-//  surfaced in `DESIGN_NOTES_BNP_GP_2026-04-20.md` Q6:
-//
-//     "User's other project: alpha = complex_function(phi), phi is prior
-//      hyperparams of the base distribution, possibly high-dim."
+//  REFERENCE TEMPLATE for the "alpha-as-function-of-other-params" pattern:
+//  alpha = complex_function(phi), where phi holds prior hyperparameters of
+//  the base distribution and may be high-dimensional.
 //
 //  This file demonstrates the COMPOSITION mechanics. Identical to
 //  `DPGaussianMixture.cpp` except:
@@ -782,8 +780,7 @@ RCPP_MODULE(DPGaussianMixture_DerivedAlpha_module) {
             "DP mixture where alpha = exp(phi) is DERIVED from phi via "
             "register_refresher; phi has Normal(0, 1) prior and is "
             "sampled by NUTS. Demonstrates the alpha-as-derived "
-            "composition pattern from DESIGN_NOTES_BNP_GP_2026-04-20.md "
-            "Q6.")
+            "composition pattern.")
         .method("step", (void (DPGaussianMixture_DerivedAlpha::*)())    &DPGaussianMixture_DerivedAlpha::step, "Run one sweep.")
         .method("step", (void (DPGaussianMixture_DerivedAlpha::*)(int)) &DPGaussianMixture_DerivedAlpha::step, "Run n sweeps.")
         .method("get_current", &DPGaussianMixture_DerivedAlpha::get_current)
@@ -812,7 +809,7 @@ PYBIND11_MODULE(DPGaussianMixture_DerivedAlpha, m) {
         // DEFAULT data-driven ctor: (y, K_trunc, rng_seed, keep_history).
         // Normal-Gamma cluster hypers computed data-driven from y. alpha =
         // exp(phi) DERIVED from phi (Normal(0,1) prior, NUTS-sampled) via
-        // register_refresher (DESIGN_NOTES_BNP_GP_2026-04-20.md Q6).
+        // register_refresher.
         .def(pybind11::init<arma::mat, int, int, bool>(),
              pybind11::arg("y"),
              pybind11::arg("K_trunc"),

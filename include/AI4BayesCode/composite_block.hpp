@@ -206,7 +206,7 @@ public:
         for (auto& child : children_) {
             const std::string& cname = child->name();
 
-            // Kernel-control freeze (interface.md Sec.1 + DESIGN_NOTES Sec.10):
+            // Kernel-control freeze (interface.md Sec.1):
             // if the child (or any of its slots / sub-keys) is frozen, skip
             // its step() and skip the write-back + refresher. shared_data
             // retains the last set_current / last-step value for this key,
@@ -377,7 +377,7 @@ public:
     // ---- Kernel-control freeze API (interface.md Sec.1) ----------------
     //
     // Composite-level dispatch for freeze / unfreeze / get_frozen. Name
-    // resolution follows DESIGN_NOTES Sec.10.c:
+    // resolution follows:
     //
     //   1. Malformed check (empty / leading dot / trailing dot / double dot)
     //   2. Flat child name -> whole-block freeze on that child
@@ -395,8 +395,8 @@ public:
     // std::runtime_error / std::invalid_argument, which the boundary
     // converts to Rcpp::stop / RuntimeError.
     //
-    // See DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md Sec.10.a/b/c/d for
-    // the full contract.
+    // See skills/system_design_skills/interface.md Sec.1 for the full
+    // contract.
 
     // Bring the base class's 0-arg freeze() / unfreeze() overloads into
     // this scope so composite_block's name-taking overloads don't hide
@@ -923,6 +923,23 @@ public:
         keep_tree_ = keep;
         for (auto& child : children_) {
             child->set_keep_tree(keep);
+        }
+    }
+
+    /**
+     * Hold-in-place history append, forwarded to ALL children.
+     *
+     * A composite can itself be a frozen child of an OUTER composite. Its own
+     * step() is then skipped, so none of its children advance either -- every
+     * grandchild's history would stall while the outer composite's other
+     * children grow, and predict_at over the joint history trips "inconsistent
+     * history sizes". Forwarding keeps the whole subtree aligned at one entry
+     * per outer sweep. See block_sampler::record_held_history.
+     */
+    void record_held_history() override {
+        if (!keep_history_) return;
+        for (auto& child : children_) {
+            child->record_held_history();
         }
     }
 

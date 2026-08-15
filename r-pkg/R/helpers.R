@@ -445,8 +445,7 @@ ai4bayescode_perf_hint <- function(wall_sec,
             "  Possible causes: (a) N * J grad eval is genuinely expensive,\n",
             "  (b) NUTS tree depth maxing out -> try raising n_warmup_first_call\n",
             "      or seeding cfg.initial_step_size,\n",
-            "  (c) mass-matrix adaptation not yet converged -> longer warmup.\n",
-            "  Validator reminder: joint_nuts_block usage requires Check #11.")
+            "  (c) mass-matrix adaptation not yet converged -> longer warmup.")
         return(invisible(NULL))
     }
 
@@ -455,14 +454,8 @@ ai4bayescode_perf_hint <- function(wall_sec,
         "  If this sampler has tightly-coupled continuous parameters in the\n",
         "  likelihood (e.g. additive linear mean, shift invariance,\n",
         "  fixed+random effects sharing mean), consider regenerating with\n",
-        "  joint_nuts_block over the coupled parameters:\n",
-        "    -> see skills/codegen.md Section 4a (Coupling analysis)\n",
-        "    -> see examples/IRT1PL_joint.cpp for a reference\n",
-        "  WARNING: joint_nuts_block has a higher semantic-bug surface than\n",
-        "  modular NUTS (concatenate-and-slice code is easier to get\n",
-        "  subtly wrong). Any joint sampler you generate must pass\n",
-        "  validator Check #11 (grad slicing, prior completeness, scale\n",
-        "  consistency, Jacobian, write-back offsets, dim asserts).")
+        "  joint_nuts_block over the coupled parameters. For a reference\n",
+        "  model, see ai4bayescode_example(\"IRT1PL_joint\").")
     invisible(NULL)
 }
 
@@ -858,13 +851,33 @@ ai4bayescode_rhat_summary <- function(run, keys = NULL, drop_burn = 0,
     out
 }
 
-# ----------------------------------------------------------------------------
-# ai4bayescode_new_frozen  (DESIGN_NOTES Sec.10.e)
-#
-# Ctor helper: construct a wrapper and immediately set + freeze the sub-
-# kernels listed in `fixed`, in one call. See AI4BayesCode_helpers.R for
-# the full docstring.
-# ----------------------------------------------------------------------------
+#' Construct a model with some components fixed
+#'
+#' @description Builds a generated model and immediately sets and freezes the
+#'   components listed in `fixed`, in one call. The frozen components are held
+#'   at the supplied values for every subsequent `step()`, so the sampler
+#'   targets the conditional posterior of the remaining components. Equivalent
+#'   to the three-step form:
+#'   ```
+#'   m <- new(module_class, ...)
+#'   m$set_current(fixed)
+#'   m$freeze(names(fixed), quiet = quiet_freeze)
+#'   ```
+#' @param module_class The generated model's Rcpp module class (for example
+#'   `MyGaussianReg`).
+#' @param ... Constructor arguments forwarded to `new(module_class, ...)`.
+#' @param fixed Named list of `component = value` pairs to set and freeze. An
+#'   empty list constructs the model without freezing anything. Names must be
+#'   FLAT -- a top-level child block name, or a component of a
+#'   `joint_nuts_block`; whatever `set_current()` accepts. Dot-path names
+#'   (nested composite descent, `rjmcmc_block` sub-keys) are rejected, because
+#'   `set_current()` does not route dot-path keys: freezing a value that was
+#'   never set would give a wrong posterior. To freeze at a dot path, call
+#'   `set_current()` at the matching composite level and then `freeze()`.
+#' @param quiet_freeze Passed as `quiet=` to `m$freeze()`. Defaults to `TRUE`:
+#'   nothing can be frozen yet at construction time, so the redundant-refreeze
+#'   warning has nothing to report.
+#' @return The constructed model, with the `fixed` components set and frozen.
 #' @export
 ai4bayescode_new_frozen <- function(module_class, ...,
                                     fixed = list(),

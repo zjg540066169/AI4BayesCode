@@ -226,6 +226,13 @@ public:
         if (keep_history_) history_.push_back(logp_);
     }
 
+    // Hold-in-place history append for a frozen block: keeps this block's
+    // draw count aligned with every sibling's when composite_block::step()
+    // skips its step(). See block_sampler::record_held_history.
+    void record_held_history() override {
+        if (keep_history_) history_.push_back(logp_);
+    }
+
     const arma::vec& current() const override { return logp_; }
 
     void set_current(const arma::vec& theta) override {

@@ -443,6 +443,18 @@ public:
     const arma::vec& current_phi()   const { return phi_;   }
     std::size_t      n_tokens() const { return N_; }
 
+
+    // Hold-in-place history append for a frozen block: keeps this block's
+    // draw count aligned with every sibling's when composite_block::step()
+    // skips its step(). See block_sampler::record_held_history.
+    void record_held_history() override {
+        if (keep_history_) {
+            history_z_.push_back(z_);
+            history_theta_.push_back(theta_);
+            history_phi_.push_back(phi_);
+        }
+    }
+
 private:
     // ----- Initialization helpers --------------------------------------
 

@@ -22,7 +22,7 @@ were staged in earlier phases):
  (future) registry submission.
 3. `skills/<Block>_validation.md` -- a **SEPARATE block-local validation skill** holding the
  block-SPECIFIC `BL#` checks, **authored ONLY if the block has any** (a block whose only checks are
- core `#1`-`#25` skips it). It is pointed to by the manifest **`ValidationSkill:`** field. It is kept
+ core `#1`-`#26` skips it). It is pointed to by the manifest **`ValidationSkill:`** field. It is kept
  SEPARATE from the main skill ON PURPOSE: the main skill is loaded on every block selection / use,
  but the `BL#` checks are needed only at VALIDATE / re-validation / audit -- so splitting them out
  (lazy-loaded via `ValidationSkill:`) saves tokens in the common case. A block with NO block-specific
@@ -119,7 +119,7 @@ field (Sec.3.2) for non-standard names.
 ### 2.2 Block-SPECIFIC failure modes (`BL#`) -- in a SEPARATE validation skill, NOT this file
 
 Each silent-failure mode unique to THIS block's mechanism becomes a FIRST-CLASS block-local
-semantic check `BL1`, `BL2`, ... (block-scoped IDs -- never collide with core `#1`-`#25`), written
+semantic check `BL1`, `BL2`, ... (block-scoped IDs -- never collide with core `#1`-`#26`), written
 with the SAME anatomy as a core check: **Trigger * Why** (the silent bug; why it passes R-hat / ESS /
 LOO) *** What to look for** (`// WRONG` vs `// RIGHT`, a `grep -nE` pattern, or a runtime
 assertion) *** Fix**. Mark each *runnable* (an assertion / regime in `test_<Block>.cpp`) or
@@ -130,7 +130,7 @@ re-validation / audit -- rarely, NOT on every block selection or use -- so to ke
 main skill lean, **write them in a SEPARATE `skills/<Block>_validation.md`** and point the manifest
 `ValidationSkill:` field at it. Author that file ONLY if the block actually has block-specific
 checks; a block with NONE simply omits `ValidationSkill:` (and VALIDATE then runs only the core
-`#1`-`#25`). This main file keeps just a ONE-LINE pointer ("block-specific checks: see
+`#1`-`#26`). This main file keeps just a ONE-LINE pointer ("block-specific checks: see
 `ValidationSkill`") plus, in Sec.2.1, any brief *usage* pitfall a composer genuinely needs. List the
 `BL#` IDs in the manifest `ChecksApplicable`. They travel with the bundle; a `BL#` that turns out
 GENERAL is the maintainer's to promote into core `validator.md`, not an auto-append.
@@ -206,7 +206,7 @@ ONE identity. Three derivations are ENFORCED CONVENTIONS, NOT fields:
 | `LabelSwitching` | `true` if the target is permutation-invariant over K exchangeable components (finite mixture / HMM / LDA / BNP clusters) -> its draws need POST-MCMC relabeling; `false` / absent otherwise | **conditionally REQUIRED: set `true` whenever the block is exchangeable** (design.md Stage 2 rule). Signals the analysis / runner layer to relabel per `label_switching.md`; the block itself NEVER resolves labels |
 | `Maintainer` | contact | **REQUIRED at submission** [FUTURE] |
 | `ChecksApplicable` | core `#N` faced + block-local `BL#` defined | informational locally; submission uses it |
-| `ValidationSkill` | path to the block's **separate** block-specific-check skill `skills/<Block>_validation.md` (holds the `BL#` checks) | **OPTIONAL -- present iff the block has any `BL#`**; absent => VALIDATE runs only core `#1`-`#25`. Kept OUT of the main `Skill` so block selection / use never load it; VALIDATE lazy-loads it only when this field is set (token saving). |
+| `ValidationSkill` | path to the block's **separate** block-specific-check skill `skills/<Block>_validation.md` (holds the `BL#` checks) | **OPTIONAL -- present iff the block has any `BL#`**; absent => VALIDATE runs only core `#1`-`#26`. Kept OUT of the main `Skill` so block selection / use never load it; VALIDATE lazy-loads it only when this field is set (token saving). |
 | `Benchmark` | ESS/s vs baseline | **REQUIRED at submission** [FUTURE] |
 | `Vendored` | NEW third-party code the block borrows into its OWN `vendor/<lib>/` dir (upstream name + license + path) | OPTIONAL -- present iff the block vendors code (`intake.md` Step 5 / `vendor.md`). NOT the FIXED system libs (mcmclib / Eigen / celerite / libgp), which are on `-I`, just `#include`d, and NEVER declared per-block. |
 | `KernelTier` | whether the block carries its OWN **Tier-C kernel** code + provenance: `none` (pure Tier-B block -- only sampler logic / callbacks / `#include`s of FIXED system libs), `own` (a hand-written low-level numerical kernel), or `vendored` (a borrowed kernel staged in `vendor/`) | OPTIONAL; default `none`. `vendored` cross-refs `Vendored:` and triggers `vendor.md` (stateful adaptation) + the VALIDATE vendored-kernel stateful check; `own` / `vendored` flag a bigger correctness surface (deeper review). |
@@ -294,7 +294,7 @@ flagged for the maintainer.)
 
 ---
 
-## 5. End-of-phase checklist (before offering the "go" to move + compile)
+## 5. End-of-phase checklist (before the automatic move + compile)
 
 - [ ] `skills/<Block>.md` has: routing row * WHEN-to-use * explicit WHEN-NOT * geometry class
  (cited) * config snippet * example path * closing CITE block. (The `BL#` checks are NOT here --
@@ -315,7 +315,7 @@ The checklist above is mostly STRUCTURAL (sections present, paths resolve, field
 step is SEMANTIC: **read each generated document back against the actual `.hpp` / `.cpp` and the
 INTAKE-signed spec, and confirm they MATCH.** Docs drift from code silently, and a correct block
 with a wrong manifest / skill misroutes and misleads every future user -- so a doc mismatch is a FIX
-before "go", the SAME bar as a failed code check.
+before the delivery move, the SAME bar as a failed code check.
 
 - [ ] **Description <-> model.** The `Description`'s model (likelihood / formula / priors) is the model
   the `.hpp` actually implements AND the spec signed off at INTAKE -- not a paraphrase that drifted.
@@ -354,7 +354,8 @@ The ONLY exception is **vendored** code under `vendor/`: it KEEPS its own upstre
 (recorded in `Vendored:`) and is NEVER relicensed to GPL-3 -- verify those headers are UNCHANGED.
 
 **Any authored file missing / mis-stating the GPL-3.0-or-later header, OR any vendored file whose
-upstream license was altered, is a HARD FIX before "go" -- a license error is not shippable.** This
+upstream license was altered, is a HARD FIX before the delivery move -- a license error is not
+shippable.** This
 gate has NO loophole, same as Sec.0.5.
 
 Then **deliver the bundle automatically -- no "go" gate.** Once EVERY check has passed (VALIDATE

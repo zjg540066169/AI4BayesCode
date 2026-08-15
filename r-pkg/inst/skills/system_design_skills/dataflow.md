@@ -96,7 +96,7 @@ constants with no named slot (e.g. `mu ~ N(0, 100^2)`,
 `sigma ~ Jeffreys`) correctly have NO context edges -- the generative
 DAG then equals the predict DAG.
 
-Gold standard: MetaRegBartSpline.cpp. Canonical pattern across the
+Gold standard: `examples/BartNoise.cpp`. Canonical pattern across the
 shipped examples: hyperprior-slot -> sampled-param, plus
 forest/kernel-param -> deterministic-mean-node.
 
@@ -155,8 +155,8 @@ cannot accept. The loop MUST use the SAME generative formula as the
 registered refreshers (verified by an equivalence / R-reference
 gate). The STATEFUL (`keep_history=FALSE`) path MUST still route
 through `impl_->predict_at` -- no shadow there -- and `ai4bayescode_plot_dag` must
-still reflect the fully reconstructed predict DAG. Gold standard
-MetaRegBartSpline is conformant under this carve-out. See
+still reflect the fully reconstructed predict DAG.
+`examples/BartNoise.cpp` is conformant under this carve-out. See
 validator.md Check #6.
 
 **Delivered-validation-harness opt-out (CORRECTNESS INVARIANT).**

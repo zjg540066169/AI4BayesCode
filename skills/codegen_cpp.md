@@ -24,7 +24,7 @@ description: |
 > below). The pybind macro's signature is `AI4BAYESCODE_PYBIND_KERNEL_CONTROL(CLASSNAME)`
 > -- takes only the class name (not the module var) because it emits
 > `.def(...)` inside the class_-fluent-chain, not `M.def(...)` on the
-> module (a previous draft version was wrong; see DESIGN_NOTES Sec.10 macro def).
+> module.
 
 # AI4BayesCode codegen -- C++ file emission
 
@@ -402,7 +402,7 @@ three-phase path was actually BROKEN (R-hat 1.017) and single-pilot FIXED it
 shot Welford with no windowed self-correction; speculative dense fails silently in
 30-70% of replicates while single-dataset 2-chain validators pass. The 2026-05-01
 retrospective on a piecewise-trend time-series model showed every L2 (13/13) and L3
-(4k+4k 2-chain R-hat < 1.005, BPV in (0.02, 0.98)) gate passing while sim1 cross-
+(4k+4k 2-chain R-hat < 1.005, BPV inside the pass band) gate passing while sim1 cross-
 impl R-hat median was 2.0 with 70% replicates having `ess_bulk = NA` (chain stuck) --
 the model was identifiable; the metric choice was the bug, and DIAGONAL recovered it.
 The lever that catches this pre-ship: start diagonal + escalate on diagnostics
@@ -1361,7 +1361,7 @@ prior context). These are VIZ-ONLY: predict_at's BFS never reads
 2. A sampled "forest/kernel" parameter feeding a deterministic mean
    node gets a context edge too: `BART->f_bart`, `genBART->r`,
    `amplitude->K_matrix`, `lengthscale->K_matrix` (parallel to the
-   user-approved MetaRegBartSpline `BART->f_bart`).
+   `BART->f_bart` edge in `examples/BartNoise.cpp`).
 3. If a model's priors are hardcoded constants with NO named slot
    (`mu ~ N(0,100^2)`, `sigma ~ Jeffreys`, `beta ~ N(0,10^2)`),
    emit NO context edges -- the generative DAG then correctly equals
@@ -1373,9 +1373,10 @@ prior context). These are VIZ-ONLY: predict_at's BFS never reads
    would wrongly trigger BFS recomputation of `param`. Keep
    `predict_edges_` and `context_edges_` disjoint.
 
-Gold standard: MetaRegBartSpline.cpp. The 28 shipped examples with
-named hyperprior slots all declare context edges; see
-PREDICT_AT_AUDIT for the per-example topology table.
+Gold standard: `examples/BartNoise.cpp` (hyperprior slots
+`sigma_nu`/`sigma_lambda` -> `sigma`, forest `BART` -> `f_bart`, all
+disjoint from its three predict edges). 33 of the 43 shipped examples
+declare context edges.
 
 ---
 
@@ -1534,7 +1535,7 @@ int main() {
         }
 
         // --- FD verification for blocks whose lp uses lgamma / digamma etc. ---
-        // autodiff.hpp does NOT overload these special functions, so we
+        // the autodiff library does NOT overload these special functions, so we
         // fall back to central finite-difference of the hand-written
         // wrap. FD precision ~= 1e-5.
         {
@@ -1598,7 +1599,7 @@ verify -- the user's lp doesn't include one either).
 
 ### Fallback: FD verification for lgamma / digamma
 
-`autodiff.hpp` does not provide overloads for `lgamma`, `digamma`,
+The autodiff library does not provide overloads for `lgamma`, `digamma`,
 `beta`, or similar R-specific special functions. Blocks whose lp body
 uses `R::lgammafn`, `R::digamma`, etc. cannot be verified via autodiff --
 use **central finite-difference** instead (see the `fd_grad` helper

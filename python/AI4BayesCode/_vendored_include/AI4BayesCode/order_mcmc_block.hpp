@@ -654,6 +654,17 @@ public:
     const score_cache& cache() const noexcept { return *cache_; }
     const std::vector<std::uint64_t>& sampled_dag() const { return sampled_dag_; }
 
+
+    // Hold-in-place history append for a frozen block: keeps this block's
+    // draw count aligned with every sibling's when composite_block::step()
+    // skips its step(). See block_sampler::record_held_history.
+    void record_held_history() override {
+        if (keep_history_) {
+            history_order_.push_back(order_state_);
+            history_log_score_.push_back(current_log_score_);
+        }
+    }
+
 private:
     /// Helper to view order_state_ as std::vector<std::size_t> for cache calls.
     std::vector<std::size_t> order_as_vec_() const {

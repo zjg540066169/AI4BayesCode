@@ -313,7 +313,7 @@ public:
                         cfg_.a_lambda_0, 1.0 / cfg_.b_lambda_0);
                     double lam = gam(rng);
                     if (!(lam > 0.0)) lam = 1e-300;
-                    // Kernel-control sub-key freeze (DESIGN_NOTES Sec.10.a):
+                    // Kernel-control sub-key freeze (interface.md Sec.1):
                     // if lambda_frozen_, skip lambda update; use existing value.
                     if (!lambda_frozen_) lambda_[idx] = lam;
                     const double lam_use = lambda_frozen_ ? lambda_[idx] : lam;
@@ -352,7 +352,7 @@ public:
                     std::gamma_distribution<double> gam(a_n, 1.0 / b_n);
                     double lam = gam(rng);
                     if (!(lam > 0.0)) lam = 1e-300;
-                    // Kernel-control sub-key freeze (DESIGN_NOTES Sec.10.a):
+                    // Kernel-control sub-key freeze (interface.md Sec.1):
                     // if lambda_frozen_, skip lambda update; use existing value.
                     if (!lambda_frozen_) lambda_[idx] = lam;
                     const double lam_use = lambda_frozen_ ? lambda_[idx] : lam;
@@ -405,8 +405,7 @@ public:
 
     const std::string& name() const noexcept override { return cfg_.name; }
 
-    // Kernel-control sub-key freeze API (DESIGN_NOTES Sec.10 + subagent-B
-    // block-family audit). Two sub-names -- the block's cfg_.mu_name and
+    // Kernel-control sub-key freeze API (interface.md Sec.1). Two sub-names -- the block's cfg_.mu_name and
     // cfg_.lambda_name. Freezing "<mu_name>" holds cluster means fixed while
     // precisions sample from their (data-dependent) conditional; freezing
     // "<lambda_name>" holds cluster precisions fixed while means sample.
@@ -484,7 +483,7 @@ private:
         }
     }
 
-    // Kernel-control sub-key freeze flags (DESIGN_NOTES Sec.10 + subagent-B).
+    // Kernel-control sub-key freeze flags (interface.md Sec.1).
     // Whole-block freeze goes via is_frozen_ in base class; these additionally
     // gate the mu-update and lambda-update inside step().
     bool                                    mu_frozen_     = false;

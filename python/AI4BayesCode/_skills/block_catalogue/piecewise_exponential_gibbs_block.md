@@ -62,7 +62,7 @@ storage). A time `t_i = e_k` exactly lands in bin `k`. `edges[K]` must exceed
 
 ```cpp
 // Sibling block that samples beta and writes exp(x_i^T beta) each sweep.
-// See examples/PehCoxRegression.cpp for the wired-up template.
+// See examples/PehSurvival.cpp for the wired-up template.
 ```
 
 **JUSTIFICATION (Check #16): Exception 3** (textbook multivariate conjugate

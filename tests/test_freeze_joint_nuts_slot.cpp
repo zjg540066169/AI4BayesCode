@@ -1,9 +1,8 @@
 /*================================================================================
  *  joint_nuts_block slot-level freeze acceptance test (Batch O, 2026-07-20).
  *
- *  Sec.10.a of DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md defines the entry
- *  criterion for flipping the kernel patch from "IMPL deferred" to "IMPL
- *  shipped":
+ *  Entry criterion for flipping the kernel patch from "IMPL deferred" to
+ *  "IMPL shipped":
  *
  *      "unit test that samples a joint block of (beta[10], log_sigma) with
  *       dense metric, freezes log_sigma at 0 (sigma=1), and confirms beta's
@@ -29,7 +28,7 @@
  *  actual masking, comment out the "expected throw" branch and enable the
  *  posterior-recovery assertion below it.
  *
- *  See DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md Sec.10.a for context.
+ *  See skills/system_design_skills/interface.md Sec.1 for context.
  *================================================================================*/
 
 #include "AI4BayesCode/composite_block.hpp"
@@ -388,8 +387,7 @@ static void F5_freeze_before_first_step() {
 
     // Freeze log_sigma BEFORE the first step.
     comp.freeze({"log_sigma"});
-    // get_frozen returns canonical dot-path form ("<block>.<slot>") per
-    // DESIGN_NOTES Sec.10.b/c ordering.
+    // get_frozen returns canonical dot-path form ("<block>.<slot>").
     auto fr = comp.get_frozen();
     check(fr.size() == 1 && fr[0] == std::string("theta.log_sigma"),
           "F5.a frozen before first step (dot-path canonical form)");

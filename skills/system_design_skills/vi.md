@@ -444,7 +444,7 @@ Deferred to v2+ (each individually a substantial project):
   whom generatively". They are different. Separated 2026-04-12.
 
 - **Check #12 at gen-time only, not runtime.** Tried runtime
-  autodiff gradient via autodiff.hpp; 97-562x slowdown killed
+  autodiff gradient via the autodiff library; 97-562x slowdown killed
   the approach. Hand-written gradient + throwaway gen-time
   verify turned out to be the right engineering balance (2026-04).
 

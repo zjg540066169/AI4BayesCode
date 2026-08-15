@@ -260,7 +260,7 @@ def _offline_emit(p: dict, output_path: str, verbose: bool) -> dict:
     rf.write_text(
         "No API key was available, so generate() emitted the prompt.\n"
         "  (A) Claude Code: \"Read AI4BayesCode/start.md first, then <model description>.\"\n"
-        "  (B) Online: set a key once with AI4BayesCode.set_key(\"sk-YOUR-KEY-HERE\", \"anthropic\")\n"
+        "  (B) Online: set a key once with AI4BayesCode.set_key(\"<your-key>\", \"anthropic\")\n"
         "      (or pass API_key= / LLM=), then re-run AI4BayesCode.generate(...).\n"
         "      (The Messages API path uses the 'anthropic' SDK, a core dependency.)\n"
         f"Target class: {p['classname']}   backend: {p['backend']}\n")
@@ -567,7 +567,7 @@ def set_key(key: str, provider: str = "anthropic", check: bool = True) -> str:
     (you still can, to override per call).
 
     Args:
-        key: Non-empty API-key string (e.g. ``"sk-ant-api..."``, ``"sk-YOUR-KEY-HERE"``).
+        key: Non-empty API-key string (e.g. ``"sk-ant-api03-XXXX"``).
             A Claude subscription key (``"sk-ant-oat..."`` from
             ``claude setup-token``) is detected from the ``sk-ant-oat`` prefix,
             but subscription keys may be rate-limited for API use (a 429) -- if

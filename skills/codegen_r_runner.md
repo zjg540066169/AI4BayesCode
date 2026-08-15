@@ -294,7 +294,7 @@ model$predict_at(list(<X> = <X>_test))
 ## Re-tune the sampler without advancing the chain -- useful after
 ## set_current() changes the data enough that the old tuning no longer
 ## fits. (Only present when the model uses NUTS.)
-## model$readapt_NUTS(500L)
+## model$readapt_NUTS(500L, FALSE, -1L)
 ##
 ## Hold one parameter fixed instead of sampling it -- e.g. pin sigma = 1
 ## for a probit-style model, or fix a parameter for a sensitivity check.
@@ -462,7 +462,7 @@ run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep, diagnosis
     #   model$set_current(list(sigma = 1))
     #   model$freeze("sigma")
     # Then also set `frozen_names <- c("sigma")` at runner scope for R2.f
-    # exclusion. See validator.md Sec.R2.f + DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md Sec.8.
+    # exclusion. See validator.md Sec.R2.f
     t0 <- Sys.time()
     model$step(n_burnin)
     model$step(n_keep)
@@ -686,7 +686,7 @@ pv <- sapply(bp_stat, function(f)
 cat("\n  Bayesian p-values: ",
     paste(sprintf("%s=%.2f", names(pv), pv), collapse = "  "), "\n")
 # Gate on the CENTRAL statistics only; min / max stay diagnostic.
-pv_lo   <- if (USES_JOINT_NUTS) 0.02 else 0.05
+pv_lo   <- if (USES_JOINT_NUTS) 0.10 else 0.05
 pv_hi   <- 1 - pv_lo
 .central <- pv[intersect(names(pv), c("mean", "sd", "q25", "q75"))]
 .n_out   <- sum(.central <= pv_lo | .central >= pv_hi)
@@ -700,9 +700,9 @@ stopifnot(.n_out < 2L)
 # correctness. GP latent-variable and hierarchical-latent models are
 # known to fail this diagnostic even when the posterior is correctly
 # sampled (Vehtari, Simpson, Gelman, Yao, Gabry, JMLR 2024,
-# arXiv:1507.02646). Sampler correctness is gated by R-hat (R2) ONLY;
-# Bayesian p-values (R3.a) and R3.b are diagnostics -- recorded + warned,
-# never stopifnot.
+# arXiv:1507.02646). Sampler correctness is gated by R-hat (R2) AND the
+# Bayesian p-values (R3.a, the stopifnot above). R3.b is diagnostic only --
+# recorded and warned, never a gate.
 LL1 <- pointwise_loglik(c1$hist, y_obs)
 LL2 <- pointwise_loglik(c2$hist, y_obs)
 LLarr <- array(NA_real_, dim = c(nrow(LL1), 2, ncol(LL1)))

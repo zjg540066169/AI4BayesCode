@@ -211,7 +211,45 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
    OUT (its updated value comes from an outer Gibbs composition, so as
    live code it would error in a standalone run).
 
+Skeleton (parameterized; mirror this structure, fill placeholders):
+
 ```python
+# Usage example for <ClassName> -- <one line: what the model is>.
+# Everything runs through the shipped library helpers:
+#   AI4BayesCode.run_chains   -- run several MCMC chains in parallel
+#   AI4BayesCode.rhat_summary -- convergence check across the chains
+#   AI4BayesCode.diagnose     -- posterior summaries + diagnostic plots
+import numpy as np
+import AI4BayesCode
+
+# Compile + load the model.
+mod = AI4BayesCode.source("<ClassName>.cpp")
+
+# <compact constructor reference: the mod.<ClassName>(...) call shape +
+#  one brief comment per data argument -- keep it SHORT>
+# Full constructor / methods / prior reference:
+#   AI4BayesCode.doc("<ClassName>")
+
+# Simulate a toy data set
+# <commented synthetic generation of <data_args> + a held-out X test>
+
+# Multi-chain run + diagnostics (the everyday flow; shipped helpers only).
+# The model constructor is the inline lambda -- it builds one fresh model
+# per chain from the data simulated above.
+chains = AI4BayesCode.run_chains(
+    lambda seed: mod.<ClassName>(<data_args>, rng_seed=int(seed),
+                                 keep_history=True),
+    seeds=[101, 202, 303, 404], n_burn=4000, n_keep=4000)
+
+print(AI4BayesCode.rhat_summary(chains))   # convergence across the chains
+
+# Per-chain summaries + trace + autocorrelation + density plots.
+tbl, plot = AI4BayesCode.diagnose(chains[0]["hist"])
+print(tbl)
+plot()
+
+# Examples of stateful functions
+
 # Initialize with full history (keep_history=False keeps only the last draw)
 model = mod.<ClassName>(..., rng_seed=42, keep_history=True)
 model.step(200)                              # burn-in
@@ -276,7 +314,7 @@ def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
     #   model.set_current({"sigma": 1.0})
     #   model.freeze(["sigma"])
     # Then also set `frozen_names = ["sigma"]` at runner scope for R2.f
-    # exclusion. See validator.md Sec.R2.f + DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md Sec.8.
+    # exclusion. See validator.md Sec.R2.f
     t0 = time.time()
     model.step(int(n_burn))
     model.step(int(n_keep))
@@ -423,7 +461,8 @@ def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
 
 # NOTE: ai4bayescode_diagnose (the diagnostics table + the trace/ACF/density plot) is a
 # SHIPPED function in the AI4BayesCode package -- the runner CALLS it (above);
-# it does NOT define its own copy. The summary uses split-R-hat / ESS (numpy),
+# it does NOT define its own copy. The summary uses rank-normalized
+# split-R-hat / ESS (numpy),
 # correct for the single chain a runner produces, and the plot uses matplotlib.
 ```
 
@@ -557,7 +596,7 @@ def _worker(args):
 n_burn = 4000; n_keep = 4000
 
 # Flip to True if this runner's composite contains a joint_nuts_block
-# (tightens the R3 BPV interval from (0.05, 0.95) to (0.02, 0.98) --
+# (narrows the R3 BPV pass band from (0.05, 0.95) to (0.10, 0.90) --
 # mirrors USES_JOINT_NUTS in codegen_r_runner.md).
 USES_JOINT_NUTS = <True if composite has joint_nuts_block else False>
 
@@ -583,9 +622,11 @@ c1, c2, total_wall_sec = _run_two_chains(n_burn, n_keep)
 # Matches validator.md Sec.R2 and codegen_r_runner.md r2_diag(): rank-normalized
 # R-hat is a HARD gate (< 1.05); ESS is a SOFT criterion via
 # ess_ratio = min(ESS_bulk, ESS_tail) / n_keep -- >= 0.01 silent,
-# [0.005, 0.01) WARN and proceed, < 0.005 escalate. AI4BayesCode.rhat / ess_* use the
-# rank-normalized split-R-hat and bulk/tail ESS of Vehtari et al. (2021),
-# the same estimators posterior::rhat / ess_bulk / ess_tail compute R-side.
+# [0.005, 0.01) WARN and proceed, < 0.005 escalate. AI4BayesCode.rhat is the
+# rank-normalized split-R-hat of Vehtari et al. (2021) and matches
+# posterior::rhat R-side, so the 1.05 gate means the same thing on both.
+# AI4BayesCode.ess_bulk / ess_tail use a simpler autocorrelation estimator
+# and are indicative, not identical to posterior::ess_bulk / ess_tail.
 #
 # Sec.R2.s conditional-relevance exclusion (Dirac spike-and-slab): for per-j
 # slab DISTRIBUTION parameters (per-coordinate slab variance tau2_beta /
@@ -703,7 +744,7 @@ pv = {nm: float(np.mean(np.array([f(row) for row in y_rep]) >= f(y_obs)))
 print("\n  Bayesian p-values: " +
       "  ".join(f"{nm}={p:.2f}" for nm, p in pv.items()))
 # Gate on the CENTRAL statistics only; min / max stay diagnostic.
-pv_lo = 0.02 if USES_JOINT_NUTS else 0.05
+pv_lo = 0.10 if USES_JOINT_NUTS else 0.05
 pv_hi = 1.0 - pv_lo
 _central = {nm: p for nm, p in pv.items() if nm in ("mean", "sd", "q25", "q75")}
 _n_out = sum(1 for p in _central.values() if p <= pv_lo or p >= pv_hi)
@@ -717,9 +758,9 @@ assert _n_out < 2, f"[R3.a FAIL] {_n_out} central Bayesian p-values outside ({pv
 # importance-weight reliability, NOT sampler correctness; GP latent-variable
 # and hierarchical-latent models routinely fail this diagnostic even with a
 # correctly sampled posterior (Vehtari, Simpson, Gelman, Yao, Gabry, JMLR
-# 2024, arXiv:1507.02646). Sampler correctness is gated by R-hat (R2) ONLY;
-# the Bayesian p-values (R3.a) and this are diagnostics -- recorded + warned,
-# never asserted.
+# 2024, arXiv:1507.02646). Sampler correctness is gated by R-hat (R2) AND the
+# Bayesian p-values (R3.a, the assert above). This one is diagnostic only --
+# recorded and warned, never a gate.
 #
 # Emit the per-observation log-likelihood that matches the model's
 # observation family (Gaussian example below; replace the body -- see

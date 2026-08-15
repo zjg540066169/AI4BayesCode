@@ -13,7 +13,7 @@ description: |
 > the `AI4BAYESCODE_BIND_KERNEL_CONTROL` macro, the base class hooks in
 > `block_sampler.hpp`, the composite dispatch in `composite_block.hpp`,
 > and the `joint_nuts_block` slot-level override (Approach B per
-> DESIGN_NOTES Sec.10.a) are all shipped. 42/43 examples migrated
+> `joint_nuts_block`) are all shipped. 42/43 examples migrated
 > (ARDLasso remains hand-Gibbs; not yet mixin-enrolled). Layer-3 R2.f
 > (frozen-parameter exclusion) is active for any wrapper that freezes
 > at least one child.
@@ -109,7 +109,7 @@ registry is the authoritative cross-reference.
 | 23 | readapt_NUTS state-preservation + RNG separation | Semantic | validator.md Sec.23 | wrapper exposes the kernel-control method `readapt_NUTS` (i.e., contains any `nuts_block` / `joint_nuts_block` child) |
 | 24 | Joint-NUTS pathology pre-flight (funnel NCR / constraint kind / lambda completeness) | Semantic | validator.md Sec.24 + joint_nuts_failure.md | cpp constructs a `joint_nuts_block` |
 | 25 | Trans-dimensional / Dirac-spike must use `rjmcmc_block` (reducibility + silent-slab guard) | Semantic | validator.md Sec.25 + codegen_priors.md Sec.3a Class 2b/4 | model is Sec.3a Class 2b (Dirac point-mass spike) or Class 4 (parameter-space dimension is a random variable) -- i.e. posterior support is a union of manifolds of different dimension |
-| 26 | Kernel-control conformance (freeze / unfreeze / get_frozen present + whitelist/blacklist gate + refreeze warning + stale-derived warning) | Semantic | validator.md Sec.26 + DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md | always (kernel-control is a universal wrapper category per interface.md Sec.1) |
+| 26 | Kernel-control conformance (freeze / unfreeze / get_frozen present + whitelist/blacklist gate + refreeze warning + stale-derived warning) | Semantic | validator.md Sec.26 | always (kernel-control is a universal wrapper category per interface.md Sec.1) |
 
 **Check #12 status note:** Check #12 is the ONE execution-based Layer-2
 check -- the AI writes a throwaway `tests_autodiff/verify_<ClassName>.cpp`
@@ -630,7 +630,7 @@ hard-rejects, or returns a key whose declared parent is unavailable,
 fails R1.
 
 **Concrete failure example** (one model, three regressions of the
-same wrapper). `MetaRegBartSpline` -- meta-regression:
+same wrapper). A meta-regression with a BART + spline mean:
 ```
 Y ~ N(theta, v2), theta ~ N(BART(X) + spline(Z), tau^2)
 ```
@@ -814,7 +814,7 @@ Acceptance conditions (all must hold):
 4. **Forest/kernel convention.** A sampled tree-ensemble / kernel
    parameter feeding a deterministic mean node is declared as a
    context edge (`BART->f_bart`, `genBART->r`, `amplitude->K_matrix`),
-   parallel to the user-approved MetaRegBartSpline `BART->f_bart`.
+   parallel to the `BART->f_bart` edge in `examples/BartNoise.cpp`.
 
 Detection: `ai4bayescode_plot_dag(model)` must render the prior context faded and
 the solid predict sub-DAG unchanged; `predict_at(list())` output keys
@@ -845,7 +845,7 @@ generative formula as the registered refreshers (gate: equivalence /
 R-reference); the STATEFUL path still routes through
 `impl_->predict_at` (no shadow there); `ai4bayescode_plot_dag` still reflects the
 fully reconstructed predict DAG. Forbidden pattern C does NOT apply
-to these. Gold standard MetaRegBartSpline is conformant under this
+to these. `examples/BartNoise.cpp` is conformant under this
 carve-out. See system_design.md Sec.5 (Q5 ruling).
 
 ### 7. Dependency declaration
@@ -992,10 +992,12 @@ slicing is off by one.
    asserts catch the majority of bugs 1, 3, and 5 before any chain
    runs.
 
-**R3 tightening when joint_nuts_block is used:** the posterior-
-predictive p-value threshold in R3.a tightens from (0.05, 0.95) to
-(0.02, 0.98), because silent miscalibration bugs in joint_NUTS are
-more insidious than in modular code and need a stricter filter.
+**R3 tightening when joint_nuts_block is used:** the R3.a posterior-
+predictive p-value PASS BAND narrows from (0.05, 0.95) to (0.10, 0.90),
+because silent miscalibration bugs in joint_NUTS are more insidious than
+in modular code and need a stricter filter. Narrowing the band means a
+statistic has to sit closer to 0.5 to pass, so more marginal models are
+caught -- do NOT widen it to (0.02, 0.98), which flags fewer.
 
 **Layer 2 routing:** failures in this check most often masquerade as
 Check #1 (wrong parameterization), #4 (missing intercept / offset),
@@ -1023,7 +1025,7 @@ alongside the production `.cpp`. The companion contains:
     block, and exits non-zero on failure.
 
 For blocks whose log-density uses `lgamma` / `digamma` / other
-special functions that `autodiff.hpp` doesn't overload, the AI falls
+special functions that the autodiff library doesn't overload, the AI falls
 back to **finite-differenceverification** (central-difference of the hand-
 written wrap). FD precision is ~1e-5 vs AD's ~1e-8.
 
@@ -1260,8 +1262,14 @@ cheapest, and best whenever diagonal suffices (the common case). Escalate by
 MEASURING, not predicting (do NOT gate on a `cond(R)` threshold -- it is dimension-
 dependent and not calibratable from limited data):
 
-1. Enable `use_dense_metric = true` ONLY when runtime validation (R2/R3) shows
-   diagonal is inadequate -- R-hat > 1.01, low ESS, max-tree-depth saturation, or
+0. EXCEPTION -- a reduced-rank BASIS SMOOTHER (spline / HSGP / ICAR) sets
+   `use_dense_metric = true` FROM THE START; overlapping bases make the
+   coefficients correlated by construction, so the diagonal step is skipped rather
+   than escalated from. Measured on `BSplineRegression`: diagonal rank-R-hat
+   1.0288 / ess_ratio 0.0059 vs dense 1.0017 / 0.3488 (59x ESS, 3.6x faster). This
+   is the ONE family where speculative dense is correct; do NOT generalize it.
+1. For every other model, enable `use_dense_metric = true` ONLY when runtime
+   validation (R2/R3) shows diagonal is inadequate -- R-hat > 1.01, low ESS, max-tree-depth saturation, or
    low E-BFMI (the signature of a correlation ridge a diagonal metric cannot
    rotate away). **Dense + single-pilot is the right next step** and resolves the
    large majority of correlated targets (broad 31-model corpus: converges to
@@ -1895,8 +1903,7 @@ defense against mode B.
 
 **Trigger:** EVERY wrapper. Kernel-control is a universal category per
 interface.md Sec.1 -- every user-facing wrapper class MUST expose
-`freeze` / `unfreeze` / `get_frozen` (see DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md
-for the full contract).
+`freeze` / `unfreeze` / `get_frozen`.
 
 **Four sub-checks** (all must pass):
 
@@ -1970,7 +1977,7 @@ stopifnot(length(m$get_frozen()) == 0L)
 ```
 
 If the composite includes any `joint_nuts_block`, ALSO test slot-level
-freeze (v1 feature per DESIGN_NOTES Sec.10.a):
+freeze:
 
 ```r
 # joint_nuts_block("<joint_name>", slots = list(..., <slot_name>, ...))
@@ -2008,14 +2015,14 @@ m2$unfreeze()
 (C++ regression coverage of the same invariant across diagonal/dense/auto-select/
 n<10-fallback exits and element-level freeze: `tests/test_freeze_dense_pilot.cpp`.)
 
-If the composite includes any `rjmcmc_block`, ALSO test sub-key freeze
-(v1 feature per DESIGN_NOTES Sec.10.d):
+If the composite includes any `rjmcmc_block`, ALSO test sub-key freeze:
 
 ```r
 # rjmcmc_block("<rj_name>", gamma_key = "<gamma_key>", beta_key = "<beta_key>")
 # NOTE: rjmcmc_block writes TWO named entries into shared_data (and hence the
 # wrapper's get_current() map): one at gamma_key, one at beta_key. They are
-# NOT nested under the block name. See DESIGN_NOTES Sec.6 rjmcmc row for the
+# NOT nested under the block name. See the rjmcmc row in
+# families.md Sec.13 for the
 # get_current() shape spec.
 m$freeze("<rj_name>.gamma")            # freeze ONLY the trans-dim sweep
 stopifnot("<rj_name>.gamma" %in% m$get_frozen())
@@ -2029,7 +2036,7 @@ m$unfreeze()
 ```
 
 If the composite has nested composite children, ALSO test dot-path
-descent (v1 feature per DESIGN_NOTES Sec.10.c):
+descent:
 
 ```r
 # outer composite has a child that is itself a composite named "inner"
@@ -2040,8 +2047,7 @@ m$step(1L)
 m$unfreeze()
 ```
 
-Also test the `quiet=TRUE` refreeze path (v1 feature per DESIGN_NOTES
-Sec.10.b) -- verifies checkpoint restore does not spam warnings:
+Also test the `quiet=TRUE` refreeze path -- verifies checkpoint restore does not spam warnings:
 
 ```r
 m$freeze("<whitelist_block_name>")
@@ -2055,8 +2061,8 @@ stopifnot(inherits(res, "error"))
 m$unfreeze()
 ```
 
-Also test the checkpoint restore round-trip closure (v1 feature per
-DESIGN_NOTES Sec.10.b + Sec.10.c ordering + Sec.10.d sub-key preservation):
+Also test the checkpoint restore round-trip closure (freeze -> get_frozen
+-> unfreeze -> refreeze, preserving order and any sub-keys):
 
 ```r
 # Freeze a mix of forms first. get_dag() exposes the DAG edges
@@ -2947,7 +2953,7 @@ never gated:
 - TWO OR MORE central statistics outside simultaneously -> **FAIL** the
   attempt (semantic bug: the posterior predictive does not reproduce
   the data). Route back to Layer 2 and retry per the attempt budget.
-- **Tighter threshold (0.02, 0.98) when the sampler uses
+- **Narrower pass band (0.10, 0.90) when the sampler uses
   `joint_nuts_block`** -- silent
   miscalibration bugs in concatenate-and-slice code are more insidious
   (see Check #11).
@@ -3001,8 +3007,8 @@ bp_stat <- c(mean = mean, sd = sd, min = min, max = max,
              q75 = function(x) quantile(x, 0.75, names = FALSE))
 pv1 <- sapply(bp_stat, function(f)
     mean(apply(c1$pp$y_rep, 1, f) >= f(y_obs)))
-# Threshold tightens to (0.02, 0.98) if the sampler uses joint_nuts_block.
-pv_lo <- if (USES_JOINT_NUTS) 0.02 else 0.05
+# Pass band narrows to (0.10, 0.90) if the sampler uses joint_nuts_block.
+pv_lo <- if (USES_JOINT_NUTS) 0.10 else 0.05
 pv_hi <- 1 - pv_lo
 # GATE on the CENTRAL statistics only; min / max are printed but never
 # gated (order statistics are legitimately extreme). >= 2 central

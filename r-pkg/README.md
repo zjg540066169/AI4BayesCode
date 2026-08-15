@@ -3,7 +3,7 @@
 R package for the AI4BayesCode block-composite MCMC + variational
 inference library. After install, all C++ headers, vendored
 dependencies (`mcmclib`, `eigen`, `autodiff`, `libgp`, `celerite`,
-`bart`), the AI codegen skill workflow, and 39 reference examples
+`bart`), the AI codegen skill workflow, and 43 reference examples
 ship as package data — **no local `AI4BayesCode/` folder needed**.
 
 ## Install (from GitHub)
@@ -72,7 +72,7 @@ model, and the thinking level **in the call**; nothing is saved.
 ```r
 res <- ai4bayescode_generate(
   "y ~ N(Xbeta, sigma^2), p(sigma^2) propto 1/sigma^2  (linear regression)",
-  API_key = "sk-YOUR-KEY-HERE",            # passed here, never saved
+  API_key = "sk-ant-api03-XXXX",           # passed here, never saved
   LLM     = "claude-opus-4-8",   # or gpt-5.5, claude-sonnet-4-6, ...
   effort  = "high",              # thinking level, validated against this model's levels
   backend = "R", output_path = "./generated", max_attempts = 2L)
@@ -95,9 +95,9 @@ Prefer not to pass the key every call? Set it **once per session** (session-only
 never written to disk):
 
 ```r
-ai4bayescode_set_key("sk-ant-api-...", "anthropic")   # or "openai" / "google"
+ai4bayescode_set_key("sk-ant-api03-XXXX", "anthropic")   # or "openai" / "google"
 ai4bayescode_key_status()                              # shows what's set (masked)
-ai4bayescode_generate("Linear regression.", LLM = "gpt-5.5")  # key picked up
+ai4bayescode_generate("Linear regression.", LLM = "gpt-5.5-codex")  # key picked up
 ```
 
 `API_key=` still works per call and **overrides** the session key for that one call —
@@ -108,9 +108,9 @@ e.g. `ai4bayescode_generate("...", API_key = "sk-other")` — without changing w
 
 | Asset | Count | How to access |
 |---|---|---|
-| Block headers (`AI4BayesCode/*_block.hpp`) | 34 | `ai4bayescode_include_path()` |
+| Block headers (`AI4BayesCode/*_block.hpp`) | 38 | `ai4bayescode_include_path()` |
 | Vendored deps (mcmclib, eigen, autodiff, libgp, celerite, bart) | 6 | bundled, auto-linked |
-| Reference examples (`.cpp`) | 39 | `ai4bayescode_list_examples()` |
+| Reference examples (`.cpp`) | 43 | `ai4bayescode_list_examples()` |
 | AI codegen skills (markdown) | 18 | `ai4bayescode_list_skills()` |
 
 ## Planned for later versions

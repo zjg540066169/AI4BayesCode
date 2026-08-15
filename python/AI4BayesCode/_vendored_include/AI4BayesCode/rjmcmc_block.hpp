@@ -420,7 +420,7 @@ public:
             //     Two mutually-exclusive modes. User picks one or neither
             //     at config time.
             //
-            // Kernel-control freeze (DESIGN_NOTES Sec.10.d): beta_frozen_
+            // Kernel-control freeze (interface.md Sec.1): beta_frozen_
             // suppresses the entire (A) block so active beta values stay
             // pinned at their current values. gamma sweep (B) still fires
             // unless gamma_frozen_ is also set.
@@ -706,7 +706,7 @@ public:
             last_n_rw_try_,    last_n_rw_ok_};
     }
 
-    // ---- Kernel-control freeze API (sub-key, DESIGN_NOTES Sec.10.d) -----
+    // ---- Kernel-control freeze API (sub-key, interface.md Sec.1) --------
     //
     // rjmcmc_block exposes two sub-keys -- gamma_key (trans-dim sweep) and
     // beta_key (continuous_update on active betas). Composite calls
@@ -782,7 +782,7 @@ private:
     std::size_t last_n_death_try_ = 0, last_n_death_ok_ = 0;
     std::size_t last_n_rw_try_    = 0, last_n_rw_ok_    = 0;
 
-    // Kernel-control sub-key freeze flags (DESIGN_NOTES Sec.10.d).
+    // Kernel-control sub-key freeze flags (interface.md Sec.1).
     // Whole-block freeze goes via is_frozen_ in the base class; these two
     // flags additionally gate the individual sub-updates inside step().
     bool                     gamma_frozen_ = false;

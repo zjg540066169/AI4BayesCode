@@ -613,7 +613,7 @@ public:
         ns.n_adapt_draws  = n_warmup;
 
         // Snapshot frozen slot values in the unconstrained space (Approach B
-        // from DESIGN_NOTES Sec.10.a). When any slot is frozen, the adapter
+        // (Approach B). When any slot is frozen, the adapter
         // wrap OVERRIDES the theta values on frozen dims with the snapshot
         // and ZEROES the gradient on those dims, so mcmclib sees a target
         // that is CONSTANT in the frozen coordinates. Combined with the
@@ -941,8 +941,9 @@ public:
 
     // ---- Kernel-control freeze API (slot-level, interface.md Sec.1) -----
     //
-    // Slot-level freeze IMPLEMENTED via "Approach B" from DESIGN_NOTES
-    // Sec.10.a + subagent-A analysis 2026-07-20: non-invasive to mcmclib.
+    // Slot-level freeze IMPLEMENTED via "Approach B": non-invasive to
+    // mcmclib -- the frozen dims are masked in this file rather than in the
+    // vendored kernel.
     //
     // Detailed balance argument (Neal HMC + Girolami RMHMC style):
     //   Let theta = (theta_f, theta_z) where _z is frozen at theta_z_snap.
@@ -1157,7 +1158,7 @@ public:
 
         // Freeze-aware adapter: if any slot is frozen, wrap eval_unc_ to
         // override theta on frozen dims with a snapshot and zero grad on
-        // those dims (Approach B per DESIGN_NOTES Sec.10.a). Fast-path
+        // those dims (Approach B). Fast-path
         // bit-identical when no slot is frozen. See step() for the full
         // rationale. This SAME pattern also runs in readapt(),
         // adapt_dense_metric_(), three_phase_warmup_() -- audit 2026-07-20
@@ -1741,7 +1742,7 @@ private:
         // Build adapter (same eval_unc_ as main step()).
         // Freeze-aware adapter: if any slot is frozen, wrap eval_unc_ to
         // override theta on frozen dims with a snapshot and zero grad on
-        // those dims (Approach B per DESIGN_NOTES Sec.10.a). Fast-path
+        // those dims (Approach B). Fast-path
         // bit-identical when no slot is frozen. See step() for the full
         // rationale. This SAME pattern also runs in readapt(),
         // adapt_dense_metric_(), three_phase_warmup_() -- audit 2026-07-20
@@ -1967,7 +1968,7 @@ private:
         // Shared adapter — same eval_unc_ as step() and adapt_dense_metric_.
         // Freeze-aware adapter: if any slot is frozen, wrap eval_unc_ to
         // override theta on frozen dims with a snapshot and zero grad on
-        // those dims (Approach B per DESIGN_NOTES Sec.10.a). Fast-path
+        // those dims (Approach B). Fast-path
         // bit-identical when no slot is frozen. See step() for the full
         // rationale. This SAME pattern also runs in readapt(),
         // adapt_dense_metric_(), three_phase_warmup_() -- audit 2026-07-20
@@ -2142,7 +2143,7 @@ private:
         if (_fz_any) theta_cat_.elem(frozen_unc_idx_) = _fz_snap;
     }
 
-    // Kernel-control slot-freeze state (DESIGN_NOTES Sec.10.a Approach B).
+    // Kernel-control slot-freeze state (Approach B).
     // frozen_slots_ is the source of truth (set by freeze_sub / cleared by
     // unfreeze_sub); frozen_unc_idx_ is the derived index vector of positions
     // in theta_cat_ that are frozen, rebuilt by rebuild_frozen_unc_idx_.

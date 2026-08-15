@@ -271,7 +271,7 @@ public:
     const std::string& name() const noexcept override { return cfg_.name; }
     std::size_t dim() const noexcept override { return cfg_.T; }
 
-    // Kernel-control freeze BLACKLIST (DESIGN_NOTES Sec.6): latent state
+    // Kernel-control freeze BLACKLIST (families.md): latent state
     // sequence z frozen while emission parameters sample yields mismatched
     // conditioning (Baum-Welch forward pass depends on emissions).
     bool supports_freeze() const noexcept override { return false; }

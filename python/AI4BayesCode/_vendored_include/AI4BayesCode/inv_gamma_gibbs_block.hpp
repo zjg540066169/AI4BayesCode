@@ -137,12 +137,12 @@ public:
         // std::gamma_distribution uses shape-SCALE, so scale = 1/rate.
         std::gamma_distribution<double> gam(p.shape, 1.0 / p.rate);
         const double g = gam(rng);
-        if (!(g > 0.0)) {
-            // Numerical underflow — inherit previous value (conservative).
-            // This is a rare pathology in extreme shape/rate regimes.
-            return;
+        if (g > 0.0 && std::isfinite(g)) {
+            value_[0] = 1.0 / g;
         }
-        value_[0] = 1.0 / g;
+        // Else: keep previous value (rare extreme shape/rate underflow). The
+        // history append below still runs, so this block's draw count stays
+        // aligned with every sibling block's.
 
         if (keep_history_) {
             history_buf_.push_back(value_);

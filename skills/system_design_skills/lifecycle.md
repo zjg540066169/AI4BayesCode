@@ -291,7 +291,7 @@ Before any PR touching Tier A / B / C lands:
       -> error; `m$freeze()` (no arg) -> error. If composite contains
       any blacklist-family block (`bart_block` / `genbart_block` /
       `hmm_block` / `vi_block`): `m$freeze("<blacklist_name>")` -> error
-      with reason string mentioning "not supported". See DESIGN_NOTES_FREEZE_UNFREEZE_2026-07-19.md Sec.6.
+      with reason string mentioning "not supported".
 - [ ] **Check #26 (c) -- state preservation across freeze + step.**
       R-level test on any WHITELIST block: `m$set_current(list(<name> = v))`
       -> `m$freeze("<name>")` -> `m$step(1L)` -> `m$get_current()[["<name>"]]`

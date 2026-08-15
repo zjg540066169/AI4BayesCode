@@ -13,7 +13,8 @@ Header-only port of Welandawe et al. 2022 RAABBVI. Exposes:
   iterate averaging + R-hat convergence at fixed gamma + SKL termination.
 - `vi_optimizer::psis_khat(log_weights) -> double` -- Pareto-smoothed
   importance-sampling k-hat computation; used by VI blocks at SKL
-  termination and by `psis_diagnostic.hpp` for Layer-3 R2-VI.
+  termination and by the PSIS / Pareto-k diagnostic in `vi_block.hpp`
+  for Layer-3 R2-VI.
 
 Users do NOT construct `vi_optimizer::raabbvi` directly; configure
 via the VI block's `cfg.optimizer` field.

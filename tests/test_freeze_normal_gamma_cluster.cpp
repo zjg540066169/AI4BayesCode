@@ -2,7 +2,7 @@
  *  normal_gamma_cluster_gibbs_block sub-key freeze acceptance test
  *  (T2, 2026-07-21).
  *
- *  Verifies DESIGN_NOTES Sec.10 + subagent-B TOP-PRIORITY finding:
+ *  Verifies the sub-key freeze contract (interface.md Sec.1):
  *      subnames() returns {cfg.mu_name, cfg.lambda_name}
  *      freeze_sub("mu") holds cluster means fixed while precisions sample
  *      freeze_sub("lambda") holds cluster precisions fixed while means sample

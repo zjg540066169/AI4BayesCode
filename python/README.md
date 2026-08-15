@@ -78,8 +78,8 @@ call**; nothing is saved.
 ```python
 res = AI4BayesCode.generate(
     "y ~ N(Xbeta, sigma^2), p(sigma^2) propto 1/sigma^2  (linear regression)",
-    API_key="sk-YOUR-KEY-HERE",            # passed here, never saved
-    LLM="gpt-5.5",               # or claude-opus-4-8, claude-sonnet-4-6, ...
+    API_key="sk-ant-api03-XXXX",           # passed here, never saved
+    LLM="gpt-5.5-codex",         # or claude-opus-4-8, claude-sonnet-4-6, ...
     effort="high",               # thinking level, validated against this model's levels
     backend="Python", output_path="./generated", max_attempts=2)
 print(res["validated"], res["cpp_path"])
@@ -101,9 +101,9 @@ Prefer not to pass the key every call? Set it **once per session** (session-only
 never written to disk):
 
 ```python
-AI4BayesCode.set_key("sk-YOUR-KEY-HERE", "openai")     # or "anthropic" / "google"
+AI4BayesCode.set_key("sk-proj-XXXX", "openai")        # or "anthropic" / "google"
 AI4BayesCode.key_status()                    # shows what's set (masked)
-AI4BayesCode.generate("Linear regression.", LLM="gpt-5.5")  # key picked up
+AI4BayesCode.generate("Linear regression.", LLM="gpt-5.5-codex")  # key picked up
 ```
 
 `API_key=` still works per call and **overrides** the session key for that one call —
