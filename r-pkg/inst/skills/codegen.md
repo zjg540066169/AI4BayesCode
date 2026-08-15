@@ -104,20 +104,28 @@ environment: same invariants, <=4 questions per batch, with an explicit
 
 ## 0b. Math rendering -- display blocks + plain ASCII, NEVER Unicode or inline `$...$`
 
-**Hard rule: NO raw Unicode in anything the user READS IN CHAT** -- the
-model description you render back, the confirmation display, table cells,
-prose, and every message or error string the user sees. That is where raw
-Unicode actually hurts: this chat does not render inline math, so `sigma^2`
-survives where a raw Greek/superscript form may not, and a broken symbol
-in the model spec is a
-correctness risk at the one gate that catches misunderstandings.
+**The ASCII constraint is on INPUT, not on output. This is not a style
+preference -- it is physically what the user can type.** The audience is
+applied scientists with no computer background, on ordinary keyboards.
+There is no key for a Greek letter or a superscript. Showing such a user
+a model template written with raw Greek letters and superscripts asks
+them to do something they simply cannot do: they would have to hunt
+through a character map or copy-paste from somewhere else, and most will
+just give up.
 
-In generated CODE, the same rule applies to **identifiers and string
-literals** (portability), but a math symbol inside a `.cpp` COMMENT is
-fine -- the ASCII spelling and the raw Greek form are both readable to
-someone reading
-the source, and the shipped examples use the latter. Do not spend effort
-converting comment math, and do not flag it as a defect.
+Therefore EVERY model-description example you show as INPUT -- the two
+canonical ones below, any "you can write it like this" prompt, any
+re-prompt after a parse failure -- is **plain ASCII, always**:
+`y ~ N(Xbeta, sigma^2)`, `sigma`, `beta_j`, `gamma_j`. No exceptions,
+and never ask the user to "use proper symbols".
+
+**Your own generated output may use Unicode wherever it reads better.**
+The model spec you render back, the confirmation display, and math inside
+generated `.cpp` comments are all system-produced: Greek letters and
+superscripts are usually MORE readable there than their spelled-out
+forms, and the shipped examples use them. Do not convert them, and do not
+flag them as a defect. The one place ASCII is still required in generated
+code is **identifiers and string literals** (portability).
 
 **Hard rule: generated files are ENGLISH-ONLY, regardless of the conversation
 language.** The chat may be conducted in Chinese (or any language the user
@@ -133,10 +141,11 @@ inline `$...$` (inline prints raw source). So EVERYWHERE in the codegen conversa
 - **Any equation / expression** (a likelihood, a prior, a gradient, a multi-line model) -> a
   `$$ ... $$` **display block** with `$$` on its OWN lines and `\begin{aligned}` for multi-line
   (the Sec.3(a) form; its LaTeX source is itself ASCII). This renders. Do NOT inline it.
-- **A lone symbol mid-sentence** -> plain ASCII (`beta`, `sigma`, `sigma^2`, `R^p`,
-  `x_i^T beta`, `r_i`), NEVER raw Unicode, never `$...$`.
-- **Table cells** -> plain ASCII ONLY (a `$$` block cannot live in a cell and inline `$...$`
-  shows raw): `X y beta sigma sigma^2 R^p n x p >0 x_i^T beta`.
+- **A lone symbol mid-sentence** -> write it directly (`beta` or the Greek
+  form, `sigma^2` or the superscript form -- whichever reads better),
+  never wrapped in `$...$`.
+- **Table cells** -> plain text, never `$...$` (a `$$` block cannot live in
+  a cell and inline `$...$` shows its raw source).
 - **NEVER** write inline `$...$` for anything you want rendered. "Likelihood: `$y_i \sim
   N(x_i^\top\beta,\sigma^2)$`" is WRONG -- lift it into a `$$` block; a lone `beta` mid-sentence
   is just `beta`; `p(sigma^2) prop.to 1/sigma^2` is ASCII (or a `$$` block).
