@@ -2408,15 +2408,17 @@ parallel::clusterEvalQ(cl, {
     library(AI4BayesCode)
     ai4bayescode_sourceCpp("models/<MODEL_ID>/<MODEL_ID>.cpp")  # relative to project root
 })
-# Export every data input that `run_chain`'s body reads from global scope
-# (adjust per model -- list every variable in the constructor's `...`):
+# NOTE: run_chain_<ClassName>() takes every data input as a PARAMETER
+# (codegen_r_runner.md HARD RULE -- never closes over globals), so the
+# only thing the workers need exported is the data objects passed at the
+# call site below:
 parallel::clusterExport(cl, c("y_full"))   # e.g. add "X_obs", "K_data", etc.
 
 # ----- Stage 1 -- default budget ---------------------------------------------
 n_burn <- 4000L; n_keep <- 4000L
 t_par_0 <- Sys.time()
 chains  <- foreach(seed = c(101L, 202L)) %dopar%
-               run_chain(seed, n_burn, n_keep)
+               run_chain_<ClassName>(y_full, seed, n_burn, n_keep)
 total_wall_sec <- as.numeric(difftime(Sys.time(), t_par_0, units = "secs"))
 c1 <- chains[[1L]]; c2 <- chains[[2L]]
 
@@ -2466,7 +2468,7 @@ if (d$max_rhat >= 1.05 || ess_ratio_stage1 < 0.005) {
     n_burn <- 20000L; n_keep <- 20000L
     t_par_0 <- Sys.time()
     chains <- foreach(seed = c(101L, 202L)) %dopar%
-                  run_chain(seed, n_burn, n_keep)
+                  run_chain_<ClassName>(y_full, seed, n_burn, n_keep)
     total_wall_sec <- total_wall_sec +
         as.numeric(difftime(Sys.time(), t_par_0, units = "secs"))
     c1 <- chains[[1L]]; c2 <- chains[[2L]]

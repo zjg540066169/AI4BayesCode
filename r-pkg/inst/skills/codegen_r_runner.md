@@ -215,6 +215,22 @@ documentation a first-time user reads):
    runnable end-to-end while still documenting the stateful-update
    pattern (no reinitialization).
 
+**Writing the simulation block (agent-facing -- this guidance does NOT go
+into the file).** For HIERARCHICAL / random-effects / weight-variance
+models, draw the scale or variance hyperparameter FROM ITS PRIOR, then
+draw the effects at that scale. Do NOT hard-code the scale to an
+arbitrary "moderate" value (e.g. sd = 0.6): a fixed moderate scale can
+CONFLICT with a tight or heavy-tailed prior -- the classic case is a
+tiny-scale InvGamma weight-variance prior (Neal-1996 / ARD weight-variance
+BNN, where the true variance can be ~1e-6), where fixed sd 0.6 makes the
+DATA say sigma^2 ~= 0.36 while the PRIOR insists sigma^2 ~= 1e-6. That
+prior-data conflict is an artificially hard, poorly-mixing posterior
+(R-hat stuck ~1.02, tiny ESS) that then gets misread as a sampler
+problem. Prior-drawn hyperparameters keep the generation-time self-test
+calibrated and on the geometry the model actually targets. If the model
+ships its own reference simulator (e.g. a `simulate_data(seed)` in the
+model card), PREFER it over an invented DGP.
+
 Skeleton (parameterized; mirror this structure, fill placeholders):
 
 ```r
@@ -236,19 +252,6 @@ ai4bayescode_source("./<ClassName>/<ClassName>.cpp")
 
 # Simulate a toy data set
 # <commented synthetic generation of <data_args> + a held-out X test>
-#
-# HIERARCHICAL / random-effects / weight-variance models -- draw the scale or
-# variance hyperparameter FROM ITS PRIOR, then draw the effects at that scale.
-# Do NOT hard-code the scale to an arbitrary "moderate" value (e.g. sd = 0.6).
-# A fixed moderate scale can CONFLICT with a tight or heavy-tailed prior -- the
-# classic case is a tiny-scale InvGamma weight-variance prior (Neal-1996 / ARD
-# weight-variance BNN, where the true variance can be ~1e-6): fixed sd 0.6 makes
-# the DATA scream "sigma^2 ~= 0.36" while the PRIOR insists "sigma^2 ~= 1e-6". That prior-data
-# conflict is an artificially HARD, poorly-mixing posterior (R-hat stuck ~1.02,
-# tiny ESS) that then gets wrongly blamed on the sampler. Prior-drawn hyper-
-# parameters keep the L3 self-test calibrated (SBC-style) and on the geometry
-# the model actually targets. If the model ships its own reference simulator
-# (e.g. a `simulate_data(seed)` in the model card), PREFER it over an invented DGP.
 
 # Multi-chain run + diagnostics (the everyday flow; shipped helpers only).
 # The model constructor is the inline function(seed) argument -- it builds
@@ -749,10 +752,12 @@ if (pct_k_lo < 50 || pct_k_hi >= 10) {
 }
 
 # ---- Post-run performance hint (see codegen_cpp.md Sec.4a) -----------------
-# `total_wall_sec` was accumulated across Stage 1 (and Stage 2 if it ran)
-# in the R2 parallel block -- it is the actual elapsed wall time. Do NOT
-# use `c1$wall_sec + c2$wall_sec`, which double-counts under parallel
-# execution.
+# Wall time actually spent sampling. run_chain_<ClassName>() returns
+# wall_sec per chain and the chains here run SEQUENTIALLY, so the sum is
+# the elapsed time. (If you switch the harness to parallel workers,
+# measure the elapsed time around the parallel block instead -- summing
+# per-chain times would then over-count.)
+total_wall_sec <- c1$wall_sec + c2$wall_sec
 ai4bayescode_perf_hint(
     wall_sec        = total_wall_sec,
     n_sweeps_total  = 2L * (n_burnin + n_keep),

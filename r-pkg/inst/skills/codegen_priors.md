@@ -1023,7 +1023,11 @@ Discrete latent z found?
       A / pi / emission params are also sampled, add sibling blocks:
         - A rows: `dirichlet_gibbs_block` per row
         - pi     : `dirichlet_gibbs_block`
-        - emission means / variances: `nuts_block` (Jeffreys, Sec.2a)
+        - emission means / variances:
+          `normal_gamma_cluster_gibbs_block` per Sec.2b (treat z as the
+          cluster partition). Do NOT put `(mu_k, sigma_k)` in a
+          `nuts_block`: NUTS dual-averaging interacts badly with the
+          slow-mixing z and silently biases those posteriors.
         - z      : `hmm_block` (this entry)
       Exact O(T*K^2) forward-filter backward-sample (Fruhwirth-Schnatter
       2006 Ch. 11). Per-site Gibbs would mix catastrophically on the

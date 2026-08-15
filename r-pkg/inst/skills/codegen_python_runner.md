@@ -208,7 +208,8 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
 model = mod.<ClassName>(..., rng_seed=42, keep_history=True)
 model.step(200)                              # burn-in
 model.step(200)                              # keep
-hist = model.get_history()                   # dict of (n_keep x dim) numpy arrays
+hist = model.get_history()                   # dict of arrays, one row per STEPPED
+                                             # iteration (here 400 = burn + keep)
 y_rep = model.predict_at({})["y_rep"]        # posterior predictive at training X
 
 # set_current() updates the sampler statefully (e.g. an outcome

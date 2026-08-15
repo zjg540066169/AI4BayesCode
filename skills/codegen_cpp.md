@@ -547,11 +547,16 @@ order:
    #endif
    ```
 
-2. **Then the R / Python runner**, translating that same simulation.
-3. **Then distill the language-specific runner into the `@example:<lang>`
-   comment** above (a compact single-chain copy).
+2. **Then the `@example:<lang>` header comment(s)**, written from that
+   same canonical DGP -- a compact copy that leads with
+   `ai4bayescode_run_chains` / `AI4BayesCode.run_chains`. Author these
+   WITH the .cpp, in this phase.
+3. **The R / Python runner comes LATER**, in the runner-emission phase --
+   only after L1 compile and the L2 semantic verdict have passed
+   (`start.md` phase table; `codegen.md` Sec.11 HARD ORDERING GATE). Do
+   not write it here; it translates the same DGP a third time.
 
-**Validation keeps all three in sync.** If the R/Python example changes (a
+**Validation keeps all three in sync.** If the R/Python runner changes (a
 different sample size, prior, or data shape), update the `int main()` demo AND
 the `@example` comment to match -- they are three renderings of ONE DGP. A
 validator pass must confirm the `@example` block actually runs and (for library
@@ -2411,10 +2416,9 @@ readapt_rng_(rng_seed == 0
 mutable std::mt19937_64 readapt_rng_;   // readapt_NUTS only (kernel-control method)
 
 // Add to the wrapper's public method section (before private:)
-/// 7th R-level method: re-tune NUTS metric (mass matrix + step size +
-/// dual averaging) without advancing chain state. Available because
-/// the composite contains NUTS-family children. See system_design.md
-/// Sec.13 NUTS-family + validator.md Sec.24.
+/// Re-tune the sampler's step size and mass matrix without advancing
+/// the chain. Useful after set_current() changes the data enough that
+/// the previous tuning no longer fits.
 void readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept) {
     if (n < 0) Rcpp::stop("readapt_NUTS: n must be non-negative");
     // max_tree_depth: -1 = use each block's configured depth;

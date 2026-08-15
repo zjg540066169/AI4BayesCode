@@ -48,9 +48,9 @@ thing that differs is the `@example` DOC block: codegen writes only the chosen b
 (that was the runner it actually tested), whereas block_design writes **AND tests BOTH** `@example:R`
 and `@example:python` -- because block_design specifies no runner and a **contributed block must ship
 usable from both R and Python**. So here both `@example` are always present and TESTED (see STAGING
-below), never one, never transcribed-but-unrun. (The ONLY permanent exception is a block whose kernel
-has no Python binding -- the BART / genbart family -- which stays R-only: `RCPP_MODULE` + `@example:R`,
-no pybind.)
+below), never one, never transcribed-but-unrun. There is no carve-out: the BART / genbart kernels are pure C++
+(`bart_pure_cpp`, arma + a seedable std::mt19937_64), and every shipped BART example carries both
+module blocks.
 
 Why the `int main()` is STILL here: it is the cheapest end-to-end check (compiles + runs as a plain
 binary, no R/Python toolchain) AND the smoke target the VALIDATE phase compiles. The two module
@@ -271,8 +271,8 @@ move happens once all checks pass, then the final path is reported. A failed exa
 - File present at `blocks_local/<Block>/examples/<Model>.cpp` with the GPL-3.0-or-later license header.
 - **TRI-MODULE**: fenced `int main()` + `#ifdef AI4BAYESCODE_RCPP_MODULE ... RCPP_MODULE ...` block +
   `#ifdef AI4BAYESCODE_PYBIND_MODULE ... PYBIND11_MODULE ...` block + BOTH `@example:R` and
-  `@example:python`. (BART / genbart-kernel blocks are the R-only exception: `RCPP_MODULE` +
-  `@example:R`, no pybind.)
+  `@example:python`. This has no exceptions -- BART / genbart-kernel blocks are dual-module
+  like every other block.
 - Driver methods NEUTRAL-typed (`state_map` / `arma`); `set_current` is a pure key-routing dispatcher
   (no sampler logic) that mirrors into `data`; errors via `ai4b::stop`.
 - **`int main()` compiles + RUNS** as a plain binary (automatic, no "go") -- prints a recovery/smoke

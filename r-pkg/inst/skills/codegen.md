@@ -508,12 +508,12 @@ checks); for a first-time user that scaffolding obscures the simple
 Ask in PLAIN language -- do NOT use the word "harness" (a first-time
 user will not know what it means); say "runtime validation code":
 
-> "Should the delivered code include the runtime validation code?
-> This is the code that checks the sampler actually converged: R-hat /
-> ESS, posterior-predictive checks, and PSIS-LOO. (These checks run
-> during generation either way -- this only controls whether that
-> checking code is kept in the final files you receive, or left out so
-> you get a shorter, cleaner usage example.)"
+> "Should the delivered code include the checking code?
+> This is extra code that verifies the sampler converged and that its
+> predictions match your data. (The checks run during generation either
+> way -- this only controls whether that checking code is kept in the
+> files you receive, or left out so you get a shorter, cleaner
+> example.)"
 >
 > Options:
 > - **No -- deliver a clean usage example, without the validation code (default)**
