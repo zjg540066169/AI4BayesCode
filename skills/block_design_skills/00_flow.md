@@ -106,7 +106,7 @@ phase loads exactly ONE `block_design_skills/<phase>.md` module on entry.
  pass every runtime diagnostic silently -- they are caught HERE or never.
  Phase ENDS with a **mandatory structured confirm gate** (env ask mechanism -- `AskUserQuestion` in Claude Code, markdown labeled-option fallback elsewhere) on
  the captured spec -- a HARD STOP: present the spec, then confirm; NO DESIGN
- question until the user signs off (`intake.md` Sec.6).
+ question until the user signs off (`intake.md` Step 6).
 
 2. **DESIGN** -- `block_design_skills/design.md`
  Lock the algorithm spec (Gibbs full-conditionals / NUTS gradient /

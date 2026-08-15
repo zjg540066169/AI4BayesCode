@@ -503,7 +503,7 @@ reparameterization, or positivity-on-the-first-loading is a **NOT-RECOMMENDED
 fallback -- discouraged, not forbidden.** It CAN break the symmetry, but tends
 to interact badly with slow-mixing discrete-allocation companions, is
 error-prone, can hurt mixing, and may bias the natural-scale posterior
-(`codegen_cpp.md` Sec.205). Reach for it only when a model genuinely cannot be
+(`codegen_cpp.md` Sec.4a). Reach for it only when a model genuinely cannot be
 resolved post-hoc (some models legitimately need it).
 
 ### Empirical evidence (this repo)

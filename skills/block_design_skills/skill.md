@@ -187,7 +187,7 @@ ONE identity. Three derivations are ENFORCED CONVENTIONS, NOT fields:
 | `Block` | unique flat name (registry key) | snake_case + `_block`; not core-reserved; unique vs core+local; **derives** ClassName/Header/bundle-dir |
 | `Version` | semver | default `0.1.0` |
 | `Title` | one-line human title | short |
-| `Description` | **detailed, human-facing**, in **CRAN-package `Description:` style** (concise complete sentences, present tense, no marketing) -- states WHAT the block IS: the model FIRST (likelihood / formula), then priors, then a brief high-level sampling note. **NOT read by the auto-selector.** See `intake.md Sec.3a`. | the human "what is this" |
+| `Description` | **detailed, human-facing**, in **CRAN-package `Description:` style** (concise complete sentences, present tense, no marketing) -- states WHAT the block IS: the model FIRST (likelihood / formula), then priors, then a brief high-level sampling note. **NOT read by the auto-selector.** See `intake.md` Step 3. | the human "what is this" |
 | `Author` | provenance | name(s) (flat naming -> author recorded to deter squatting) |
 | `License` | the block's own license = **`GPL-3.0-or-later`** -- every generated block inherits the project license (README "Licensing"); vendored upstreams are recorded in `Vendored:` + gated at INTAKE Step 5 | inherited, not chosen |
 | `EngineKind` *(facet)* | `mcmc` / `vi` / future | matches `engine_kind_t` |

@@ -338,7 +338,7 @@ mixed cleanly).
    - A documented diagonal-failure case applies. Currently three
      such cases are recognized:
      1. GP banana ridge in heteroscedastic / hierarchical / multi-
-        output GP per `codegen_priors.md Sec.11.4` + `block_catalogue/index.md`
+        output GP per `codegen_priors.md Sec.2b` + `block_catalogue/index.md`
         "GP convergence troubleshooting ladder";
      2. **Centered hierarchical with G >= 3 groups inside a joint
         block** (e.g., `joint_nuts_block` over `(mu_u, u_1..u_G)`
@@ -1699,7 +1699,7 @@ When you write the templated (AD) version:
 
 ---
 
-## 6c. Custom genBART likelihood (when the 10 shipped families don't fit)
+## 6d. Custom genBART likelihood (when the 10 shipped families don't fit)
 
 When the user's model has a likelihood that is NOT one of the 10
 shipped `genbart::lik::*` classes (Normal / Logistic / Poisson / NB /

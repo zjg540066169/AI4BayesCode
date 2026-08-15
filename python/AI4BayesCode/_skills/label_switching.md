@@ -59,7 +59,7 @@ For all label-switching-affected models in this benchmark:
   Sec.3-Sec.5) and convergence is judged on **label-invariant** (order-statistic)
   R-hat. An in-sampler ordering constraint / canonicalizer is a
   NOT-RECOMMENDED fallback (discouraged, not forbidden -- it mixes badly and can
-  bias the natural-scale posterior, `codegen_cpp.md` Sec.205); some models
+  bias the natural-scale posterior, `codegen_cpp.md` Sec.4a); some models
   legitimately need it, so reach for it only when post-hoc resolution won't do.
 - **Reference** (Stan or R-package) typically also has no constraint by
   default. Each reference draw can use any permutation.

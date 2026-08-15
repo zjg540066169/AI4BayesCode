@@ -1318,7 +1318,7 @@ diagonal, escalate on diagnostics.
      on a representative dataset; dense improves to 1.02 at the
      same budget". Cite dataset / parameter / budget.
    - **Posterior class known to be intrinsically anisotropic.**
-     E.g., "GP banana ridge per `codegen_priors.md Sec.11.4`". Cite the
+     E.g., "GP banana ridge per `codegen_priors.md Sec.2b`". Cite the
      documentation. **NOTE -- a CENTERED scale-governed hierarchical
      effect is NOT a valid dense justification:** it is a hard Check
      #24(a) FAIL, and the only accepted fix is non-centered

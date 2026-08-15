@@ -42,7 +42,7 @@ The example is ONE **tri-module** C++ file -- the SAME shape as every shipped co
 4. BOTH `@example:R` and `@example:python` doc blocks in the header comment.
 
 **Emit ALL FOUR -- always.** The `.cpp` BINDINGS are dual-module exactly like codegen: codegen also
-emits BOTH `RCPP_MODULE` and `PYBIND11_MODULE` regardless of the runtime backend (`codegen_cpp.md Sec.1`
+emits BOTH `RCPP_MODULE` and `PYBIND11_MODULE` regardless of the runtime backend (`codegen_cpp.md` Sec.9
 + its "Class shape" section), so every generated model is `source`-able in R and Python. The ONE
 thing that differs is the `@example` DOC block: codegen writes only the chosen backend's `@example`
 (that was the runner it actually tested), whereas block_design writes **AND tests BOTH** `@example:R`
