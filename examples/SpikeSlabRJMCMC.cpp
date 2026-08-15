@@ -9,20 +9,20 @@
 //
 //  THE CANONICAL reference template for Class 2b Dirac spike-and-slab.
 //
-//  Model — Ishwaran & Rao 2005 JASA "sigma-scaled slab" form
+//  Model -- Ishwaran & Rao 2005 JASA "sigma-scaled slab" form
 //  ----------------------------------------------------------
 //      y_i           = X_i' beta + eps_i,   eps_i ~ N(0, sigma^2)   i = 1..N
 //      gamma_j       ~ Bernoulli(pi)                                j = 1..p
 //      beta_j | gamma_j = 0 = 0              (Dirac spike)
 //      beta_j | gamma_j = 1, sigma, tau ~ N(0, sigma^2 * tau^2)
-//              (Gaussian slab, SIGMA-SCALED — tau is dimensionless,
+//              (Gaussian slab, SIGMA-SCALED -- tau is dimensionless,
 //               representing signal-to-noise ratio)
 //
 //  Why sigma^2 * tau^2 and not just tau^2?
 //  ---------------------------------------
 //  (i)  Scale-invariance: rescaling (y, X) -> (c*y, c*X) rescales sigma
 //       but leaves tau unchanged. tau is therefore a data-scale-free
-//       quantity measuring "signal strength in units of noise sd" — a
+//       quantity measuring "signal strength in units of noise sd" -- a
 //       natural interpretable quantity.
 //  (ii) Decorrelated posterior: sigma and tau are approximately
 //       posterior-independent under this parametrization (their
@@ -32,7 +32,7 @@
 //       other updates.
 //  (iii) Jeffreys p(tau) ∝ 1/tau becomes the natural noninformative
 //       choice (tau is a scale parameter and Jeffreys is the
-//       scale-invariant prior). See skills/codegen.md §2a.
+//       scale-invariant prior). See skills/codegen.md Sec.2a.
 //
 //  Priors
 //  ------
@@ -49,9 +49,8 @@
 //
 //  Block decomposition (FOUR blocks)
 //  ---------------------------------
-//    1. beta_gibbs_block  : pi | gamma      (**Exception 3**: scalar
-//                           textbook Beta-Bernoulli conjugate; library
-//                           parity test Check #15)
+//    1. beta_gibbs_block  : pi | gamma      (scalar textbook
+//                           Beta-Bernoulli conjugate)
 //
 //    2. nuts_block        : sigma (log-transformed, Jeffreys prior +
 //                           likelihood incl. slab-prior contribution
@@ -65,12 +64,11 @@
 //                           with hand-written Gibbs continuous_update
 //                           for beta_j | gamma_j=1 (**Exception 2**:
 //                           kernel contract; per-usage parity test
-//                           Check #15).
 //
 //  Order: rjmcmc_block runs LAST so pi, sigma, tau read from ctx are
 //  the freshest draws from the current sweep.
 //
-//  Warm-start init (Ishwaran-Rao 2005 §3.1)
+//  Warm-start init (Ishwaran-Rao 2005 Sec.3.1)
 //  ----------------------------------------
 //  Under Jeffreys on tau with sigma-scaled slab, the conditional
 //  posterior of tau at sum_active gamma = 0 is improper, and even
@@ -170,17 +168,17 @@ namespace {
 
 // ===========================================================================
 // NATURAL-SCALE log-density functions for NUTS blocks (sigma and tau).
-// Jacobian (+log(param)) is added by constraints::positive::wrap — these
+// Jacobian (+log(param)) is added by constraints::positive::wrap -- these
 // functions MUST NOT include it.
 //
 // Convention: the Jeffreys prior p(param) ∝ 1/param appears as -log(param)
 // in the natural-scale density and is exactly cancelled by the wrap
 // Jacobian, so the eta-scale density the user sees is just the likelihood
 // (plus the Gaussian normalization's own -N log(sigma) term, which is
-// likelihood, not prior — see skills/codegen.md §2a).
+// likelihood, not prior -- see skills/codegen.md Sec.2a).
 // ===========================================================================
 
-// p(sigma | y, X, beta, tau, gamma) — natural-scale, sigma-scaled slab.
+// p(sigma | y, X, beta, tau, gamma) -- natural-scale, sigma-scaled slab.
 //
 // Pieces, in sigma:
 //   (a) Gaussian likelihood: L(sigma; y, beta, X)
@@ -210,7 +208,7 @@ double sigma_natural_log_density(const arma::vec& sigma_nat,
     const std::size_t N = y.n_elem;
     const std::size_t p = beta.n_elem;
 
-    // SSE = ||y - X*beta||^2 via armadillo / BLAS (skill §6.1).
+    // SSE = ||y - X*beta||^2 via armadillo / BLAS (skill Sec.6.1).
     const arma::mat X(const_cast<double*>(X_flat.memptr()),
                       N, p, /*copy_aux_mem=*/false, /*strict=*/true);
     arma::vec res = y - X * beta;                                  // length N
@@ -248,7 +246,7 @@ double sigma_natural_log_density(const arma::vec& sigma_nat,
     return lp;
 }
 
-// p(tau | beta, gamma, sigma) — natural-scale with Jeffreys prior.
+// p(tau | beta, gamma, sigma) -- natural-scale with Jeffreys prior.
 //
 // Pieces, in tau:
 //   (a) Slab likelihood (sigma-scaled):
@@ -265,7 +263,7 @@ double sigma_natural_log_density(const arma::vec& sigma_nat,
 // likelihood to apply to) and the posterior under Jeffreys would be
 // improper. Fall back to a soft pin near the reference scale tau = 1
 // via half-Normal(0, 1): log p(tau | k=0) = -0.5 * tau^2, grad = -tau.
-// This is a transient state — once any gamma_j = 1 is proposed and
+// This is a transient state -- once any gamma_j = 1 is proposed and
 // accepted, the slab likelihood dominates at the next sweep and tau's
 // posterior concentrates on the data-driven value. The reference scale
 // tau = 1 is the natural choice under the sigma^2 tau^2 parametrization
@@ -323,7 +321,7 @@ double tau_natural_log_density(const arma::vec& tau_nat,
 }
 
 // ===========================================================================
-// rjmcmc_block hooks — sigma-scaled slab (σ² τ² variance).
+// rjmcmc_block hooks -- sigma-scaled slab (σ² τ² variance).
 // ===========================================================================
 double spike_slab_log_joint(const arma::vec& gamma,
                             const arma::vec& beta,
@@ -348,7 +346,7 @@ double spike_slab_log_joint(const arma::vec& gamma,
     const double tau2    = tau   * tau;
     const double slabvar = sigma2 * tau2;    // <-- σ²τ²
 
-    // SSE = ||y - X*beta||^2 via armadillo / BLAS (skill §6.1).
+    // SSE = ||y - X*beta||^2 via armadillo / BLAS (skill Sec.6.1).
     const arma::mat X(const_cast<double*>(X_flat.memptr()),
                       N, p, /*copy_aux_mem=*/false, /*strict=*/true);
     arma::vec res = y - X * beta;                                  // length N
@@ -370,10 +368,6 @@ double spike_slab_log_joint(const arma::vec& gamma,
     return lp;
 }
 
-// Check #17 whitelist: std::normal_distribution inside rjmcmc_block's
-// `propose_sample` hook (one of the three whitelisted contexts from
-// skills/codegen.md §2e). The proposal distribution is slab-prior-matched
-// N(0, sigma^2 tau^2), part of the RJ kernel contract.
 double spike_slab_propose_sample(std::mt19937_64& rng,
                                  std::size_t /*j*/,
                                  const block_context& ctx) {
@@ -402,7 +396,7 @@ double spike_slab_propose_logq(double beta_new,
 //     v    = 1 / prec = sigma^2 / (xtx + 1/tau^2)
 //     sd   = sigma / sqrt(xtx + 1/tau^2)
 //
-// JUSTIFICATION (Check #16): Exception 2 (codegen.md §2b) — rjmcmc_block's
+// Sampling note: Exception 2 (codegen.md Sec.2b) -- rjmcmc_block's
 // continuous_update hook requires a direct conditional iid draw to preserve
 // detailed balance. A NUTS step would not be conditionally iid and would
 // break the RJ chain.
@@ -583,7 +577,7 @@ public:
         // X, beta, sigma all directly produce y_rep in the generative
         // model y_rep ~ N(X*beta, sigma^2). All three are declared as
         // predict-edge parents so the DAG visualization (ai4bayescode_plot_dag) shows
-        // X → y_rep. X is also registered as a data_input so it can be
+        // X -> y_rep. X is also registered as a data_input so it can be
         // replaced via predict_at(list(X = X_new)).
         //
         // Pass-2 availability rule (shared_data.hpp): a parent is
@@ -658,11 +652,11 @@ public:
 
         // ================================================================
         // Block 1: pi (beta_gibbs_block)
-        // JUSTIFICATION (Check #16): Exception 3 from codegen.md §2b —
+        // Sampling note: Exception 3 from codegen.md Sec.2b --
         // scalar textbook Beta-Bernoulli conjugate. NUTS on 1-D tight-
         // posterior scalar is warmup-dominated and wasteful.
         // Covered by library parity test
-        // tests_autodiff/block_tests/test_beta_gibbs_block.cpp (Check #15).
+        // tests_autodiff/block_tests/test_beta_gibbs_block.cpp.
         // ================================================================
         {
             beta_gibbs_block_config cfg;
@@ -732,12 +726,10 @@ public:
 
         // ================================================================
         // Block 4: rjmcmc_block for (gamma, beta), sigma-scaled slab.
-        // continuous_update is a HAND-WRITTEN Gibbs step. JUSTIFICATION
-        // (Check #16): Exception 2 — rjmcmc_block kernel contract mandates
-        // direct conditional draw; NUTS would break detailed balance.
-        // Covered by per-usage parity test
-        // tests_autodiff/test_spikeslab_beta_conditional_parity.cpp
-        // (Check #15).
+        // continuous_update is a HAND-WRITTEN Gibbs step: the
+        // rjmcmc_block kernel contract requires a direct conditional
+        // draw here; a NUTS update would break detailed balance.
+        //.
         // ================================================================
         {
             rjmcmc_block_config cfg;
@@ -845,7 +837,7 @@ public:
             impl_->data().set("pi", arma::vec{pv});
         }
         // ---- X / y branches: canonical dynamic-N pattern
-        // (codegen_cpp.md §7a; system_design.md §7 rules 4 + 6).
+        // (codegen_cpp.md Sec.7a; system_design.md Sec.7 rules 4 + 6).
         // p is strict (gamma/beta length); N is dynamic and updated
         // atomically with X. y_rep refresher reads N from X.n_elem/p.
         // X is a vectorised N*p column-major arma::vec; p_ is fixed, so
@@ -1009,7 +1001,7 @@ public:
     /// 7th R-level method: re-tune NUTS metric (mass matrix + step size +
     /// dual averaging) without advancing chain state. Available because
     /// the composite contains NUTS-family children. See system_design.md
-    /// §13 NUTS-family + validator.md §24.
+    /// Sec.13 NUTS-family + validator.md Sec.24.
     // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
     // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
     // C++ default args so both arities are also exposed as separate

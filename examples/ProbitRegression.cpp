@@ -32,7 +32,7 @@
 //  --------------------
 //  Albert-Chib's z step is conditionally independent across i and is a
 //  textbook closed-form vector conjugate sample (Exception 3 of
-//  codegen_priors §2b). We therefore use the library-blessed
+//  codegen_priors Sec.2b). We therefore use the library-blessed
 //  `probit_aug_block` instead of inlining the truncated-normal sampling
 //  in this wrapper's step() method. The beta step uses NUTS on a clean
 //  Gaussian-likelihood log-density (prior + Gaussian "z ~ N(X beta, 1)"
@@ -383,8 +383,7 @@ public:
         // latent z vector of length N is allocated inside
         // probit_aug_block at construction. Changing N requires
         // reconstructing the aug block, so this wrapper enforces
-        // STRICT-N (validator Check #21 legitimate use case —
-        // codegen_cpp.md §7a). Same-N replacement of X/y is fine.
+        // STRICT-N. Same-N replacement of X/y is fine.
         auto it_X = params.find("X");
         if (it_X != params.end()) {
             const arma::vec& Xnew = it_X->second;
@@ -416,9 +415,9 @@ public:
     }
 
     // predict_at: optional X = arma::vec (vectorised N*p_test).
-    //   * keep_history = FALSE: single predict at current draw — each
+    //   * keep_history = FALSE: single predict at current draw -- each
     //     refreshed key returned as a 1-row arma::mat.
-    //   * keep_history = TRUE:  loops over all posterior draws of beta —
+    //   * keep_history = TRUE:  loops over all posterior draws of beta --
     //     each refreshed key returned as an (n_draws x N) arma::mat (full
     //     posterior predictive).
     AI4BayesCode::history_map predict_at(
@@ -498,7 +497,7 @@ public:
     /// 7th R-level method: re-tune NUTS metric (mass matrix + step size +
     /// dual averaging) without advancing chain state. Available because
     /// the composite contains NUTS-family children. See system_design.md
-    /// §13 NUTS-family + validator.md §24.
+    /// Sec.13 NUTS-family + validator.md Sec.24.
     // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
     // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
     // C++ default args so both arities are also exposed as separate

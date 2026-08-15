@@ -5,7 +5,7 @@
 //  ICARSpatialGMRF_joint.cpp
 //
 //  JOINT-NUTS rewrite of ICARSpatialGMRF.cpp. Same model, same priors,
-//  SAME posterior — but the three scalar hyperparameters (Intercept, tau,
+//  SAME posterior -- but the three scalar hyperparameters (Intercept, tau,
 //  sigma) are sampled by ONE joint_nuts_block instead of three separate
 //  single nuts_blocks updated Gibbs-style. phi is still sampled by the
 //  gmrf_precision_block (Rue 2001 direct draw + hard sum-to-zero),
@@ -21,7 +21,7 @@
 //
 //  JOINT natural-scale log-density over [Intercept, tau, sigma] (each term
 //  exactly ONCE; the SSR term was shared between the Intercept and sigma
-//  conditionals in the original — here it appears once as the full likelihood):
+//  conditionals in the original -- here it appears once as the full likelihood):
 //
 //    log p(Intercept, tau, sigma | y, phi) =
 //        - T log σ  - SSR / (2 σ²)              # Gaussian likelihood
@@ -215,7 +215,7 @@ icar_joint_log_density(const arma::vec& theta_cat,
 
     // Read TRUE external data from ctx. phi, y, node_idx come from data(),
     // written by the gmrf_precision_block each step. Intercept, tau, sigma
-    // are NOT read from ctx — they come from the concatenated vector above.
+    // are NOT read from ctx -- they come from the concatenated vector above.
     const arma::vec& y              = ctx.at("y");
     const arma::vec& node_idx       = ctx.at("node_idx");
     const arma::vec& phi            = ctx.at("phi");
@@ -330,7 +330,7 @@ public:
             ai4b::stop("node_idx must have same length as y");
         }
 
-        // Convert 1-based → 0-based. Indices arrive as NUMERIC (double); round
+        // Convert 1-based -> 0-based. Indices arrive as NUMERIC (double); round
         // to the nearest integer before subtracting 1 (cf. HierarchicalLM_joint).
         arma::vec node_idx(T);
         for (std::size_t t = 0; t < T; ++t) {

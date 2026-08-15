@@ -5,11 +5,11 @@
 //  FiniteGaussianMixture.cpp
 //
 //  REFERENCE TEMPLATE for FINITE-K Gaussian mixture with diagonal
-//  Normal-Gamma cluster prior (Bishop PRML §10.2, Murphy 2007 §11.4).
+//  Normal-Gamma cluster prior (Bishop PRML Sec.10.2, Murphy 2007 Sec.11.4).
 //  K is FIXED at construction; cluster mixing weights π are sampled
 //  exactly from a symmetric Dirichlet conditional via the SHIPPED
 //  `dirichlet_gibbs_block` (this is the first reference example using
-//  that block — it complements the BNP truncated-SBP path in
+//  that block -- it complements the BNP truncated-SBP path in
 //  `DPGaussianMixture.cpp`).
 //
 //  Model
@@ -31,7 +31,7 @@
 //  Refreshers
 //  ----------
 //      cluster_counts   register_refresher (deterministic)
-//                       counts_from_z(z, K) — invalidated by z
+//                       counts_from_z(z, K) -- invalidated by z
 //      y_rep            register_stochastic_refresher (predict-time)
 //
 //  COMPARISON TO DPGaussianMixture
@@ -51,7 +51,7 @@
 //
 //  LABEL SWITCHING
 //  ---------------
-//  Same as DP: K exchangeable clusters → label switching at posterior.
+//  Same as DP: K exchangeable clusters -> label switching at posterior.
 //  Per `skills/label_switching.md`, post-MCMC Stephens 2000 + Hungarian
 //  match to truth is the user's responsibility for per-component
 //  posterior summaries. The audit script
@@ -59,31 +59,21 @@
 //  globally-identified scalars (e.g., posterior log-likelihood,
 //  predictive moments).
 //
-//  JUSTIFICATION (Check #16):
-//  - z is DISCRETE → categorical_gibbs_block (Exception 1 from
-//    codegen_priors.md §2b). Conditional independence holds because
+//  Sampling note:
+//  - z is DISCRETE -> categorical_gibbs_block (Exception 1 from
+//    codegen_priors.md Sec.2b). Conditional independence holds because
 //    π is sampled separately.
 //  - π conditional is EXACTLY Dirichlet (Dirichlet-Categorical
-//    conjugate) → dirichlet_gibbs_block (Exception 1 from
-//    codegen_priors.md §2b). Library Check #15 parity test for
+//    conjugate) -> dirichlet_gibbs_block (Exception 1 from
+//    codegen_priors.md Sec.2b). The parity test for
 //    dirichlet_gibbs_block is currently library-only (test ships
 //    in v0.6 follow-up; correctness inherited from
 //    test_bnp_utils.cpp's gamma-normalization mechanism, which
 //    is the same primitive).
 //  - (μ, λ): normal_gamma_cluster_gibbs_block (NEW Tier-B block,
-//    shipped 2026-05-02 with Check #15 parity test).
-//
-//  Check #15 inheritance from existing tests:
-//    - tests_autodiff/block_tests/test_normal_gamma_cluster_gibbs_block.cpp
-//    - tests_autodiff/block_tests/test_bnp_utils.cpp (counts_from_z)
-//    - (categorical_gibbs_block is library-tested across HMM and BNP usage)
-//    - (dirichlet_gibbs_block: tested by gamma-normalization mechanism;
-//       a per-block library test is on the v0.6 roadmap)
+//    shipped 2026-05-02 with a library parity test).
 //
 //  No hand-written log-density: all 3 children are conjugate Gibbs.
-//  Check #12 is vacuous for this example. Check #17 is satisfied:
-//  std::*_distribution usages live only in the y_rep stochastic
-//  refresher (whitelisted).
 // ============================================================================
 
 // @example:R
@@ -336,7 +326,7 @@ public:
         impl_->data().declare_invalidates("z", {"cluster_counts"});
 
         // ---- Predict DAG + y_rep stochastic refresher --------------
-        // (No declare_data_input here — y is an observed terminal,
+        // (No declare_data_input here -- y is an observed terminal,
         // not a replaceable covariate. The y_rep refresher reads
         // pi/mu/lambda, NOT y.)
         impl_->data().declare_predict_edges("pi",     {"y_rep"});
@@ -511,7 +501,7 @@ public:
         auto it_y = params.find("y");
         if (it_y != params.end()) {
             const arma::vec& y_new = it_y->second;
-            // STRICT-N legitimate (Check #21): z allocation length-N.
+            // STRICT-N legitimate: z allocation length-N.
             if (y_new.n_elem != N_ * d_)
                 ai4b::stop("set_current: FiniteGaussianMixture fixes N and d at "
                            "construction (z allocation length-N). y has %d "
@@ -721,7 +711,7 @@ PYBIND11_MODULE(FiniteGaussianMixture, m) {
 //  single-Gaussian (K=1) baseline in mean log-likelihood on the training data.
 //
 //  NOTE: get_current() returns mu/lambda as COLUMN-MAJOR (K x d) vectorised
-//  arma::vec, i.e. element (k, j) lives at index [k + j * K] — NOT the internal
+//  arma::vec, i.e. element (k, j) lives at index [k + j * K] -- NOT the internal
 //  row-major [k * d + j]. The recovery checks below index accordingly.
 // ============================================================================
 #if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)

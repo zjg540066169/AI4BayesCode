@@ -5,7 +5,7 @@
 // GPClassification_joint.cpp
 //
 // JOINT-NUTS rewrite of GPClassification.cpp. Same model, same priors,
-// same posterior — but amplitude and lengthscale are sampled by ONE
+// same posterior -- but amplitude and lengthscale are sampled by ONE
 // joint_nuts_block instead of two separate single nuts_blocks alternated
 // Gibbs-style. The elliptical_slice_sampling_block for f stays separate.
 //
@@ -860,7 +860,7 @@ PYBIND11_MODULE(GPClassification, m) {
 //  Bernoulli-logit likelihood), averages the posterior latent f -> posterior
 //  class probability at each training point, and checks that:
 //    (a) the posterior probabilities track the TRUE probabilities better than
-//        a naive constant-rate baseline (mean(y)) — i.e. lower mean abs error;
+//        a naive constant-rate baseline (mean(y)) -- i.e. lower mean abs error;
 //    (b) the recovered probabilities are accurate in absolute terms.
 //
 //  State is read via the FULL contract get_current() (keys: f, amplitude,

@@ -409,9 +409,12 @@ ESCALATE BY MEASUREMENT, keep only if it helps (do NOT enable dense blindly):
 
 ```cpp
 cfg.use_dense_metric = true;
-// JUSTIFICATION (Check #18): diagonal gave rhat = <r> / ess_ratio = <e> at
-// 20k+20k; dense raised ess_ratio <old> -> <new> (MEASURED), capturing the
-// (<param_a>, <param_b>) cross-correlation [name the correlated geometry].
+// Sampling note: <param_a> and <param_b> are strongly correlated, so the
+// sampler uses a full covariance metric rather than a per-axis one.
+//
+// (Agent-side, NOT in the delivered file: record in the L2 verdict table
+// that diagonal gave rhat = <r> / ess_ratio = <e> at 20k+20k and dense
+// raised ess_ratio <old> -> <new>, MEASURED.)
 ```
 
 Geometries where the diagonal metric is frequently inefficient (still CONFIRM by

@@ -21,7 +21,7 @@
 //     `declare_invalidates("phi", {"alpha"})`. Whenever phi is updated
 //     by its NUTS step, alpha is automatically refreshed.
 //   - Downstream blocks (`stick_breaking_block`'s b_fn, etc.) read
-//     `alpha` from ctx UNCHANGED — they don't know or care that alpha
+//     `alpha` from ctx UNCHANGED -- they don't know or care that alpha
 //     came from a refresher rather than a sampler. This is the core
 //     of the modular-block architecture.
 //
@@ -40,14 +40,14 @@
 //  LABEL SWITCHING
 //  ---------------
 //  DEFAULT / RECOMMENDED: resolve label switching POST-MCMC on the recorded
-//  draws (skills/label_switching.md) — simple descending-pi / mu sort for
+//  draws (skills/label_switching.md) -- simple descending-pi / mu sort for
 //  well-separated components, or Stephens 2000 + Hungarian for overlapping
 //  ones. The truncated-DP mixture likelihood is invariant under permutation of
 //  the K_trunc component labels, so a clean raw exchangeable-component sampler
 //  is the preferred design and per-slot rank-R-hat is computed AFTER relabeling.
 //  alpha (= exp(phi)) and the likelihood are label-invariant and converge as-is.
 //
-//  THIS SAMPLER STAYS RAW — no in-sampler canonicalizer. The raw per-slot
+//  THIS SAMPLER STAYS RAW -- no in-sampler canonicalizer. The raw per-slot
 //  pi[slot]/mu[slot] are exchangeable and not identified, so their raw R-hat
 //  looks high (benign label switching); the label-invariant summaries (cluster
 //  proportions, sorted occupied centres, occupied-cluster count) converge
@@ -57,7 +57,7 @@
 //  canonicalizer is a discouraged fallback (skills/label_switching.md) and is
 //  deliberately NOT used here.
 //
-//  Note alpha has NO sampler block — it is a derived key. The alpha
+//  Note alpha has NO sampler block -- it is a derived key. The alpha
 //  log-density is rewritten as a phi log-density via change of variables;
 //  the Jacobian d alpha / d phi = exp(phi) IS automatically handled
 //  because phi is on the user-natural scale (Normal prior at phi-level)
@@ -203,7 +203,7 @@ double digamma_psi(double x) {
     return result;
 }
 
-/// log p(phi | k, n) where alpha = exp(phi) — the COLLAPSED / exact-DP concentration
+/// log p(phi | k, n) where alpha = exp(phi) -- the COLLAPSED / exact-DP concentration
 /// conditional (Antoniak 1974; Escobar & West 1995) in the log-parameterisation.
 /// alpha's SUFFICIENT STATISTICS are k = #OCCUPIED clusters and n = #observations;
 /// it does NOT depend on the stick weights. The previous version conditioned on the
@@ -211,7 +211,7 @@ double digamma_psi(double x) {
 /// pure prior draws) -> alpha mixed terribly (split-R-hat ~2-3; an exact draw is just
 /// as bad). Conditioning on (k, n) decouples them and mixes (R-hat ~1.0). NOTE this
 /// demonstrates the Antoniak update with a NON-Gamma prior: here alpha = exp(phi),
-/// phi ~ N(0,1), i.e. alpha is LOG-NORMAL — the (k,n) marginal is prior-agnostic.
+/// phi ~ N(0,1), i.e. alpha is LOG-NORMAL -- the (k,n) marginal is prior-agnostic.
 ///
 ///   p(k | alpha, n) ∝ alpha^k * Gamma(alpha) / Gamma(alpha + n)   [Antoniak]
 ///   prior: phi ~ N(0,1)   <-- swap THIS term for any prior on phi/alpha
@@ -424,14 +424,14 @@ public:
             {"z", "y"});
         impl_->data().declare_dependencies("pi",
             {"cluster_counts", "alpha"});
-        // cluster_counts — the exact-DP (Antoniak) update, NOT on the sticks.
+        // cluster_counts -- the exact-DP (Antoniak) update, NOT on the sticks.
         impl_->data().declare_dependencies("phi",
             {"cluster_counts"});
 
         impl_->data().declare_invalidates("z",   {"cluster_counts"});
         impl_->data().declare_invalidates("phi", {"alpha"});
 
-        // (No declare_data_input here — y is an observed terminal,
+        // (No declare_data_input here -- y is an observed terminal,
         // not a replaceable covariate. The y_rep refresher reads
         // pi/mu/lambda, NOT y.)
         impl_->data().declare_predict_edges("pi",     {"y_rep"});
@@ -612,7 +612,7 @@ public:
         auto it_y = params.find("y");
         if (it_y != params.end()) {
             const arma::vec& y_col = it_y->second;   // column-major N_ x d_
-            // STRICT-N legitimate (Check #21): z allocation length-N.
+            // STRICT-N legitimate: z allocation length-N.
             if (y_col.n_elem != N_ * d_)
                 ai4b::stop("set_current: DPGaussianMixture_DerivedAlpha "
                            "fixes N and d at construction (z is length-N). "
@@ -663,7 +663,7 @@ public:
     // Backend-neutral predict_at: takes an empty state_map (no covariates at v0)
     // and returns a history_map (map<string, arma::mat>). In no-history mode each
     // refreshed node is a 1-row arma::mat (y_rep is 1 x N_*d_, FLAT row-major
-    // i*d_+j — reshape to N_ x d_ downstream). In history mode y_rep is
+    // i*d_+j -- reshape to N_ x d_ downstream). In history mode y_rep is
     // n_draws x N_*d_.
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
         if (!new_data.empty())
@@ -725,7 +725,7 @@ public:
     /// 7th R-level method: re-tune NUTS metric (mass matrix + step size +
     /// dual averaging) without advancing chain state. Available because
     /// the composite contains NUTS-family children. See system_design.md
-    /// §13 NUTS-family + validator.md §24.
+    /// Sec.13 NUTS-family + validator.md Sec.24.
     // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
     // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
     // C++ default args so both arities are also exposed as separate

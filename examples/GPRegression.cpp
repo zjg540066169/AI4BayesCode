@@ -439,7 +439,7 @@ public:
 
         // ---- Generative-DAG context (VIZ-ONLY; predict_at BFS never
         //      reads context_edges_). The GP kernel K is built from the
-        //      sampled hyperparameters (amplitude, lengthscale) — they
+        //      sampled hyperparameters (amplitude, lengthscale) -- they
         //      are generative parents of K_matrix, analogous to the BART
         //      forest -> f_bart edge. Their priors: amplitude ~
         //      half-Normal(0, amp_prior_sd); lengthscale ~
@@ -885,7 +885,7 @@ public:
     /// 7th R-level method: re-tune NUTS metric (mass matrix + step size +
     /// dual averaging) without advancing chain state. Available because
     /// the composite contains NUTS-family children. See system_design.md
-    /// §13 NUTS-family + validator.md §24.
+    /// Sec.13 NUTS-family + validator.md Sec.24.
     // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
     // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
     // C++ default args so both arities are also exposed as separate

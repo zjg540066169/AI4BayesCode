@@ -46,7 +46,7 @@
 //      in joint_nuts_block / _mixed). Its conditional given (beta, z,
 //      tau, sigma) is well-identified so modular sampling is fine.
 //
-//  (e) Every block keeps n_warmup_per_step = 0 (validator Check #20).
+//  (e) Every block keeps n_warmup_per_step = 0.
 //      Ongoing per-step dual-averaging recomputes the step size against
 //      the kept draws, which both violates detailed balance AND can
 //      progressively collapse the step size, locking a chain into one
@@ -83,7 +83,7 @@
 //    d / d z_{j,k}     : -z_{j,k} + sum_{i:g(i)=j} r_i * sum_m Z_{i,m} tau_m L_{m,k} / sigma^2
 //    d / d log_tau_l   : 1 - tau_l^2/6.25 + (tau_l/sigma^2) * sum_i r_i Z_{i,l} (Lz_{g(i)})_l
 //    d / d log_sigma   : -N + SSE / sigma^2
-//  (validator Check #11 must audit these offsets; verified 2026-04-22.)
+//
 //
 //  R_chol block reads current (beta, z, tau, sigma) from ctx and uses
 //  the LKJ(eta=2) prior on L's diagonal: log p(L | eta) = sum_k (d - k +
@@ -500,7 +500,7 @@ public:
         //   y_rep ~ N(mu_fixed_i + Z_i' u[:,g_i], sigma^2)
         // RE rule (Q1/Q7=A): a KNOWN group uses sampled u[:,g]
         // (deterministic; in-sample bit-identical to the old collapsed
-        // path — same value, same per-i obs-noise RNG order, no extra
+        // path -- same value, same per-i obs-noise RNG order, no extra
         // draws). An UNSEEN group draws z_g ~ N(0, I_D) ONCE then
         // u_g = diag(tau) L z_g (the intrinsically-stochastic part,
         // confined to y_rep).
@@ -631,7 +631,7 @@ public:
             cfg.dense_metric_pilot_iters = 500;
             cfg.dense_metric_adapt_iters = 1500;
             cfg.n_warmup_first_call      = 500;
-            // n_warmup_per_step MUST stay 0 (validator Check #20). Non-zero
+            // n_warmup_per_step MUST stay 0. Non-zero
             // ongoing per-step dual-averaging recomputes the step size against
             // the kept draws, which both violates detailed balance AND
             // progressively collapses the step size, locking the chain into
@@ -643,7 +643,7 @@ public:
             impl_->add_child(std::make_unique<joint_nuts_block>(std::move(cfg)));
         }
 
-        // -------- R_chol block (cholesky_corr — PRIMARY SHOWCASE)
+        // -------- R_chol block (cholesky_corr -- PRIMARY SHOWCASE)
         {
             nuts_block_config cfg;
             cfg.name        = "R_chol";
@@ -652,7 +652,7 @@ public:
             cfg.unconstrain = constraints::cholesky_corr::unconstrain;
             cfg.initial_step_size   = 0.05;
             cfg.n_warmup_first_call = 500;
-            // n_warmup_per_step MUST stay 0 (validator Check #20). The prior
+            // n_warmup_per_step MUST stay 0. The prior
             // value of 20 progressively shrank this 1-D correlation block's
             // step size to ~0 by ~step 13, FREEZING R_chol at its warmup
             // endpoint (sd=0, rank-R-hat=Inf between chains). Persistent
@@ -761,7 +761,7 @@ public:
 
         // History mode: joint_block sub-params are
         //   beta (p), z_flat (D*J), log_tau (D), log_sigma (1).
-        // R_chol is a separate block. tau / sigma are NOT in history —
+        // R_chol is a separate block. tau / sigma are NOT in history --
         // they're refreshed from log_tau / log_sigma; rebuild per-draw.
         AI4BayesCode::history_map hist = impl_->get_history();
         const arma::mat& beta_hist      = hist.at("beta");      // n_draws x p
@@ -821,7 +821,7 @@ public:
     /// 7th R-level method: re-tune NUTS metric (mass matrix + step size +
     /// dual averaging) without advancing chain state. Available because
     /// the composite contains NUTS-family children. See system_design.md
-    /// §13 NUTS-family + validator.md §24.
+    /// Sec.13 NUTS-family + validator.md Sec.24.
     // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
     // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
     // C++ default args so both arities are also exposed as separate
@@ -929,7 +929,7 @@ PYBIND11_MODULE(HierarchicalLM_MultivariateRE, m) {
 //        for the random effects reduces residual scale toward sigma_true).
 //
 //  State is read through the full-contract get_current() (keys: beta, z, tau,
-//  L, R, sigma) — R is the 2x2 implied correlation, col-major flat, so R[1] is
+//  L, R, sigma) -- R is the 2x2 implied correlation, col-major flat, so R[1] is
 //  the off-diagonal rho.
 //==============================================================================
 #if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)

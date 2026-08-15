@@ -7,7 +7,6 @@
 //
 //  Reference template for the rjmcmc_block custom-bijection path
 //  (`make_templated_bijection_1d`, runtime AD Jacobian; see validator.md
-//  Check #14 for the gen-time sanity probes).
 //
 //  WHY THIS EXAMPLE EXISTS
 //  =======================
@@ -294,8 +293,6 @@ public:
 
         impl_->data().set("y_rep", arma::vec(N_, arma::fill::zeros));
         const double sigma_ref = sigma;
-        // Check #17 whitelist: std::normal_distribution used inside
-        // register_stochastic_refresher (one of the whitelisted contexts).
         impl_->data().register_stochastic_refresher(
             "y_rep",
             [sigma_ref](const AI4BayesCode::shared_data_t& d,

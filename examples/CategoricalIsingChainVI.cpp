@@ -16,7 +16,7 @@
 //
 //  Mean-field VI factorises q(z) = prod_i Categorical(z_i ; phi_i) and
 //  optimises the variational marginals phi_i in (K-1)-simplex via
-//  RAABBVI on the ELBO. For small n*K (state space prod_i K_i ≤
+//  RAABBVI on the ELBO. For small n*K (state space prod_i K_i <=
 //  exact_state_cap), gradients are EXACT; otherwise Monte Carlo with
 //  configurable S.
 //
@@ -30,15 +30,15 @@
 //  (V1-V8: KL/TV vs 81-state exact enumeration on symmetric AND
 //  asymmetric chain; PSIS-k̂ diagnostic).
 //
-//  JUSTIFICATION (Check #16): Discrete latents with strong local
-//  dependence — system_design.md §11.2(b). Per-site Gibbs mixes
+//  Sampling note: Discrete latents with strong local
+//  dependence -- system_design.md Sec.11.2(b). Per-site Gibbs mixes
 //  catastrophically near critical coupling; categorical mean-field VI
 //  gives a deterministic deterministic approximation that converges
 //  cleanly to a (biased) joint with correct marginals in many regimes,
 //  validated by V1-V8. The textbook MF underestimate-of-joint-variance
-//  caveat (Bishop §10.1.2) is correctly diagnosed by PSIS-k̂.
+//  caveat (Bishop Sec.10.1.2) is correctly diagnosed by PSIS-k̂.
 //
-//  Reference: Bishop PRML §10.1, Jaakkola-Jordan 1999 (QMR-DT), Welandawe
+//  Reference: Bishop PRML Sec.10.1, Jaakkola-Jordan 1999 (QMR-DT), Welandawe
 //  et al. 2022 (RAABBVI).
 //
 //  BACKEND-NEUTRAL STATE (state_map / history_map)
@@ -49,8 +49,8 @@
 //  length-(n*K) vector under key "phi" (reshape with R matrix(phi, n, K) /
 //  numpy phi.reshape(n, K, order="F")). Scalars (elbo, converged, epoch) are
 //  returned as length-1 vectors. set_current() accepts phi as either the flat
-//  length-(n*K) column-major vector or — under the R backend only, via a
-//  named-list helper — an n×K matrix; under the backend-neutral path it is the
+//  length-(n*K) column-major vector or -- under the R backend only, via a
+//  named-list helper -- an n×K matrix; under the backend-neutral path it is the
 //  flat column-major vector. predict_at() returns a history_map with key
 //  "z_samples" = an (n_draws × n) integer-valued matrix.
 //
