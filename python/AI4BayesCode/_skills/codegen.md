@@ -108,12 +108,14 @@ environment: same invariants, <=4 questions per batch, with an explicit
 model description you render back, the confirmation display, table cells,
 prose, and every message or error string the user sees. That is where raw
 Unicode actually hurts: this chat does not render inline math, so `sigma^2`
-survives and `σ²` may not, and a broken symbol in the model spec is a
+survives where a raw Greek/superscript form may not, and a broken symbol
+in the model spec is a
 correctness risk at the one gate that catches misunderstandings.
 
 In generated CODE, the same rule applies to **identifiers and string
 literals** (portability), but a math symbol inside a `.cpp` COMMENT is
-fine -- `mu`, `sigma^2` and `μ`, `σ²` are both readable to someone reading
+fine -- the ASCII spelling and the raw Greek form are both readable to
+someone reading
 the source, and the shipped examples use the latter. Do not spend effort
 converting comment math, and do not flag it as a defect.
 
