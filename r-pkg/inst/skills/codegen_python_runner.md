@@ -90,6 +90,13 @@ the runner deliverables are independent (`.R` + `.py`).
 
 ### Usage-example template (`example_<ClassName>.py`, default deliverable)
 
+**READABILITY IS THE HIGHEST RULE for the delivered example.** The
+audience is applied researchers with NO programming background: one
+linear script, one visible call per action, no user-defined functions,
+no abstractions, and as short as correctness allows. Whenever a
+structural choice trades completeness or cleverness against
+readability, readability wins.
+
 Same rule as the R version: the delivered example drives chains
 EXCLUSIVELY through the SHIPPED helpers (`AI4BayesCode.run_chains`,
 `AI4BayesCode.rhat_summary`, `AI4BayesCode.diagnose`), with NO
@@ -112,7 +119,21 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
    PSIS-LOO (model-specific).
 2. **AI4BayesCode.sourceCpp call** -- exact same form as in the runner
    template below.
-3. **Constructor reference block** -- identical to the runner.
+3. **Compact constructor reference + doc() pointer** -- a SHORT
+   comment block: the `mod.<ClassName>(...)` call shape with one brief
+   comment per data argument, then ONE pointer line:
+
+   ```python
+   # Full constructor / methods / prior reference:
+   #   AI4BayesCode.doc("<ClassName>")
+   ```
+
+   The FULL 30-40 line argument + methods documentation lives in the
+   `.cpp` header (codegen_cpp.md Sec.5) -- that is exactly what
+   `AI4BayesCode.doc()` parses and prints, so do NOT duplicate it into
+   the example (the full block stays in the harness runner only). A
+   wall of reference comments is what makes the example unreadable for
+   the non-programmer audience.
 4. **NO generated helper functions -- the constructor goes INLINE.**
    The example defines NOTHING between the data and the
    `AI4BayesCode.run_chains` call. The constructor is passed as an

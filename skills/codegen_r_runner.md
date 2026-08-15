@@ -74,6 +74,13 @@ For the C++ file emission, see `codegen_cpp.md`.
 
 ### Usage-example template (`example_<ClassName>.R`, default deliverable)
 
+**READABILITY IS THE HIGHEST RULE for the delivered example.** The
+audience is applied researchers with NO programming background: one
+linear script, one visible call per action, no user-defined functions,
+no abstractions, and as short as correctness allows. Whenever a
+structural choice trades completeness or cleverness against
+readability, readability wins.
+
 NOT a stripped golden-path snippet, and NOT a copy of the Layer-3
 harness prefix. The delivered example drives chains EXCLUSIVELY
 through the SHIPPED multi-chain helpers (`ai4bayescode_run_chains`,
@@ -103,8 +110,20 @@ documentation a first-time user reads):
    (`env = parent.frame()`). So compile at the TOP LEVEL of the runner. If you wrap
    the compile inside a helper FUNCTION, pass `env = globalenv()` explicitly, else
    `new(<ClassName>, ...)` fails with 'object <ClassName> not found'.
-3. **Constructor reference block** -- one comment line per `new()`
-   argument (name, type, default/range).
+3. **Compact constructor reference + doc() pointer** -- a SHORT
+   comment block: the `new(<ClassName>, ...)` call shape with one
+   brief comment per data argument, then ONE pointer line:
+
+   ```r
+   # Full constructor / methods / prior reference:
+   #   ai4bayescode_doc(<ClassName>)
+   ```
+
+   The FULL 30-40 line argument + methods documentation lives in the
+   `.cpp` header (codegen_cpp.md Sec.5) -- that is exactly what
+   `ai4bayescode_doc()` parses and prints, so do NOT duplicate it
+   into the example. A wall of reference comments is what makes the
+   example unreadable for the non-programmer audience.
 4. **NO generated helper functions -- the constructor goes INLINE.**
    The example defines NOTHING between the data and the
    `ai4bayescode_run_chains` call. The constructor is passed as an
@@ -193,7 +212,10 @@ Skeleton (parameterized; mirror this structure, fill placeholders):
 library(AI4BayesCode)
 ai4bayescode_source("./<ClassName>/<ClassName>.cpp")
 
-# <constructor reference: one comment line per new() argument>
+# <compact constructor reference: the new() call shape + one brief
+#  comment per data argument -- keep it SHORT>
+# Full constructor / methods / prior reference:
+#   ai4bayescode_doc(<ClassName>)
 
 # (No helper functions here on purpose: chain running, draw collection,
 #  R-hat/ESS, and diagnostics all come from the SHIPPED library
