@@ -1079,8 +1079,7 @@ Discrete latent z found?
               conditional probability tables theta marginalised analytically).
     -> *** SUPPORTED via `order_mcmc_block` (SHIPPED 2026-05-31). ***
       Use `examples/OrderMCMCBN.cpp` as the reference template; full
-      end-to-end demo in `examples/OrderMCMCBN.cpp` + audit in
-      `tests/audit_OrderMCMCBN_vs_BiDAG.R`. Scope (v1.2):
+      end-to-end demo in `examples/OrderMCMCBN.cpp`. Scope (v1.2):
         - Discrete categorical observations (no BGe / Gaussian / mixed)
         - n <= 64 variables (FK 2003 Sec.4.2 64-bit parent-set bitmask)
         - max_parents k_max <= 5 default (tractability cliff at k~=7-8)

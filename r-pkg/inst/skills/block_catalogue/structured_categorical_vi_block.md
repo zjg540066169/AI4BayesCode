@@ -77,7 +77,7 @@ that washes out the correlation.
 - `examples/StructuredPottsVI.cpp` -- n-node K-state Potts on arbitrary
   graph (user-supplied edges + per-edge couplings + per-node external
   field + clique partition).
-- R audit `tests/audit_StructuredPottsVI.R` -- Pearson cor 1.00000 vs
+- R-level audit: Pearson cor 1.00000 vs
   exact 81-state enumeration over both cliques.
 
 **Validation against independent paths** (`tests/test_structured_*.cpp`):

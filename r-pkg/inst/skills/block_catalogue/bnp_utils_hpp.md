@@ -19,6 +19,6 @@ when a user writes a refresher that needs to draw a CRP assignment
 at predict time, or when implementing a Neal-Alg-2 categorical_gibbs
 log_probs_fn.
 
-**Check #15** parity: `tests_autodiff/block_tests/test_bnp_utils.cpp`
+**Check #15** parity: verified by a block-level parity test.
 verifies all five functions within Check #15 tolerance (analytic +
 empirical).

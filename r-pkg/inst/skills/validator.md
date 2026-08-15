@@ -1789,7 +1789,7 @@ Static check: inspect the joint `sub_params` + log-density for the centered
 pattern; FAIL if a scale-governed effect is sampled centered. Rationale:
 centered + joint NUTS FREEZES on the funnel (empirically a centered
 scale-governed hierarchical model -> random-effect ESS = NA and R-hat
-blows up; the verified non-centered fix is `tests/test_joint_nuts_ncr_funnel.cpp`). Fix:
+blows up; the non-centered form is the verified fix). Fix:
 `joint_nuts_failure.md` Mode 1.
 
   **Parameterization comes from the PROMPT SPEC, never from the model/file

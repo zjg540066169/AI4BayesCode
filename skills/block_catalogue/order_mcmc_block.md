@@ -76,16 +76,14 @@ r_i = 4 cardinality recovery, R9 n = 2 edge case.
 - **D4 ESS(log_score) > 200** on 10000 post-burn samples (Geyer
   initial-positive-sequence).
 
-**bnlearn ASIA cross-check:**
-`tests/audit_OrderMCMCBN_bnlearn_cross.R` -- On ASIA (8 nodes,
+**bnlearn ASIA cross-check:** on ASIA (8 nodes,
 N = 5000), OrderMCMCBN's top-8 inclusion frequencies recover
 **7 / 8** true Markov-equivalent edges with **7 / 7 perfect
 skeleton match** against `bnlearn::hc`. The miss (A -> T) is also
 missed by bnlearn::hc -- low data evidence, not an algorithm
 failure.
 
-**BiDAG reference-implementation comparison:**
-`tests/audit_OrderMCMCBN_vs_BiDAG.R` -- head-to-head with
+**BiDAG reference-implementation comparison:** head-to-head with
 `BiDAG::orderMCMC` (Kuipers-Moffa reference, the same source as our
 shipped partition method) on identical data and 4 matched chains.
 Both implementations achieve **R-hat < 1.01** (ours 1.00073,

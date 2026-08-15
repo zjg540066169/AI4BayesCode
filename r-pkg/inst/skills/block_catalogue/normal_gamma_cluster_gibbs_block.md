@@ -51,8 +51,7 @@ cfg.initial_lambda  = ...;            // a_lambda_0 / b_lambda_0
 
 **JUSTIFICATION (Check #16): Exception 1 from codegen_priors.md Sec.2b**
 (NEW Tier-B block; conjugate cluster update is the textbook Murphy
-2007 Sec.4 formula). **Check #15** parity:
-`tests_autodiff/block_tests/test_normal_gamma_cluster_gibbs_block.cpp`
+2007 Sec.4 formula). **Check #15** parity: verified by a block-level parity test.
 verifies prior-recovery (empty cluster) and posterior-recovery
 (populated single cluster) within 5% on 10k draws.
 

@@ -40,7 +40,6 @@ also has unconstrained topics.
 **JUSTIFICATION (Check #16):** Exception 1 from `codegen_priors.md` Sec.2b
 -- z is discrete; NUTS cannot target it. Library Check #15 parity
 test is at
-`tests_autodiff/block_tests/test_lda_collapsed_gibbs_block.cpp`
 (5 regimes: count integrity, theta conjugate parity, phi conjugate
 parity, cross-impl parity vs in-test reference via label-invariant
 statistics, recovery from synthetic truth at K=2 with Hungarian

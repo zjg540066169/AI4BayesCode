@@ -77,7 +77,7 @@ relies on the categorical Gibbs sweeps depopulating clusters.
 NUTS cannot target). Library-blessed block; user writes no MH
 acceptance code.
 
-**Check #15** parity: `tests_autodiff/block_tests/test_split_merge_block.cpp`
+**Check #15** parity: verified by a block-level parity test.
 verifies (a) smoke + valid output on identical-cluster fixture; (b)
 truth-recovery K_active >= 2 on a 2-cluster split-favored fixture;
 (c) full-covariance sigma_key path runs.

@@ -38,8 +38,8 @@ to a (biased) joint with correct marginals in many regimes, with
 known underestimate-of-joint-variance caveat (Bishop Sec.10.1.2)
 correctly diagnosed by PSIS-k-hat.
 
-**Empirical validation** (`tests/test_mean_field_categorical_vi_chain.cpp`
-on 4-node K=3 Potts chain at beta=0.8 vs 81-state exact enumeration):
+**Empirical validation** (4-node K=3 Potts chain at beta=0.8 vs
+81-state exact enumeration):
 
 | Test | Result |
 |---|---|
@@ -63,8 +63,7 @@ on 4-node K=3 Potts chain at beta=0.8 vs 81-state exact enumeration):
 **Reference template:**
 - `examples/CategoricalIsingChainVI.cpp` -- n-node K-state Potts chain
   with optional per-node external field `h`, RAABBVI-converged VI
-  marginals + predict_at sampling. R-level audit
-  (`tests/audit_CategoricalIsingChainVI.R`) cross-checks per-var KL
+  marginals + predict_at sampling. R-level audit cross-checks per-var KL
   < 0.05 vs 81-state exact enumeration on n=4 K=3 chain.
 
 **Caveats (Bishop Sec.10.1.2, validated by k-hat diagnostic)**:

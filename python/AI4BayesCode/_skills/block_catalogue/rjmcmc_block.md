@@ -102,7 +102,7 @@ hook, beta[j] stays at its birth-time value as long as gamma[j]=1
   a `sinh` forward + `asinh` inverse). Single-coefficient toy
   model with fixed hyperparameters; the whole point is to exercise
   the custom-bijection plumbing end-to-end with a non-linear bijection that
-  the identity and library transforms cannot fit. See `tests_autodiff/audit_rjmcmc_custom_bijection.R`
+  the identity and library transforms cannot fit. See
   for the multi-chain MCMC audit (rhat + posterior comparison
   against the closed-form Bayes-factor answer).
 

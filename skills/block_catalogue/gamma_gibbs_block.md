@@ -45,8 +45,7 @@ call site (`rcpp_api.md Sec.11`).
 
 **JUSTIFICATION (Check #16): Exception 3** (scalar textbook conjugate
 with NUTS-wasteful efficiency profile).
-**Check #15** parity:
-`tests_autodiff/block_tests/test_gamma_gibbs_block.cpp` covers three
+**Check #15** parity: the block-level parity test covers three
 regimes (small shape, large shape, DP-style closure) at 10 000 draws,
 within 5 % mean / 10 % variance tolerance.
 

@@ -39,7 +39,7 @@ cfg.initial_pi = arma::vec(20, arma::fill::value(1.0 / 20));
 
 **JUSTIFICATION (Check #16): Exception 1** (per-stick Beta conditional
 on a NEW Tier-B block -- Ishwaran-James textbook scheme).
-**Check #15** parity: `tests_autodiff/block_tests/test_stick_breaking_block.cpp`
+**Check #15** parity: verified by a block-level parity test.
 verifies analytic E[pi_k] under both empty-counts (GEM(alpha) regime)
 and populated-counts DP regimes within 5% on 20k draws.
 

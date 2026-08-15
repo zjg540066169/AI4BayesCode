@@ -69,8 +69,7 @@ back to the Gaussian formula based on the working-response range and
 over-shrinks the leaves by a factor of 3. See `bart_block_config::binary`
 in this catalogue.
 
-**Check #15 parity test:**
-`tests_autodiff/block_tests/test_probit_aug_block.cpp` -- verifies the
+**Check #15 parity test:** verifies the
 empirical mean of drawn z's against the closed-form `TN(mu, 1, [a, b])`
 expectation across 5 regimes (centred / shifted positive / shifted
 negative / mixed-y vector with scalar offset / per-obs offset

@@ -884,8 +884,7 @@ call).
 
 The sampled DAG is **NEVER** in history.
 
-**Canonical pattern for collecting per-draw DAGs** -- used in
-`tests/audit_OrderMCMCBN_vs_BiDAG.R` line 116-122, and in the v1.2
+**Canonical pattern for collecting per-draw DAGs** -- used in the v1.2
 `examples/OrderMCMCBN.cpp` companion runner:
 
 ```r
@@ -1147,7 +1146,7 @@ Modular (codegen default):
   `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal
   Normal-Gamma) + `nuts_block` on log(alpha). Default K_trunc =
   max(20, ceil(N / 5)). DP concentration alpha ~ Gamma(a_alpha,
-  b_alpha). Audit: `tests_autodiff/audit_dp_gaussian_4chain.R`.
+  b_alpha).
 - `examples/PYGaussianMixture.cpp` -- Pitman-Yor variant. Identical
   composition; only stick_breaking_block's a_fn / b_fn change to
   the PY weights (a_k = 1 + n_k - discount, b_k = alpha + (k+1) *
