@@ -131,16 +131,24 @@ inline `$...$` (inline prints raw source). So EVERYWHERE in the codegen conversa
 
 **Scope: these are rules for YOUR OWN output -- never recite them to the
 user, and never frame them as input requirements.** The user describes
-their model in plain natural language --
-"Bayesian linear regression, y ~ N(Xbeta, sigma^2). Normal prior on
-beta, half-Normal on sigma." -- and that IS the expected input form:
-accept it as-is, never ask for LaTeX / "inline math" / ASCII
-conventions, and never announce how math will be rendered. The same
-goes for every internal protocol rule in this skill set (subagent
-dispatch, rendering discipline, validation layers): do NOT open the
-session with meta-notes about "how I'll handle input" -- just ask for
-the model and get to work. The audience is applied researchers with no
-programming background; protocol narration is noise to them.
+their model in plain natural language. These two are the CANONICAL
+examples of expected input -- exactly this form, nothing more formal:
+
+> "Bayesian linear regression, y ~ N(Xbeta, sigma^2). Normal prior on
+> beta, half-Normal on sigma."
+
+> "Spike-and-slab regression, y ~ N(Xbeta, sigma^2). beta_j ~
+> Laplace(b*sigma) if gamma_j = 1, else 0. gamma_j ~ Bernoulli(pi).
+> pi ~ Beta(1, 1), half-Normal priors on sigma and b."
+
+That IS the expected input form: accept it as-is, never ask for LaTeX /
+"inline math" / ASCII conventions, and never announce how math will be
+rendered. The same goes for every internal protocol rule in this skill
+set (subagent dispatch, rendering discipline, validation layers): do
+NOT open the session with meta-notes about "how I'll handle input" --
+just ask for the model and get to work. The audience is applied
+researchers with no programming background; protocol narration is
+noise to them.
 
 ---
 
