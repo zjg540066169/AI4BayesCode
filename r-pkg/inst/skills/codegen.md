@@ -454,7 +454,26 @@ lets the user skip the one gate that catches extraction and prior
 mistakes before code exists. The review is not optional content; it IS
 the sign-off gate. Display all three parts, then fire the single
 confirmation prompt at the end of this section. One display, one
-question, nothing before it.
+question, nothing before it. This display is FORCED because it is the
+pre-generation validation: it is the one place the user can catch the
+AI having misunderstood the model BEFORE any code exists -- skip it
+and a misread likelihood or prior generates a whole wrong sampler.
+
+**Multi-round human-in-the-loop: RE-DISPLAY after EVERY change.** The
+gate is rarely one round -- the user fixes a prior, adjusts the
+sampling plan, corrects a constraint. After EVERY such change,
+re-render the UPDATED three-part summary (formulas, DAG, table) and
+confirm again. Do NOT collapse later rounds into a bare "start
+generating, or any more issues?" without showing the current spec:
+the user must always confirm what they can SEE, never a spec held
+silently in the AI's head -- an invisible spec defeats the entire
+point of this gate. And EVERY pre-generation question fired during
+these rounds (proceed? / more changes?) MUST carry a standing option:
+
+> **(c) Show me the current model summary (formulas + DAG + table)**
+
+so the user can always pull the confirmation display back up;
+choosing it re-renders the summary and re-fires the gate.
 
 ### Ship the runtime validation code? (ask in this same pre-generation round)
 
