@@ -76,8 +76,10 @@ such as paper + reference impl, so do not add a "paper + reference code" choice)
 - **Other / custom.**
 
 > **Local files welcome.** Any source above may be given as a LOCAL FILE PATH -- a
-> paper PDF, a reference-code file, or a notes file -- and I will read it from disk
-> (a DOI / URL also works for a paper I can fetch).
+> paper PDF, a reference-code file, or a notes file (a DOI / URL also works for a
+> paper I can fetch). Papers / long documents are read in a SUBAGENT (mandatory --
+> see the paper rule below in (a)); short notes / single code files may be read
+> directly.
 
 Whatever the mix, you MUST still finish Step 1 with a COMPLETE, SOURCED math
 spec -- see (a). A reference impl (or a raw search hit) alone does not exempt you --
@@ -117,12 +119,47 @@ block cannot live inside a table cell):
    math.) This confirmed complete spec is what DESIGN builds + verifies against.
 
 If the user hands you a **paper**, do NOT proceed on "what the method
-probably does." Read the relevant algorithm/equations; if you do not have
-them, ASK for the section/equation refs (SECOND RULE -- methodology from a
-paper). Surface every implementation choice the paper pins (sampler,
-update order, marginalization, noise propagation) so DESIGN can lock them
-against the source -- but the deep methodology lock-in happens in DESIGN;
-intake's job is to make sure the spec is COMPLETE and SOURCED.
+probably does" -- and do NOT read the paper into the main context.
+**Dispatch a subagent to read it. MANDATORY, no exceptions** (same
+context-protection rationale as `start.md`'s codegen paper rule: a full
+paper read drowns the window the whole DESIGN/VALIDATE flow still needs).
+The block-design extraction must return MORE than the codegen spec
+template -- DESIGN's methodology lock needs algorithm-level detail:
+
+1. **The ordered ALGORITHM / pseudocode** -- every step of one sweep, in
+   the paper's own order and numbering, with section/equation refs.
+   Faithful, not paraphrased-from-memory.
+2. **Full equations for every update** -- target density, full
+   conditionals, acceptance ratios -- in EXACT parametrization
+   (shape-rate vs shape-scale, log-SD vs log-variance), ASCII/LaTeX
+   source only.
+3. **The symbol table** (one row per symbol: name | type |
+   distribution / value | tunable?) PLUS each parameter's SUPPORT
+   (real / positive / simplex / ordered / ...).
+4. **Every implementation choice the paper pins** -- sampler settings
+   (step sizes, tolerances, warmup schedules, MC sizes), update ORDER,
+   marginalization choices, augmentation / noise propagation,
+   initialization, numerical fallbacks -- each with its
+   section / equation / table ref. This is the raw material DESIGN
+   locks against the source (SECOND RULE -- methodology from a paper).
+5. **What the paper does NOT pin** -- an explicit "unpinned" list of
+   gaps needing user elicitation.
+6. **Variants / alternative parametrizations** the paper offers, and
+   which one it recommends.
+7. **Reference implementations the paper names** (packages, URLs) --
+   feeds the Step-5 license gate.
+8. **A section map** -- where each of the above came from, so DESIGN
+   can later dispatch a TARGETED follow-up subagent read of one
+   specific passage (never an inline full re-read) when a lock needs
+   verifying.
+
+If the extract is missing something DESIGN needs, ASK the user for the
+section/equation refs or dispatch a targeted follow-up subagent -- the
+deep methodology lock-in happens in DESIGN; intake's job is to make
+sure the spec is COMPLETE and SOURCED. (No subagent tool in the
+environment: ask the user for the specific sections, read ONLY those
+pages, extract immediately, discard raw text -- never a full-paper
+inline read.)
 
 **(b) Existing package/code to BORROW or VENDOR.** If the user is porting
 or wrapping a published implementation (an R/C++/Julia package, a
