@@ -113,6 +113,16 @@ below is HARNESS-INTERNAL (Layer-3 R1/R2/R3 + sim1 need its
 delivered example; the whole harness (R2 R-hat/ESS, R3 BPV, PSIS-LOO,
 R1 smoke wiring) is throwaway and NOT shipped in the default case.
 
+**Emitting the advanced-control block (agent-facing rules -- these do NOT
+go into the file).** Same as the R skill: `readapt_NUTS` lines are
+CONDITIONAL on a NUTS-family child; `freeze()` is strict (empty /
+unknown / blacklisted family -- BART, genBART, softbart, VI, HMM --
+raise) while `unfreeze()` is permissive (`unfreeze()` releases all,
+`unfreeze([])` raises); element-level freeze works only on PER-ELEMENT
+components, coupled ones (ORDERED / SIMPLEX / CORR_MATRIX / COV_MATRIX)
+raise; nested dot-paths and rjmcmc sub-keys are also valid names; batch
+refreeze takes `quiet=True`. Show only what THIS model supports.
+
 The delivered `example_<ClassName>.py` MUST contain, in order:
 
 1. **Header comment** -- what the model is, plus the short list of the
@@ -188,9 +198,7 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
        lambda seed: mod.<ClassName>(<data_args>, rng_seed=int(seed),
                                     keep_history=True),
        seeds=[101, 202, 303, 404], n_burn=4000, n_keep=4000)
-   # each chain's "hist" is KEEP-ONLY (run_chains strips the warmup
-   # draws), so no drop_burn / n_burn bookkeeping downstream:
-   print(AI4BayesCode.rhat_summary(chains))
+   print(AI4BayesCode.rhat_summary(chains))   # convergence across chains
    tbl, plot = AI4BayesCode.diagnose(chains[0]["hist"])
    ```
 
@@ -219,70 +227,30 @@ y_rep = model.predict_at({})["y_rep"]        # posterior predictive at training 
 # model.step(1)                              # one iteration after set_current
 # model.get_history()
 
-# readapt_NUTS() -- CONDITIONAL -- emit ONLY if the wrapper's composite
-# contains any NUTS-family child (nuts_block / joint_nuts_block).
-# Skip the whole block if pure BART /
-# pure Gibbs / pure VI / pure HMM / pure SBP / pure RJMCMC /
-# pure slice.
+# ---- Advanced control (uncomment what you need) ---------------------
 #
-# readapt_NUTS re-tunes the NUTS metric (mass matrix + step size +
-# dual averaging) WITHOUT advancing chain state.
+# Re-tune the sampler without advancing the chain -- useful after
+# set_current() changes the data enough that the old tuning no longer
+# fits. (Only present when the model uses NUTS.)
+# model.readapt_NUTS(500)
 #
-# WORKFLOW RULE (system_design.md Sec.13 hybrid-composite caveat):
-#   - Pure NUTS-family composite (no BART / no specialised Gibbs):
-#       set_current(...) -> readapt_NUTS(N) immediately is fine
-#   - Hybrid composite with BART / SoftBart / specialised Gibbs whose
-#     outputs (f_bart, working residuals, etc.) refresh inside step():
-#       set_current(...) -> step(1) -> readapt_NUTS(N)
-#     The intervening step(1) refreshes shared_data so the NUTS
-#     sibling's adapter sees fresh derived state, not stale values.
-#
-# Example (uncomment in real sequential-update use):
-# model.set_current({"<data input>": <updated value>})
-# model.step(1)                                   # refresh derived state -- hybrid composites only
-# model.readapt_NUTS(500)                         # re-tune metric (defaults: reset=False, max_tree_depth=-1, target_accept=-1.0)
-# model.readapt_NUTS(500, reset=True)             # reset=True if data change is dramatic
-# model.readapt_NUTS(500, target_accept=0.55)    # 4th kwarg: target_accept in (0,1] overrides the block's dual-averaging
-                                                  # target (default 0.55; behaves like Stan adapt_delta -- raise to 0.8-0.99 for difficult geometries); sentinel <= 0 keeps current
-
-# freeze() / unfreeze() / get_frozen() -- kernel-control, always available on every wrapper.
-#
-# freeze holds a child block's state fixed (skips its step() and readapt_NUTS()).
-# Use for probit-style pinning (sigma = 1), prior sensitivity, two-stage inference.
-#
-# STRICT semantics:
-#   model.freeze(["sigma"])          # hold sigma at last set_current value
-#   model.freeze(["s1", "s2"])       # hold multiple
-#   model.freeze()                    # ERROR (freeze requires non-empty list)
-#   model.freeze(["unknown"])         # ERROR (block name not in composite)
-#   model.freeze(["<bart_block>"])    # ERROR (BART / VI / HMM / genBART on blacklist)
-#
-# PERMISSIVE unfreeze:
-#   model.unfreeze()                  # release all
-#   model.unfreeze(["sigma"])         # release one
-#   model.unfreeze([])                # ERROR (empty set; use unfreeze() for all)
-#
-# Example (uncomment for a probit-style sigma pin):
+# Hold one parameter fixed instead of sampling it -- e.g. pin sigma = 1
+# for a probit-style model, or fix a parameter for a sensitivity check.
 # model.set_current({"sigma": 1.0})
-# model.freeze(["sigma"])
-# model.step(1)              # sigma stays 1.0; beta continues to sample
-# model.get_frozen()         # -> ["sigma"]
-# model.unfreeze(["sigma"])  # sigma resumes sampling
-
-# OR one-line ctor helper (equivalent to init + set_current + freeze):
+# model.freeze(["sigma"])     # sigma stays 1.0; everything else keeps sampling
+# model.step(1)
+# model.get_frozen()          # -> ["sigma"]
+# model.unfreeze(["sigma"])   # resume sampling it
+#
+# Same thing in one line at construction:
 # model = AI4BayesCode.new_frozen(mod.<ClassName>, <data_args>, rng_seed=42,
 #                                 keep_history=True,
 #                                 fixed={"sigma": 1.0})
-
-# Advanced names (all valid in freeze / unfreeze / ctor helper's fixed keys):
-#   "<component_name>"                     -- hold one component of a joint block
-#   "<component_name>[k]"                  -- hold a single element of that component
-#   "<outer>.<inner_leaf>"                 -- nested composite dot-path (Sec.10.c)
-#   "<rjmcmc_name>.gamma" / ".beta"        -- rjmcmc sub-key freeze (Sec.10.d)
-
-# Batch refreeze on checkpoint restore -- use quiet=True to skip
-# redundant-refreeze warnings:
-# model.freeze(saved_frozen_names, quiet=True)
+#
+# You can also hold a single component of a jointly-sampled parameter,
+# or one element of it:
+# model.freeze(["<component_name>"])
+# model.freeze(["<component_name>[2]"])
 ```
 
 ### Python runner template -- standard body (DEFAULT; harness-internal)

@@ -260,8 +260,9 @@ and `skills/codegen.md Sec.12` carries a Hard Rule pointing here. The
 code-gen agent's only obligation is: if a user
 model description implies Sec.11.2(a) or Sec.11.2(b), the agent falls
 back to a supported alternative (Class 2a continuous spike, or
-horseshoe, or explain "not supported yet") and points the user
-here for the theory.
+horseshoe, or explain "not supported yet"). The measure-theory
+rationale stays HERE, agent-side -- explain the choice to the user in
+plain language, never by citing this file.
 
 ### 11.6 Variance / scale prior discipline (Gelman 2006)
 

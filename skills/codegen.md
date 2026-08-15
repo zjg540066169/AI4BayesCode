@@ -335,7 +335,7 @@ later, at Sec.2 and Sec.3. **Once the model is confirmed**, ask the upfront ques
    them exactly:
 
    - **One "attempt" = one full `generate -> validate` cycle** (code
-     generation + compile + Layer-3 R1/R2/R3 + Checks #1-20).
+     generation + compile + Layer-3 R1/R2/R3 + Checks #1-26).
    - **The first generation IS attempt 1** -- it is NOT a free or
      uncounted "attempt 0". The counter starts at 1 on the initial
      generation. `max_attempts = N` therefore means at most **N total**
@@ -520,7 +520,7 @@ user will not know what it means); say "runtime validation code":
 > - **Yes -- include the full runtime validation code in the delivered files**
 
 **CORRECTNESS INVARIANT -- read this exactly; it is not optional.**
-The validator (Layer-3 R1/R2/R3 + Checks #1-20) **ALWAYS runs and
+The validator (Layer-3 R1/R2/R3 + Checks #1-26) **ALWAYS runs and
 must PASS during generation, regardless of this answer.** This
 question controls ONLY what is *shipped* in the final deliverable,
 NEVER whether the validator runs. "No (default)" does **NOT** mean

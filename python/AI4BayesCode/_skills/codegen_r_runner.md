@@ -194,9 +194,7 @@ documentation a first-time user reads):
    run <- ai4bayescode_run_chains(
        function(seed) new(<ClassName>, <data_args>, as.integer(seed), TRUE),
        n_chains = 4L, n_burn = 4000L, n_keep = 4000L)
-   # run$histories are KEEP-ONLY (run_chains strips the warmup draws),
-   # so no drop_burn / n_burn bookkeeping downstream:
-   ai4bayescode_rhat_summary(run)                     # cross-chain R-hat / ESS
+   ai4bayescode_rhat_summary(run)   # convergence check across the chains
    dg <- ai4bayescode_diagnose(run$histories[[1]])
    dg$summary; dg$plot
    ```
@@ -240,8 +238,7 @@ Skeleton (parameterized; mirror this structure, fill placeholders):
 #   ai4bayescode_rhat_summary -- convergence check across the chains
 #   ai4bayescode_diagnose     -- posterior summaries + diagnostic plots
 
-# Compile + load the C++ model (the class becomes available by name).
-# Packaged API -- no AI4BayesCode checkout / helper sourcing needed.
+# Compile + load the model (the class becomes available by name).
 library(AI4BayesCode)
 ai4bayescode_source("./<ClassName>/<ClassName>.cpp")
 
@@ -260,9 +257,7 @@ run <- ai4bayescode_run_chains(
     function(seed) new(<ClassName>, <data_args>, as.integer(seed), TRUE),
     n_chains = 4L, n_burn = 4000L, n_keep = 4000L)
 
-# run$histories are KEEP-ONLY (run_chains strips the warmup draws), so
-# no drop_burn / n_burn bookkeeping downstream.
-ai4bayescode_rhat_summary(run)   # cross-chain R-hat / ESS per parameter
+ai4bayescode_rhat_summary(run)   # convergence check across the chains
 
 # Per-chain summaries + trace + autocorrelation + density plots.
 dg <- ai4bayescode_diagnose(run$histories[[1]])
@@ -294,79 +289,54 @@ model$predict_at(list(<X> = <X>_test))
 ## model$step(1)          ## one iteration after set_current
 ## model$get_history()    ## 111 posterior draws
 
-## readapt_NUTS() -- CONDITIONAL -- emit ONLY if the wrapper's composite
-## contains any NUTS-family child (nuts_block / joint_nuts_block).
-## Skip the whole block if pure
-## BART / pure Gibbs / pure VI / pure HMM / pure SBP / pure
-## RJMCMC / pure slice -- the method is not exposed there.
+## ---- Advanced control (uncomment what you need) --------------------
 ##
-## readapt_NUTS re-tunes the NUTS metric (mass matrix + step size +
-## dual averaging) WITHOUT advancing chain state. Use after a
-## set_current() data change in a sequential / online update
-## workflow.
+## Re-tune the sampler without advancing the chain -- useful after
+## set_current() changes the data enough that the old tuning no longer
+## fits. (Only present when the model uses NUTS.)
+## model$readapt_NUTS(500L)
 ##
-## WORKFLOW RULE (system_design.md Sec.13 hybrid-composite caveat):
-##   - Pure NUTS-family composite (no BART / no specialised Gibbs):
-##       set_current(...) -> readapt_NUTS(N) immediately is fine
-##   - Hybrid composite with BART / SoftBart / specialised Gibbs whose
-##     outputs (f_bart, working residuals, etc.) refresh inside step():
-##       set_current(...) -> step(1L) -> readapt_NUTS(N)
-##     The intervening step(1L) refreshes shared_data so the NUTS
-##     sibling's adapter sees fresh derived state, not stale values.
-##
-## Example (uncomment in real sequential-update use):
-## model$set_current(list(<data inputs> = <updated values>))
-## model$step(1L)               ## refresh derived state -- hybrid composites only
-## model$readapt_NUTS(500L, FALSE, -1L)         ## 3-arg backward-compat form: reset=FALSE, max_tree_depth=-1 = configured depth
-## ## model$readapt_NUTS(500L, TRUE, -1L)         ## reset=TRUE if data change is dramatic
-## ## model$readapt_NUTS(500L, FALSE, -1L, 0.55) ## 4-arg form: 4th = target_accept in (0,1] (default 0.55; behaves like Stan adapt_delta -- raise to 0.8-0.99 for difficult geometries; sentinel <= 0 keeps the current value)
-
-## freeze() / unfreeze() / get_frozen() -- kernel-control, always available on every wrapper.
-##
-## freeze holds a child block's state fixed (skips its step() and readapt_NUTS()).
-## Use for probit-style pinning (sigma = 1), prior sensitivity, two-stage inference.
-##
-## STRICT semantics:
-##   freeze("<name>")           -- hold sigma at last set_current value
-##   freeze(c("<n1>", "<n2>"))  -- hold multiple
-##   freeze()                   -- ERROR (freeze requires a non-empty name vector)
-##   freeze("unknown")          -- ERROR (block name not in composite)
-##   freeze("<bart_block>")     -- ERROR (BART / VI / HMM / genBART on the blacklist)
-##
-## PERMISSIVE unfreeze:
-##   unfreeze()                 -- release all
-##   unfreeze("<name>")         -- release one
-##   unfreeze(character(0))     -- ERROR (empty set; use unfreeze() for all)
-##
-## Example (uncomment for a probit-style sigma pin):
+## Hold one parameter fixed instead of sampling it -- e.g. pin sigma = 1
+## for a probit-style model, or fix a parameter for a sensitivity check.
 ## model$set_current(list(sigma = 1))
-## model$freeze("sigma")
-## model$step(1L)               ## sigma stays 1; beta continues to sample
-## model$get_frozen()           ## -> "sigma"
-## model$unfreeze("sigma")      ## sigma resumes sampling
-
-## OR one-line ctor helper (equivalent to new + set_current + freeze):
+## model$freeze("sigma")     ## sigma stays 1; everything else keeps sampling
+## model$step(1L)
+## model$get_frozen()        ## -> "sigma"
+## model$unfreeze("sigma")   ## resume sampling it
+##
+## Same thing in one line at construction:
 ## model <- ai4bayescode_new_frozen(<ClassName>, <data_args>, rng_seed = 42L,
 ##                                  keep_history = TRUE,
 ##                                  fixed = list(sigma = 1))
-
-## Advanced names (all valid in freeze / unfreeze / ctor helper's `fixed` names):
-##   "<component_name>"                     -- joint_nuts_block component-level freeze (Sec.10.a)
-##   "<component_name>[k]"                   -- joint_nuts_block ELEMENT-level freeze (1-based k;
-##                                              matrices use column-major flat k). Only for
-##                                              PER-ELEMENT components (REAL / POSITIVE /
-##                                              LOWER_BOUNDED / UPPER_BOUNDED / INTERVAL); a
-##                                              coupled/constrained component (ORDERED / SIMPLEX /
-##                                              CORR_MATRIX / COV_MATRIX / ...) ERRORS -- freeze the
-##                                              whole component instead. get_frozen() reports it
-##                                              back as "<component>[k]".
-##   "<outer>.<inner_leaf>"                 -- nested composite dot-path (Sec.10.c)
-##   "<rjmcmc_name>.gamma" / ".beta"        -- rjmcmc sub-key freeze (Sec.10.d)
-
-## Batch refreeze on checkpoint restore -- use quiet=TRUE to skip
-## redundant-refreeze warnings:
-## model$freeze(saved_frozen_names, quiet = TRUE)
+##
+## You can also hold a single component of a jointly-sampled parameter,
+## or one element of it:
+## model$freeze("<component_name>")
+## model$freeze("<component_name>[2]")
 ```
+
+**Emitting the advanced-control block (agent-facing rules -- these do NOT
+go into the file).**
+
+- The `readapt_NUTS` lines are CONDITIONAL: emit them ONLY if the
+  composite has a NUTS-family child (`nuts_block` / `joint_nuts_block`).
+  Drop them entirely for pure BART / Gibbs / VI / HMM / SBP composites.
+- `freeze()` is strict and `unfreeze()` is permissive: `freeze()` with no
+  argument, an unknown name, or a blacklisted family (BART / genBART /
+  softbart / VI / HMM) raises; `unfreeze()` with no argument releases
+  all, while `unfreeze(character(0))` raises.
+- Element-level freeze (`"<component>[k]"`, 1-based, column-major for
+  matrices) works only on PER-ELEMENT components (REAL / POSITIVE /
+  LOWER_BOUNDED / UPPER_BOUNDED / INTERVAL). Coupled components
+  (ORDERED / SIMPLEX / CORR_MATRIX / COV_MATRIX / ...) raise -- freeze
+  the whole component. `get_frozen()` reports it back as
+  `"<component>[k]"`.
+- Other valid names: `"<outer>.<inner_leaf>"` for a nested composite,
+  `"<rjmcmc_name>.gamma"` / `".beta"` for rjmcmc sub-keys. Batch
+  refreeze on checkpoint restore takes `quiet = TRUE` to suppress
+  redundant-refreeze warnings.
+- Show only what THIS model supports. Never paste the whole taxonomy
+  into the delivered example.
 
 The example must run as-is on the synthetic shapes generated in the
 simulation block. The ENTIRE Layer-3 harness -- including its internal

@@ -109,8 +109,9 @@ likelihood and classify:
 5. **Structural gap (`codegen_priors.md Sec.2c` Exception 4):** if -- judged
    at generation time -- no block fits AND NUTS is structurally
    inapplicable (e.g. a bespoke tree ensemble, a novel trans-dimensional
-   move), author a custom block/sampler with the Check #17 justification
-   comment. Last resort; never a runtime swap.
+   move), author a custom block/sampler with the plain-language
+   "// Sampling note: ..." comment (the Exception-4 justification goes in
+   the L2 verdict table). Last resort; never a runtime swap.
 
 ### Coupling outside the table (no Sec.4a match)
 

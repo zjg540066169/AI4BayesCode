@@ -164,7 +164,7 @@ A pre-generation question (`codegen.md` "Delivered-code validation
 harness") lets the user choose whether the Layer-3 harness ships in
 the delivered code; **default = No (deliver a minimal
 `example_<ClassName>.R`)**. This NEVER affects whether validation
-runs: the validator (Layer-3 R1/R2/R3 + Checks #1-20) ALWAYS runs and
+runs: the validator (Layer-3 R1/R2/R3 + Checks #1-26) ALWAYS runs and
 must PASS during generation regardless of the answer -- the harness is
 a throwaway gating tool by default (same rule as the smoke test /
 the Check #12 autodiff-verify file, jacobian.md Sec.10.1), retained in `run_<ClassName>.R` only if

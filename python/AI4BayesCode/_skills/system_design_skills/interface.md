@@ -212,8 +212,8 @@ resolves each name passed to `freeze(...)` in this fixed order (see
      children match, the resolver raises `std::runtime_error` with the
      enumerated-candidates format:
      ```
-     sub-name 'X' is ambiguous: matches slots [child_A.X, child_B.X, ...];
-     use dot-path to disambiguate
+     name 'X' is ambiguous: it matches [child_A.X, child_B.X, ...];
+     give the full name (for example "child_A.X") to pick one
      ```
      (The candidate list is in child declaration order.) `get_frozen()`
      reports the canonical `<child>.<slot>` dot-path on success.

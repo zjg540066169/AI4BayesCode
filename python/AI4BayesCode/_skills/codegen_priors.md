@@ -703,7 +703,7 @@ getting a joint NUTS log-density wrong. Library-blessed `*_gibbs_block`
 continuous param not covered by Exceptions 1-3 of Sec.2b: USE
 `joint_nuts_block` (default) / `nuts_block` INSTEAD. Hand-written
 sampling is permitted ONLY under Sec.2c Exception 4 (no block fits AND
-NUTS structurally inapplicable), with the Check #17 justification
+NUTS structurally inapplicable), with the plain-language sampling-note
 comment and full validator gating.
 
 ---
@@ -880,10 +880,12 @@ meta-analyses. Follow this workflow (inspired by
      fallback.
 4. **Present to user**: show both proposals with the source references,
    your reasoning, and a recommendation. Let the user pick.
-5. **Report confidence**: be transparent about limitations -- LLM-suggested
-   priors tend toward overconfidence in the width (Riegler et al. 2025
-   found moderately informative priors were often worse than weakly
-   informative ones). When in doubt, widen the prior.
+5. **Default to the wider prior.** Literature-derived priors are easy to
+   make too narrow (Riegler et al. 2025 found moderately informative
+   priors were often worse than weakly informative ones), so when the
+   sources leave room for doubt, widen. Report the SOURCE and the
+   resulting prior to the user; do not editorialise about how reliable
+   the suggestion is -- pick the defensible default and say what it is.
 
 Example interaction:
 
@@ -1097,13 +1099,15 @@ Discrete latent z found?
         (a) Uniform DAG prior -- every DAG (with in-degree <= k_max)
             carries equal prior weight P(G) prop.to 1. Matches BiDAG
             (edgepf=1), bnlearn, and most reference BN packages.
-            -> cpp: `cfg.use_structure_prior = false`
         (b) Friedman-Koller 2003 per-family balancing -- penalises
             high fan-in, P(G) prop.to prod_j 1/C(p-1, |Pa_j|). FK paper's
             preferred default; argued to reflect domain priors better
-            for empirical BN learning. -> cpp: `cfg.use_structure_prior
-            = true`
+            for empirical BN learning.
       ```
+
+      (Agent-side: option (a) is `cfg.use_structure_prior = false`,
+      option (b) is `true`. The flag name is NOT shown to the user --
+      they are choosing a prior, not a config field.)
 
       If the spec says "Uniform DAG prior" (e.g. `G ~ Uniform(DAGs)`)
       this maps to (a). If the spec says "Friedman-Koller prior" or
