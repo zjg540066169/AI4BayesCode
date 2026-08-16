@@ -25,6 +25,19 @@ across all child blocks. It holds:
 `ctx.at(key)` to fetch whatever it needs (declared via
 `declare_dependencies(block_name, {keys...})`).
 
+**A configured `*_key` MUST be declared as a dependency.** Blocks with
+optional terms (`offset_key`, `entry_time_key`, `sigma_key`, `y_key`,
+`n_key`, ...) use the empty string to mean "this model has no such term".
+Setting the key to a name and then leaving that name out of
+`declare_dependencies` is a wiring bug, and every block that takes such a
+key now THROWS on it, naming the key and the fix. Before this guard the
+term was silently dropped: a covariate effect vanished from a hazard, left
+truncation stopped being applied, and BART sampled a second error variance
+alongside the sibling block that owned sigma -- each of them a wrong
+posterior that passes every convergence check. So: whenever you set a
+`*_key`, add that key to the block's `declare_dependencies` list in the
+same edit.
+
 **Invariant -- shared_data must stay in sync.** After any change via
 `set_current`, any entry the composite advertises in shared_data
 (especially data inputs and derived quantities) MUST reflect the new

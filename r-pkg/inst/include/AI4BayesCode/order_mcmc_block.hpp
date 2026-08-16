@@ -267,7 +267,7 @@ struct order_mcmc_block_config {
     ///   false → Strict uniform DAG prior: P(G) ∝ 1 (with the same
     ///           in-degree cap). Matches BiDAG (`edgepf=1`) +
     ///           bnlearn defaults; pick this when the spec says
-    ///           "uniform DAG prior" or "P(G) ∝ 1".
+    ///           "uniform DAG prior" or "P(G) proportional to 1".
     /// THE TWO PRIORS PRODUCE DIFFERENT POSTERIORS — they are NOT
     /// equivalent up to a normalising constant. Codegen agents MUST
     /// AskUserQuestion when the spec doesn't disambiguate (see
@@ -639,7 +639,12 @@ public:
     }
 
     std::size_t history_size() const noexcept override {
-        return history_order_.size();
+        // Base contract: 1 when the buffer is empty (current draw only).
+        // composite_block::history_size() takes the MIN over children, so a
+        // literal 0 here drags the whole composite to 0 draws -- which is what
+        // happens with keep_history off (the default), and for a VI block also
+        // after convergence, when its appends stop while siblings keep going.
+        return history_order_.empty() ? 1 : history_order_.size();
     }
 
     void clear_history() override {

@@ -182,6 +182,9 @@ public:
      * new value; it must not capture anything that could become stale.
      */
     void register_refresher(const std::string& derived_key, refresher_fn fn) {
+        if (refreshers_.find(derived_key) == refreshers_.end()) {
+            refresher_order_.push_back(derived_key);
+        }
         refreshers_[derived_key] = std::move(fn);
     }
 
@@ -191,8 +194,20 @@ public:
      * been installed, to prime the shared_data_t before the first sweep.
      */
     void refresh_all() {
-        for (auto& kv : refreshers_) {
-            values_[kv.first] = kv.second(*this);
+        // REGISTRATION order, not hash order. A derived key may read another
+        // derived key (GPRegression: L_chol and L_prior both read K_matrix),
+        // and the keys are seeded with placeholder zeros before this runs. In
+        // hash order the reader can be visited first and get primed from the
+        // placeholder -- e.g. an ESS prior Cholesky of sqrt(jitter) * I instead
+        // of chol(K), so the first latent draw comes from the wrong prior, with
+        // no error and a result that varies with the build. Registration order
+        // is the order the model author wrote the chain in, and it is what
+        // refresh_derived_for already relies on.
+        for (const auto& key : refresher_order_) {
+            auto it = refreshers_.find(key);
+            if (it != refreshers_.end()) {
+                values_[key] = it->second(*this);
+            }
         }
     }
 
@@ -448,10 +463,17 @@ public:
 
         // BFS with fixpoint iteration: nodes may need to wait for a sibling
         // to be resolved before their parent-set is complete.
-        std::size_t max_iters = queue.size() * queue.size() + 1;
-        std::size_t iter = 0;
-        while (!queue.empty() && iter < max_iters) {
-            ++iter;
+        //
+        // Termination comes from `progress`, not from an iteration count:
+        // every round that does not resolve at least one node breaks out, and
+        // `reachable` only ever grows, so the loop runs at most once per node.
+        // An earlier version also capped the rounds at (#seed-children)^2 + 1,
+        // which is a width, not a depth -- a single seed child gave a cap of 2,
+        // truncating any deterministic chain more than two hops deep. The
+        // dropped nodes were then never recomputed, and predict_at returned
+        // them (and anything sampled from them) at the TRAINING state with no
+        // error. tests/test_predict_dag_depth.cpp pins the depth contract.
+        while (!queue.empty()) {
             std::vector<std::string> next_queue;
             bool progress = false;
 
@@ -586,7 +608,10 @@ public:
      * and returns keys in a safe refresh order (parents before children).
      *
      * NOTE: this uses the Gibbs DAG (invalidates_), not the predict DAG.
-     * Used internally by composite_block::step() for refresher dispatch.
+     * Provided for inspection and for callers that want the transitive
+     * closure. The Gibbs sweep does NOT use it: composite_block::step()
+     * calls refresh_derived_for(), which refreshes exactly the keys a block
+     * declares and does not descend further.
      */
     std::vector<std::string> downstream_derived_of(
             const std::unordered_set<std::string>& replaced_keys) const {
@@ -659,6 +684,9 @@ private:
     std::unordered_map<std::string, std::vector<std::string>> dependencies_;
     std::unordered_map<std::string, std::vector<std::string>> invalidates_;
     std::unordered_map<std::string, refresher_fn> refreshers_;
+    /// Registration order of refreshers_, so refresh_all() can prime a
+    /// derived-reads-derived chain in the order the author declared it.
+    std::vector<std::string> refresher_order_;
     std::unordered_map<std::string, stochastic_refresher_fn>
         stochastic_refreshers_;
     std::unordered_set<std::string> data_input_keys_;

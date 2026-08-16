@@ -372,7 +372,7 @@ inline double psis_khat(const arma::vec& log_weights) {
     // near-perfect approximation and the GPD upper tail is degenerate
     // (all excesses ~ 0). Returning NaN would mislead the Layer-3
     // verdict; return a clearly negative sentinel to indicate
-    // "k̂ far below the PASS threshold". This is the PSIS convention
+    // "k-hat far below the PASS threshold". This is the PSIS convention
     // (Vehtari et al. 2024 §4): k̂ < 0 means "thinner-than-exponential
     // tail" — i.e., q is at least as concentrated as p.
     const double min_lw = log_weights.min();

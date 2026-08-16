@@ -6,6 +6,13 @@
  *
  *  USE: same construction as nuts_block; just swap class name.
  *
+ *  STATUS: not exercised by any shipped example, test, or generated
+ *  wrapper -- nothing in the tree constructs it. Treat it as an
+ *  experimental path, not the drop-in the line above suggests, and note
+ *  that its defaults differ from nuts_block's (n_warmup_first_call 1000
+ *  vs 200, and no target_accept_rate knob). Generated code should use
+ *  nuts_block.
+ *
  *  KEY DIFFERENCES vs mcmclib-based nuts_block:
  *    - mass matrix is ADAPTED online via Welford during phase II warmup;
  *      user does NOT need to call set_precond_matrix
@@ -23,7 +30,11 @@
 
 #include "nuts_kernel_v1/nuts/nuts_kernel.hpp"
 
-#include <armadillo>
+#ifndef MCMC_USE_RCPP_ARMADILLO
+# include <armadillo>
+#else
+# include <RcppArmadillo.h>
+#endif
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>

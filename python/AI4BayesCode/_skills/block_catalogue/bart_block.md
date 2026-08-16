@@ -69,7 +69,7 @@ ensemble `j`'s fit (equivalently their `x_ij^2` leaf weight is 0) -- never feed
 bart_block_config cfg;
 cfg.name                 = "f_bart";
 cfg.x_train              = X;            // Rcpp::NumericMatrix
-cfg.y_init               = y;            // Rcpp::NumericVector
+cfg.y_init               = y;            // arma::vec
 cfg.working_response_key = "bart_target";
 cfg.sigma_key            = "sigma";
 cfg.ntrees               = 50;

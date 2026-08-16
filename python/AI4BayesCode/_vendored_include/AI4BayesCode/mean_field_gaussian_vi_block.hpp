@@ -295,11 +295,28 @@ public:
             m(i, cols - 1) = history_.final_khat;  // same value all rows
         }
         out.emplace(cfg_.name + "__vi_history", std::move(m));
+
+        // Also emit the plain "<name>" key, ALWAYS. Emitting only
+        // "<name>__vi_history" once history is on means code that indexes the
+        // composite's history by the block's name -- the way every MCMC block
+        // is read -- gets NULL / KeyError the moment keep_history is turned
+        // on. One row per recorded step keeps it aligned with the sibling
+        // blocks' draws; "<name>__vi_history" keeps the packed diagnostics.
+        arma::mat q(n, K_);
+        for (std::size_t i = 0; i < n; ++i)
+            for (std::size_t j = 0; j < K_; ++j)
+                q(i, j) = history_.mu[i][j];
+        out.emplace(cfg_.name, std::move(q));
         return out;
     }
 
     std::size_t history_size() const noexcept override {
-        return history_.elbo.size();
+        // Base contract: 1 when the buffer is empty (current draw only).
+        // composite_block::history_size() takes the MIN over children, so a
+        // literal 0 here drags the whole composite to 0 draws -- which is what
+        // happens with keep_history off (the default), and for a VI block also
+        // after convergence, when its appends stop while siblings keep going.
+        return history_.elbo.empty() ? 1 : history_.elbo.size();
     }
 
     void clear_history() override {

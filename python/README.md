@@ -1,7 +1,7 @@
 # AI4BayesCode — Python helper
 
 Python-side companion to the AI4BayesCode MCMC library. Provides the
-Python equivalent of the R-side `AI4BayesCode_helpers.R`:
+Python equivalent of the R package's exported helpers:
 
 | R function                      | Python function                  |
 |---------------------------------|----------------------------------|
@@ -13,6 +13,14 @@ Python equivalent of the R-side `AI4BayesCode_helpers.R`:
 | `ai4bayescode_run_chains(...)`  | `AI4BayesCode.run_chains(...)`    |
 | `posterior::rhat(x)`            | `AI4BayesCode.rhat(x)`            |
 | `posterior::ess_bulk(x)`        | `AI4BayesCode.ess_bulk(x)`        |
+| `posterior::ess_tail(x)`        | `AI4BayesCode.ess_tail(x)`        |
+
+The last three have no `ai4bayescode_` prefix on the R side on purpose: R
+already has `posterior`, so the R helpers call it directly. The Python
+implementations exist because there is no assumed Python equivalent. They agree
+with `posterior` to within 1e-3 relative on the parity suite
+(`python/tests/test_diagnostics_vs_posterior.py`), so the same draws give the
+same verdict on both sides of the 1.05 gate.
 
 ## Install
 

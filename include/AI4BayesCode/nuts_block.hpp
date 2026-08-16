@@ -168,6 +168,26 @@ struct nuts_block_config {
     /// FindReasonableEpsilon's 10x bias can tolerate on iter 1.
     double initial_step_size = 0.0;
 
+    /// Hard bounds on the persisted dual-averaging step size, applied after
+    /// EVERY step() call. The same guard `joint_nuts_block` carries, for the
+    /// same reason: mcmclib's dual-averaging path has no floor or cap of its
+    /// own, and `use_persistent_adapt = true` (which this block always sets)
+    /// carries the adapted epsilon into the next call. A boundary-region
+    /// conditional -- a Beta or binomial parameter pushed near 0 or 1 -- can
+    /// drive eps to underflow, and once epsilon_bar_persist reaches ~0 it is
+    /// locked there for every subsequent draw: infinitesimal leapfrog steps,
+    /// identical draws, sd = 0, R-hat = Inf. The cap bounds the opposite
+    /// runaway (eps -> 1e+77, every trajectory rejected). pi is the nuts-rs
+    /// standard. Set either to 0 to disable that side.
+    /// Set by the constructor: whether the USER supplied constrain /
+    /// unconstrain, as opposed to the identity defaults installed below.
+    /// set_current uses this to refuse the half-configured case.
+    bool constrain_was_supplied   = false;
+    bool unconstrain_was_supplied = false;
+
+    double min_step_size = 1e-6;
+    double max_step_size = 3.141592653589793;  // pi (nuts-rs)
+
     /// Number of dual-averaging adaptation iterations performed at the
     /// very first call to step(). Larger gives the initial step-size
     /// search more runway; the default 200 matches the order used by
@@ -285,6 +305,8 @@ public:
             throw std::invalid_argument(
                 "nuts_block: log_density_grad oracle is required");
         }
+        cfg_.constrain_was_supplied   = static_cast<bool>(cfg_.constrain);
+        cfg_.unconstrain_was_supplied = static_cast<bool>(cfg_.unconstrain);
         if (!cfg_.constrain) {
             cfg_.constrain = [](const arma::vec& x) { return x; };
         }
@@ -362,9 +384,11 @@ public:
 
         ns.n_burnin_draws = n_warmup;
         ns.n_keep_draws   = cfg_.n_draws_per_step;
-        // Adapt ONLY during burnin, not during kept draws. Adapting
-        // during sampling violates detailed balance and causes ~7%
-        // variance underestimation in 1D.
+        // Adapt ONLY during burnin, not during kept draws: adapting while
+        // draws are being kept violates detailed balance. (For what
+        // n_warmup_per_step > 0 actually costs, see its config docs -- the
+        // old "~5-8% variance bias" framing predates the 2026-04-12 mcmclib
+        // fix and understates it.)
         ns.n_adapt_draws  = n_warmup;
 
         // Adapter between our (theta, ctx) -> (lp, grad) signature and
@@ -397,6 +421,22 @@ public:
                 "nuts_block '" + cfg_.name + "': nuts produced zero draws");
         }
 
+        // Clamp the PERSISTED step size into [min_step_size, max_step_size]
+        // before it is carried into the next call. See the config docs: a
+        // well-conditioned chain never touches these bounds, so behaviour is
+        // unchanged there; they only catch the underflow-lock and the runaway.
+        {
+            auto& ns = cfg_.nuts_settings.nuts_settings;
+            if (cfg_.min_step_size > 0.0 &&
+                !(ns.epsilon_bar_persist >= cfg_.min_step_size)) {
+                ns.epsilon_bar_persist = cfg_.min_step_size;
+            }
+            if (cfg_.max_step_size > 0.0 &&
+                ns.epsilon_bar_persist > cfg_.max_step_size) {
+                ns.epsilon_bar_persist = cfg_.max_step_size;
+            }
+        }
+
         // Advance current value to the last kept draw. All prior draws in
         // this step() call are discarded; if the user wants thinning
         // behaviour they must pull draws out of a larger outer loop.
@@ -423,6 +463,23 @@ public:
     }
 
     void set_current(const arma::vec& theta_natural) override {
+        if (theta_natural.n_elem != theta_natural_.n_elem) {
+            throw std::invalid_argument(
+                "nuts_block '" + cfg_.name + "': set_current expects a length-"
+                + std::to_string(theta_natural_.n_elem) + " vector, got length "
+                + std::to_string(theta_natural.n_elem)
+                + ". A different length would silently change dim(), which the "
+                "composite uses to split its concatenated state vector.");
+        }
+        if (cfg_.constrain_was_supplied && !cfg_.unconstrain_was_supplied) {
+            throw std::invalid_argument(
+                "nuts_block '" + cfg_.name + "': set_current needs an "
+                "`unconstrain` in the config, because a non-identity "
+                "`constrain` was supplied. Without it the natural value is "
+                "taken as if it were already unconstrained -- with "
+                "constrain = exp, set_current(2.0) would restart the chain at "
+                "exp(2.0) = 7.39, not 2.0.");
+        }
         theta_natural_ = theta_natural;
         theta_unc_     = cfg_.unconstrain(theta_natural);
     }
@@ -473,7 +530,13 @@ public:
         if (static_cast<std::size_t>(ns.precond_mat.n_elem) ==
             theta_unc_.n_elem * theta_unc_.n_elem) {
             out.precond_mat = ns.precond_mat;
-            out.metric_kind = "dense";
+            out.metric_kind = metric_is_diagonal(ns.precond_mat) ? "diagonal"
+                                                                 : "dense";
+            if (out.metric_kind == "diagonal") {
+                out.precond_diag.assign(ns.precond_mat.n_rows, 0.0);
+                for (arma::uword i = 0; i < ns.precond_mat.n_rows; ++i)
+                    out.precond_diag[i] = ns.precond_mat(i, i);
+            }
         } else {
             out.metric_kind = "identity";
         }

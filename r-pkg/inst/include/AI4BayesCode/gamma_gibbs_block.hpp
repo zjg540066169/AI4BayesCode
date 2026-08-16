@@ -175,6 +175,21 @@ public:
             value_[0] = g;
         }
         // Else: keep previous value (rare extreme-shape underflow).
+        //
+        // The conjugate leaves deliberately differ here, by what the draw
+        // FEEDS rather than by taste:
+        //   gamma / inv_gamma  -- hold the previous value. A scale parameter
+        //     read by a sibling likelihood must stay strictly positive and
+        //     finite; the previous draw is the nearest valid state, and one
+        //     held draw in a long chain is negligible.
+        //   beta               -- clamp to 1e-300. Its output is a
+        //     probability, and 0 or 1 exactly would make a downstream log()
+        //     infinite; clamping keeps the support open.
+        //   dirichlet          -- THROW. All K gamma draws underflowing means
+        //     the normalizer is 0, so there is no simplex point to hold or
+        //     clamp to; continuing would silently emit a non-simplex value.
+        // Whatever the branch, the history append below still runs, so this
+        // block's draw count stays aligned with its siblings'.
 
         if (keep_history_) {
             history_buf_.push_back(value_);

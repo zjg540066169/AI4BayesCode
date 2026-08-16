@@ -100,6 +100,17 @@ struct adaptation_info {
     std::string metric_kind  = "identity";    // "identity" | "diagonal" | "dense"
 };
 
+/// True when M is square and every off-diagonal entry is exactly zero, i.e.
+/// the metric is diagonal even though it is stored densely. Reporting such a
+/// metric as "dense" makes a checkpoint misdescribe the sampler it came from.
+inline bool metric_is_diagonal(const arma::mat& M) {
+    if (M.n_rows != M.n_cols || M.n_rows == 0) return false;
+    for (arma::uword j = 0; j < M.n_cols; ++j)
+        for (arma::uword i = 0; i < M.n_rows; ++i)
+            if (i != j && M(i, j) != 0.0) return false;
+    return true;
+}
+
 } // namespace AI4BayesCode
 
 #endif // AI4BAYESCODE_TYPES_HPP

@@ -283,7 +283,14 @@ public:
         bool offset_scalar = false;
         if (!cfg_.offset_key.empty()) {
             const auto it_off = context_.find(cfg_.offset_key);
-            if (it_off != context_.end()) {
+            if (it_off == context_.end()) {
+                throw std::runtime_error(
+                    "probit_aug_block '" + cfg_.name + "': offset_key '" + cfg_.offset_key
+                    + "' is configured but not present in the context. Add it to "
+                    "declare_dependencies(\"" + cfg_.name + "\", {...}), or leave "
+                    "offset_key empty if this model has no offset.");
+            }
+            {
                 if (it_off->second.n_elem == 1) {
                     offset_scalar = true;
                 } else if (it_off->second.n_elem == cfg_.n_obs) {

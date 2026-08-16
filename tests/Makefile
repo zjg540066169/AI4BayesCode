@@ -141,10 +141,10 @@ run: build
 	./test_history_alignment
 	@echo
 	@echo "=== Running test_predict_dag_depth ==="
-	@echo "    (currently FAILS: locks the predict-DAG BFS depth cap,"
-	@echo "     an unfixed bug in shared_data.hpp. Runs last so it"
-	@echo "     does not block the rest of the suite.)"
 	./test_predict_dag_depth
+	@echo
+	@echo "=== Running test_wiring_guards ==="
+	./test_wiring_guards
 
 AI4BAYESCODE_HEADERS := \
   $(INC_DIR)/AI4BayesCode/block_sampler.hpp \

@@ -896,7 +896,15 @@ public:
         if (static_cast<std::size_t>(ns.precond_mat.n_elem) ==
             total_unc_dim_ * total_unc_dim_) {
             out.precond_mat = ns.precond_mat;
-            out.metric_kind = dense_metric_adapted_ ? "dense" : "identity";
+            out.metric_kind =
+                !dense_metric_adapted_      ? "identity"
+                : metric_is_diagonal(ns.precond_mat) ? "diagonal"
+                                                     : "dense";
+            if (out.metric_kind == "diagonal") {
+                out.precond_diag.assign(ns.precond_mat.n_rows, 0.0);
+                for (arma::uword i = 0; i < ns.precond_mat.n_rows; ++i)
+                    out.precond_diag[i] = ns.precond_mat(i, i);
+            }
         } else {
             out.metric_kind = "identity";
         }

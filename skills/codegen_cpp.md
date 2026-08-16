@@ -636,6 +636,15 @@ Sub-parameter names (`theta`, `b`, ...) appear in shared_data as
 individual keys automatically -- the joint block writes each slice back
 to its own key via `current_named_outputs()`.
 
+**Every `*_key` you set must appear in that block's dependency list.** A
+block's optional terms (`offset_key`, `entry_time_key`, `sigma_key`,
+`y_key`, `n_key`, ...) take the empty string to mean "not used in this
+model". Naming a key and then omitting it from `declare_dependencies`
+throws at the first `step()`, with the key and the fix in the message --
+it used to be silently ignored, which dropped the term from the
+conditional and produced a wrong posterior that passed every convergence
+check. Set the key and declare it in the same edit.
+
 **Hard rules for joint_nuts_block:**
 - Every sub-parameter name must be unique within the block AND must be
   the same name downstream blocks read via `declare_dependencies`.

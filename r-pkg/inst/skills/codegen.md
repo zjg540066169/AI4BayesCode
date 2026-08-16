@@ -1172,6 +1172,17 @@ test does:
 - `pp <- model$predict_at(list())` -- verify predict_at runs without
   error and `get_current()` is unchanged afterwards (state preservation
   per validator Check #10)
+- **freeze -> `predict_at` history**: with `keep_history = TRUE`, freeze
+  one child, step a few more times, then call `predict_at` -- it must not
+  raise "inconsistent history sizes". A freezable history-bearing block
+  that forgot `record_held_history()` fails exactly here.
+- **`predict_dag_smoke`**: replace ONE data input and confirm no key comes
+  back that depends on an input you did NOT supply. That is the
+  silent-default-substitution scan -- a wrapper that quietly fills a
+  missing input from a training-set mean passes every other check.
+
+These four are validator.md's R1, in full; emitting only the first two
+is the common shortfall.
 
 **On PASS, DELETE the smoke-test file.** The smoke test is a
 throwaway -- it verifies the generation once, then it is gone. Ongoing
@@ -1206,8 +1217,11 @@ wording -- R2/R3 are never skipped, but by default they are not
 *shipped*.)
 
 ```r
-chain1 <- run_chain_<ClassName>(data, init1, seed = 1L, n_burnin = 4000, n_keep = 4000)
-chain2 <- run_chain_<ClassName>(data, init2, seed = 2L, n_burnin = 4000, n_keep = 4000)
+# Chains differ by SEED only. Do NOT surface per-parameter initial values
+# as constructor arguments (codegen_cpp.md "Initial values: NEVER expose by
+# default"); the signature here matches validator.md's R2 template.
+chain1 <- run_chain(seed = 1L, n_burn = 4000, n_keep = 4000)
+chain2 <- run_chain(seed = 2L, n_burn = 4000, n_keep = 4000)
 
 # Check: do the chains agree on posterior means?
 # Check: are all values finite?

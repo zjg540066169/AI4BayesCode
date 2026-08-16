@@ -392,7 +392,7 @@ inline arma::mat rk45(RHS&& f,
             if (++iter_count > max_iter) {
                 throw std::runtime_error(
                     "ode::rk45: max_iter exceeded (" +
-                    std::to_string(max_iter) + ") — "
+                    std::to_string(max_iter) + ") -- "
                     "consider increasing tolerances or max_iter; "
                     "ODE may be stiff (Tier 1 is non-stiff only).");
             }
@@ -405,7 +405,7 @@ inline arma::mat rk45(RHS&& f,
                 throw std::runtime_error(
                     "ode::rk45: step size underflow (" +
                     std::to_string(h_step) + " < " +
-                    std::to_string(min_h) + ") — stiff dynamics or "
+                    std::to_string(min_h) + ") -- stiff dynamics or "
                     "discontinuity likely; Tier 1 handles non-stiff only.");
             }
 

@@ -152,7 +152,7 @@ def _read_pybind_module_name(text: str, where: str) -> str:
             "Python compilation requires a pybind11 module declaration. If the "
             "file has only RCPP_MODULE (Rcpp-only), add a PYBIND11_MODULE inside "
             "an `#ifdef AI4BAYESCODE_PYBIND_MODULE ... #endif` guard. See the "
-            "dual-module reference examples/ODE_SIR.cpp."
+            "dual-module reference AI4BayesCode.examples_path(\"ODE_SIR\")."
         )
     start = idx + len(needle)
     end = text.find(",", start)

@@ -11,7 +11,11 @@
 #include "block_sampler.hpp"
 #include "nuts_block_v2.hpp"  // for log_density_gradient_fn_v2
 
-#include <armadillo>
+#ifndef MCMC_USE_RCPP_ARMADILLO
+# include <armadillo>
+#else
+# include <RcppArmadillo.h>
+#endif
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -34,6 +38,9 @@ struct joint_nuts_block_v2_config {
     std::vector<joint_nuts_sub_param_v2> sub_params;
     log_density_gradient_fn_v2 log_density_grad;
     arma::vec initial_cat;
+    /// NOTE: joint_nuts_block uses 500 here, with a stated reason. This
+    /// header is not exercised by any shipped example, test, or generated
+    /// wrapper; treat it as an experimental path.
     std::size_t n_warmup_first_call = 1000;
     std::size_t n_draws_per_step    = 1;
     double      initial_step_size   = 0.0;

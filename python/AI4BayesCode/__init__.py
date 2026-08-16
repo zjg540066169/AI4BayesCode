@@ -1,6 +1,6 @@
 """AI4BayesCode — Python helper for the AI4BayesCode MCMC library.
 
-Public API mirrors the R helper (AI4BayesCode_helpers.R):
+Public API mirrors the R package's exported helpers:
 
     sourceCpp(cpp_file, ai4bayescode_path)   # compile a .cpp with pybind11
     plot_dag(model, ...)                 # visualize the model DAG
@@ -19,7 +19,7 @@ headers ship inside the installed package):
     AI4BayesCode.plot_dag(m)
 
 The `.cpp` file must contain a `PYBIND11_MODULE(ModuleName, m) { ... }`
-block. See `examples/ODE_SIR.cpp` for a dual-module reference.
+block. For a reference model, see AI4BayesCode.examples_path("ODE_SIR").
 
 `sourceCpp(...)` is retained as a back-compatibility alias (pass
 `ai4bayescode_path=` only if you want the legacy checkout-based build).

@@ -11,7 +11,7 @@ Install:
 
 Once installed:
     import AI4BayesCode
-    mod = AI4BayesCode.sourceCpp("MyModel.cpp", ai4bayescode_path=".../AI4BayesCode")
+    mod = AI4BayesCode.source("MyModel.cpp")
 """
 
 from setuptools import setup, find_packages

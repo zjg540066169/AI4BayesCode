@@ -5,7 +5,8 @@ Header-only port of Welandawe et al. 2022 RAABBVI. Exposes:
 - `vi_optimizer::raabbvi_config` -- POD struct with `gamma_0` (initial
   learning rate, default 0.1), `rho` (geometric decay between epochs,
   default 0.5), `tau` (SKL termination threshold, default 0.1),
-  `W_min` (minimum R-hat-convergence window, default 100), `max_epochs`
+  `inner_iter_per_epoch` (fixed steps per gamma-epoch, default 200),
+  `eps_stab` (Adam stabilizer, default 1e-8), `max_epochs`
   (cap on outer loops, default 50), `S_khat` (samples for terminal
   k-hat computation, default 1000).
 - `vi_optimizer::raabbvi<GradFn>` -- templated struct taking a

@@ -40,7 +40,7 @@ which is what mean-field collapses to -- textbook Bishop Sec.10.1.2.
 (too expensive -- switch back to mean-field or restructure).
 
 **Public interface**: identical to `mean_field_gaussian_vi_block`,
-plus `get_L() -> const arma::mat&` (current lower-triangular Cholesky
+plus `L() -> const arma::mat&` (current lower-triangular Cholesky
 factor).
 
 **Constraints + validator obligations**: same as

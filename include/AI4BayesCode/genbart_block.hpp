@@ -186,7 +186,14 @@ public:
         // Refresh Y if a key is configured and present.
         if (!cfg_.y_key.empty()) {
             auto it = ctx.find(cfg_.y_key);
-            if (it != ctx.end()) {
+            if (it == ctx.end()) {
+                ai4b::stop("genbart_block '" + cfg_.name + "': y_key '" + cfg_.y_key
+                    + "' is configured but not present in the context. Add it to "
+                    "declare_dependencies(\"" + cfg_.name + "\", {...}), or leave "
+                    "y_key empty if Y is fixed training data. Without it the "
+                    "ensemble keeps fitting the previous sweep's working response.");
+            }
+            {
                 if (it->second.n_elem != n) {
                     ai4b::stop("genbart_block '" + cfg_.name
                         + "': Y context length "

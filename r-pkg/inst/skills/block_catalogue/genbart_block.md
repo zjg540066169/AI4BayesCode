@@ -72,7 +72,7 @@ genbart_block_config cfg;
 cfg.name        = "r";           // shared_data key storing r(X)
 cfg.x_train     = X;
 cfg.y_init      = y;
-cfg.offset_init = Rcpp::NumericVector(0);  // empty = zeros
+cfg.offset_init = arma::vec();             // empty = zeros
 cfg.lik         = likelihood_.get();       // non-owning pointer
 cfg.ntrees      = 50;                       // Linero 2022: 50 for softer
                                             // likelihoods (logistic/NB/

@@ -361,7 +361,14 @@ public:
         const arma::vec* n_ptr = nullptr;
         if (!cfg_.n_key.empty()) {
             auto it = context_.find(cfg_.n_key);
-            if (it != context_.end()) {
+            if (it == context_.end()) {
+                throw std::runtime_error(
+                    "poisson_multinomial_aug_block '" + cfg_.name + "': n_key '" + cfg_.n_key
+                    + "' is configured but not present in the context. Add it to "
+                    "declare_dependencies(\"" + cfg_.name + "\", {...}), or leave "
+                    "n_key empty if this model has no exposure vector.");
+            }
+            {
                 if (it->second.n_elem != cfg_.N) {
                     throw std::runtime_error(
                         "poisson_multinomial_aug_block '" + cfg_.name

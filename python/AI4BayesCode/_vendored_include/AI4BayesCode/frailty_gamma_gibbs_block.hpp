@@ -241,7 +241,14 @@ public:
         const arma::vec* entry_ptr  = nullptr;
         if (!cfg_.offset_key.empty()) {
             auto it_o = context_.find(cfg_.offset_key);
-            if (it_o != context_.end()) {
+            if (it_o == context_.end()) {
+                throw std::runtime_error(
+                    "frailty_gamma_gibbs_block '" + cfg_.name + "': offset_key '" + cfg_.offset_key
+                    + "' is configured but not present in the context. Add it to "
+                    "declare_dependencies(\"" + cfg_.name + "\", {...}), or leave "
+                    "offset_key empty if this model has no covariate effect.");
+            }
+            {
                 if (it_o->second.n_elem != n) {
                     throw std::runtime_error("frailty_gamma_gibbs_block '" + cfg_.name
                         + "': offset length mismatch");
@@ -251,7 +258,14 @@ public:
         }
         if (!cfg_.entry_time_key.empty()) {
             auto it_v = context_.find(cfg_.entry_time_key);
-            if (it_v != context_.end()) {
+            if (it_v == context_.end()) {
+                throw std::runtime_error(
+                    "frailty_gamma_gibbs_block '" + cfg_.name + "': entry_time_key '" + cfg_.entry_time_key
+                    + "' is configured but not present in the context. Add it to "
+                    "declare_dependencies(\"" + cfg_.name + "\", {...}), or leave "
+                    "entry_time_key empty if this model has no left truncation.");
+            }
+            {
                 if (it_v->second.n_elem != n) {
                     throw std::runtime_error("frailty_gamma_gibbs_block '" + cfg_.name
                         + "': entry_time length mismatch");

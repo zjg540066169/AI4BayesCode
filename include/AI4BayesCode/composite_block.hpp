@@ -290,8 +290,24 @@ public:
                     "total child dim");
             }
             child->set_current(theta.subvec(offset, offset + d - 1));
+
+            // Write back the child's NAMED OUTPUTS, exactly as step() does.
+            // Writing only child->name() is wrong for any multi-output block:
+            // a joint_nuts_block's name() is not a shared_data key at all
+            // (see joint_nuts_block's docs), so that path would store a junk
+            // entry while the real sub-parameter keys -- beta, sigma, ... --
+            // kept their PRE-restore values, and the next sweep would run
+            // against stale state. Use the no-rng overload here: this is a
+            // restore, not a sweep, so a VI child must not burn a q-draw.
+            for (const auto& kv : child->current_named_outputs()) {
+                data_.write_back(kv.first, kv.second);
+            }
+
+            // ...and refresh whatever those keys invalidate, again as step()
+            // does; otherwise the restored state coexists with derived values
+            // computed from the state it replaced.
             if (!child->name().empty()) {
-                data_.write_back(child->name(), child->current());
+                data_.refresh_derived_for(child->name());
             }
             offset += d;
         }
@@ -819,6 +835,22 @@ public:
         for (const auto& dk : det_refreshed) {
             if (scratch.has_refresher(dk)) {
                 scratch.refresh_key(dk);
+            } else if (replaced_values.find(dk) == replaced_values.end()) {
+                // The DAG says this node changed, but there is no way to
+                // recompute it and the caller did not supply one. Marking it
+                // "changed" anyway would propagate its TRAINING value through
+                // every downstream node and hand it back as a prediction --
+                // silently, at whatever the fit happened to leave there. The
+                // canonical case is a BART / genBART / GP forest key
+                // (declare_predict_edges("X", {"f_bart"})) at new X: the
+                // ensemble cannot be re-evaluated from shared_data alone, so
+                // it has to be injected per draw.
+                throw std::runtime_error(
+                    "predict_at: '" + dk + "' is downstream of the replaced "
+                    "inputs but has no registered refresher, so it cannot be "
+                    "recomputed at the new data. Either supply it directly in "
+                    "newdata (per draw, for a fitted forest / kernel), or "
+                    "register a refresher for it.");
             }
             changed.insert(dk);
         }
