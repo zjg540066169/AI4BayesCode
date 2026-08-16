@@ -65,22 +65,6 @@ those sections).
   the combined-work license to the GPL **v3** branch — see
   "Compatibility notes".
 
-## walnuts (design reference for `nuts_kernel_v1`)
-
-- Upstream: https://github.com/flatironinstitute/walnuts
-- License: MIT.
-- Methodology / reference implementation: Bou-Rabee, Carpenter, Kleppe
-  & Liu (2025), the WALNUTS within-orbit / mass-adaptation scheme.
-- What we use: NO walnuts source is vendored. The header-only NUTS
-  kernel under `include/AI4BayesCode/nuts_kernel_v1/` is an independent
-  AI4BayesCode implementation (`Copyright (C) 2026 AI4BayesCode`,
-  GPL-3.0-or-later) whose mass-matrix / dual-averaging conventions were
-  cross-checked against walnuts (e.g. `adaptive_walnuts.hpp`); the
-  inline comments cite walnuts where a default or convention is
-  matched. MIT is GPL-compatible, so even a future vendoring of walnuts
-  source would be combinable into the GPL-3 combined work.
-- Modifications: not applicable (no vendored source).
-
 ## BART kernel — CRAN BART R package (vanilla Gaussian BART)
 
 - Upstream: the **CRAN `BART` R package** (NOT `dbarts`).
@@ -244,8 +228,7 @@ those sections).
 ### Compatibility notes
 
 - GPL is one-directionally compatible with **MIT** (autodiff,
-  celerite, and walnuts — the latter a design reference only, no
-  vendored source), **BSD-3-Clause** (libgp), **MPL-2.0** (Eigen) and
+  celerite), **BSD-3-Clause** (libgp), **MPL-2.0** (Eigen) and
   **CeCILL-B** (librjmcmc) — all may be combined into a GPL work.
 - The BART-family kernels are **GPL-2.0-or-later**: the "or-later"
   clause permits redistribution under GPL-3.
