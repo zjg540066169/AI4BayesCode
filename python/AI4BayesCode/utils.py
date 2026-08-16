@@ -3,8 +3,10 @@
 Python equivalents of the R `posterior` package functions used in the
 R helper. `rhat` implements the rank-normalized split-R-hat of Vehtari
 et al. (2021) and agrees with `posterior::rhat` to ~1e-7. `ess_bulk` /
-`ess_tail` use a simpler autocorrelation estimator and are NOT identical
-to `posterior::ess_bulk` / `ess_tail`; treat them as indicative.
+`ess_tail` implement the same paper's split-ESS with Geyer's initial
+positive / monotone sequence and agree with `posterior::ess_bulk` /
+`ess_tail` to within 1e-3 relative (see
+`python/tests/test_diagnostics_vs_posterior.py`).
 
 Inputs are numpy arrays shaped (n_draws, n_chains) or a single 1-D
 array which is treated as a single chain.

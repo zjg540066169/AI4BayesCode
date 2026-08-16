@@ -80,7 +80,7 @@ that washes out the correlation.
 - R-level audit: Pearson cor 1.00000 vs
   exact 81-state enumeration over both cliques.
 
-**Validation against independent paths** (`tests/test_structured_*.cpp`):
+**Validation against independent paths**:
 | Path | Algorithm | Status |
 |---|---|---|
 | #1 | RAABBVI gradient (block under test) | reference |

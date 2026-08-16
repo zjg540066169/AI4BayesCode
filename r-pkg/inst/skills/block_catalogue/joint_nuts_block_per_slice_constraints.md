@@ -52,7 +52,7 @@ vector of per-unit random effects at large dim -- e.g.
 `(sigma, eps_raw[M])` for `eps = sigma * eps_raw` non-centered
 parameterization, or `(tau, u[J])` -- the `u_i` and `sigma` are
 strongly multiplicatively correlated. Identity-metric NUTS mixes
-poorly here (see joint_nuts_block Sec.1289 dim-vs-rhat envelope), so the
+poorly here (see the dim-vs-rhat envelope in `validator.md` Check #18), so the
 diagonal->dense escalation frequently lands on dense.
 
 **Start diagonal; escalate to `cfg.use_dense_metric = true` (Check #18)

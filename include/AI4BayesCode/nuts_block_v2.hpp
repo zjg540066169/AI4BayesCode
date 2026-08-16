@@ -7,7 +7,10 @@
  *  USE: same construction as nuts_block; just swap class name.
  *
  *  STATUS: not exercised by any shipped example, test, or generated
- *  wrapper -- nothing in the tree constructs it. Treat it as an
+ *  wrapper -- nothing in the tree constructs it, and it does NOT currently
+ *  compile: its `readapt(std::size_t, bool, std::mt19937_64&)` no longer
+ *  matches the 5-argument virtual in block_sampler.hpp, so the `override`
+ *  is a hard error. Treat it as an
  *  experimental path, not the drop-in the line above suggests, and note
  *  that its defaults differ from nuts_block's (n_warmup_first_call 1000
  *  vs 200, and no target_accept_rate knob). Generated code should use

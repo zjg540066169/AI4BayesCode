@@ -8,13 +8,20 @@ expect to see the model's data-flow structure. Call
 `model.get_dag()["gibbs_reads"]` directly if you need to debug
 Gibbs dependencies.
 
-Node coloring matches the R helper:
+Node coloring (five roles, classified from `gibbs_reads` /
+`gibbs_invalidates`):
 
   - Data inputs                (green circle)
   - Hyperparameters            (grey square)
   - Sampled parameters         (blue circle)
   - Derived keys               (purple diamond)
   - Terminal / leaf            (orange circle)
+
+This is FINER than the R helper's rendering, which classifies by
+predict-DAG in-degree into four roles (data / sampled / predictive /
+context) with its own palette. The same model therefore looks different
+in the two frontends -- same graph, different grouping -- so do not
+compare the two pictures node-for-node.
 
 Plate detection: names matching `<prefix>_<digits>` collapse into a
 single node labeled `<prefix>_i [n=K]`.

@@ -40,7 +40,9 @@ struct joint_nuts_block_v2_config {
     arma::vec initial_cat;
     /// NOTE: joint_nuts_block uses 500 here, with a stated reason. This
     /// header is not exercised by any shipped example, test, or generated
-    /// wrapper; treat it as an experimental path.
+    /// wrapper, and it does NOT currently compile (its `readapt` signature no
+    /// longer matches the 5-argument virtual in block_sampler.hpp); treat it
+    /// as an experimental path.
     std::size_t n_warmup_first_call = 1000;
     std::size_t n_draws_per_step    = 1;
     double      initial_step_size   = 0.0;

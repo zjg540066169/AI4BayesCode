@@ -30,7 +30,10 @@ The shipped `audit_dp_gaussian_4chain.R` only checks GLOBALLY-IDENTIFIED
 quantities (alpha, K_active, predictive moments) for this reason;
 per-component R-hat is left to user post-processing.
 
-**Marginal-Neal-Alg-2/8 (CRP) alternative**: not shipped at this version. Would
+**Marginal-Neal-Alg-2/8 (CRP) alternative**: available via
+`categorical_gibbs_block` with a CRP `log_probs_fn` (see
+`block_catalogue/categorical_gibbs_block.md` and the `bnp::crp_*` helpers).
+A dedicated collapsed-CRP block would
 require a CRP-specific categorical_gibbs that handles birth/death of
 clusters in the partition (z_i sampled from a (K+1)-way mixture where
 the K+1-th outcome creates a new cluster). The truncated SBP approach

@@ -19,7 +19,7 @@ description: |
 | `interval` | (L, U) | logit | Tight intervals: Yes |
 | `ordered` | x1 < x2 < ... | log-increments | **Yes** (0.05) |
 | `cholesky_corr` | Cholesky of corr matrix | tanh partial correlations | **Yes** (0.05) |
-| `unit_vector` | ||x||=1 | auxiliary Gaussian | No |
+| `unit_vector` | `norm(x) = 1` | auxiliary Gaussian | No |
 | `positive_ordered` | 0 < x1 < x2 < ... | log first + log-increments | **Yes** (0.05) |
 | `offset_multiplier` | R (affine reparam) | offset + multiplier * u | No |
 | `sum_to_zero` | sum(x) = 0, K-1 free dims | orthogonal sum-to-zero basis | No |

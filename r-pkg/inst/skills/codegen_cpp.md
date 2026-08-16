@@ -640,7 +640,8 @@ to its own key via `current_named_outputs()`.
 block's optional terms (`offset_key`, `entry_time_key`, `sigma_key`,
 `y_key`, `n_key`, ...) take the empty string to mean "not used in this
 model". Naming a key and then omitting it from `declare_dependencies`
-throws at the first `step()`, with the key and the fix in the message --
+throws at the first `step()` that reads it, with the key and the fix in the
+message --
 it used to be silently ignored, which dropped the term from the
 conditional and produced a wrong posterior that passed every convergence
 check. Set the key and declare it in the same edit.
@@ -2369,7 +2370,8 @@ pybind11 type casters (in `AI4BayesCode/pybind_casters.hpp`) convert these
 to R lists / Python dicts automatically. Include the one that matches
 your backend at the tail of the `.cpp`.
 
-### Tail template -- choose based on Sec.1 Q0 "Runtime backend"
+### Tail template -- choose based on `codegen.md` Sec.1, question 1
+(which language the usage example is in)
 
 #### Conditional kernel-control method `readapt_NUTS` (NUTS-family composites only)
 

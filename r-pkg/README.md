@@ -101,7 +101,7 @@ e.g. `ai4bayescode_generate("...", API_key = "sk-other")` — without changing w
 | Block headers (`AI4BayesCode/*_block.hpp`) | 38 | `ai4bayescode_include_path()` |
 | Vendored deps (mcmclib, eigen, autodiff, libgp, celerite, bart) | 6 | bundled, auto-linked |
 | Reference examples (`.cpp`) | 43 | `ai4bayescode_list_examples()` |
-| AI codegen skills (markdown) | 18 | `ai4bayescode_list_skills()` |
+| AI codegen skills (markdown) | 14 | `ai4bayescode_list_skills()` |
 
 ## Planned for later versions
 
@@ -110,6 +110,7 @@ generator (`ai4bayescode_generate()`, above). Still planned:
 
 - `m$sample(data = ..., chains = 4, ...)` — a CmdStanR-style high-level wrapper
 - Command-line interface (`ai4bayescode` CLI)
+
 The Python mirror is **already available** — install it with:
 
 ```bash

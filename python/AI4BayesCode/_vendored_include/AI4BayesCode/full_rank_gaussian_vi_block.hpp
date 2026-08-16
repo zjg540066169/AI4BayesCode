@@ -238,10 +238,13 @@ public:
         // is read -- gets NULL / KeyError the moment keep_history is turned
         // on. One row per recorded step keeps it aligned with the sibling
         // blocks' draws; "<name>__vi_history" keeps the packed diagnostics.
+        // NATURAL scale, matching this key's empty-history fallback above and
+        // current(). history_.mu holds the UNCONSTRAINED mean.
         arma::mat q(n, K_);
-        for (std::size_t i = 0; i < n; ++i)
-            for (std::size_t j = 0; j < K_; ++j)
-                q(i, j) = history_.mu[i][j];
+        for (std::size_t i = 0; i < n; ++i) {
+            const arma::vec nat = cfg_.constrain(history_.mu[i]);
+            for (std::size_t j = 0; j < K_; ++j) q(i, j) = nat[j];
+        }
         out.emplace(cfg_.name, std::move(q));
         return out;
     }

@@ -12,8 +12,9 @@
  *
  *  WHY THIS BLOCK EXISTS
  *  =====================
- *  `simplex_nuts_block` works for any target on the simplex, including
- *  non-conjugate cases where theta couples into a complicated likelihood.
+ *  A `joint_nuts_block` with a SIMPLEX sub-parameter works for any target
+ *  on the simplex, including non-conjugate cases where theta couples into a
+ *  complicated likelihood.
  *  But for the common case where theta's full conditional is exactly
  *
  *      theta | everything_else  ~  Dirichlet(alpha_post)
@@ -40,12 +41,12 @@
  *  only mathematical content the AI has to write; the remaining code is
  *  a small amount of idiomatic glue.
  *
- *  RELATIONSHIP TO simplex_nuts_block
- *  ----------------------------------
- *  Use this block when the conditional is EXACTLY Dirichlet. Use
- *  simplex_nuts_block when the conditional has additional non-
- *  Dirichlet factors (e.g. a logistic link, a smooth prior on the
- *  log-ratios, a penalty on the simplex location).
+ *  RELATIONSHIP TO joint_nuts_block (SIMPLEX sub-parameter)
+ *  --------------------------------------------------------
+ *  Use this block when the conditional is EXACTLY Dirichlet. Put the
+ *  simplex on a `joint_nuts_block` SIMPLEX sub-parameter when the
+ *  conditional has additional non-Dirichlet factors (e.g. a logistic link,
+ *  a smooth prior on the log-ratios, a penalty on the simplex location).
  *
  *  NUMERICAL NOTES
  *  ---------------
@@ -53,8 +54,9 @@
  *  parameters (below ~0.01) due to underflow. In that case the sum of
  *  draws can also be zero, producing NaN on division. We detect this
  *  and throw a descriptive error: the caller should either bound the
- *  prior shape away from zero, or switch to simplex_nuts_block whose
- *  stick-breaking parameterization handles tiny shapes gracefully.
+ *  prior shape away from zero, or move the simplex onto a
+ *  `joint_nuts_block` SIMPLEX sub-parameter, whose stick-breaking
+ *  parameterization handles tiny shapes gracefully.
  *================================================================================*/
 
 #ifndef AI4BAYESCODE_DIRICHLET_GIBBS_BLOCK_HPP

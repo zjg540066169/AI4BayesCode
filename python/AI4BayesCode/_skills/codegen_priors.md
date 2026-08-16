@@ -290,7 +290,7 @@ rank -- do NOT read "item 1" as "try this first":
      regression -- that is exactly `bart_block`, only sampled far slower.** `normal_lik` exists for
      composition, not as the Gaussian default. (Custom families outside
      the 10 shipped: subclass `genbart::likelihood`; see
-     `codegen_cpp.md Sec.6c`.)
+     `codegen_cpp.md Sec.6d`.)
 5. **`hmm_block`** -- exact forward-filter backward-sample for
    finite-state Hidden Markov Models.
 

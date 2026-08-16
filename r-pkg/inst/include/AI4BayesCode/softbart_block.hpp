@@ -207,7 +207,13 @@ public:
         sigma_override_ = -1.0;
         if (!cfg_.sigma_key.empty()) {
             auto it_s = ctx.find(cfg_.sigma_key);
-            if (it_s != ctx.end()) {
+            if (it_s == ctx.end()) {
+                ai4b::stop("softbart_block '" + cfg_.name + "': sigma_key '" + cfg_.sigma_key
+                    + "' is configured but not present in the context. Add it to "
+                    "declare_dependencies(\"" + cfg_.name + "\", {...}), or leave "
+                    "sigma_key empty if this model has no external sigma.");
+            }
+            {
                 if (it_s->second.n_elem != 1) {
                     ai4b::stop("softbart_block '" + cfg_.name
                         + "': sigma context must be a length-1 vector");

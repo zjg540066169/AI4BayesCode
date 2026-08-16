@@ -59,7 +59,9 @@ Work through the layers in order. If a layer fails, fix the code and
 re-run that layer before moving on. Within Layer 3, run R1 -> R2 -> R3
 in order; failure at an earlier step means don't bother with the next.
 
-**R2 rank-R-hat > 1.01 is a MIXING failure by default -- not a property of the
+**The R2 GATE is rank-R-hat >= 1.05; 1.01 is the strict bar you investigate
+against, not a second gate.** Above 1.01, treat it as a MIXING failure by
+default -- not a property of the
 posterior.** Do NOT report FAILED with a "multimodal" / "genuinely hard
 posterior" / "ridge R-hat cannot reconcile" rationale UNLESS you can SHOW
 explicit evidence of genuine multimodality: over-dispersed independent chains
@@ -2948,10 +2950,13 @@ only** -- `mean`, `sd`, `q25`, `q75`. The order statistics `min` / `max`
 are legitimately extreme under a correct model, so they are PRINTED but
 never gated:
 - every central pv in (0.05, 0.95) -> PASS
-- exactly ONE central statistic outside -> WARN, not a failure. Each
-  has ~2*0.05 chance of landing outside under a CORRECT model, so "at
-  least one outside" is expected in roughly a third of clean
-  4-statistic runs; gating on it would false-fail correct samplers.
+- exactly ONE central statistic outside -> WARN, not a failure, WHEN the
+  support gives two or more central statistics. Each has ~2*pv_lo chance of
+  landing outside under a CORRECT model, so "at least one outside" is
+  expected in roughly a third of clean 4-statistic runs; gating on it would
+  false-fail correct samplers. **When the support gives exactly ONE central
+  statistic (binary y -> `mean`), that one gates on its own** -- otherwise
+  R3.a can never fail a binary model.
 - TWO OR MORE central statistics outside simultaneously -> **FAIL** the
   attempt (semantic bug: the posterior predictive does not reproduce
   the data). Route back to Layer 2 and retry per the attempt budget.
@@ -3029,9 +3034,14 @@ pv_hi <- 1 - pv_lo
 # model and gating on it would false-fail clean samplers.
 central <- pv1[intersect(names(pv1), c("mean", "sd", "q25", "q75"))]
 n_out   <- sum(central <= pv_lo | central >= pv_hi)
-if (n_out == 1L) message("[R3.a WARN] one central BPV statistic outside (",
-                         paste(round(central, 3), collapse = ", "), ")")
-stopifnot(n_out < 2L)
+# The verdict scales with HOW MANY central statistics the support gives us.
+# With exactly ONE (binary y -> `mean`) the ">= 2 to fail" rule would make
+# R3.a unfailable, so that single statistic gates on its own.
+fail_at <- if (length(central) >= 2L) 2L else 1L
+if (n_out > 0L && n_out < fail_at)
+    message("[R3.a WARN] one central BPV statistic outside (",
+            paste(round(central, 3), collapse = ", "), ")")
+stopifnot(n_out < fail_at)
 
 # --- R3.b PSIS-LOO (DIAGNOSTIC ONLY -- does NOT fail R3) ---
 # Pareto-k_hat measures LOO importance-weight reliability, NOT sampler
@@ -3077,8 +3087,8 @@ if (pct_k_lo < 50 || pct_k_hi >= 10) {
 - **Layer 1 (Syntactic):** run `sourceCpp`. Compilation errors -> fix
   and retry.
 - **Layer 2 (Semantic):** walk the generated `.cpp` through the 26
-  semantic checks (#1-#26; #14-#17 are defined in sibling skill
-  files). Check #12 (gradient verification) is execution-based and
+  semantic checks (#1-#26; #15-#17 are defined in
+  `codegen_priors.md` Sec.2c-2e). Check #12 (gradient verification) is execution-based and
   done at generation time via a throwaway
   `tests_autodiff/verify_<ClassName>.cpp` companion file (see the
   Check #12 body above for the template); the rest are static code

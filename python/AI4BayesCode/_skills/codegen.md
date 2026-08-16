@@ -1141,7 +1141,8 @@ without errors. If it fails, read the error, fix the code, and retry.
 After compile passes, run the full validator checklist in `skills/validator.md` (the
 Semantic-layer checks: distribution parameterization, parallel-update bugs, dead
 parameters, missing intercepts, Jacobian handling, DAG consistency, RNG separation, the
-gradient-verification-via-autodiff Check #12, plus the conditional #19-#25). Any
+gradient-verification-via-autodiff Check #12, the conditional #14-#25, and #26,
+which fires on every wrapper). Any
 failure must be fixed -- and the layer re-run -- before proceeding. **This is the layer that
 catches the silent-correctness bugs the runtime checks CANNOT**, so it must be cleared
 before the expensive L3 chains below. In particular the **AD-twin (Check #12)** -- the

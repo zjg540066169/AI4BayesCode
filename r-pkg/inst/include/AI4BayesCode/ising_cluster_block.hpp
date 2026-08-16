@@ -530,7 +530,14 @@ private:
         double beta = cfg_.beta_default;
         if (!cfg_.beta_key.empty()) {
             auto it = context_.find(cfg_.beta_key);
-            if (it != context_.end()) {
+            if (it == context_.end()) {
+                throw std::runtime_error(
+                    "ising_cluster_block '" + cfg_.name + "': beta_key '" + cfg_.beta_key
+                    + "' is configured but not present in the context. Add it to "
+                    "declare_dependencies(\"" + cfg_.name + "\", {...}), or leave "
+                    "beta_key empty if this model has no sampled beta (beta_default is then used).");
+            }
+            {
                 if (it->second.n_elem != 1) {
                     throw std::runtime_error(
                         "ising_cluster_block '" + cfg_.name + "': beta_key '" +
@@ -569,7 +576,14 @@ private:
     const arma::mat* resolve_field_(std::size_t n, std::size_t Q) {
         if (!cfg_.field_key.empty()) {
             auto it = context_.find(cfg_.field_key);
-            if (it != context_.end()) {
+            if (it == context_.end()) {
+                throw std::runtime_error(
+                    "ising_cluster_block '" + cfg_.name + "': field_key '" + cfg_.field_key
+                    + "' is configured but not present in the context. Add it to "
+                    "declare_dependencies(\"" + cfg_.name + "\", {...}), or leave "
+                    "field_key empty if this model has no external field.");
+            }
+            {
                 if (it->second.n_elem != n * Q) {
                     throw std::runtime_error(
                         "ising_cluster_block '" + cfg_.name + "': field_key '" +

@@ -760,11 +760,16 @@ pv_lo = 0.10 if USES_JOINT_NUTS else 0.05
 pv_hi = 1.0 - pv_lo
 _central = {nm: p for nm, p in pv.items() if nm in ("mean", "sd", "q25", "q75")}
 _n_out = sum(1 for p in _central.values() if p <= pv_lo or p >= pv_hi)
-if _n_out == 1:
+# Verdict scales with HOW MANY central statistics this support gives us.
+# With several, one outside is expected under a correct model, so one WARNs
+# and two or more FAIL. With exactly ONE (binary y -> "mean" only) there is
+# no such slack: the ">= 2 to fail" rule would make R3.a unfailable.
+_fail_at = 2 if len(_central) >= 2 else 1
+if 0 < _n_out < _fail_at:
     import warnings
     warnings.warn(f"[R3.a WARN] one central Bayesian p-value outside "
                   f"({pv_lo}, {pv_hi}): {_central}")
-assert _n_out < 2, f"[R3.a FAIL] {_n_out} central Bayesian p-values outside ({pv_lo}, {pv_hi}): {_central}"
+assert _n_out < _fail_at, f"[R3.a FAIL] {_n_out} central Bayesian p-values outside ({pv_lo}, {pv_hi}): {_central}"
 
 # R3.b PSIS-LOO (DIAGNOSTIC ONLY -- NEVER gates). Pareto-k_hat measures LOO
 # importance-weight reliability, NOT sampler correctness; GP latent-variable

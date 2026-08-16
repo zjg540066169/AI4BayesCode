@@ -105,7 +105,7 @@ MPL-2.0). Same `-I include/eigen` build flag as
 - AMD reordering via Eigen built-in
 
 **Deferred to v1.3:**
-- Check #25 validator for `Q_fn` (returns symmetric PSD sparse) and
+- A block-local `BL#` check for `Q_fn` (returns symmetric PSD sparse) and
   `log_lik` (returns finite scalar) contracts
 - Cross-block ESS scheduling for composite_blocks with multiple GMRF
   latents

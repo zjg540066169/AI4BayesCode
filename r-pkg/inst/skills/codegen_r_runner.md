@@ -701,10 +701,16 @@ pv_lo   <- if (USES_JOINT_NUTS) 0.10 else 0.05
 pv_hi   <- 1 - pv_lo
 .central <- pv[intersect(names(pv), c("mean", "sd", "q25", "q75"))]
 .n_out   <- sum(.central <= pv_lo | .central >= pv_hi)
-if (.n_out == 1L)
+# Verdict scales with HOW MANY central statistics this support gives us.
+# With several (continuous / count), one outside is expected under a correct
+# model -- each has ~2*pv_lo chance -- so one is a WARN and two or more FAIL.
+# With exactly ONE (binary y -> `mean` only) there is no such slack: keeping
+# the ">= 2 to fail" rule would make R3.a unfailable for every binary model.
+.fail_at <- if (length(.central) >= 2L) 2L else 1L
+if (.n_out > 0L && .n_out < .fail_at)
     warning(sprintf("[R3.a WARN] one central Bayesian p-value outside (%.2f, %.2f): %s",
                     pv_lo, pv_hi, paste(sprintf("%s=%.3f", names(.central), .central), collapse = ", ")))
-stopifnot(.n_out < 2L)
+stopifnot(.n_out < .fail_at)
 
 # R3.b PSIS-LOO (DIAGNOSTIC ONLY -- does NOT fail R3).
 # Pareto-k_hat measures LOO importance-weight reliability, NOT sampler

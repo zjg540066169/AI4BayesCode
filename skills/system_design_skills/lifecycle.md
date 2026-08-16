@@ -6,7 +6,11 @@
 ## 14. How to design a new block type (step-by-step)
 
 Suppose you want to add `gp_block` (Gaussian Process regression with
-closed-form conjugate draws on the latent function values).
+closed-form conjugate draws on the latent function values). **Every
+`gp_block` / `GPGaussian` path below is a WORKED HYPOTHETICAL** -- those
+files do not exist in the tree, they are what this walkthrough would
+create. (The shipped GP blocks are `celerite_gp_block` and the
+`elliptical_slice_sampling_block` route; see `examples/GPRegression.cpp`.)
 
 ### Step 1 -- Tier C (kernel)
 

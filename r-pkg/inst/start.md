@@ -660,12 +660,12 @@ You should now:
    (d) C++ only -- just the .cpp and its built-in demo
    (e) Other / custom
 
-   Output folder?
-   (a) ./generated/<ClassName>/ (default)
-   (b) Other / custom
-
    Class name (CamelCase)?
    (a) <a sensible model-derived suggestion> (default)
+   (b) Other / custom
+
+   Output folder?
+   (a) ./generated/<ClassName>/ (default)
    (b) Other / custom
 
    Sampler engine? (codegen.md Sec.1 #6)

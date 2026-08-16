@@ -179,14 +179,14 @@ struct nuts_block_config {
     /// identical draws, sd = 0, R-hat = Inf. The cap bounds the opposite
     /// runaway (eps -> 1e+77, every trajectory rejected). pi is the nuts-rs
     /// standard. Set either to 0 to disable that side.
+    double min_step_size = 1e-6;
+    double max_step_size = 3.141592653589793;  // pi (nuts-rs)
+
     /// Set by the constructor: whether the USER supplied constrain /
     /// unconstrain, as opposed to the identity defaults installed below.
     /// set_current uses this to refuse the half-configured case.
     bool constrain_was_supplied   = false;
     bool unconstrain_was_supplied = false;
-
-    double min_step_size = 1e-6;
-    double max_step_size = 3.141592653589793;  // pi (nuts-rs)
 
     /// Number of dual-averaging adaptation iterations performed at the
     /// very first call to step(). Larger gives the initial step-size

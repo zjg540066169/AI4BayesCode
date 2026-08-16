@@ -347,7 +347,13 @@ public:
         weights_.clear();
         if (!cfg_.weights_key.empty()) {
             auto it_w = ctx.find(cfg_.weights_key);
-            if (it_w != ctx.end()) {
+            if (it_w == ctx.end()) {
+                ai4b::stop("bart_block '" + cfg_.name + "': weights_key '" + cfg_.weights_key
+                    + "' is configured but not present in the context. Add it to "
+                    "declare_dependencies(\"" + cfg_.name + "\", {...}), or leave "
+                    "weights_key empty if this model has no observation weights.");
+            }
+            {
                 const arma::vec& w = it_w->second;
                 if (w.n_elem != cfg_.x_train.n_rows) {
                     ai4b::stop("bart_block '" + cfg_.name

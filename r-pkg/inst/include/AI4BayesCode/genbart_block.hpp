@@ -208,7 +208,13 @@ public:
         // Refresh offset similarly.
         if (!cfg_.offset_key.empty()) {
             auto it = ctx.find(cfg_.offset_key);
-            if (it != ctx.end()) {
+            if (it == ctx.end()) {
+                ai4b::stop("genbart_block '" + cfg_.name + "': offset_key '" + cfg_.offset_key
+                    + "' is configured but not present in the context. Add it to "
+                    "declare_dependencies(\"" + cfg_.name + "\", {...}), or leave "
+                    "offset_key empty if this model has no offset.");
+            }
+            {
                 if (it->second.n_elem != n) {
                     ai4b::stop("genbart_block '" + cfg_.name
                         + "': offset context length "

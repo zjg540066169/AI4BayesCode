@@ -943,7 +943,11 @@ public:
             // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate
             // setup cache -- precond_mat just changed.
             ns.precond_cache_valid = false;
-            dense_metric_adapted_ = (ad.metric_kind == "dense");
+            // Any non-identity metric counts as ADAPTED. Testing for "dense"
+            // alone would leave the flag false after restoring a DIAGONAL
+            // metric, so the first step() on the restored object would re-run
+            // the pilot and overwrite the precond_mat that was just restored.
+            dense_metric_adapted_ = (ad.metric_kind != "identity");
         }
     }
 
