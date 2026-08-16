@@ -75,6 +75,40 @@ for f in examples/*.cpp; do
   cp -f "$f" "python/AI4BayesCode/_examples/$(basename "$f")"
 done
 
+# Copying file-by-file cannot notice a DELETION, so an example removed from
+# examples/ would live on in both packages as an orphan -- still listed by
+# ai4bayescode_list_examples() / AI4BayesCode.examples_path(), still shipped.
+# (The include/ and skills/ trees are safe: sync_dir rm -rf's the destination
+# first. Only this loop copies in place, because r-pkg/inst/examples also holds
+# hand-maintained run_*.R / test_*.R / Makevars that must NOT be wiped.)
+for d in r-pkg/inst/examples python/AI4BayesCode/_examples; do
+  for f in "$d"/*.cpp; do
+    [ -e "$f" ] || continue
+    if [ ! -e "examples/$(basename "$f")" ]; then
+      echo "  - dropping orphaned $f (no longer in examples/)"
+      rm -f "$f"
+    fi
+  done
+done
+
 find r-pkg/inst python/AI4BayesCode/_skills python/AI4BayesCode/_vendored_include \
      -name '.DS_Store' -delete 2>/dev/null || true
+# Post-sync consistency gate: the .cpp sets must match exactly, in both
+# directions, or a later `install_github` ships something the source tree does
+# not have (or misses something it does).
+sync_ok=1
+for d in r-pkg/inst/examples python/AI4BayesCode/_examples; do
+  if ! diff -q <(ls examples/*.cpp | xargs -n1 basename | sort) \
+                <(ls "$d"/*.cpp 2>/dev/null | xargs -n1 basename | sort) >/dev/null; then
+    echo "  ! $d does not match examples/:"
+    diff <(ls examples/*.cpp | xargs -n1 basename | sort) \
+         <(ls "$d"/*.cpp 2>/dev/null | xargs -n1 basename | sort) | sed 's/^/      /'
+    sync_ok=0
+  fi
+done
+if [ "$sync_ok" -ne 1 ]; then
+  echo "✗ Sync finished with mismatches above -- fix before committing."
+  exit 1
+fi
+
 echo "✓ Synced. Commit the regenerated copies under r-pkg/inst and python/AI4BayesCode."
