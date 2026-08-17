@@ -106,7 +106,11 @@ iterations and restores state.
   iterates children; each block reports `supports_readapt()`. Non-
   NUTS-family blocks inherit default `supports_readapt() == false`
   and are silently skipped. NUTS-family blocks override to
-  `true` and implement `readapt(n, reset, rng)`.
+  `true` and implement the FIVE-parameter form
+  `readapt(std::size_t n, bool reset, std::mt19937_64& rng,
+  std::size_t max_tree_depth_override = 0,
+  double target_accept_override = -1.0)`. A three-parameter `override` is a
+  compile error; without `override` it is never dispatched.
 - **History.** The n ghost iterations are NOT recorded in
   `get_history()` -- they're internal and discarded along with state
   restore. Only `step()`'s on-record samples enter history.

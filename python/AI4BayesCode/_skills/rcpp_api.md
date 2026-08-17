@@ -45,9 +45,13 @@ arma::vec v(rcpp_vec.begin(), rcpp_vec.size(), /*copy=*/false);
 ```
 Use no-copy only for temporary computation within a single function.
 
-### 4. Rcpp::stop vs throw
-In Rcpp context, use `Rcpp::stop()` not `throw std::runtime_error()`.
-`Rcpp::stop` properly unwinds through R's error handling.
+### 4. Raising an error: use `ai4b::stop`
+Use `ai4b::stop()` (`backend_neutral.hpp`), NOT `ai4b::stop()` and not a bare
+`throw`. The wrapper's class body is compiled by BOTH the `RCPP_MODULE` and the
+`PYBIND11_MODULE` translation units, so `Rcpp::stop` is undefined under
+`AI4BAYESCODE_PYBIND_MODULE`. `ai4b::stop` dispatches to `ai4b::stop` under the
+R backend (so it still unwinds through R's error handling) and to a C++
+exception otherwise. All 43 shipped examples use it; none uses `Rcpp::stop`.
 
 ### 5. Where Rcpp lives in the header tree
 All public `AI4BayesCode` headers under `include/AI4BayesCode/` depend on
@@ -89,9 +93,20 @@ NUTS blocks use `std::mt19937_64` -- reproducible with the seed passed
 to the constructor. These are independent RNG streams.
 
 ### 8. Rcpp Module method signatures
-Rcpp Modules do NOT support C++ function overloading. Each method must
-have a unique name. Use `Rcpp::List` for flexible input/output instead
-of multiple overloads.
+Rcpp Modules DO bind same-name overloads, but only with an explicit
+member-pointer cast that names the signature:
+
+```cpp
+.method("step", (void (Class::*)())    &Class::step, "Run one sweep.")
+.method("step", (void (Class::*)(int)) &Class::step, "Run n sweeps.")
+```
+
+What Rcpp ignores is a C++ DEFAULT ARGUMENT -- which is precisely why each
+arity must be bound separately. `kernel_control_mixin.hpp` binds two `freeze`
+and two `unfreeze` overloads this way, and every shipped example binds both
+`step` arities. For multi-type input/output use the backend-neutral
+`state_map`, never `Rcpp::List` (the class body is compiled by the pybind11
+module too).
 
 ### 9. Empty Rcpp::List
 `Rcpp::List::create()` returns an empty list with NULL names. Check

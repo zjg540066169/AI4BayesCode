@@ -1218,11 +1218,12 @@ wording -- R2/R3 are never skipped, but by default they are not
 *shipped*.)
 
 ```r
-# Chains differ by SEED only. Do NOT surface per-parameter initial values
-# as constructor arguments (codegen_cpp.md "Initial values: NEVER expose by
-# default"); the signature here matches validator.md's R2 template.
-chain1 <- run_chain(seed = 1L, n_burn = 4000, n_keep = 4000)
-chain2 <- run_chain(seed = 2L, n_burn = 4000, n_keep = 4000)
+# Chains differ by SEED only. Do NOT surface per-parameter initial values as
+# constructor arguments (codegen_cpp.md "Initial values: NEVER expose by
+# default"). The helper's name and signature follow the HARD RULE below:
+# model-specific name, every data input a parameter.
+chain1 <- run_chain_<ClassName>(<data_args>, seed = 1L, n_burnin = 4000, n_keep = 4000)
+chain2 <- run_chain_<ClassName>(<data_args>, seed = 2L, n_burnin = 4000, n_keep = 4000)
 
 # Check: do the chains agree on posterior means?
 # Check: are all values finite?

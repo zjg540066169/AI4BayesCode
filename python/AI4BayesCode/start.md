@@ -583,7 +583,7 @@ commonly missed checks this skill set has caught:
   declares any `declare_data_input`, the Rcpp wrapper
   `predict_at(state_map)` MUST forward to
   `impl_->predict_at(replaced, predict_rng_)` -- NOT hard-reject
-  non-empty `new_data` with `Rcpp::stop`. The hard-reject pattern
+  non-empty `new_data` with `ai4b::stop`. The hard-reject pattern
   compiles + R-hat-passes but silently breaks predictions.
 
 ---

@@ -446,8 +446,17 @@ def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
     if remainder > 0:
         model.readapt_NUTS(readapt_n, False)
         model.step(remainder)
-    out = {"hist": model.get_history(),
-           "pp":   model.predict_at(newdata),
+    # Strip warmup, exactly as the default helper does. Without this the R2
+    # R-hat and R3 gates are computed over burn-in draws, and ess_ratio (which
+    # divides by n_keep downstream) can exceed 1, making the 0.005 floor
+    # meaningless.
+    keep = slice(int(n_burn), int(n_burn) + int(n_keep))
+    def _slice(d):
+        return {k: (np.asarray(v)[keep] if np.asarray(v).ndim == 1
+                    else np.asarray(v)[keep, ...])
+                for k, v in d.items()}
+    out = {"hist": _slice(model.get_history()),
+           "pp":   _slice(model.predict_at(newdata)),
            "wall_sec": time.time() - t0}
     # diagnosis=True attaches model-INDEPENDENT posterior diagnostics via the
     # SHIPPED library function AI4BayesCode.diagnose() -- do NOT reimplement:
@@ -881,7 +890,8 @@ p_var = data_obs.shape[1]
 dags = np.zeros((int(n_keep), p_var, p_var), dtype=int)
 for s in range(int(n_keep)):
     model.step(1)
-    # sampled_DAG[i, j] = 1 iff j is a parent of i (row-major).
+    # sampled_DAG[i, j] = 1 iff j is a parent of i. get_current() returns a FLAT
+# length-n^2 vector filled column-major, so reshape with order="F".
     dags[s] = np.asarray(model.get_current()["sampled_DAG"])
 out = {"hist": _slice(model.get_history()),
        "dags": dags,                                    # top-level, NOT inside "hist"

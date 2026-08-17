@@ -2048,8 +2048,22 @@ invent others:**
   `.declare_data_input(...)`, `.register_stochastic_refresher(...)`),
   `impl_->add_child(std::make_unique<...block>(...))`.
 
-There is **NO `impl_->get_current()`** -- build the class's `get_current()` by
-`return impl_->current_named_outputs();` (or assemble from the child blocks).
+There is **NO `impl_->get_current()`**. Assemble the class's `get_current()`
+from shared_data, one entry per parameter:
+
+```cpp
+AI4BayesCode::state_map get_current() const {
+    AI4BayesCode::state_map out;
+    out["mu"]    = impl_->data().get("mu");
+    out["sigma"] = impl_->data().get("sigma");
+    return out;
+}
+```
+
+Do NOT `return impl_->current_named_outputs();`: `composite_block` does not
+override it, so the base default returns `{ name() -> current() }` -- ONE entry
+keyed by the wrapper's class name, holding the concatenation of every child's
+vector. All 43 shipped examples assemble from `data().get(...)`.
 The canonical, copy-this reference is `examples/GaussianLocationScale.cpp`
 (its `get_current` / `get_history` / `predict_at` / `get_dag` bodies).
 
@@ -2610,7 +2624,10 @@ clang++ -std=c++17 -O2 \
     MyModel.cpp -o MyModel -framework Accelerate
 ```
 
-No RCPP_MODULE, no PYBIND11_MODULE, no Rcpp dependency at all. Useful
+The `int main()` goes in ADDITION to both module blocks, each under its own
+`#ifdef`, exactly as all 43 shipped examples do -- the `#if !defined(...)` fence
+already keeps `main` out of the module builds. Never gate the binding blocks on
+the runtime-backend answer. Useful
 for benchmarking, embedding into a larger C++ program, or Docker
 deployment.
 

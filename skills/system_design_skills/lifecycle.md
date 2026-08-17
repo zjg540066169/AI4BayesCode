@@ -208,11 +208,12 @@ Before any PR touching Tier A / B / C lands:
       equivalent is called so `get_current()` returns consistent
       values with no intervening `step()`.
 - [ ] **Dimension / type validation.** Every setter does
-      `Rcpp::stop` on mismatch with a precise error message.
+      `ai4b::stop` on mismatch with a precise error message (never
+      `Rcpp::stop` -- the class body is compiled by the pybind11 module too).
 - [ ] **Unknown key tolerance.**
       `m$set_current(list(random_key = rnorm(5)))` does NOT error.
 - [ ] **Impossible keys rejected.** Where applicable
-      (`f_bart`, `log_f`, refresher outputs), a clear `Rcpp::stop`
+      (`f_bart`, `log_f`, refresher outputs), a clear `ai4b::stop`
       fires.
 - [ ] **Round-trip property.**
       `s <- m$get_current(); m$set_current(s)` does not crash and
@@ -329,7 +330,7 @@ Before any PR touching Tier A / B / C lands:
   `readapt_NUTS(n, reset, max_tree_depth, target_accept)` (iff any NUTS-family
   child). Future kernel-control methods (e.g., a hypothetical
   `readapt_VI`) require an explicit Sec.1 amendment.
-- `Rcpp::stop("set_current not supported")` in a BART-family or any
+- `ai4b::stop("set_current not supported")` in a BART-family or any
   block that has data inputs an outer MCMC might update. If the
   block has NO updatable inputs, say that in the error message and
   route users at construction-time alternatives.

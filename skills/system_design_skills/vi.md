@@ -50,7 +50,7 @@ codegen. No special "hybrid" framework code exists or is needed.
 
 ```cpp
 enum class engine_kind_t { MCMC, VI };
-virtual engine_kind_t engine_kind() const = 0;  // override per family
+virtual engine_kind_t engine_kind() const noexcept;  // defaulted to MCMC
 ```
 
 All existing blocks (`nuts_block`, `joint_nuts_block(_mixed)`,
@@ -68,7 +68,7 @@ get_history`) plus the kernel-control category (`freeze / unfreeze /
 get_frozen` always; `readapt_NUTS` conditional on NUTS-family child).
 The wrapper class chooses children at construction time; outer
 R/Python code is identical for MCMC, VI, and hybrid wrappers. Note:
-freezing a VI child is blacklisted (Rcpp::stop) -- see Sec.18.4 for
+freezing a VI child is blacklisted (ai4b::stop) -- see Sec.18.4 for
 why (the q-sample stream invariant); freeze applies at the composite
 level via non-VI siblings.
 
@@ -85,9 +85,11 @@ public:
   void  step(std::mt19937_64& rng) override;          // one optimizer step
   const arma::vec& current() const override;          // q-mean
   void  set_current(const arma::vec& mu) override;    // overwrite mu only
-  const std::string& name() const override;
-  size_t dim() const override;
-  engine_kind_t engine_kind() const override { return engine_kind_t::VI; }
+  // noexcept is part of each signature; dropping it on an override is
+  // ill-formed.
+  const std::string& name() const noexcept override;
+  std::size_t dim() const noexcept override;
+  engine_kind_t engine_kind() const noexcept override { return engine_kind_t::VI; }
 
   // === VI-specific extensions (callable from Tier A dispatcher) ===
   arma::vec current_sample(std::mt19937_64& rng) const;     // draw theta ~ q

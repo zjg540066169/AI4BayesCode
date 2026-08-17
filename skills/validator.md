@@ -563,7 +563,7 @@ to parse `new_data`, place the supplied keys in a
 AI4BayesCode::history_map predict_at(
         const AI4BayesCode::state_map& new_data) const {
     if (new_data.size() > 0) {
-        Rcpp::stop("<ClassName>: predict_at takes empty list");
+        ai4b::stop("<ClassName>: predict_at takes empty list");
     }
     return Rcpp::wrap(impl_->predict_at({}, predict_rng_));
 }
@@ -580,7 +580,7 @@ supply ALL siblings):**
 
 ```cpp
 if (!has_v) {
-    Rcpp::stop("predict_at: v_sq must be supplied when X / Z are "
+    ai4b::stop("predict_at: v_sq must be supplied when X / Z are "
                "supplied for new points.");
 }
 ```
@@ -620,7 +620,7 @@ it considers reachable for that draw's `newdata`.
 **Static grep (yellow flags):**
 
 ```
-grep -nE 'Rcpp::stop\([^)]*supplied when' examples/*.cpp
+grep -nE 'ai4b::stop\([^)]*supplied when' examples/*.cpp
 grep -nE 'predict_at[^{]*\{[^}]*keep_history_[^}]*for[^}]*draws' examples/*.cpp
 ```
 
@@ -678,7 +678,7 @@ dimension caches").
 // WRONG: compares against frozen N_; rejects any legitimate N
 // change without explaining why.
 if (X_new.nrow() != N_ || X_new.ncol() != p_)
-    Rcpp::stop("X dimensions must match construction");
+    ai4b::stop("X dimensions must match construction");
 ```
 
 **Static grep:**
@@ -706,7 +706,7 @@ For every hit, the wrapper must either:
   Error message MUST name the reason and tell the user to
   reconstruct:
   ```
-  Rcpp::stop("This model fixes N at construction because <REASON>. "
+  ai4b::stop("This model fixes N at construction because <REASON>. "
              "To change N, reconstruct the wrapper.");
   ```
 
@@ -912,7 +912,7 @@ argument names a child block, not a shared_data key.
 **Check:** see `skills/rcpp_api.md` for the full list. Key items:
 - `Rcpp::List` names checked with `.size()` before `.names()`
 - `NumericMatrix` is column-major
-- `Rcpp::stop()` used instead of `throw` in Rcpp context
+- `ai4b::stop()` used instead of `throw` in Rcpp context
 - No Rcpp calls in pure C++ headers
 
 These compile but behave wrongly at runtime if mis-used.
@@ -1597,7 +1597,7 @@ For each VI child named `<param>`:
   `vi_child->set_variational_state(mu_vec, ls_vec)` (mean + log_sd)
 - Unknown keys silently ignored (Sec.7 contract preserved)
 - Impossible keys (`<param>_chol_diag` for a mean-field VI block)
-  rejected via `Rcpp::stop` with a precise message
+  rejected via `ai4b::stop` with a precise message
 
 **Common failure modes:**
 
@@ -2138,8 +2138,8 @@ before the sampler ships.
 **Compositional behavior (informational, not checked here)**
 
 `composite_block::freeze(names)` validates every name is a known child
-and belongs to a WHITELIST family; unknown -> Rcpp::stop; blacklist ->
-Rcpp::stop; already-frozen -> Rcpp::warning; static-Gibbs-DAG check
+and belongs to a WHITELIST family; unknown -> ai4b::stop; blacklist ->
+ai4b::stop; already-frozen -> Rcpp::warning; static-Gibbs-DAG check
 emits Rcpp::warning if the frozen name is upstream of any registered
 refresher. Validator does NOT check this dispatch logic -- it's
 covered by `composite_block`'s own unit tests. The wrapper-level
@@ -2395,10 +2395,14 @@ suppressPackageStartupMessages({
 # verbatim to model$predict_at(); the framework's BFS rule determines
 # which downstream keys come back (see Semantic #6 -- silent default-
 # substitution inside refreshers is forbidden).
-run_chain <- function(seed, n_burn, n_keep, newdata = list()) {
-    m <- new(ModelName, ..., as.integer(seed), TRUE)   # keep_history = TRUE
+# Name and signature per codegen_r_runner.md's HARD RULE: model-specific name,
+# every data input a PARAMETER (never closed over from the outer scope), and
+# n_burnin / n_keep. The %dopar% call below uses exactly this.
+run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep,
+                                  newdata = list()) {
+    m <- new(<ClassName>, <data_args>, as.integer(seed), TRUE)  # keep_history
     t0 <- Sys.time()
-    m$step(n_burn)
+    m$step(n_burnin)
     m$step(n_keep)
     t1 <- Sys.time()
     list(hist     = m$get_history(),
@@ -2430,7 +2434,7 @@ parallel::clusterExport(cl, c("y_full"))   # e.g. add "X_obs", "K_data", etc.
 n_burn <- 4000L; n_keep <- 4000L
 t_par_0 <- Sys.time()
 chains  <- foreach(seed = c(101L, 202L)) %dopar%
-               run_chain_<ClassName>(y_full, seed, n_burn, n_keep)
+               run_chain_<ClassName>(y_full, seed, n_burnin, n_keep)
 total_wall_sec <- as.numeric(difftime(Sys.time(), t_par_0, units = "secs"))
 c1 <- chains[[1L]]; c2 <- chains[[2L]]
 

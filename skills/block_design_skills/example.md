@@ -59,10 +59,10 @@ frontend-independent example -- tri-module is a SUPERSET, not a replacement.
 
 **Types**: the driver-class methods use NEUTRAL C++ types only -- `AI4BayesCode::state_map` /
 `history_map` / `arma::vec` -- which auto-convert to `Rcpp::List` / a Python dict via
-`backend_neutral.hpp`. Errors preferably use **`ai4b::stop(...)`** (backend-neutral: `Rcpp::stop`
+`backend_neutral.hpp`. Errors preferably use **`ai4b::stop(...)`** (backend-neutral: `ai4b::stop`
 under R, a Python exception under pybind, `std::runtime_error` standalone); a plain
 `throw std::runtime_error(...)` is also backend-safe (Rcpp and pybind both catch and convert it) and
-is what `GaussianLocationScale.cpp` itself uses. What is BANNED is a raw `Rcpp::stop` or any `Rcpp::`
+is what `GaussianLocationScale.cpp` itself uses. What is BANNED is a raw `ai4b::stop` or any `Rcpp::`
 / `pybind11::` call OUTSIDE its own module block -- that breaks the standalone and Python builds.
 
 ## What this phase produces
@@ -150,7 +150,7 @@ blocks, and the fence copy as-is.
 ### Constructor -- minimal wiring
 
 - Build `impl_ = std::make_unique<composite_block>("<Model>")`.
-- `impl_->data.set(key, value)` for observed data + initial parameter values.
+- `impl_->data().set(key, value)` for observed data + initial parameter values.
 - Declare the Gibbs-DAG dependencies (`declare_dependencies`) and predict-DAG edges
   (`declare_predict_edges`) + any refreshers -- semantics at **system_design Sec.3-Sec.9** (`dataflow.md`).
   Do NOT restate DAG rules here; wire the minimal set this small model needs (often a single child
@@ -163,7 +163,7 @@ blocks, and the fence copy as-is.
 - RNG discipline: separate `rng_`, `predict_rng_`, `readapt_rng_` (seed-derived, deterministic when
   seed != 0) -- copy the pattern from `GaussianLocationScale.cpp`; see system_design Sec.8.
 - Validation errors use `ai4b::stop(...)` (or a plain `throw std::runtime_error`); never a raw
-  `Rcpp::stop`.
+  `ai4b::stop`.
 
 ### `set_current` is a pure DISPATCHER (Tier A -> Tier B)
 
@@ -175,7 +175,7 @@ blocks, and the fence copy as-is.
 3. routes the value to the corresponding Tier-B setter on the child block (e.g.
    `dynamic_cast<<Block>&>(impl_->child(0)).set_current(vec)` or the block's fine-grained
    `set_X`/`set_Y`-style C++ setter), and
-4. mirrors the pushed value back into `impl_->data.set(key,...)` so downstream reads see it.
+4. mirrors the pushed value back into `impl_->data().set(key,...)` so downstream reads see it.
 
 Which keys, and how they map to Tier-B setters, is the dispatch table -- that is system_design Sec.7
 (`dataflow.md`); the example just instantiates it for this one model. See the `set_current` body in
