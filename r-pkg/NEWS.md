@@ -7,7 +7,7 @@
   prompts for model, thinking level, backend, and per-parameter priors.
   Companion helpers: `ai4bayescode_models()`, `ai4bayescode_set_key()`,
   `ai4bayescode_key_status()`.
-* Expanded to 39 bundled reference examples and the full AI codegen skill
+* Expanded to 43 bundled reference examples and the full AI codegen skill
   corpus under `inst/skills/`.
 * `ai4bayescode_source(code)` -- canonical, self-contained sourcer/loader.
   Resolves the full include tree (AI4BayesCode, mcmclib, BaseMatrixOps,

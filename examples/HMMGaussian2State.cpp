@@ -50,7 +50,8 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(HMMGaussian2State, y, A, pi0, mu, sigma, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(HMMGaussian2State,
 //            y,        # length-T observations
@@ -79,7 +80,8 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HMMGaussian2State(y, A, pi0, mu, sigma, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.HMMGaussian2State(y, A, pi0, mu, sigma, 7, True)  # (y, A, pi, mu, sigma, seed, keep_history)
 //   m.step(2500); print(m.get_current())           # dict: z (latent path) only

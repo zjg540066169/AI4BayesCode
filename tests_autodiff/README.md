@@ -34,8 +34,17 @@ a new block.
 
 ## Running
 
-Run from the **repository root** so the `-I include` paths resolve, for
-example:
+The supported way to run these is the driver, which sets every include path
+and reports all failures:
+
+```bash
+Rscript tests_autodiff/run_all.R              # everything
+Rscript tests_autodiff/run_all.R test_ode     # only files matching a pattern
+```
+
+They are `Rcpp::sourceCpp` translation units, not standalone programs (19 of
+the 20 have no `int main`), so compiling one by hand needs Rcpp's and
+RcppArmadillo's headers on the path as well as the project's:
 
 ```bash
 # a C++ gradient-correctness test

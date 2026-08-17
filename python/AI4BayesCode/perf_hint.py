@@ -13,6 +13,11 @@ __all__ = ["perf_hint"]
 def perf_hint(wall_sec: float,
               n_sweeps_total: int,
               uses_joint_nuts: bool = False,
+              *,
+              # Keyword-only from here: R's 4th positional argument is
+              # `thresholds`, so an R-style positional call landed a mapping in
+              # `slow_sweep_sec` and failed at the `per <= slow_sweep_sec`
+              # comparison.
               slow_sweep_sec: float = 0.5,
               thresholds: dict | None = None) -> None:
     """Print a per-sweep timing summary (and a joint_nuts_block hint if slow).

@@ -61,7 +61,8 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(GBartHeteroscedastic, X, y, 50L, 1.0, seed, FALSE, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   mod <- new(GBartHeteroscedastic, X, y, 50L, 1.0, 42L, FALSE)
 //   #          X,  y, ntrees, phi_init, seed, keep_tree
@@ -78,7 +79,8 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GBartHeteroscedastic(X, y, 50, 1.0, seed, False, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m_ = Mod.GBartHeteroscedastic(X, y, 50, 1.0, 42, False, False)  # X,y,ntrees,phi_init,seed,keep_tree,keep_history
 //   m_.step(2000); print(m_.get_current())            # r, mean, phi
@@ -687,11 +689,19 @@ int main() {
     std::printf("  all finite               = %s\n",
                 finite_ok ? "YES" : "NO");
 
+    // Finiteness alone would pass a model that returned a constant. Gate on the
+    // recovery quantities this demo already computes: cor(mean_hat, m_true) > 0.70.
+    const bool recovery_ok = cor_m > 0.70;
+
     if (!finite_ok) {
         std::printf("FAIL: non-finite recovery\n");
         return 1;
     }
-    std::printf("OK: finite recovery\n");
+    if (!recovery_ok) {
+        std::printf("FAIL: recovery below tolerance\n");
+        return 1;
+    }
+    std::printf("OK: recovery within tolerance\n");
     return 0;
 }
 #endif

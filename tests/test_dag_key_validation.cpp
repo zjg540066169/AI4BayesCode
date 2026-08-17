@@ -204,5 +204,6 @@ int main() {
     std::printf("\n%s  (%d checks, %d fail)\n",
                 fails == 0 ? "[DAG VALIDATION PASS]" : "[DAG VALIDATION FAIL]",
                 checks, fails);
-    return fails;
+    return fails == 0 ? 0 : 1;   // an exit status is a byte; 256 failures
+                                 // would otherwise report success
 }

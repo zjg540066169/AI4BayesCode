@@ -642,8 +642,7 @@ public:
         // Base contract: 1 when the buffer is empty (current draw only).
         // composite_block::history_size() takes the MIN over children, so a
         // literal 0 here drags the whole composite to 0 draws -- which is what
-        // happens with keep_history off (the default), and for a VI block also
-        // after convergence, when its appends stop while siblings keep going.
+        // happens with keep_history off, which is the default.
         return history_order_.empty() ? 1 : history_order_.size();
     }
 

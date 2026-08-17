@@ -435,7 +435,13 @@ public:
     }
 
     const std::string& name() const noexcept override { return cfg_.name; }
-    std::size_t dim() const noexcept override { return n_; }
+    // dim() must equal current().n_elem: composite_block concatenates
+    // children by current() and SPLITS a restored vector by dim(), so a
+    // mismatch makes composite current() throw "subvec(): indices out of
+    // bounds" and composite set_current reject a correctly-sized vector.
+    // current() is the variational parameter phi, and set_current already
+    // requires that length, so the block's dimension is phi's.
+    std::size_t dim() const noexcept override { return total_S_; }
 
     history_map get_history() const override {
         history_map out;
@@ -494,6 +500,32 @@ public:
     /// Draw z ~ q. For each clique, draw one joint state from
     /// Categorical(phi_C); decode to per-node integers in clique nodes.
     /// Returns length-n arma::vec of doubles.
+    // shared_data's key for this block is a length-n STATE vector z, not
+    // phi. The base default publishes current() (= phi, length total_S_),
+    // so before the first step -- and in get_current() on a freshly
+    // constructed model -- a sibling reading this key saw variational
+    // probabilities where the docs promise "entry i is the state z_i".
+    // Publish the per-node argmax, the deterministic counterpart of
+    // current_sample().
+    state_map current_named_outputs() const override {
+        const std::string& nm = name();
+        if (nm.empty()) return {};
+        arma::vec z(n_);
+        std::size_t off = 0;
+        for (std::size_t i = 0; i < n_; ++i) {
+            const std::size_t Ki = cfg_.cardinalities[i];
+            std::size_t best = 0;
+            double best_p = -1.0;
+            for (std::size_t k = 0; k < Ki; ++k)
+                if (phi_[off + k] > best_p) { best_p = phi_[off + k]; best = k; }
+            z[i] = static_cast<double>(best);
+            off += Ki;
+        }
+        state_map out;
+        out.emplace(nm, std::move(z));
+        return out;
+    }
+
     arma::vec current_sample(std::mt19937_64& rng) const override {
         arma::vec z(n_, arma::fill::zeros);
         std::uniform_real_distribution<double> U(0.0, 1.0);

@@ -77,8 +77,9 @@ relies on the categorical Gibbs sweeps depopulating clusters.
 NUTS cannot target). Library-blessed block; user writes no MH
 acceptance code.
 
-**Check #15** parity: verified by a block-level parity test.
-verifies (a) smoke + valid output on identical-cluster fixture; (b)
+**Check #15** parity: NO dedicated parity test ships for this block. When
+Check #15 fires, write one covering (a) smoke + valid output on an
+identical-cluster fixture; (b)
 truth-recovery K_active >= 2 on a 2-cluster split-favored fixture;
 (c) full-covariance sigma_key path runs.
 

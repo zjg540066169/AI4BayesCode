@@ -1011,7 +1011,7 @@ public:
         if (s.empty() || s.back() != ']')
             throw std::runtime_error(
                 "joint_nuts_block: malformed element name '" + s +
-                "' (expected 'slot[k]', k a 1-based index)");
+                "' (expected 'component[k]', k a 1-based index)");
         base = s.substr(0, lb);
         const std::string num = s.substr(lb + 1, s.size() - lb - 2);
         if (num.empty() || num.find_first_not_of("0123456789") != std::string::npos)
@@ -1089,7 +1089,13 @@ public:
         // (1-based), in ascending index order (std::set is ordered).
         std::vector<std::string> out;
         for (const auto& sp : cfg_.sub_params) {
-            if (frozen_slots_.count(sp.name)) { out.push_back(sp.name); continue; }
+            // Report BOTH forms. `continue`ing on the whole-slot freeze hid any
+            // element freeze on the same slot from composite_block::unfreeze_all(),
+            // which iterates exactly this list: freeze("beta") then
+            // freeze("beta[2]") then unfreeze() left element 2 pinned for the rest
+            // of the run, so every later draw came from a conditional posterior
+            // while the user believed everything was released.
+            if (frozen_slots_.count(sp.name)) out.push_back(sp.name);
             auto it = frozen_elems_.find(sp.name);
             if (it != frozen_elems_.end()) {
                 for (std::size_t local : it->second)
@@ -1224,6 +1230,22 @@ public:
         theta_cat_  = snap_theta_cat;
         first_call_ = snap_first_call;
         rebuild_named_outputs_();
+
+        // The same clamp step() applies. readapt runs dual averaging with
+        // n_adapt_draws = n and writes epsilon_bar_persist, so without this an
+        // epsilon that underflowed or ran away during readapt_NUTS() is carried
+        // into the next step() before anything catches it.
+        {
+            auto& nsc = cfg_.nuts_settings.nuts_settings;
+            if (cfg_.min_step_size > 0.0 &&
+                !(nsc.epsilon_bar_persist >= cfg_.min_step_size)) {
+                nsc.epsilon_bar_persist = cfg_.min_step_size;
+            }
+            if (cfg_.max_step_size > 0.0 &&
+                nsc.epsilon_bar_persist > cfg_.max_step_size) {
+                nsc.epsilon_bar_persist = cfg_.max_step_size;
+            }
+        }
     }
 
     /// Expose the offset of a sub-parameter in theta_cat. Used by unit

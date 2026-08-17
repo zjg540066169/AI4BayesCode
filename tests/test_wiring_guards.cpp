@@ -179,10 +179,17 @@ int main() {
         d.declare_predict_edges("X", {"f_forest"});
         d.declare_predict_edges("f_forest", {"mu"});
 
+        // Match the guard's own wording, not just the key name -- "f_forest"
+        // alone would also be satisfied by any unrelated exception that
+        // happens to mention the key.
+        check_throws([&] { root->predict_at(AI4BayesCode::block_context{
+                               {"X", arma::vec{9.0}}}); },
+                     "no registered refresher",
+                     "predict_at reports the missing-refresher guard");
         check_throws([&] { root->predict_at(AI4BayesCode::block_context{
                                {"X", arma::vec{9.0}}}); },
                      "f_forest",
-                     "predict_at names the node it cannot recompute");
+                     "...and names the node it cannot recompute");
 
         // Supplying it directly (the documented per-draw injection) works.
         bool ok = true;

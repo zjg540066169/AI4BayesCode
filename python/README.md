@@ -57,7 +57,8 @@ hist = m.get_history()
 # Convergence diagnostics:
 import numpy as np
 beta_samples = np.array(hist["beta"])
-print(AI4BayesCode.posterior_summary(beta_samples))
+print(for j in range(beta_samples.shape[1]):
+    print(j, AI4BayesCode.posterior_summary(beta_samples[:, j])))
 
 # Visualize the model DAG:
 AI4BayesCode.plot_dag(m, out_path="dag.png")

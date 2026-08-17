@@ -69,7 +69,8 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(GBartLogistic, X, y, 50L, seed, FALSE, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GBartLogistic, X, y, 50L, 42L)     # X, y, ntrees=50, seed=42 (single chain)
 //   m$step(2000L); str(m$get_current())         # $r linear predictor, $p fitted prob
@@ -84,7 +85,8 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GBartLogistic(X, y, 50, seed, False, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GBartLogistic(X, y, 50, 42, False, False)       # X, y, ntrees=50, seed=42
 //   m.step(2000); print(m.get_current())                   # 'r' linear predictor, 'p' fitted prob
@@ -633,11 +635,19 @@ int main() {
     std::printf("  all finite               = %s\n",
                 finite_ok ? "YES" : "NO");
 
+    // Finiteness alone would pass a model that returned a constant. Gate on the
+    // recovery quantities this demo already computes: accuracy > 0.70 (chance is ~0.5), RMSE(p_hat) < 0.30.
+    const bool recovery_ok = accuracy > 0.70 && rmse_p < 0.30;
+
     if (!finite_ok) {
         std::printf("FAIL: non-finite recovery\n");
         return 1;
     }
-    std::printf("OK: finite recovery\n");
+    if (!recovery_ok) {
+        std::printf("FAIL: recovery below tolerance\n");
+        return 1;
+    }
+    std::printf("OK: recovery within tolerance\n");
     return 0;
 }
 #endif

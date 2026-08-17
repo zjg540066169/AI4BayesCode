@@ -39,8 +39,8 @@
 //  path). gmrf_precision_block is the library-blessed sparse-Cholesky
 //  direct sampler (Rue 2001 Sec.2 + Sec.3.1.2 + Sec.3.1.3 simplified). Check
 //  #15 parity tests:
-//    tests/test_gmrf_precision_block.cpp -- 5 sub-tests covering
-//      diagonal Q sanity, AR(1) Cov vs dense inverse, b ≠ 0 mean shift,
+//    5 sub-tests cover diagonal Q sanity, AR(1) Cov vs dense inverse,
+//      b != 0 mean shift,
 //      IGMRF sum-to-zero (exact constraint + projected-Cov match),
 //      two-init R-hat across 4 chains on n=50.
 // ============================================================================
@@ -55,7 +55,8 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(GMRFPrior, 4L, 4L, 2.0, FALSE, FALSE, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GMRFPrior,
 //            4L,     # L_x : lattice width
@@ -75,7 +76,8 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GMRFPrior(4, 4, 2.0, False, False, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GMRFPrior(4, 4, 2.0, False, False, 7, True)
 //   #             (L_x, L_y, kappa, periodic, eight_nn, rng_seed, keep_history)

@@ -426,7 +426,6 @@ public:
         // well-conditioned chain never touches these bounds, so behaviour is
         // unchanged there; they only catch the underflow-lock and the runaway.
         {
-            auto& ns = cfg_.nuts_settings.nuts_settings;
             if (cfg_.min_step_size > 0.0 &&
                 !(ns.epsilon_bar_persist >= cfg_.min_step_size)) {
                 ns.epsilon_bar_persist = cfg_.min_step_size;
@@ -679,6 +678,24 @@ public:
         theta_unc_     = snap_theta_unc;
         theta_natural_ = snap_theta_natural;
         first_call_    = snap_first_call;
+
+        // The same [min_step_size, max_step_size] clamp step() applies. readapt
+        // runs mcmclib's dual averaging with n_adapt_draws = n and writes
+        // epsilon_bar_persist, so without this an epsilon that underflowed or
+        // ran away during readapt_NUTS() is carried into the next step() before
+        // anything catches it.
+        {
+            auto& nsc = cfg_.nuts_settings.nuts_settings;
+            if (cfg_.min_step_size > 0.0 &&
+                !(nsc.epsilon_bar_persist >= cfg_.min_step_size)) {
+                nsc.epsilon_bar_persist = cfg_.min_step_size;
+            }
+            if (cfg_.max_step_size > 0.0 &&
+                nsc.epsilon_bar_persist > cfg_.max_step_size) {
+                nsc.epsilon_bar_persist = cfg_.max_step_size;
+            }
+        }
+
         // History buffer untouched: the n internal iterations did NOT
         // call push_back (no draws_out entries were recorded into
         // history_buf_; see step() for that path).

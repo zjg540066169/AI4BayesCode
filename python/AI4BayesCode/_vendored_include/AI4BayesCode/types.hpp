@@ -104,7 +104,8 @@ struct adaptation_info {
 /// the metric is diagonal even though it is stored densely. Reporting such a
 /// metric as "dense" makes a checkpoint misdescribe the sampler it came from.
 inline bool metric_is_diagonal(const arma::mat& M) {
-    if (M.n_rows != M.n_cols || M.n_rows == 0) return false;
+    if (M.n_rows != M.n_cols) return false;
+    if (M.n_rows == 0) return true;   // vacuously diagonal, never "dense"
     for (arma::uword j = 0; j < M.n_cols; ++j)
         for (arma::uword i = 0; i < M.n_rows; ++i)
             if (i != j && M(i, j) != 0.0) return false;

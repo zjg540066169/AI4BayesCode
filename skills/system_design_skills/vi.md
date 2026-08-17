@@ -97,7 +97,8 @@ public:
                               const arma::vec& log_sd);
   arma::vec get_log_sd() const;                              // current log sigma
   double current_elbo() const;                               // last-step ELBO
-  // history hook: pushes (elbo, mu, log sigma, gamma, epoch) when keep_history=true
+  // history hook: pushes (elbo, mu, log sigma, gamma, epoch, final_khat)
+  // when keep_history=true
   const vi_history_t& vi_history() const;   // pure virtual on vi_block
 };
 ```
@@ -276,7 +277,9 @@ list(
   mu     = matrix(n_steps x K),     # variational mean trajectory
   log_sd = matrix(n_steps x K),     # variational log-sd trajectory
   gamma  = numeric(n_steps),        # learning-rate at each step
-  epoch  = integer(n_steps)         # which gamma-epoch the step belongs to
+  epoch  = integer(n_steps),        # which gamma-epoch the step belongs to
+  final_khat = numeric(1)           # terminal PSIS k-hat; validator Check
+                                    # #21 hard-errors when this is absent
 )
 ```
 

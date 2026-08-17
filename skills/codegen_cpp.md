@@ -336,8 +336,9 @@ mixed cleanly).
 3. **Enable dense metric only when** ONE of:
    - The user explicitly requests it after seeing diagonal R-hat
      failure;
-   - A documented diagonal-failure case applies. Currently three
-     such cases are recognized:
+   - A documented diagonal-failure case applies. FOUR are listed below;
+     note that case 2 is a REPARAMETERIZE case, not a
+     dense-justification one:
      1. GP banana ridge in heteroscedastic / hierarchical / multi-
         output GP per `codegen_priors.md Sec.2b` + `block_catalogue/index.md`
         "GP convergence troubleshooting ladder";
@@ -2144,7 +2145,7 @@ proactively; only honor an explicit ask.
 Every generated class MUST include a backend-neutral
 `AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map&) const`
 method (NEVER `Rcpp::List` -- see "Return BACKEND-NEUTRAL types" above;
-all 43 shipped examples use this signature). The behavior depends on (1) whether the model has data
+the shipped examples use this signature). The behavior depends on (1) whether the model has data
 inputs and (2) whether the class supports `keep_history`.
 
 **WARNING Critical #1 (data_input forwarding):** if the constructor calls
@@ -2586,7 +2587,7 @@ PYBIND11_MODULE(<ClassName>, m) {
 Python users invoke via `AI4BayesCode.source("MyModel.cpp")` (packaged; no path),
 which sets `-DAI4BAYESCODE_PYBIND_MODULE` at compile time.
 
-#### Dual-module (R + Python from the same .cpp -- the 6 shipped examples)
+#### Dual-module (R + Python from the same .cpp -- all 43 shipped examples)
 
 Guard both blocks; the active backend's `-D` define picks which one
 compiles. See `examples/ODE_SIR.cpp` for a full dual-module reference.

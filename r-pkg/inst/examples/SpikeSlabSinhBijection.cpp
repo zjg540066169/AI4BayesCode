@@ -48,7 +48,7 @@
 //  beta | gamma=1, y ~ N(m, v) with
 //      v = 1 / (X'X / sigma^2 + 1 / slab_sd^2)
 //      m = v * X'y / sigma^2
-//  See `tests_autodiff/audit_rjmcmc_custom_bijection.R` for the comparison.
+//  The bijection is cross-checked against this closed form.
 // ============================================================================
 //
 // @example:R
@@ -62,7 +62,8 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(SpikeSlabSinhBijection, y, x, sigma, slab_sd, pi_incl, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(SpikeSlabSinhBijection,
 //            y, x,                                 # data: response y, predictor x
@@ -82,7 +83,8 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.SpikeSlabSinhBijection(y, x, sigma, slab_sd, pi_incl, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.SpikeSlabSinhBijection(y, x, sigma, slab_sd, pi_incl, 7, True)
 //   m.step(2000); print(m.get_current())            # dict: gamma (~1), beta (~1.5)

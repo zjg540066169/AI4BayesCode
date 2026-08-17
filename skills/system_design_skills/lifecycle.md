@@ -224,10 +224,10 @@ Before any PR touching Tier A / B / C lands:
       log-density lambda.
 - [ ] **Check #12 AD verify file (if any new NUTS block with
       hand-written grad).** Generate, run, PASS, delete.
-- [ ] **Check #15 -- Gibbs-block parity test.** If the example uses
-      any `*_gibbs_block`: verify
-      `tests_autodiff/block_tests/test_<blockname>_gibbs_block.cpp`
-      exists and passes. If the `params_fn` is non-textbook (uses
+- [ ] **Check #15 -- Gibbs-block parity test.** If the example uses any
+      `*_gibbs_block`: if a parity test for that block exists under
+      `tests_autodiff/block_tests/`, run it; only six blocks have one, so for
+      the rest the check means WRITE the parity test. If the `params_fn` is non-textbook (uses
       conditional logic, active-subset indexing, or any derivation
       beyond plug-in counts), ALSO verify
       `tests_autodiff/test_<model>_<...>_gibbs_parity.cpp` per-usage

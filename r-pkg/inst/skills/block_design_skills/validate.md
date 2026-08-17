@@ -333,4 +333,7 @@ Code, markdown labeled-option fallback elsewhere): `(a) Yes -- write a bundled e
 - **(b) no** -> **do NOT load `example.md`** -- skip straight to the SKILL phase (`skill.md`).
 Do NOT announce "Entering the EXAMPLE phase / loading its module" until this gate is ANSWERED yes.
 
-The bundle MOVES to `blocks_local/<Block>/` AUTOMATICALLY once all checks pass (no "go" gate); then report the final path. A failed block is never moved.
+The bundle stays in staging at the END of VALIDATE -- the manifest and both
+skill files do not exist yet (SKILL authors them). The move to
+`blocks_local/<Block>/` happens automatically at the end of the SKILL phase,
+once Sec.5c passes (no "go" gate); then report the final path. A failed block is never moved.

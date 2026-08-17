@@ -66,7 +66,8 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(BartNoise, X, y, 50L, 2.0, 2.0, 0.95, 3.0, 100L, FALSE, FALSE, seed, FALSE, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(BartNoise, X, y, 50L, 2.0, 2.0, 0.95, 3.0, 100L, FALSE, FALSE, 42L)
 //                                                          # ntrees=50,k=2,power=2,base=.95,nu=3,numcut=100,dart=F,aug=F,seed=42
@@ -82,7 +83,8 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.BartNoise(X, y, 50, 2.0, 2.0, 0.95, 3.0, 100, False, False, seed, False, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.BartNoise(X, y, 50, 2.0, 2.0, 0.95, 3.0, 100, False, False, 42, False, False)
 //   m.step(2000); print(m.get_current())                 # 'f_bart' fitted mean, 'sigma' noise SD
@@ -861,11 +863,21 @@ int main() {
     std::printf("  all finite               = %s\n",
                 finite_ok ? "YES" : "NO");
 
+    // Finiteness alone would pass a model that returned a constant. Gate on the
+    // recovery quantities this demo already computes: cor(f_hat,f_true) > 0.85, RMSE < 1.0, sigma_hat within 2x of truth.
+    const bool recovery_ok = cor_f > 0.85 && rmse_f < 1.0 &&
+                            sigma_hat > 0.5 * sigma_true &&
+                            sigma_hat < 2.0 * sigma_true;
+
     if (!finite_ok) {
         std::printf("FAIL: non-finite recovery\n");
         return 1;
     }
-    std::printf("OK: finite recovery\n");
+    if (!recovery_ok) {
+        std::printf("FAIL: recovery below tolerance\n");
+        return 1;
+    }
+    std::printf("OK: recovery within tolerance\n");
     return 0;
 }
 #endif

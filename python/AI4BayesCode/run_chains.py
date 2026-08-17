@@ -1,6 +1,9 @@
 """Parallel multi-chain MCMC orchestration.
 
-Python equivalent of the R helper's `ai4bayescode_run_chains()`:
+Python counterpart of the R helper's `ai4bayescode_run_chains()`. The two are
+NOT argument-compatible: R takes `n_chains` and returns
+`list(histories, seeds, wall)`; this takes `seeds` and returns a list of
+per-chain dicts. `n_chains=` is accepted as an alias that derives the seeds:
 
     chains = AI4BayesCode.run_chains(
         factory = lambda seed: MyModel(y, seed=seed, keep_history=True),
@@ -113,6 +116,7 @@ def _chain_worker_fork(seed: int, n_burn: int, n_keep: int,
 def run_chains(
     factory: Callable[[int], Any],
     *,
+    n_chains: int | None = None,
     seeds: Iterable[int] = (101, 202, 303, 404),
     n_burn: int = 2000,
     n_keep: int = 10000,
@@ -159,6 +163,10 @@ def run_chains(
     ``drop_burn`` / ``n_burn`` bookkeeping. An entry with a single stored
     draw (``keep_history=False``) is returned unchanged.
     """
+    # R's ai4bayescode_run_chains takes n_chains; accept it so the same call
+    # reads the same way in both frontends. Explicit seeds win.
+    if n_chains is not None and seeds == (101, 202, 303, 404):
+        seeds = tuple(101 * (i + 1) for i in range(int(n_chains)))
     seeds = list(seeds)
     if not seeds:
         return []

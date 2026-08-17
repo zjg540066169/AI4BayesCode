@@ -26,14 +26,13 @@
 //
 //  Validation
 //  ----------
-//  Cross-validation lives at tests/test_mean_field_categorical_vi_chain.cpp
-//  (V1-V8: KL/TV vs 81-state exact enumeration on symmetric AND
-//  asymmetric chain; PSIS-k̂ diagnostic).
+//  Validated against 81-state exact enumeration on symmetric and asymmetric
+//  chains (KL / TV, plus the PSIS k-hat diagnostic).
 //
 //  Sampling note: Discrete latents with strong local
 //  dependence -- system_design.md Sec.11.2(b). Per-site Gibbs mixes
 //  catastrophically near critical coupling; categorical mean-field VI
-//  gives a deterministic deterministic approximation that converges
+//  gives a deterministic approximation that converges
 //  cleanly to a (biased) joint with correct marginals in many regimes,
 //  validated by V1-V8. The textbook MF underestimate-of-joint-variance
 //  caveat (Bishop Sec.10.1.2) is correctly diagnosed by PSIS-k̂.
@@ -380,8 +379,7 @@ RCPP_MODULE(CategoricalIsingChainVI_module) {
             "exact_enumeration (use full enumeration for gradient if "
             "K^n_nodes <= 4096; otherwise MC), rng_seed, keep_history. "
             "Discrete Potts chain mean-field VI via Bishop §10.1 + "
-            "RAABBVI. Cross-validation at tests/test_categorical_"
-            "meanfield_vi_chain.cpp.")
+            "RAABBVI.")
         .method("step", (void (CategoricalIsingChainVI::*)())    &CategoricalIsingChainVI::step, "Run one sweep.")
         .method("step", (void (CategoricalIsingChainVI::*)(int)) &CategoricalIsingChainVI::step, "Run n sweeps.")
         .method("get_current", &CategoricalIsingChainVI::get_current,

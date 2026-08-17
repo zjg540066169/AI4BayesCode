@@ -512,18 +512,43 @@ int main() {
         y[i]   = b0t[i] + b1t[i] * X(i, 0) + b2t[i] * X(i, 1) + eps(g);
     }
 
-    VCBart m(X, Z, y, 50, 2.0, 2.0, 0.95, 3.0, 100, 1, false);
-    m.step(1500);
-    auto cur = m.get_current();
+    // keep_history so the recovery check uses a POSTERIOR MEAN over kept draws
+    // rather than whatever a single final draw happened to be.
+    VCBart m(X, Z, y, 50, 2.0, 2.0, 0.95, 3.0, 100, 1, true);
+    m.step(500);                                  // burn
+    const int M = 1000;
+    arma::vec b0(b0t.n_elem, arma::fill::zeros);
+    arma::vec b1(b1t.n_elem, arma::fill::zeros);
+    arma::vec b2(b2t.n_elem, arma::fill::zeros);
+    double sig = 0.0;
+    for (int d = 0; d < M; ++d) {
+        m.step();
+        auto cur = m.get_current();
+        b0 += cur["beta_0"]; b1 += cur["beta_1"]; b2 += cur["beta_2"];
+        sig += cur["sigma"][0];
+    }
+    b0 /= M; b1 /= M; b2 /= M; sig /= M;
 
     auto corr = [](const arma::vec& a, const arma::vec& b) {
         return arma::as_scalar(arma::cor(a, b));
     };
-    std::printf("VC-BART recovery (correlation of fitted beta_j(Z) with truth):\n");
-    std::printf("  beta_0 (sin 3Z): %.3f\n", corr(cur["beta_0"], b0t));
-    std::printf("  beta_1 (Z^2)   : %.3f\n", corr(cur["beta_1"], b1t));
-    std::printf("  beta_2 (-Z)    : %.3f\n", corr(cur["beta_2"], b2t));
-    std::printf("  sigma (true 0.3): %.3f\n", cur["sigma"][0]);
+    const double c0 = corr(b0, b0t), c1 = corr(b1, b1t), c2 = corr(b2, b2t);
+    std::printf("VC-BART recovery (correlation of posterior-mean beta_j(Z) with truth):\n");
+    std::printf("  beta_0 (sin 3Z): %.3f\n", c0);
+    std::printf("  beta_1 (Z^2)   : %.3f\n", c1);
+    std::printf("  beta_2 (-Z)    : %.3f\n", c2);
+    std::printf("  sigma (true 0.3): %.3f\n", sig);
+
+    // Gate, so a regression is visible. The thresholds are deliberately loose:
+    // varying-coefficient BART recovers the SHAPE of each beta_j(Z) well before
+    // it recovers the scale, and sigma absorbs what the trees miss.
+    const bool ok = std::isfinite(sig) && sig > 0.0 && sig < 1.0 &&
+                    c0 > 0.7 && c1 > 0.5 && c2 > 0.7;
+    if (!ok) {
+        std::printf("FAIL: recovery below tolerance\n");
+        return 1;
+    }
+    std::printf("OK: recovery within tolerance\n");
     return 0;
 }
 #endif

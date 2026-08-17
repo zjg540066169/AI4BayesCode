@@ -306,10 +306,10 @@ rank -- do NOT read "item 1" as "try this first":
 
    Reference examples: `DPGaussianMixture.cpp`, `PYGaussianMixture.cpp`,
    `DPGaussianMixture_DerivedAlpha.cpp`. The composition recipe is in
-   `block_catalogue/index.md` "BNP example summary"; the planned (not v0)
-   pieces are `gamma_gibbs_block` (closed-form alpha update),
-   `niw_cluster_gibbs_block` (full-covariance NIW), and
-   `split_merge_block` (Jain-Neal 2004 partition acceleration).
+   `block_catalogue/index.md` "BNP example summary"; `gamma_gibbs_block`
+   (closed-form alpha update), `niw_cluster_gibbs_block` (full-covariance
+   NIW) and `split_merge_block` (Jain-Neal 2004 partition acceleration) all
+   SHIP; each has a header and a catalogue card.
 6. **`pg_logistic_block`** -- Bayesian logistic regression via
    Polya-Gamma data augmentation, 10-100x faster than NUTS-on-logistic
    for p < 1000.
@@ -598,9 +598,11 @@ by tests under `tests/` or by their example's recovery check -- cite the
 test that actually exists, never assume a per-block file in this
 directory.
 
-The intent is that every `*_gibbs_block` type shipped in the library has ONE block-level
-parity test in `tests_autodiff/block_tests/test_<blockname>_gibbs_block.cpp`
-that verifies the SAMPLING MECHANISM: given fixed hyperparameters
+The INTENT is that every `*_gibbs_block` shipped in the library has ONE
+block-level parity test in `tests_autodiff/block_tests/`. As of now SIX exist
+(beta, elliptical_slice, frailty_gamma, interval_censored,
+piecewise_exponential, univariate_slice); for anything else the test is what
+Check #15 asks YOU to write. Such a test verifies the SAMPLING MECHANISM: given fixed hyperparameters
 (e.g., {alpha=5, beta=10} for a Beta distribution), 10,000 draws
 match the analytic distribution's mean and variance within
 tolerances 5% (mean) and 10% (variance).
@@ -670,7 +672,7 @@ posterior draw, `Rcpp::rbeta`, `Rcpp::rgamma`, `Rcpp::rdirichlet`,
   Markov chain; same reasoning as stochastic refreshers)
 - Inside library internal code (`include/AI4BayesCode/*_gibbs_block.hpp`
   and friends)
-- Inside a Sec.2c Exception 4 custom block/sampler carrying the
+- Inside a Sec.2b Exception 4 custom block/sampler carrying the
   `// Sampling note: ...` comment (structural-gap
   last resort: no blessed block fits AND NUTS is structurally
   inapplicable). Hand-rolled conjugate Gibbs where a blessed block or
@@ -690,7 +692,7 @@ for the pre-block ARD pattern. The Check #17 static grep MAY
 whitelist this file explicitly; the cpp header carries the legacy
 note. DO NOT generate new samplers following this pattern -- for
 new continuous parameters, use `joint_nuts_block` (default) or
-`nuts_block`. The only carve-out is Sec.2c Exception 4 (a genuine
+`nuts_block`. The only carve-out is Sec.2b Exception 4 (a genuine
 structural gap where NUTS is inapplicable), and even there prefer a
 NUTS-based custom log-density over hand-rolled Gibbs.
 
@@ -702,7 +704,7 @@ getting a joint NUTS log-density wrong. Library-blessed `*_gibbs_block`
 (with parity tests, inline justification) is the safe path. For any
 continuous param not covered by Exceptions 1-3 of Sec.2b: USE
 `joint_nuts_block` (default) / `nuts_block` INSTEAD. Hand-written
-sampling is permitted ONLY under Sec.2c Exception 4 (no block fits AND
+sampling is permitted ONLY under Sec.2b Exception 4 (no block fits AND
 NUTS structurally inapplicable), with the plain-language sampling-note
 comment and full validator gating.
 

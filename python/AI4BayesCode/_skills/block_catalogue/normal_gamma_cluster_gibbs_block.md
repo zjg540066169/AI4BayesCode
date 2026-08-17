@@ -51,9 +51,9 @@ cfg.initial_lambda  = ...;            // a_lambda_0 / b_lambda_0
 
 **JUSTIFICATION (Check #16): Exception 1 from codegen_priors.md Sec.2b**
 (NEW Tier-B block; conjugate cluster update is the textbook Murphy
-2007 Sec.4 formula). **Check #15** parity: verified by a block-level parity test.
-verifies prior-recovery (empty cluster) and posterior-recovery
-(populated single cluster) within 5% on 10k draws.
+2007 Sec.4 formula). **Check #15** parity: NO dedicated parity test ships for this block. When
+Check #15 fires, write one covering prior-recovery (empty cluster) and
+posterior-recovery (populated single cluster) within 5% on 10k draws.
 
 **FULL covariance NIW** is shipped as `niw_cluster_gibbs_block` (NEW
 2026-05-03) -- see its catalogue entry below. Use the NIW block when

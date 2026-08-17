@@ -39,9 +39,10 @@ cfg.initial_pi = arma::vec(20, arma::fill::value(1.0 / 20));
 
 **JUSTIFICATION (Check #16): Exception 1** (per-stick Beta conditional
 on a NEW Tier-B block -- Ishwaran-James textbook scheme).
-**Check #15** parity: verified by a block-level parity test.
-verifies analytic E[pi_k] under both empty-counts (GEM(alpha) regime)
-and populated-counts DP regimes within 5% on 20k draws.
+**Check #15** parity: NO dedicated parity test ships for this block. When
+Check #15 fires, write one checking analytic E[pi_k] under both the
+empty-counts GEM(alpha) regime and the populated-counts DP regime, within 5%
+on 20k draws.
 
 **Reference examples**: `DPGaussianMixture.cpp`, `PYGaussianMixture.cpp`,
 `DPGaussianMixture_DerivedAlpha.cpp`.

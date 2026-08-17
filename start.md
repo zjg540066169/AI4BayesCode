@@ -209,7 +209,8 @@ re-tune metric / try non-centered reparam / try a joint block; etc.
 **N defaults to 5.** The user may override by specifying a different
 budget -- either upfront ("retry up to 3 times" / "retry up to 10
 times") or mid-session at any point before validation starts. If
-the user has not specified anything, use N = 5 silently.
+the user answers the upfront question with nothing, use N = 5. The question
+itself is never skipped -- every upfront question must be asked.
 
 If the N-th attempt still fails, **report the failure and stop**.
 Emit a final message describing what failed, which N attempts you

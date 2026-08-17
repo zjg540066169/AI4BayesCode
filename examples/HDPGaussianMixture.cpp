@@ -20,18 +20,12 @@
 //  m_jt sampled from the Antoniak distribution (Teh et al. 2006 Sec.5.1),
 //  with β | m_·1, ..., m_·T ~ Dirichlet(γ/T + m_·1, ..., γ/T + m_·T).
 //
-//  For a v0 demonstration of the COMPOSITION PATTERN, the heuristic
-//  works correctly on simple group-clustering fixtures and matches the
-//  posterior intuitively (more populated atoms get larger β). For
-//  rigorous HDP inference, future work needs an `antoniak_aug_block`
-//  that samples table counts; with that, the existing β block can be
-//  re-pointed to read m_·t instead of n_·t.
-//
-//  This caveat is documented prominently here (in the header comment),
-//  in `skills/block_catalogue/index.md` (HDP example summary), and in
-//  `BNP_AUDIT_STATUS.md`. Users who need rigorous HDP should look at
-//  BayesMix (Beraha et al. 2022, arXiv 2205.08144) for a reference
-//  implementation.
+//  APPROXIMATION: beta is updated from the OBSERVATION counts n_.t rather
+//  than the table counts m_.t. The two agree in ordering (more populated
+//  atoms get larger beta) but not in scale, so the shared-atom weights are
+//  approximate. Sampling m_.t exactly needs an Antoniak-distributed table
+//  count; the beta block would then read m_.t in place of n_.t with no other
+//  change.
 //
 //  MODEL
 //  -----
@@ -126,7 +120,8 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(HDPGaussianMixture, y, group_idx, 6L, c(0, 0), 0.1, diag(d), 4.0, 1.0, 1.0, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(HDPGaussianMixture,
 //            y, group_idx, 6L,                 # y (N x d), group_idx, K_trunc
@@ -156,7 +151,8 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HDPGaussianMixture(y, group_idx, 6, np.zeros(d), 0.1, np.eye(d), 4.0, 1.0, 1.0, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.HDPGaussianMixture(y, group_idx, 6, np.zeros(d), 0.1,
 //                              np.eye(d), 4.0, 1.0, 1.0, 7, False)

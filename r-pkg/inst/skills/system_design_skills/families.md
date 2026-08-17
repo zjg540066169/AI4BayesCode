@@ -36,7 +36,9 @@ WHITELIST/BLACKLIST admission varies:
 | `hmm_block` | Latent state sequence z frozen while emission parameters sample yields mismatched conditioning (Baum-Welch forward pass depends on emissions). Silent bias. Canonical error string: `"freezing hmm_block not supported: the hidden state sequence has to be re-drawn whenever the emission parameters change, so holding it fixed would bias the other parameters."`. |
 | `vi_block` subclasses | Sec.18.4 invariant: composite writes `current_sample(rng)` (fresh q-draw) to shared_data each step, NOT `current()` (q-mean). Freezing VI breaks the hybrid q-sample stream -> MCMC siblings silently underestimate posterior variance. Error string: `"freezing VI blocks not supported: a frozen VI block would hand the same single draw to every other sampler, biasing their results."`. |
 
-**All FOUR error strings above contain the substring `"not supported"` verbatim** -- validator Check #26(b) uses `grepl("not supported", ...)` as a uniform blacklist-error test.
+| `softbart_block` | Same class as `bart_block`. Canonical error string: `"freezing softbart_block not supported: a fitted tree ensemble cannot be restored from a stored value. To make predictions at new data without changing the fitted model, use predict_at()."`. |
+
+**All FIVE error strings above contain the substring `"not supported"` verbatim** -- validator Check #26(b) uses `grepl("not supported", ...)` as a uniform blacklist-error test.
 
 **Composite-of-composite (nested wrappers).** freeze/unfreeze accept
 dot-path names for descending into nested composite children:

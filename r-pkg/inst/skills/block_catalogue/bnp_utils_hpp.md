@@ -28,6 +28,7 @@ when a user writes a refresher that needs to draw a CRP assignment
 at predict time, or when implementing a Neal-Alg-2 categorical_gibbs
 log_probs_fn.
 
-**Check #15** parity: verified by a block-level parity test.
-verifies all six functions within Check #15 tolerance (analytic +
-empirical).
+**Check #15** parity: NO dedicated parity test ships for this header. The six
+functions are exercised indirectly through the BNP examples' recovery checks.
+When Check #15 fires on a model using these helpers, write the parity test as
+part of that generation rather than citing one that does not exist.

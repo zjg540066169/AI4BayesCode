@@ -122,7 +122,7 @@ chat tool (Claude Code / Cursor / etc.) — point the agent at the bundled skill
 
 ```r
 ai4bayescode_skills_path("start.md")
-#> "/Library/.../R/library/AI4BayesCode/skills/start.md"
+#> "/Library/.../R/library/AI4BayesCode/start.md"   # start.md is at the root
 ```
 
 …then tell the agent "follow the workflow at that path, then write code

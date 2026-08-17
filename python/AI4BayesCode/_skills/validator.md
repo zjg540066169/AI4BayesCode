@@ -1324,7 +1324,8 @@ diagonal, escalate on diagnostics.
    budget) go in the L2 verdict table, never in the shipped file.
    Acceptable reasons:
    - **Reparameterization explored and ruled out** (preferred fix
-     for anisotropy; see `codegen_cpp.md Sec.4a` "Dense metric: opt-in
+     for anisotropy; see `codegen_cpp.md` Sec.4a "Metric choice: prefer the adapted DIAGONAL
+     metric" ("Dense metric: opt-in
      only"). E.g., "non-centered hierarchical tried, group-level
      R-hat 1.4 on tau at 20k+20k".
    - **Documented R-hat failure on joint+diagonal at extended
@@ -1366,7 +1367,8 @@ diagonal, escalate on diagnostics.
 **Limits of static review:** cannot verify the *substance* of the
 justification -- the agent's claim "non-centered was tried" is taken
 at face value. The companion mitigation is in `codegen_cpp.md Sec.4a`
-("Dense metric: opt-in only") which constrains codegen-time policy.
+(Sec.4a, "Metric choice: prefer the adapted DIAGONAL metric") which
+constrains codegen-time policy.
 Cannot detect Welford-inversion failures at runtime; those manifest
 as `ess_bulk = NA` in Layer 3 R2, and the validator should treat
 any Layer 3 R2 stall accompanied by `use_dense_metric = true` as
@@ -1475,8 +1477,8 @@ calibration init (per-county OLS, balanced floor, etc.) lands the chain
 in a friendly region; sim1 cross-dataset checks FAIL catastrophically.
 
 This check is the safety net. The codegen-time prevention is in
-`skills/codegen.md` Hard Rules + `skills/block_catalogue/index.md` "nuts_block
--> Configuration discipline" + the doc comment in
+`skills/codegen.md` Hard Rules + `skills/block_catalogue/nuts_block.md`
+"Configuration discipline" + the doc comment in
 `include/AI4BayesCode/nuts_block.hpp`. If those have been read, this
 check should never fire.
 

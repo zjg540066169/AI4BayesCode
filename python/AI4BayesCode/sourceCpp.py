@@ -53,7 +53,7 @@ def _read_pybind_module_name(cpp_file: Path) -> str:
         raise ValueError(
             f"No PYBIND11_MODULE(<name>, ...) block found in {cpp_file}.\n"
             "Python compilation requires a pybind11 module declaration. "
-            "See examples_py/ODE_SIR.cpp for a reference. If the file has "
+            "See AI4BayesCode.examples_path('ODE_SIR') for a reference. If the file has "
             "only RCPP_MODULE (Rcpp-only), add a PYBIND11_MODULE inside an "
             "`#ifdef AI4BAYESCODE_PYBIND_MODULE ... #endif` guard."
         )

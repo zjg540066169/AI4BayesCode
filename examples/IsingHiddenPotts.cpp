@@ -60,7 +60,8 @@
 //       function(seed) new(IsingHiddenPotts, 16L, 0.7, 0.6, 0.0, 2.0, 1.0,
 //                          2024L, seed, 0L, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(IsingHiddenPotts,
 //            16L,        # L: lattice side (N = 256 sites)
@@ -87,7 +88,8 @@
 //       lambda seed: Mod.IsingHiddenPotts(16, 0.7, 0.6, 0.0, 2.0, 1.0,
 //                                         2024, seed, 0, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.IsingHiddenPotts(16,        # L: lattice side (N = 256 sites)
 //                            0.7,       # beta: spatial interaction (>= 0)

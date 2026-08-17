@@ -369,4 +369,6 @@ test_genbart_slice_mstep: test_genbart_slice_mstep.cpp \
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 
 clean:
-	rm -f $(TARGETS)
+	# The build also leaves .rebuilt / .rb / .new / .builderr / .be markers;
+	# without these a stale one can outlive the binary it describes.
+	rm -f $(TARGETS) *.rebuilt *.rb *.new *.builderr *.be

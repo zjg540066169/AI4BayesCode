@@ -50,7 +50,8 @@
 //   run <- ai4bayescode_run_chains(
 //       model_ctor = function(seed) new(PehSurvival, t_obs, delta, edges, 0.01, 0.01, seed, TRUE),
 //       n_chains = 4, n_burn = 3000, n_keep = 5000)
-//   diag <- ai4bayescode_diagnose(run$histories[[1]])
+//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   diag <- ai4bayescode_diagnose(run$histories[[1]])   # chain 1
 //   print(diag$summary)   # posterior mean lambda_k, R-hat, ESS
 
 // @example:python
@@ -69,6 +70,7 @@
 //   run = ai.run_chains(
 //       factory = lambda seed: Mod.PehSurvival(t_obs, delta, edges, 0.01, 0.01, seed, True),
 //       seeds = (101, 202, 303, 404), n_burn=3000, n_keep=5000)
+//   print(ai.rhat_summary(run))                    # CROSS-chain R-hat / ESS
 //   summary, plot_fn = ai.diagnose(run[0]["hist"]); print(summary)
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS

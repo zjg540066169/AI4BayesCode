@@ -91,7 +91,8 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(LdaCollapsedGibbs, w, doc, M, V, K, rep(1, K), rep(1, V), seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(LdaCollapsedGibbs, w, doc, M, V, K,     # w/doc length-N (1-indexed) tokens & doc ids
 //            rep(1, K), rep(1, V), 7L, TRUE)          # alpha (len K), beta (len V), seed, keep_history
@@ -114,7 +115,8 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.LdaCollapsedGibbs(w, doc, M, V, K, np.ones(K), np.ones(V), seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.LdaCollapsedGibbs(w, doc, M, V, K,        # w/doc length-N (1-indexed) tokens & doc ids
 //                             np.ones(K), np.ones(V), 7, True)  # alpha, beta, seed, keep_history

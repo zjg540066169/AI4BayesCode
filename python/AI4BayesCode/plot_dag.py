@@ -123,6 +123,11 @@ def plot_dag(
 ) -> Optional[Path]:
     """Render the model DAG to a PNG file and return its path.
 
+    Argument names differ from the R helper on purpose, following each
+    language's plotting convention: R takes ``main`` / ``width`` / ``height`` /
+    ``res`` (base graphics), this takes ``title`` / ``figsize`` / ``dpi``
+    (matplotlib).
+
     Always writes a file. With ``out_path=None`` the PNG goes to a temporary
     directory and that path is returned -- nothing is displayed inline. (The R
     helper ``ai4bayescode_plot_dag`` draws to the active graphics device

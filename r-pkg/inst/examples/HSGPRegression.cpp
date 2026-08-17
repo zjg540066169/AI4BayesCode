@@ -17,9 +17,8 @@
 //  (1) (amp, ell) form a banana ridge through the spectral-density
 //      formula; (2) (amp, zs) form a Neal funnel because f scales as
 //      amp * zs; (3) (Intercept, sum(zs * phi)) is a marginal ridge.
-//  Any agent generating an HSGP cpp without these three guards will get
-//  rhat = 2+ and ESS = 1-3 on amp/ell -- exactly what we observed in the
-//  GP-class test set under sim3 ablation.
+//  Without these three guards an HSGP sampler gets rhat = 2+ and ESS = 1-3
+//  on amp/ell.
 //
 //  Architectural choices DEMONSTRATED here (must transfer)
 //  -------------------------------------------------------
@@ -78,7 +77,8 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(HSGPRegression, y, x, M, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(HSGPRegression, y, x, M, 7L, TRUE)       # y, x, M, seed, keep_history
 //   m$step(2500); str(m$get_current())
@@ -92,7 +92,8 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HSGPRegression(y, x, M, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.HSGPRegression(y, x, M, 7, True); m.step(2500); print(m.get_current())
 // @example:end

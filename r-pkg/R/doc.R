@@ -214,6 +214,9 @@
 #' }
 #' @export
 ai4bayescode_doc <- function(x) {
+    # Python's doc() short-circuits with "source not found"; R printed a full
+    # banner plus the seven canonical method names for a name that resolves to
+    # nothing, which reads as though the model exists.
     expr <- substitute(x)          # capture BEFORE x is forced below
     class_name <- NULL; src_path <- NULL
     if (is.character(x) && length(x) == 1L && grepl("\\.cpp$", x) && file.exists(x)) {

@@ -358,7 +358,7 @@ inline double gpd_fit_shape(const std::vector<double>& y) {
  * Returns NaN if S < 25 (insufficient samples for a meaningful k̂).
  *
  * @param log_weights  S log importance weights log w_s = log p̃(η_s) - log q(η_s)
- * @return joint k̂ estimate, or NaN if S too small / degenerate.
+ * @return joint k̂ estimate, or -1.0 if S is too small / the weights are degenerate.
  */
 inline double psis_khat(const arma::vec& log_weights) {
     const std::size_t S = log_weights.n_elem;

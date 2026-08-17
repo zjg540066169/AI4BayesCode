@@ -324,9 +324,9 @@ sampler inside an `rjmcmc_block` hook incurs three validator
 obligations:
 
 - **Check #15** -- library-level OR per-usage parity test present
-  (see `skills/codegen_priors.md` Sec.2c). Library-level test
-  `tests_autodiff/block_tests/test_<blockname>_gibbs_block.cpp`
-  covers the sampling mechanism for textbook `params_fn`; per-usage
+  (see `skills/codegen_priors.md` Sec.2c). A library-level test under `tests_autodiff/block_tests/`
+  covers the sampling mechanism for a textbook `params_fn` (six blocks have
+  one today); per-usage
   test `tests_autodiff/test_<model>_<...>_gibbs_parity.cpp` covers
   non-textbook `params_fn` (e.g., active-subset indexing) or hand-
   written Gibbs in rjmcmc hooks. Tolerance 5% mean / 10% variance

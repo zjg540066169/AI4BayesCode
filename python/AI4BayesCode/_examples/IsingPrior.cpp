@@ -46,7 +46,8 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(IsingPrior, 16L, 16L, 2L, 0.44, TRUE, FALSE, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(IsingPrior,
 //            16L, 16L,   # L_x, L_y: lattice dims (N = 256 sites)
@@ -67,7 +68,8 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.IsingPrior(16, 16, 2, 0.44, True, False, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.IsingPrior(16, 16,   # L_x, L_y: lattice dims (N = 256 sites)
 //                      2,         # Q: state count (2 = Ising)

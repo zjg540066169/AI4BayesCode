@@ -117,7 +117,8 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(DPGaussianMixture, y, 60L, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(DPGaussianMixture, y, 60L, 42L, TRUE)        # y (N x d), K_trunc=60, seed=42, keep_history
 //   m$step(2000L); cur <- m$get_current()                # $z $pi $mu $lambda $alpha $K_trunc
@@ -137,7 +138,8 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DPGaussianMixture(y, 60, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.DPGaussianMixture(y, 60, 42, True)             # (y N x d, K_trunc, seed, keep_history)
 //   m.step(2000); cur = m.get_current()                   # 'z' 'pi' 'mu' 'lambda' 'alpha' 'K_trunc'

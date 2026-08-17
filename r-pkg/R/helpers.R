@@ -581,6 +581,13 @@ ai4bayescode_diagnose <- function(hist, n_burn = 0, plot = TRUE, order_component
         }
     }
     M <- do.call(cbind, cols); colnames(M) <- names(cols)
+    # posterior::summarise_draws happily returns an R-hat near 1 for a column
+    # containing Inf/NaN, so a non-finite draw reads as "converged". Say so.
+    .bad <- colnames(M)[apply(M, 2L, function(v) any(!is.finite(v)))]
+    if (length(.bad))
+        warning("non-finite draws in: ", paste(.bad, collapse = ", "),
+                ". The diagnostics below are not meaningful for those.",
+                call. = FALSE)
     drw <- posterior::as_draws_matrix(M)
     summary <- posterior::summarise_draws(drw)
     plt <- NULL
@@ -886,6 +893,7 @@ ai4bayescode_rhat_summary <- function(run, keys = NULL, drop_burn = 0,
 #'   nothing can be frozen yet at construction time, so the redundant-refreeze
 #'   warning has nothing to report.
 #' @return The constructed model, with the `fixed` components set and frozen.
+#' @importFrom methods new
 #' @export
 ai4bayescode_new_frozen <- function(module_class, ...,
                                     fixed = list(),

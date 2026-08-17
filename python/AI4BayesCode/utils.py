@@ -340,7 +340,8 @@ def ess_tail(samples: np.ndarray, quantile_lo: float = 0.05,
     return float(min(out))
 
 
-def posterior_summary(samples: np.ndarray, prob: float = 0.90) -> dict:
+def posterior_summary(samples: np.ndarray, prob: float = 0.90,
+                      *, chains: bool = False) -> dict:
     """Compact posterior summary: mean, median, sd, mad, CI bounds, R-hat, ESS.
 
     The credible-interval level defaults to ``prob=0.90`` to match R's
@@ -349,6 +350,16 @@ def posterior_summary(samples: np.ndarray, prob: float = 0.90) -> dict:
     are included for parity with the R summary. Works for a scalar or a single
     vector component (call per-component for a vector).
     """
+    a = np.asarray(samples, dtype=float)
+    if a.ndim == 2 and a.shape[1] > 1 and not chains:
+        raise ValueError(
+            f"posterior_summary got a {a.shape[0]}x{a.shape[1]} array. A 2-D "
+            "array is read as (n_draws, n_chains), so passing a VECTOR "
+            "parameter's draws here would summarize its components as if they "
+            "were chains -- the mean would be the mean over components. "
+            "Summarize one component at a time "
+            "(`posterior_summary(x[:, j])`), or pass chains=True if the "
+            "columns really are chains of one scalar.")
     x = _as_2d(samples)
     alpha = (1.0 - prob) / 2.0
     flat = x.reshape(-1)

@@ -43,6 +43,15 @@ def _stack(hists, key, j, drop_burn, order):
     return np.column_stack([c[:n] for c in cols])
 
 
+
+class _SummaryDict(dict):
+    """A dict that also carries out-of-band metadata on `.attrs`, so the
+    mapping itself stays a clean {param: summary} view."""
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.attrs = {}
+
+
 def rhat_summary(chains, keys=None, drop_burn=0, order_components=False, *, n_burn=None):
     """Per-parameter cross-chain split-R-hat + bulk-ESS.
 
@@ -111,7 +120,12 @@ def rhat_summary(chains, keys=None, drop_burn=0, order_components=False, *, n_bu
                       "max_rhat": float(np.nanmax(rh)), "min_ess": float(np.nanmin(eb))}
 
     if label_switch:
-        out["_label_switch"] = label_switch
+        # Out-of-band, not as another parameter row: code that iterates the
+        # result and reads ["max_rhat"] per key hit a KeyError on this entry.
+        # R attaches it as attr(out, "label_switch"); .attrs is the analogue,
+        # and `diagnose` already uses it.
+        out = _SummaryDict(out)
+        out.attrs["label_switch"] = label_switch
         if not order_components:
             nm0 = next(iter(label_switch))
             ex = label_switch[nm0]

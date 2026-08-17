@@ -24,6 +24,7 @@ Depends: R (>= 4.0)
 Imports:
     Rcpp (>= 1.0.10),
     RcppArmadillo,
+    methods,
     utils
 Suggests:
     testthat (>= 3.0.0),

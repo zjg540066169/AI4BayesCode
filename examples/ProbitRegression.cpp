@@ -40,7 +40,7 @@
 //  pattern for any "binary probit + linear / non-linear mean" model;
 //  swap nuts_block for bart_block (with binary=true) to get probit BART.
 //
-//  CHECK #16 (inline justification)
+//  SAMPLER-CHOICE JUSTIFICATION
 //  --------------------------------
 //  - z step is Exception 3 (closed-form vector conjugate sample,
 //    NUTS-wasteful for N independent truncated normals). Library-blessed
@@ -63,7 +63,8 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(ProbitRegression, X, y, 10, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(ProbitRegression, X, y, 10, 7L, TRUE)  # X, y, prior_sd, seed, keep_history
 //   m$step(2500); str(m$get_current())
@@ -79,7 +80,8 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.ProbitRegression(X, y, 10, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.ProbitRegression(X, y, 10, 7, True)  # X, y, prior_sd, seed, keep_history
 //   m.step(2500); print(m.get_current())

@@ -25,13 +25,11 @@
 //
 //  Validation
 //  ----------
-//    tests/test_structured_categorical_vi_block.cpp -- basic unit tests
-//      including singleton-clique -> Block 4 and grand-clique -> exact
-//      degeneracies.
-//    tests/test_structured_categorical_vi_chain.cpp -- head-to-head with
-//      Block 4 fully factorised MF: structured ELBO tighter to log Z,
-//      pairwise KL ~5 orders of magnitude smaller within clique.
-//    tests/test_structured_categorical_vi_cavi_cross.cpp -- 4-path
+//    Unit tests cover the singleton-clique and grand-clique degeneracies.
+//    Head-to-head against fully factorised mean-field: the structured ELBO is
+//      tighter to log Z, with pairwise KL ~5 orders of magnitude smaller
+//      within a clique.
+//    A 4-path
 //      cross-check (VI / clique-CAVI / Gibbs / exact) + R-hat
 //      convergence diagnostics.
 //

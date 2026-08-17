@@ -62,7 +62,8 @@
 //       model_ctor = function(seed) new(PehSharedFrailty, t_obs, delta, as.numeric(z), G,
 //                                       edges, theta, 0.01, 0.01, seed, TRUE),
 //       n_chains = 4, n_burn = 3000, n_keep = 5000)
-//   print(ai4bayescode_diagnose(run$histories[[1]])$summary)
+//   print(ai4bayescode_rhat_summary(run))                     # CROSS-chain R-hat / ESS
+//   print(ai4bayescode_diagnose(run$histories[[1]])$summary)  # chain 1 summary
 
 // @example:python
 //   import numpy as np, AI4BayesCode as ai
@@ -84,6 +85,7 @@
 //       factory = lambda seed: Mod.PehSharedFrailty(t_obs, delta, z.astype(float), G, edges,
 //                                                   theta, 0.01, 0.01, seed, True),
 //       seeds = (101, 202, 303, 404), n_burn=3000, n_keep=5000)
+//   print(ai.rhat_summary(run))                    # CROSS-chain R-hat / ESS
 //   summary, plot_fn = ai.diagnose(run[0]["hist"]); print(summary)
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS

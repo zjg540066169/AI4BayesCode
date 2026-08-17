@@ -47,7 +47,8 @@ for covariance. User downstream blocks (`categorical_gibbs_block`'s
 2007 Sec.4 formula; Bartlett decomposition is the standard IW sampling
 method).
 
-**Check #15** parity: the block-level parity test covers
+**Check #15** parity: NO dedicated parity test ships for this block. When
+Check #15 fires, write one covering
 empty-cluster prior recovery, populated single-cluster posterior
 recovery (mu within 0.4% rel err, Sigma diagonal within 1% rel err
 on 4000 draws), and multi-cluster PSD-shape sanity.

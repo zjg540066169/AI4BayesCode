@@ -37,7 +37,8 @@ per session.
   or earlier only if the user's prior is ambiguous and you need
   block-selection / Gibbs discipline / discrete-variable decision
   tree content right now.
-- `codegen_cpp.md` -- load only when entering **Sec.5+ (C++ emission)**.
+- `codegen_cpp.md` -- load only when entering the C++ emission step
+  (Sec.4 workflow, step 8).
   Skip until then.
 - `codegen_r_runner.md` -- load only when emitting the R runner file
   (AFTER the `.cpp` is written).
@@ -264,7 +265,7 @@ later, at Sec.2 and Sec.3. **Once the model is confirmed**, ask the upfront ques
    every compile recipe). Only ASK when NOT running from the installed skill (a local checkout):
    then default `./AI4BayesCode`. Reuse from earlier in the session if already known.
    **Detect the installed package FIRST and skip this question entirely when it is present**
-   (`start.md` Sec.4 makes this mandatory): in R, `requireNamespace("AI4BayesCode")` ->
+   (`start.md` Sec.1b makes this mandatory): in R, `requireNamespace("AI4BayesCode")` ->
    `ai4bayescode_include_path()`; in Python, `importlib.util.find_spec("AI4BayesCode")` ->
    `AI4BayesCode.vendored_include_path()`. Both ship in 1.0.0.
 5. **Model description** (if not already given; normally the model is already captured +
@@ -1039,7 +1040,7 @@ the structured picker UI. Three firm rules:
    support and pick a block type. See `codegen_priors.md Sec.2b` for the
    block selection priority (specialized / conjugate-Gibbs blocks by
    applicability -> `joint_nuts_block` = DEFAULT for continuous ->
-   `nuts_block` = LOW-priority single fallback -> slice -> `Sec.2c`
+   `nuts_block` = LOW-priority single fallback -> slice -> `Sec.2b`
    Exception 4 custom code only for genuine structural gaps). If the
    model has any discrete latent, run through `codegen_priors.md Sec.3a`
    (Class 1-5 decision tree) FIRST. Reference block catalogue:
@@ -1051,7 +1052,7 @@ the structured picker UI. Three firm rules:
    block provides the NUTS machinery. A standalone `nuts_block` is the
    low-priority fallback (genuinely scalar params / post-NCR branch /
    deliberate isolation). Do NOT contort the model to fit a built-in
-   block; if none fits AND NUTS is structurally inapplicable, `Sec.2c`
+   block; if none fits AND NUTS is structurally inapplicable, `Sec.2b`
    Exception 4 permits a justified custom block.
 
    **Pattern triggers for MANDATORY joint sampling -- read the linked
@@ -1435,8 +1436,8 @@ run, and produce reasonable samples out of the box.
   (a) `joint_nuts_block` over `(sigma_*, z_*)` per `codegen_cpp.md
   Sec.4a` row "scale + raw effect"; (b) bump `n_warmup_first_call` to
   1500-3000; (c) better init via OLS / method of moments. Do NOT escape
-  to `n_warmup_per_step > 0`. See `skills/block_catalogue/index.md` "nuts_block
-  -> Configuration discipline" for the full table of which fields
+  to `n_warmup_per_step > 0`. See `skills/block_catalogue/nuts_block.md`
+  "Configuration discipline" for the full table of which fields
   code-gen may set; `validator.md` Check #20 catches violations.
 - **Never write a custom conjugate-Gibbs block.** Continuous parameters
   MUST be sampled by the NUTS family -- `joint_nuts_block` is the

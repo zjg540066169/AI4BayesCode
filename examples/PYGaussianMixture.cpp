@@ -33,8 +33,8 @@
 //                          truly has many small components.
 //  - discount > 0.7     : extreme; rarely useful in practice.
 //
-//  The 4-chain audit (`tests_autodiff/audit_py_gaussian_4chain.R`)
-//  verifies discount = 0 (PASS) AND discount = 0.5 (DIAGNOSTIC FAIL --
+//  A 4-chain audit verifies discount = 0 (PASS) and discount = 0.5
+//  (DIAGNOSTIC FAIL --
 //  chains find K = 5–8 instead of truth 3 because of the heavy-tail
 //  prior; mechanics correct, modal K is not a function of truth alone).
 //
@@ -120,7 +120,8 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(PYGaussianMixture, y, 12L, 0.0, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
+//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(PYGaussianMixture, y, 12L, 0.0, 7L)  # (y, K_trunc, discount=0(DP), seed)
 //   m$step(2000)
@@ -140,7 +141,8 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.PYGaussianMixture(y, 12, 0.0, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
+//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.PYGaussianMixture(y, 12, 0.0, 7)   # (y, K_trunc, discount=0(DP), seed)
 //   m.step(2000); print(m.get_current())
