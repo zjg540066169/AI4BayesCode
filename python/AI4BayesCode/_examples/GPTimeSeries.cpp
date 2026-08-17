@@ -2,26 +2,16 @@
 // Licensed under the GNU General Public License v3.0 or later
 // (GPL-3.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
-// GPTimeSeries.cpp  (v0.5 -- slice-based hyperparameter MCMC)
+// GPTimeSeries.cpp
 //
-// 1-D time-series Gaussian Process regression using the celerite
-// algorithm (Foreman-Mackey et al. 2017) for O(N) Cholesky.
+// 1-D time-series Gaussian Process regression. The exponential kernel is
+// semi-separable, so the marginal likelihood is available in O(N) rather
+// than O(N^3) via the celerite algorithm (Foreman-Mackey et al. 2017).
 //
-// CHANGELOG
-// ---------
-// v0 (2026-04-20 morning) - Proof-of-concept. Used nuts_block for
-//     hyperparameters (amp, tau, sigma), reading celerite_logp from
-//     ctx as a scalar constant. KNOWN LIMITATION: NUTS only saw the
-//     prior gradient; posterior did not concentrate on the data.
-//
-// v0.5 (2026-04-20 afternoon) - FIXED. Replaced nuts_block hyperparam
-//     blocks with univariate_slice_sampling_block (Neal 2003 section
-//     4.1 stepping-out + shrinkage). Each slice block's log_density
-//     lambda calls celerite_log_marginal_real(...) at the PROPOSED
-//     hyperparameter value, evaluating a fresh Cholesky on the fly
-//     (O(N) per evaluation, cheap). Slice sampling is tuning-free and
-//     requires only a log-density lambda, not a gradient -- the right
-//     tool for celerite's black-box marginal likelihood.
+// The hyperparameters (amplitude, timescale, noise) are sampled by
+// univariate_slice_sampling_block (Neal 2003 Sec. 4.1, stepping-out plus
+// shrinkage): each proposal evaluates a fresh O(N) Cholesky, so no
+// gradient of the marginal likelihood is required.
 //
 // MODEL (single-real-term exponential kernel = OU process / Matern 1/2)
 // -----
@@ -364,9 +354,10 @@ public:
                 const double sig = d.get("sigma")[0];
                 std::normal_distribution<double> nd(0.0, 1.0);
                 arma::vec out(y_obs.n_elem);
-                // Posterior predictive at training t, rough proxy:
-                // y_rep = y + noise. celerite users typically call
-                // predict_at(list(t=t_new)) for proper predictive at new t.
+                // Posterior predictive at the TRAINING times, as a rough
+                // proxy: y_rep = y + noise. For a predictive at NEW times,
+                // pass t_new_flag -- that is the key this model declares
+                // (see declare_data_input above). There is no "t" key.
                 for (std::size_t i = 0; i < y_obs.n_elem; ++i)
                     out[i] = y_obs[i] + sig * nd(rng);
                 return out;

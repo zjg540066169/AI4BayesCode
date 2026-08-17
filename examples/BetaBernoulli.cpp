@@ -7,8 +7,9 @@
 //  Test example for sampling a Beta-distributed parameter p in (0, 1)
 //  using NUTS with constraints::interval(0, 1).
 //
-//  This tests a common failure mode of AI-generated code: parameters on
-//  [0, 1] require interval constraints, not real or positive transforms.
+//  A parameter constrained to [0, 1] is sampled on the interval scale via
+//  constraints::interval(0, 1), which keeps NUTS on an unconstrained space
+//  while respecting both bounds.
 //
 //  Model
 //  -----

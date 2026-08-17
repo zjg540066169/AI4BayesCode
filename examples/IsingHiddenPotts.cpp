@@ -4,7 +4,7 @@
 // ============================================================================
 //  IsingHiddenPotts.cpp
 //
-//  Hidden-Potts image segmentation demo -- exercises the v1.2.1
+//  Hidden-Potts image segmentation demo -- exercises the
 //  ising_cluster_block EXTERNAL FIELD + PARTIAL DECOUPLING path.
 //  Tri-module build: RCPP_MODULE / PYBIND11_MODULE / standalone int main().
 //

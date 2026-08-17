@@ -4,8 +4,8 @@
 // ============================================================================
 //  IsingPrior.cpp
 //
-//  Pure-prior 2D Ising / Potts sampler -- first specialized-block demo for
-//  AI4BayesCode v1.2. Wires ising_cluster_block (Swendsen-Wang cluster
+//  Pure-prior 2D Ising / Potts sampler. Wires ising_cluster_block
+//  (Swendsen-Wang cluster
 //  sweep) through composite_block + RCPP_MODULE.
 //
 //  Model

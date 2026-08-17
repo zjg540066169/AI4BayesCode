@@ -275,7 +275,7 @@ double alpha_natural_log_density(const arma::vec& alpha_nat,
 }  // anonymous namespace
 
 // ============================================================================
-//  Tier A wrapper class
+//  Wrapper class
 // ============================================================================
 
 class DPGaussianMixture : public AI4BayesCode::kernel_control_mixin<DPGaussianMixture> {

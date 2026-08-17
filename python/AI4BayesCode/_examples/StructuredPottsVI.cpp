@@ -4,7 +4,8 @@
 // ============================================================================
 //  StructuredPottsVI.cpp
 //
-//  Tier A demo for v1.2 Block 5 (structured_categorical_vi_block).
+//  Structured (partially factorised) variational inference for a discrete
+//  Potts field (structured_categorical_vi_block).
 //
 //  Model
 //  -----
@@ -37,8 +38,8 @@
 //  dependence (system_design.md Sec.11.2(b)). Structured MF refines Block
 //  4 by preserving intra-clique correlation exactly while factorising
 //  ACROSS cliques (Saul-Jordan 1996). Gives demonstrably tighter
-//  approximations than Block 4 when the user can identify
-//  strong-coupling clusters; degenerates to Block 4 with singleton
+//  approximations than a fully factorised mean field when you can identify
+//  strong-coupling clusters; degenerates to mean field with singleton
 //  cliques, to exact inference with a single all-encompassing clique.
 //
 //  Reference: Saul-Jordan 1996 (NIPS); Bishop PRML Sec.10.1.

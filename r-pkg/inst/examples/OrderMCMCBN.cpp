@@ -4,7 +4,7 @@
 // ============================================================================
 //  OrderMCMCBN.cpp
 //
-//  Tier A demo for v1.2 Block 3 (order_mcmc_block).
+//  Bayesian-network structure learning by order MCMC (order_mcmc_block).
 //
 //  Model
 //  -----
@@ -38,11 +38,12 @@
 //  -------------------------
 //  Order MCMC's induced structure prior is NOT hypothesis-equivalent
 //  (Markov-equivalent DAGs receive different prior weights). Fix is
-//  Kuipers-Moffa 2017 partition MCMC, deferred to v1.2.1.
+//  Kuipers-Moffa 2017 partition MCMC, available here as
+//  cfg.method = order_mcmc_block_config::method_t::partition.
 //
 //  Sampling note: Discrete latent (BN structure) with
 //  combinatorial state space. system_design.md Sec.11.2(b) lists this as
-//  the canonical Block 3. order_mcmc_block is the v1.2 implementation.
+//  the canonical implementation.
 //
 //  DUAL-BACKEND (R + Python)
 //  -------------------------

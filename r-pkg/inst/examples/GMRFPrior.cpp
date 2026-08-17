@@ -4,8 +4,7 @@
 // ============================================================================
 //  GMRFPrior.cpp
 //
-//  Pure-prior 2D ICAR sampler -- first specialised-block demo for the
-//  Block 2 v1.2 ship. Wires gmrf_precision_block (Rue 2001 sparse-
+//  Pure-prior 2D ICAR sampler. Wires gmrf_precision_block (Rue 2001 sparse-
 //  Cholesky direct sampling) through composite_block + a DUAL frontend
 //  (RCPP_MODULE for R, PYBIND11_MODULE for Python).
 //

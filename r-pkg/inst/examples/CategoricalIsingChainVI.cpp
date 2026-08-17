@@ -4,7 +4,8 @@
 // ============================================================================
 //  CategoricalIsingChainVI.cpp
 //
-//  Tier A demo for v1.2 Block 4 (mean_field_categorical_vi_block).
+//  Mean-field variational inference for a discrete Potts / Ising chain
+//  (mean_field_categorical_vi_block).
 //
 //  Model
 //  -----

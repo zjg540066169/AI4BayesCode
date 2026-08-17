@@ -6,19 +6,10 @@
 //
 //  Automatic Relevance Determination (ARD) LASSO for D=1.
 //
-//  **LEGACY self-contained example** (pre-dates AI4BayesCode's block system) --
-//  all full conditionals are Jeffreys-based conjugate closed forms drawn
-//  inline, and the class manages its own state, history, and DAG without
-//  `composite_block` / `nuts_block` / `declare_dependencies` / `refresher`.
-//  This is the ONE documented exception to the "compose typed blocks"
-//  invariant -- both `std::gamma_distribution` (for InvGamma σ² and Gamma
-//  ψ² draws) and `std::normal_distribution` (for α and β conditionals) are
-//  used inline. These are all textbook conjugate conditionals and derivations
-//  have been formally verified against Park & Casella 2008 (Bayesian LASSO).
-//  When generating new samplers, DO NOT copy this pattern -- use the block
-//  system (nuts_block + rjmcmc_block + ... as per `skills/codegen.md Sec.2b`).
-//  This file remains here as a reference implementation of the pre-block
-//  ARD Gibbs pattern.
+//  Every full conditional is a conjugate closed form and is drawn directly
+//  (Park & Casella 2008, Bayesian LASSO): sigma^2 and psi^2 from
+//  Inverse-Gamma / Gamma conditionals, alpha and beta from Normal
+//  conditionals. No Metropolis step and no gradient is needed anywhere.
 //
 //  DUAL-MODULE: this legacy example is exposed to BOTH R (RCPP_MODULE) and
 //  Python (PYBIND11_MODULE). The class I/O methods use the backend-neutral

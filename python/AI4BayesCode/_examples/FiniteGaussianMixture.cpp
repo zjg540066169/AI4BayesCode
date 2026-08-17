@@ -19,7 +19,7 @@
 //      π        ~ Dirichlet(α/K, ..., α/K)           (symmetric)
 //      (μ_k, λ_k) ~ NormalGamma(μ_0, κ_0, a_λ_0, b_λ_0)
 //      K        : FIXED at construction (user-specified)
-//      α        : FIXED at construction (v0; future v0.5 NUTS on log α)
+//      α        : FIXED at construction
 //
 //  Block decomposition (Gibbs sweep order)
 //  ---------------------------------------
@@ -175,7 +175,7 @@ inline double diag_normal_log_density(const double* y, const double* mu,
 }  // anonymous namespace
 
 // ============================================================================
-//  Tier A wrapper class
+//  Wrapper class
 //  (backend-neutral: arma-typed ctor + state_map / history_map interface, so
 //   the SAME class compiles for BOTH the Rcpp module and the pybind module.
 //   The standalone demo at the end of this file drives the class directly.)

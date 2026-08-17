@@ -159,7 +159,7 @@ using AI4BayesCode::lda_collapsed_gibbs_block;
 using AI4BayesCode::lda_collapsed_gibbs_block_config;
 
 // ============================================================================
-//  Tier A wrapper class
+//  Wrapper class
 // ============================================================================
 
 class LdaCollapsedGibbs : public AI4BayesCode::kernel_control_mixin<LdaCollapsedGibbs> {
