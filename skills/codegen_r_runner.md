@@ -9,7 +9,7 @@ description: |
   with keep_history = TRUE is NOT shipped), Layer 3 validator wiring
   (R1 smoke check, R2
   rank-normalized R-hat + ESS via posterior, R3 Bayesian p-values +
-  PSIS-LOO via loo), ai4bayescode_perf_hint call, joint-NUTS threshold
+  PSIS-LOO via loo), run timing, joint-NUTS threshold
   tightening, and the reference-template catalogue (examples/*.cpp).
   Extracted from codegen.md (sections 9 and 10). The entry-point
   skill `codegen.md` points here for R runner emission.
@@ -31,7 +31,7 @@ block, the delivered inline-constructor-closure + shipped
 `ai4bayescode_diagnose` flow, the harness-internal
 run_chain_<ClassName>() helper, Layer 3 validator wiring
 (R-hat, ESS,
-Bayesian p-values, PSIS-LOO), `ai4bayescode_perf_hint`, and the
+Bayesian p-values, PSIS-LOO), run timing, and the
 reference-template catalogue.
 
 For prior elicitation + block selection, see `codegen_priors.md`.
@@ -409,7 +409,7 @@ ai4bayescode_source("<folder>/<ClassName>.cpp")   # relative path; no AI4BayesCo
 
 # ---- Helper: run ONE chain with history, return (hist, pp, wall_sec) -----
 # The runner uses keep_history = TRUE so validator Layer 3 (R1/R2/R3) can
-# work on the stored draws. Wall-clock time is captured for perf_hint.
+# work on the stored draws. Wall-clock time is captured for the timing line.
 #
 # HARD RULE (naming) -- everything is named after the model, i.e. the
 # Rcpp class `<ClassName>` (the same identifier used in
@@ -747,10 +747,10 @@ if (pct_k_lo < 50 || pct_k_hi >= 10) {
 # measure the elapsed time around the parallel block instead -- summing
 # per-chain times would then over-count.)
 total_wall_sec <- c1$wall_sec + c2$wall_sec
-ai4bayescode_perf_hint(
-    wall_sec        = total_wall_sec,
-    n_sweeps_total  = 2L * (n_burnin + n_keep),
-    uses_joint_nuts = USES_JOINT_NUTS)
+n_sweeps_total <- 2L * (n_burnin + n_keep)
+message(sprintf("[timing] %.1fs across %d sweeps (%.3fs / sweep)",
+                total_wall_sec, n_sweeps_total,
+                total_wall_sec / n_sweeps_total))
 
 # ---- (Optional) Predict at new data ------------------------------------
 # pred <- c1 model-call equivalent at new X:

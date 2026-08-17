@@ -7,6 +7,8 @@ continuous parameters.
 """
 from __future__ import annotations
 
+import warnings
+
 __all__ = ["perf_hint"]
 
 
@@ -27,6 +29,14 @@ def perf_hint(wall_sec: float,
     when given, its ``slow_sweep_sec`` key overrides the flat ``slow_sweep_sec``
     kwarg (which is kept for back-compat).
     """
+    warnings.warn(
+        "AI4BayesCode.perf_hint() is deprecated and will be removed. It asks "
+        "you to compute and pass two numbers that AI4BayesCode.run_chains() "
+        "already returns -- 'wall' per chain, and the sweep count from "
+        "n_burn + n_keep -- and its 0.5s/sweep threshold is a fixed number "
+        "that ignores the size of the model. Read the timing off the run "
+        "object instead: sum(c['wall'] for c in run).",
+        DeprecationWarning, stacklevel=2)
     if thresholds is not None:
         slow_sweep_sec = thresholds.get("slow_sweep_sec", slow_sweep_sec)
     if n_sweeps_total <= 0:

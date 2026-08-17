@@ -273,21 +273,27 @@ Check #11.
 
 ### Post-run performance hint (in the R runner)
 
-Always emit the following helper call at the end of the R runner so
-that when a runner is slow (e.g. one that stayed modular as a fallback),
-the user gets a clear joint-escape suggestion:
+Report the run's timing at the end of the R runner, so a slow runner (e.g.
+one that stayed modular as a fallback) is visible:
 
 ```r
-ai4bayescode_perf_hint(
-    wall_sec = total_wall_sec,                # actual elapsed time across stages
-    n_sweeps_total = 2 * (n_burnin + n_keep),
-    uses_joint_nuts = FALSE                   # TRUE if this runner already uses joint
-)
+n_sweeps_total <- 2L * (n_burnin + n_keep)
+message(sprintf("[timing] %.1fs across %d sweeps (%.3fs / sweep)",
+                total_wall_sec, n_sweeps_total,
+                total_wall_sec / n_sweeps_total))
 ```
 
 `total_wall_sec` is set in the R2 parallel block of the runner (see
 `codegen_r_runner.md` and `validator.md Sec.R2`). Do NOT use
 `c1$wall_sec + c2$wall_sec` -- that double-counts under parallel execution.
+
+Do NOT call `ai4bayescode_perf_hint()`: it is deprecated. It asked the caller
+to pass two numbers the run object already carries, and judged them against a
+fixed 0.5s/sweep threshold that ignores the size of the model. If per-sweep
+time looks high and the sampler has tightly-coupled continuous parameters
+(additive linear mean, shift invariance, fixed+random effects sharing a mean),
+the remedy is the same as it always was -- regenerate with `joint_nuts_block`
+over the coupled parameters; see `examples/IRT1PL_joint.cpp`.
 
 See `codegen_r_runner.md` for the full runner template (the helper is
 emitted into the runner, not part of AI4BayesCode core).

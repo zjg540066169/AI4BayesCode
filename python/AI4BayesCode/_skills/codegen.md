@@ -1506,10 +1506,10 @@ run, and produce reasonable samples out of the box.
   `USES_JOINT_NUTS <- TRUE` in the throwaway harness runner so R3's
   Bayesian-p-value PASS BAND narrows from (0.05, 0.95) to
   (0.10, 0.90) -- a statistic has to sit closer to the middle to pass.
-- **Always emit `ai4bayescode_perf_hint(...)` at the end of the R
-  runner** (see `codegen_r_runner.md Sec.9` template). The helper emits
-  a friendly escape-hatch hint if per-sweep time is slow. Set
-  `uses_joint_nuts = TRUE` when the runner already uses joint NUTS.
+- **Report the run's wall time at the end of the R runner** by reading it
+  off the run object -- `ai4bayescode_run_chains()` already returns `wall`
+  per chain. Do NOT call `ai4bayescode_perf_hint()`: it is deprecated, and
+  it only asks the caller to recompute numbers the run object already has.
 - **Always run Check #12 gradient verification at generation time.**
   For every NUTS block with a hand-written gradient, the AI must:
     1. write a companion file `tests_autodiff/verify_<ClassName>.cpp`

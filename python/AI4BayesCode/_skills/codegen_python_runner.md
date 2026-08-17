@@ -8,7 +8,7 @@ description: |
   harness-internal run_chain_<ClassName>() with keep_history=True is
   NOT shipped), Layer 3 validator wiring (R1 smoke
   check, R2 rank-normalized R-hat + ESS (AI4BayesCode numpy helpers), R3 Bayesian p-values
-  + PSIS-LOO via arviz), AI4BayesCode.perf_hint call, joint-NUTS threshold
+  + PSIS-LOO via arviz), run timing, joint-NUTS threshold
   tightening, and the reference-template catalogue (examples/*.cpp).
   Mirror of codegen_r_runner.md for the Python (pybind11) backend.
   The entry-point skill `codegen.md` and `start.md` Phase 6 point here
@@ -30,7 +30,7 @@ Companion skill to `codegen.md`. Load this when writing the generated
 reference block, the delivered inline-constructor-lambda + shipped
 `AI4BayesCode.run_chains` / `rhat_summary` / `diagnose` flow, the
 harness-internal `run_chain_<ClassName>()` helper, Layer 3 validator
-wiring (R-hat, ESS, Bayesian p-values, PSIS-LOO), `AI4BayesCode.perf_hint`,
+wiring (R-hat, ESS, Bayesian p-values, PSIS-LOO), run timing,
 and the reference-template catalogue.
 
 For prior elicitation + block selection, see `codegen_priors.md`.
@@ -40,7 +40,7 @@ dual R+Python forms).
 
 This skill mirrors `codegen_r_runner.md` for the Python backend. Where
 the logic is identical between R and Python (prior emission, L2
-semantic check, R3 BPV semantics, perf_hint thresholds), refer to the R
+semantic check, R3 BPV semantics), refer to the R
 skill rather than duplicating content. This file covers only
 Python-specific patterns (`AI4BayesCode.sourceCpp`, `multiprocessing`
 parallel chains, `arviz` diagnostics, numpy / dict idioms).
@@ -828,14 +828,15 @@ except Exception as _loo_err:               # no loglik, no arviz, arviz API cha
     print(f"  [R3.b] PSIS-LOO skipped ({type(_loo_err).__name__}) -- "
           "diagnostic only, does not gate.")
 
-# === Performance hint ===
+# === Timing ===
 # total_wall_sec is the true elapsed wall time from _run_two_chains; the two
 # chains run SEQUENTIALLY, so it already reflects total work -- use it directly
 # rather than re-deriving from c1["wall_sec"] + c2["wall_sec"].
-AI4BayesCode.perf_hint(
-    wall_sec=total_wall_sec,
-    n_sweeps_total=2 * (n_burn + n_keep),
-    uses_joint_nuts=<True if composite has joint_nuts_block else False>)
+# (AI4BayesCode.perf_hint() is deprecated -- it only asked the caller to
+#  recompute numbers the run object already carries.)
+n_sweeps_total = 2 * (n_burn + n_keep)
+print(f"[timing] {total_wall_sec:.1f}s across {n_sweeps_total} sweeps "
+      f"({total_wall_sec / n_sweeps_total:.3f}s / sweep)")
 
 # === Final validation verdict (MUST be the VERY LAST line printed) ===
 # The generator greps stdout for this exact sentinel. worst_rhat is from R2 above.

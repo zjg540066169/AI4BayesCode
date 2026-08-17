@@ -409,6 +409,17 @@ ai4bayescode_perf_hint <- function(wall_sec,
                                 n_sweeps_total,
                                 uses_joint_nuts = FALSE,
                                 thresholds = list(slow_sweep_sec = 0.5)) {
+    .Deprecated(msg = paste0(
+        "ai4bayescode_perf_hint() is deprecated and will be removed.\n",
+        "  It asks you to compute and pass two numbers that ",
+        "ai4bayescode_run_chains()\n",
+        "  already returns -- `wall` per chain, and the sweep count from ",
+        "n_burn + n_keep --\n",
+        "  and its 0.5s/sweep threshold is a fixed number that ignores the ",
+        "size of the\n",
+        "  model. Read the timing off the run object instead:\n",
+        "      run <- ai4bayescode_run_chains(...)\n",
+        "      sum(vapply(run$chains, function(c) c$wall, numeric(1)))"))
     if (n_sweeps_total <= 0) return(invisible(NULL))
     per_sweep <- wall_sec / n_sweeps_total
     message(sprintf(

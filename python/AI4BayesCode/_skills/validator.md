@@ -2520,8 +2520,8 @@ if (ess_ratio < 0.01) {
 }
 
 # `total_wall_sec` is the actual elapsed wall time across both stages --
-# pass it (not c1$wall_sec + c2$wall_sec, which double-counts in parallel)
-# to ai4bayescode_perf_hint() at the end of the runner.
+# report it (not c1$wall_sec + c2$wall_sec, which double-counts in parallel)
+# at the end of the runner.
 ```
 
 If R-hat stays >= 1.05 even at the 20k+20k extended budget, the likely
