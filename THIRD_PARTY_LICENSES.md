@@ -51,7 +51,16 @@ those sections).
 - Modifications: YES — see the header comments in
   `include/mcmclib/mcmc/nuts.hpp` and `include/mcmclib/mcmc/nuts.ipp`.
   The modifications enable persistent adaptation (needed for stateful
-  Gibbs-wise NUTS) and fix the upstream tree-doubling endpoint bug.
+  Gibbs-wise NUTS), add identity/diagonal-metric fast paths and a leapfrog
+  gradient cache, and fix TWO correctness bugs that are present upstream:
+  the tree-doubling endpoint bug, and (2026-08-17) a transposition of the
+  `new_draw_pos` / `new_draw_neg` output slots in `nuts_build_tree`'s second
+  recursive call. The second one made the sampler converge to the wrong
+  stationary distribution whenever trajectories reached tree depth 2 — about
+  +3% on a Dirichlet mean at a step size of 0.1 — and is guarded by
+  `tests/test_nuts_small_step_invariance.cpp`. Anyone syncing this tree
+  against upstream must carry both fixes forward; they are semantic, not
+  performance, divergences.
 
 ## BaseMatrixOps (linear-algebra helpers for the NUTS backend)
 

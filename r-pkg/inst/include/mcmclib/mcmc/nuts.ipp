@@ -52,15 +52,33 @@
   ##       gradient of the next step. This halves the number of
   ##       target_log_kernel-with-grad calls per leapfrog step.
   ##       nuts_build_tree maintains DUAL caches per call --
-  ##       cached_at_new_draw_pos_out and cached_at_new_draw_neg_out --
-  ##       to honor the cache invariant under mcmclib's boundary swap
-  ##       convention (the second sub-tree call for direction=+1
-  ##       maps callee's new_draw_neg to caller's new_draw_pos, etc.).
-  ##       Single-cache versions of this patch produced 253 invariant
-  ##       violations on a 4-dim toy test because they assumed
-  ##       new_draw_pos always tracks the "far forward leaf", which is
-  ##       NOT what mcmclib's convention produces at depth >= 2.
-  ##       See project_mcmclib_nuts_cache_investigation.md.
+  ##       cached_at_new_draw_pos_out and cached_at_new_draw_neg_out.
+  ##     - CORRECTNESS (2026-08-17, JZ): the second sub-tree call had its
+  ##       new_draw_pos / new_draw_neg output slots TRANSPOSED in both
+  ##       direction branches, so the caller kept the NEAR boundary of the
+  ##       new sub-tree and discarded the far one. Upstream mcmclib has the
+  ##       same transposition; the outer doubling loop in nuts.hpp does NOT,
+  ##       which is how the two came to disagree.
+  ##       This is what the 253 cache-invariant violations reported above
+  ##       were really pointing at: the assumption that "new_draw_pos always
+  ##       tracks the far forward leaf" is CORRECT -- Hoffman & Gelman 2014
+  ##       Algorithm 3 says so -- and the dual-cache patch was aligned to the
+  ##       broken mapping instead of to the algorithm. Both are now fixed
+  ##       together, so -DCACHE_CHECK stays clean.
+  ##       Effect of the bug: from depth 2 the U-turn check compared a
+  ##       mid-tree state rather than a trajectory endpoint; from depth 3 the
+  ##       next sub-tree started from a non-extremal state and re-walked
+  ##       states already in the trajectory, so n_val double-counted and both
+  ##       acceptance ratios consumed corrupted counts. Measured on
+  ##       Dirichlet(2,3,4,5) through a SIMPLEX at fixed step size, 240
+  ##       independent chains started from EXACT draws: E[p_0] was +2.9% at
+  ##       eps 0.05, +3.5% at 0.10, +2.7% at 0.30, and clean at 1.00 (where
+  ##       trajectories end at depth 0-1 and the transposition cannot show).
+  ##       Flat in chain length from 500 to 200000 draws, i.e. a wrong
+  ##       invariant distribution, not burn-in.
+  ##       Gate: tests/test_nuts_small_step_invariance.cpp.
+  ##       See project_mcmclib_nuts_cache_investigation.md for the earlier
+  ##       cache work this supersedes.
   ##     - SAFE-SPEEDUP (2026-07-26, JZ) Fix #3: per-depth ColVec_t scratch
   ##       pool for nuts_build_tree, eliminating ~154 ColVec_t stack
   ##       constructions per nuts() call at max_tree_depth=10. See top of
@@ -524,7 +542,7 @@ nuts_build_tree(
                     direction_val, step_size, log_rand_val, prev_U, prev_K,
                     draw_neg, mntm_neg, inv_precond_matrix,
                     box_log_kernel_fn, leap_frog_fn, tree_depth - 1,
-                    new_draw_pp, new_draw_neg, dummy_draw, new_mntm_neg, dummy_mntm,
+                    new_draw_pp, dummy_draw, new_draw_neg, dummy_mntm, new_mntm_neg,
                     n_pp_val, s_pp_val, alpha_pp_val, n_alpha_pp_val, rand_engine, target_data,
                     cached_at_first_neg, cached_at_second_pos, cached_at_second_neg,
                     prop_box_U_second, prop_grad_second,
@@ -532,13 +550,28 @@ nuts_build_tree(
                     scratch_pool,
                     // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
                     is_identity_metric, metric_is_diag, inv_diag);
-                // mcmclib boundary mapping for direction=-1 second sub-tree:
-                //   arg 13 = callee's new_draw_pos -> caller's new_draw_neg (UPDATED via swap)
-                //   arg 14 = callee's new_draw_neg -> dummy_draw (lost)
-                // Cache mapping (must MATCH boundary mapping):
-                //   caller's new_draw_neg cache = callee's new_draw_POS cache
+                // FIXED (2026-08-17): the two output slots were TRANSPOSED
+                // here, and upstream mcmclib has the same transposition. Going
+                // backwards, the new far end is the callee's NEG boundary, so
+                // that is what the caller's new_draw_neg must receive (Hoffman
+                // & Gelman 2014 Alg 3, BuildTree else-branch, v = -1: keep the
+                // callee's minus, discard its plus). The old code bound the
+                // callee's POS here and threw its NEG away, so from depth 2 on
+                // the U-turn check compared a mid-tree state instead of an
+                // endpoint, and from depth 3 on the next sub-tree started from
+                // a NON-extremal state -- the trajectory re-walked states it
+                // already held, n_val double-counted them, and the acceptance
+                // ratios n'/n and n''/(n'+n'') consumed the corrupted counts.
+                // Measured on Dirichlet(2,3,4,5) via SIMPLEX at fixed eps:
+                // +3.5% on E[p_0] at eps 0.10, flat in chain length out to
+                // 200k draws (+324 se); clean at eps 1.00, where trajectories
+                // stop at depth 0-1 and the transposition is invisible.
+                //   boundary: callee's new_draw_neg -> caller's new_draw_neg
+                //             callee's new_draw_pos -> dummy_draw (discarded)
+                // Cache mapping MUST match the boundary mapping:
+                //   caller's new_draw_neg cache = callee's new_draw_NEG cache
                 //   caller's new_draw_pos cache = (unchanged from first sub-tree)
-                cached_at_new_draw_neg_out = cached_at_second_pos;
+                cached_at_new_draw_neg_out = cached_at_second_neg;
                 cached_at_new_draw_pos_out = cached_at_first_pos;
             } else {
                 // Second sub-tree extends forward from new_draw_pos.
@@ -557,7 +590,7 @@ nuts_build_tree(
                     direction_val, step_size, log_rand_val, prev_U, prev_K,
                     draw_pos, mntm_pos, inv_precond_matrix,
                     box_log_kernel_fn, leap_frog_fn, tree_depth - 1,
-                    new_draw_pp, dummy_draw, new_draw_pos, dummy_mntm, new_mntm_pos,
+                    new_draw_pp, new_draw_pos, dummy_draw, new_mntm_pos, dummy_mntm,
                     n_pp_val, s_pp_val, alpha_pp_val, n_alpha_pp_val, rand_engine, target_data,
                     cached_at_first_pos, cached_at_second_pos, cached_at_second_neg,
                     prop_box_U_second, prop_grad_second,
@@ -565,13 +598,16 @@ nuts_build_tree(
                     scratch_pool,
                     // FORK MARKER (2026-07-26, JZ) [IDENTITY-only Fix #1]: thread flag.
                     is_identity_metric, metric_is_diag, inv_diag);
-                // mcmclib boundary mapping for direction=+1 second sub-tree:
-                //   callee's new_draw_pos -> dummy_draw (lost)
-                //   callee's new_draw_neg -> caller's new_draw_pos (updated)
-                // Cache mapping (matches boundary mapping):
-                //   caller's new_draw_pos's cache = callee's new_draw_neg's cache
-                //   caller's new_draw_neg's cache = (unchanged from first sub-tree)
-                cached_at_new_draw_pos_out = cached_at_second_neg;
+                // FIXED (2026-08-17): mirror of the v = -1 branch above --
+                // see the explanation there. Going forwards the new far end is
+                // the callee's POS boundary (Alg 3, else-branch: keep the
+                // callee's plus, discard its minus).
+                //   boundary: callee's new_draw_pos -> caller's new_draw_pos
+                //             callee's new_draw_neg -> dummy_draw (discarded)
+                // Cache mapping MUST match the boundary mapping:
+                //   caller's new_draw_pos cache = callee's new_draw_POS cache
+                //   caller's new_draw_neg cache = (unchanged from first sub-tree)
+                cached_at_new_draw_pos_out = cached_at_second_pos;
                 cached_at_new_draw_neg_out = cached_at_first_neg;
             }
 

@@ -53,7 +53,7 @@ else
 LDLIBS   ?= -lblas -llapack
 endif
 
-TARGETS  := test_constraints test_binary_gibbs test_dirichlet_gibbs test_categorical_gibbs test_gaussian_linear test_simplex_dirichlet test_nuts_variance test_vi_mean_field_gaussian test_vi_correlated_gaussian test_vi_hybrid_composition test_vi_glmm_logistic test_vi_bnn_regression test_vi_full_rank_correlated test_vi_bnn_full_rank test_readapt_NUTS test_target_accept_config test_joint_nuts_block_mixed_stress test_bde_scorer test_score_cache test_order_mcmc_block test_order_mcmc_block_stress test_order_mcmc_block_diagnostics test_bge_scorer test_partition_geometry test_partition_mcmc_diagnostics test_partition_mcmc_rhat test_order_mcmc_block_partition test_freeze_predict_history test_freeze_element test_freeze_dense_pilot test_freeze_joint_nuts_slot test_ode_rk45_inplace test_dag_key_validation test_genbart_slice_mstep test_predict_dag_depth test_history_alignment test_wiring_guards test_composite_bare_name_slot_fallback test_freeze_normal_gamma_cluster test_freeze_rjmcmc_subkey test_joint_nuts_block_constraints test_joint_nuts_dimchanging test_vi_publish_and_history test_split_merge_exact test_pg_truncation
+TARGETS  := test_constraints test_binary_gibbs test_dirichlet_gibbs test_categorical_gibbs test_gaussian_linear test_simplex_dirichlet test_nuts_variance test_vi_mean_field_gaussian test_vi_correlated_gaussian test_vi_hybrid_composition test_vi_glmm_logistic test_vi_bnn_regression test_vi_full_rank_correlated test_vi_bnn_full_rank test_readapt_NUTS test_target_accept_config test_joint_nuts_block_mixed_stress test_bde_scorer test_score_cache test_order_mcmc_block test_order_mcmc_block_stress test_order_mcmc_block_diagnostics test_bge_scorer test_partition_geometry test_partition_mcmc_diagnostics test_partition_mcmc_rhat test_order_mcmc_block_partition test_freeze_predict_history test_freeze_element test_freeze_dense_pilot test_freeze_joint_nuts_slot test_ode_rk45_inplace test_dag_key_validation test_genbart_slice_mstep test_predict_dag_depth test_history_alignment test_wiring_guards test_composite_bare_name_slot_fallback test_freeze_normal_gamma_cluster test_freeze_rjmcmc_subkey test_joint_nuts_block_constraints test_joint_nuts_dimchanging test_vi_publish_and_history test_split_merge_exact test_pg_truncation test_nuts_small_step_invariance
 
 # The VI publish/history regression guards four VI headers plus the composite
 # freeze path -- a header-only edit otherwise leaves a stale binary in place.
@@ -79,20 +79,17 @@ test_pg_truncation: test_pg_truncation.cpp \
     $(INC_DIR)/AI4BayesCode/pg_logistic_block.hpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 
-# KNOWN-FAILING gate for the vendored-NUTS small-step-size defect. Kept OUT of
-# TARGETS and the run: panel on purpose -- it fails today, and a permanently red
-# default suite teaches everyone to ignore red. Run it deliberately:
-#     make known_failing
+# Guards the vendored-NUTS boundary transposition fixed on 2026-08-17: the
+# sampler must reproduce an exact Dirichlet mean at EVERY step size, not only
+# where trajectories are too short to reach depth 2. Sized for the default
+# suite; AI4B_NUTS_GATE_FULL=1 runs the 240 x 20000 configuration the original
+# measurement used.
 test_nuts_small_step_invariance: test_nuts_small_step_invariance.cpp \
     $(INC_DIR)/AI4BayesCode/joint_nuts_block.hpp \
-    $(INC_DIR)/AI4BayesCode/constraints.hpp
+    $(INC_DIR)/AI4BayesCode/constraints.hpp \
+    $(INC_DIR)/mcmclib/mcmc/nuts.ipp \
+    $(INC_DIR)/mcmclib/mcmc/nuts.hpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
-
-.PHONY: known_failing
-known_failing: test_nuts_small_step_invariance
-	@echo "=== KNOWN-FAILING: vendored NUTS at small step size ==="
-	@echo "    expected to FAIL until the kernel defect is fixed."
-	./test_nuts_small_step_invariance
 
 .PHONY: all build run clean
 
@@ -235,6 +232,9 @@ run: build
 	@echo
 	@echo "=== Running test_pg_truncation ==="
 	./test_pg_truncation
+	@echo
+	@echo "=== Running test_nuts_small_step_invariance ==="
+	./test_nuts_small_step_invariance
 
 # These three had no rule, so make's built-in %: %.cpp applied and a
 # header-only edit left the previous binary in place, still reporting PASS.

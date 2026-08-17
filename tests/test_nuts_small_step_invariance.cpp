@@ -1,19 +1,27 @@
 /*
  * test_nuts_small_step_invariance.cpp
  *
- * KNOWN FAILURE. This test is RED on purpose: it pins a confirmed defect in the
- * vendored NUTS kernel so the defect cannot be forgotten, and so that whoever
- * fixes it has an unambiguous pass/fail gate. It is deliberately NOT in the
- * Makefile's default `run` panel -- build and run it explicitly:
- *
- *     make test_nuts_small_step_invariance && ./test_nuts_small_step_invariance
+ * A NUTS sampler must reproduce the target at EVERY step size. Step size
+ * changes efficiency; it may not change the answer. This pins that.
  *
  * ---------------------------------------------------------------------------
- * WHAT IS WRONG
+ * THE BUG THIS GUARDS (fixed 2026-08-17)
  * ---------------------------------------------------------------------------
- * At small step sizes the kernel does not leave the target invariant. On a
- * plain Dirichlet(2,3,4,5) through a SIMPLEX constraint -- three unconstrained
- * dimensions, nothing exotic -- E[p_0] should be exactly 2/14:
+ * nuts_build_tree's second recursive call had its new_draw_pos / new_draw_neg
+ * output slots TRANSPOSED in both direction branches, so the caller kept the
+ * NEAR boundary of the new sub-tree and discarded the far one. Upstream
+ * mcmclib has the same transposition; nuts.hpp's outer doubling loop does
+ * not, which is how the two came to disagree.
+ *
+ * Consequences, by depth: at depth >= 2 the U-turn check compared a mid-tree
+ * state instead of a trajectory endpoint; at depth >= 3 the next sub-tree
+ * started from a NON-extremal state, so the trajectory re-walked states it
+ * already held, n_val double-counted them, and both acceptance ratios --
+ * n'/n in the outer loop and n''/(n'+n'') at each merge -- consumed the
+ * corrupted counts.
+ *
+ * On a plain Dirichlet(2,3,4,5) through a SIMPLEX -- three unconstrained
+ * dimensions, nothing exotic -- E[p_0] should be exactly 2/14. Before the fix:
  *
  *     step size   E[p_0]      deviation   verdict
  *       0.05      0.1469471   +2.863%     +85.2 se
@@ -21,11 +29,11 @@
  *       0.30      0.1467504   +2.725%     +93.4 se
  *       1.00      0.1428215   -0.025%      -0.7 se   (clean)
  *
- * It matters in the DEFAULT configuration too: adaptation lands wherever the
- * geometry puts it, and a second sub-param with a stiffer scale pulls the
- * adapted step size down. Measured on SIMPLEX + POSITIVE(InvGamma(5,6)) with
- * adaptation on, adapted eps 0.72: +0.605% at +15.6 se. Real hierarchical
- * models routinely adapt below 0.3.
+ * eps = 1.00 was clean because trajectories there end at depth 0-1, where the
+ * leaf collapses pos and neg and the transposition cannot show. That is why
+ * the default configuration mostly looked fine: adaptation lands near 1 on
+ * well-scaled models. It does not on stiffer ones -- SIMPLEX +
+ * POSITIVE(InvGamma(5,6)) adapted to eps 0.72 and read +0.605% at +15.6 se.
  *
  * ---------------------------------------------------------------------------
  * WHY THE MEASUREMENT IS TRUSTWORTHY
@@ -36,38 +44,20 @@
  * are run and each chain's mean is ONE observation, so the standard error is
  * the across-chain spread and cannot be deflated by an autocorrelation time
  * longer than a batch. An earlier batch-means version of this measurement WAS
- * fooled that way at small step sizes; that is why the estimator is built this
- * way and should not be "simplified" back.
+ * fooled that way at small step sizes, and briefly produced the opposite wrong
+ * conclusion ("this is burn-in, not a bug"); do not "simplify" the estimator
+ * back to batch means.
  *
- * Two controls are asserted below alongside the defect, because the whole
- * conclusion rests on them:
+ * Two controls are asserted alongside the main claim, because the conclusion
+ * rested on them:
  *   - the requested starting point is actually honoured (to ~1e-16), and
  *   - the deviation does NOT shrink with chain length. Initialization bias
- *     falls like 1/n; a wrong stationary distribution does not. Measured flat
- *     across three orders of magnitude: 500 -> +3.369%, 2000 -> +3.509%,
- *     20000 -> +3.530%.
+ *     falls like 1/n; a wrong stationary distribution does not. Before the
+ *     fix it was flat from 500 to 200000 draws (+3.369% -> +3.531%) while the
+ *     standard error fell from 15 to 324 se.
  *
- * ---------------------------------------------------------------------------
- * WHAT HAS ALREADY BEEN RULED OUT (do not re-investigate)
- * ---------------------------------------------------------------------------
- *   - joint_nuts_block's constraint-transform layer. Writing the identical
- *     transform by hand and passing a plain REAL slice reproduces the bias to
- *     SEVEN significant figures (0.1464295 either way), with a finite-
- *     difference gradient instead of the analytic one.
- *   - the tree-depth cap: raising it from 5 to 11 does not reduce the bias.
- *   - the leapfrog gradient-cache optimisation: the kernel's own -DCACHE_CHECK
- *     reports zero invariant violations over 2000 steps of the biased config.
- *   - anisotropy: SIMPLEX ALONE is biased too. Earlier readings that suggested
- *     curvature mismatch were really just "a stiffer sub-param adapts to a
- *     smaller step size". Step size is the single explanatory variable.
- *   - the algorithm's structure, checked line by line against Hoffman & Gelman
- *     Algorithm 3: slice variable log u - H0, base case n = I[log u <= -H] and
- *     s = I[log u < 1000 - H], recursive sub-tree U-turn, progressive
- *     multinomial selection, and a symmetric reversible leapfrog.
- *
- * The bias is worst when trajectories involve MANY doublings and vanishes when
- * they are short, so whatever is wrong lives on a path only long trajectories
- * exercise.
+ * Sized for the default suite. AI4B_NUTS_GATE_FULL=1 restores the 240 x 20000
+ * configuration the original measurement used (se ~0.037%).
  */
 
 #include "AI4BayesCode/joint_nuts_block.hpp"
@@ -234,11 +224,11 @@ int main() {
 
     std::printf("\n%d checks, %d failures\n", checks, failures);
     if (failures) {
-        std::printf("FAILED -- this is the KNOWN vendored-NUTS defect, not a regression\n"
-                    "         introduced by your change. See the header of this file.\n");
+        std::printf("FAILED -- the sampler no longer reproduces the target at some\n"
+                    "         step size. See the header: this is the boundary\n"
+                    "         transposition in nuts_build_tree, or a new one like it.\n");
         return 1;
     }
-    std::printf("PASSED -- if this is the first pass, the kernel defect is FIXED:\n"
-                "         move this test into the Makefile's TARGETS and run: panel.\n");
+    std::printf("PASSED\n");
     return 0;
 }
