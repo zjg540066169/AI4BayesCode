@@ -118,7 +118,9 @@ Rcpp::List test_nuts_adaptation() {
         std::mt19937_64 rng1(42);
         for (int i = 0; i < 50; ++i) blk1->step(rng1);  // burn
         // snapshot
-        Rcpp::List snap = blk1->get_adaptation();
+        // get_adaptation returns the backend-neutral adaptation_info since the
+        // backend_neutral refactor; it is no longer an Rcpp::List.
+        AI4BayesCode::adaptation_info snap = blk1->get_adaptation();
         // continue 100 more steps and save outputs
         std::vector<double> draws_A;
         draws_A.reserve(100);
@@ -147,17 +149,12 @@ Rcpp::List test_nuts_adaptation() {
         // blk1 consumed rng1 over those 50 steps; to replicate we would
         // need the same consumption. Simpler: just check that DA state
         // round-trips by comparing get_adaptation() outputs.
-        Rcpp::List snap2 = blk2->get_adaptation();
-        bool eq = std::abs(Rcpp::as<double>(snap["step_size"]) -
-                           Rcpp::as<double>(snap2["step_size"])) < 1e-12 &&
-                  std::abs(Rcpp::as<double>(snap["epsilon_bar"]) -
-                           Rcpp::as<double>(snap2["epsilon_bar"])) < 1e-12 &&
-                  std::abs(Rcpp::as<double>(snap["h_val"]) -
-                           Rcpp::as<double>(snap2["h_val"])) < 1e-12 &&
-                  std::abs(Rcpp::as<double>(snap["mu_val"]) -
-                           Rcpp::as<double>(snap2["mu_val"])) < 1e-12 &&
-                  std::abs(Rcpp::as<double>(snap["adapt_iter"]) -
-                           Rcpp::as<double>(snap2["adapt_iter"])) < 1e-12;
+        AI4BayesCode::adaptation_info snap2 = blk2->get_adaptation();
+        bool eq = std::abs(snap.step_size   - snap2.step_size)   < 1e-12 &&
+                  std::abs(snap.epsilon_bar - snap2.epsilon_bar) < 1e-12 &&
+                  std::abs(snap.h_val       - snap2.h_val)       < 1e-12 &&
+                  std::abs(snap.mu_val      - snap2.mu_val)      < 1e-12 &&
+                  snap.adapt_iter == snap2.adapt_iter;
         record("nuts_block get/set_adaptation round-trip", eq,
                "DA state fields match after snapshot+restore");
 
@@ -176,26 +173,24 @@ Rcpp::List test_nuts_adaptation() {
         blk1->set_context(ctx);
         std::mt19937_64 rng(123);
         for (int i = 0; i < 50; ++i) blk1->step(rng);
-        Rcpp::List snap = blk1->get_adaptation();
-        bool has_dense = Rcpp::as<bool>(snap["dense_metric_adapted"]);
-        record("joint_nuts_block snap has dense_metric_adapted field",
-               !has_dense,  // should be false (not enabled)
-               "dense_metric_adapted=false expected");
-        bool has_step = (Rcpp::as<double>(snap["step_size"]) > 0.0);
-        record("joint_nuts_block snap step_size > 0", has_step,
-               "step_size = " + std::to_string(
-                   Rcpp::as<double>(snap["step_size"])));
+        AI4BayesCode::adaptation_info snap = blk1->get_adaptation();
+        // The old Rcpp::List carried a "dense_metric_adapted" flag; the
+        // backend-neutral struct reports the same thing through metric_kind,
+        // which is "identity" until a metric is actually adapted.
+        record("joint_nuts_block reports no adapted metric when none is enabled",
+               snap.metric_kind == "identity",
+               "metric_kind = " + snap.metric_kind);
+        record("joint_nuts_block snap step_size > 0", snap.step_size > 0.0,
+               "step_size = " + std::to_string(snap.step_size));
 
         // Fresh block + restore + sanity
         auto blk2 = make_2d_joint_block();
         blk2->set_context(ctx);
         blk2->set_adaptation(snap);
-        Rcpp::List snap2 = blk2->get_adaptation();
+        AI4BayesCode::adaptation_info snap2 = blk2->get_adaptation();
         bool eq_core =
-            std::abs(Rcpp::as<double>(snap["step_size"]) -
-                     Rcpp::as<double>(snap2["step_size"])) < 1e-12 &&
-            std::abs(Rcpp::as<double>(snap["epsilon_bar"]) -
-                     Rcpp::as<double>(snap2["epsilon_bar"])) < 1e-12;
+            std::abs(snap.step_size   - snap2.step_size)   < 1e-12 &&
+            std::abs(snap.epsilon_bar - snap2.epsilon_bar) < 1e-12;
         record("joint_nuts_block get/set_adaptation round-trip", eq_core,
                "step_size + epsilon_bar match");
     }

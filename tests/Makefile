@@ -28,19 +28,30 @@ BMO_INC     := ../include/mcmclib/BaseMatrixOps/include
 # Vendored Eigen 3.4 (used by gmrf_precision_block for sparse Cholesky).
 EIGEN_INC   := ../include/eigen
 
-# Use RcppArmadillo's bundled Armadillo headers so we don't need a
-# separate libarmadillo install. This works on macOS whenever the user
-# has RcppArmadillo installed in R.
-R_ARMA_INC := /Library/Frameworks/R.framework/Versions/Current/Resources/library/RcppArmadillo/include
+# Armadillo headers. Preference order, so the same Makefile works on a dev
+# Mac and on a bare Linux CI runner:
+#   1. ARMA_INC=... passed in explicitly
+#   2. RcppArmadillo's bundled copy, asked for via Rscript (any platform, any
+#      R library path -- the old hard-coded /Library/Frameworks path only ever
+#      worked on macOS)
+#   3. the system libarmadillo-dev headers, which need no R at all
+ARMA_INC ?= $(shell Rscript -e 'cat(system.file("include", package="RcppArmadillo"))' 2>/dev/null)
+ARMA_FLAG := $(if $(strip $(ARMA_INC)),-I$(ARMA_INC),)
 
-CXX      ?= clang++
+UNAME_S := $(shell uname -s)
+
+CXX      ?= c++
 CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -Wno-unused-parameter
-CPPFLAGS ?= -I$(INC_DIR) -I$(MCMCLIB_INC) -I$(BMO_INC) -I$(EIGEN_INC) -I$(R_ARMA_INC) \
+CPPFLAGS ?= -I$(INC_DIR) -I$(MCMCLIB_INC) -I$(BMO_INC) -I$(EIGEN_INC) $(ARMA_FLAG) \
             -DMCMC_ENABLE_ARMA_WRAPPERS \
             -DARMA_DONT_USE_WRAPPER
 LDFLAGS  ?=
-# On macOS, link directly against Accelerate for BLAS/LAPACK.
+# macOS: Accelerate provides BLAS/LAPACK. Elsewhere: the usual pair.
+ifeq ($(UNAME_S),Darwin)
 LDLIBS   ?= -framework Accelerate
+else
+LDLIBS   ?= -lblas -llapack
+endif
 
 TARGETS  := test_constraints test_binary_gibbs test_dirichlet_gibbs test_categorical_gibbs test_gaussian_linear test_simplex_dirichlet test_nuts_variance test_vi_mean_field_gaussian test_vi_correlated_gaussian test_vi_hybrid_composition test_vi_glmm_logistic test_vi_bnn_regression test_vi_full_rank_correlated test_vi_bnn_full_rank test_readapt_NUTS test_target_accept_config test_joint_nuts_block_mixed_stress test_bde_scorer test_score_cache test_order_mcmc_block test_order_mcmc_block_stress test_order_mcmc_block_diagnostics test_bge_scorer test_partition_geometry test_partition_mcmc_diagnostics test_partition_mcmc_rhat test_order_mcmc_block_partition test_freeze_predict_history test_freeze_element test_freeze_dense_pilot test_freeze_joint_nuts_slot test_ode_rk45_inplace test_dag_key_validation test_genbart_slice_mstep test_predict_dag_depth test_history_alignment test_wiring_guards test_composite_bare_name_slot_fallback test_freeze_normal_gamma_cluster test_freeze_rjmcmc_subkey test_joint_nuts_block_constraints test_joint_nuts_dimchanging
 

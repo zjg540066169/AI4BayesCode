@@ -45,7 +45,10 @@ sync_skills () {
   # outcome instead of trusting the rule: anything named sim* that reached the
   # package is a build failure, not a warning.
   local leaked
-  leaked=$(find "$1" -iname 'sim*' -print 2>/dev/null || true)
+  # -maxdepth 1: the skill tree's own files. A recursive -iname 'sim*'
+  # would also match vendored sources such as Eigen's SimplicialCholesky.h
+  # if this helper is ever pointed at an include tree.
+  leaked=$(find "$1" -maxdepth 2 -iname 'sim*' -print 2>/dev/null || true)
   if [ -n "$leaked" ]; then
     echo "✗ experiment material reached $1 -- these must NEVER ship:"
     echo "$leaked" | sed 's/^/      /'

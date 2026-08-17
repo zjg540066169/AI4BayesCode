@@ -1,0 +1,163 @@
+name: CI
+
+# Every gate in this file used to be a thing somebody had to remember to run.
+# That is how five tests sat in the Makefile without ever being invoked (one of
+# them red), how tests_autodiff/test_nuts_adaptation.cpp stopped compiling
+# unnoticed, how a MANIFEST.in pattern silently reduced the Python sdist to
+# seven files, and how experiment-only skills reached both packages. Each job
+# below turns one of those into something that fails a push.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # -------------------------------------------------------------------------
+  # The core C++ suite: 42 tests. This is the primary correctness gate.
+  # -------------------------------------------------------------------------
+  cpp-tests:
+    name: C++ suite (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install BLAS/LAPACK (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libblas-dev liblapack-dev libarmadillo-dev
+
+      - name: Build and run
+        working-directory: tests
+        # ARMA_INC is empty on Linux (system libarmadillo-dev headers are
+        # already on the default include path); on macOS the Makefile asks
+        # Rscript for RcppArmadillo's bundled copy.
+        run: make run
+
+  # -------------------------------------------------------------------------
+  # The extended suite: gradient/autodiff twins and block-level parity tests.
+  # These are Rcpp::sourceCpp translation units, so they need R.
+  # -------------------------------------------------------------------------
+  extended-tests:
+    name: Extended suite (R / autodiff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+      - name: System deps
+        run: sudo apt-get update && sudo apt-get install -y libblas-dev liblapack-dev
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::Rcpp
+            any::RcppArmadillo
+          working-directory: r-pkg
+      - name: Run extended suite
+        run: Rscript tests_autodiff/run_all.R
+
+  # -------------------------------------------------------------------------
+  # Python package: unit tests plus the R-parity suite for the convergence
+  # diagnostics (rhat / ess_bulk / ess_tail vs posterior).
+  # -------------------------------------------------------------------------
+  python-tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pytest scipy
+          pip install -e ./python --no-deps
+      - name: Run tests
+        run: python -m pytest python/tests -q
+
+  # -------------------------------------------------------------------------
+  # R package: R CMD check plus the testthat suite.
+  # -------------------------------------------------------------------------
+  r-package:
+    name: R CMD check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::rcmdcheck
+          working-directory: r-pkg
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          working-directory: r-pkg
+          args: 'c("--no-manual", "--as-cran")'
+          error-on: '"warning"'
+
+  # -------------------------------------------------------------------------
+  # Packaging + tree hygiene. Cheap, and each check corresponds to a defect
+  # that actually shipped.
+  # -------------------------------------------------------------------------
+  packaging:
+    name: Packaging and tree hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: sdist is not empty
+        # A MANIFEST.in pattern containing a space is split on whitespace by
+        # setuptools; `global-exclude * [0-9].*` once reduced this sdist from
+        # 953 files to 7, including no source.py at all.
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --sdist --outdir /tmp/dist ./python
+          n=$(tar tzf /tmp/dist/*.tar.gz | wc -l)
+          echo "sdist entries: $n"
+          test "$n" -gt 500 || { echo "sdist is far too small -- check MANIFEST.in"; exit 1; }
+          tar tzf /tmp/dist/*.tar.gz | grep -q 'AI4BayesCode/source.py' \
+            || { echo "sdist is missing source.py"; exit 1; }
+          if tar tzf /tmp/dist/*.tar.gz | grep -E '\.bak|_archive'; then
+            echo "sdist contains editing backups"; exit 1
+          fi
+
+      - name: No experiment material in the packages
+        # sim* files are our paper-experiment protocol. They are excluded by
+        # tools/sync.sh and gated there too; this is the belt to that braces,
+        # because the packaged copies are committed.
+        run: |
+          # Scoped to the SKILL directories: a bare -iname 'sim*' over the whole
+          # package also matches vendored Eigen's SimplicialCholesky.h.
+          if find r-pkg/inst/skills python/AI4BayesCode/_skills \
+                  -iname 'sim*' -print 2>/dev/null | grep .; then
+            echo "experiment material is committed inside a package skill directory"
+            exit 1
+          fi
+          echo "clean"
+
+      - name: Packages are in sync with the source tree
+        # tools/sync.sh regenerates r-pkg/inst and python/AI4BayesCode from
+        # skills/, include/ and examples/. If someone edits a source file and
+        # forgets to run it, install_github users get the old copy.
+        run: |
+          bash tools/sync.sh
+          if ! git diff --quiet; then
+            echo "tools/sync.sh produced changes -- the committed package copies are stale:"
+            git --no-pager diff --stat
+            exit 1
+          fi
+          echo "packages match the source tree"

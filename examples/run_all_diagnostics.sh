@@ -23,11 +23,17 @@ for t in "${TESTS[@]}"; do
     echo "=== Running $t"
     echo "=============================================================="
     ts=$(date +%s)
-    if Rscript "$t" 2>&1 | tail -5; then
+    # `if Rscript ... | tail -5` reads TAIL's status, which is always 0 -- every
+    # test was recorded PASS regardless of outcome, and `exit $all_pass` at the
+    # end was therefore always 0. Capture the real status, then show the tail.
+    log="$(mktemp)"
+    if Rscript "$t" > "$log" 2>&1; then
         s="PASS"
     else
         s="FAIL"
     fi
+    tail -5 "$log"
+    rm -f "$log"
     te=$(date +%s)
     STATUS+=("$s")
     RUNTIME+=("$((te - ts))")
