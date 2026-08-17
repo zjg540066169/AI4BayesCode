@@ -236,7 +236,7 @@ if (identical(backend, "both"))
     if (!file.exists(rscript)) rscript <- Sys.which("Rscript")   # last-resort PATH lookup
 
     # The runner compiles its .cpp via a RELATIVE path, but the convention varies:
-    # some emit `ai4bayescode_sourceCpp("<Class>.cpp")` (relative to the runner's
+    # some emit `ai4bayescode_source("<Class>.cpp")` (relative to the runner's
     # OWN dir), others `"<out>/<Class>.cpp"` (relative to the PROJECT ROOT). Run the
     # runner (by ABSOLUTE path, so it is found from any cwd) from its own dir first;
     # if it could not find the .cpp, retry from the parent -- so BOTH conventions

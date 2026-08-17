@@ -4,7 +4,7 @@
 # Compile-smoke test for all 4 shipped GBart* examples + vanilla BartNoise.
 #
 # For each example:
-#   (a) ai4bayescode_sourceCpp compiles
+#   (a) ai4bayescode_source_checkout compiles
 #   (b) new(..., seed) constructs
 #   (c) step(10) runs to completion
 #   (d) get_current() returns finite values
@@ -69,7 +69,7 @@ for (ex in examples) {
     cat(sprintf("=== %s ===\n", ex$name))
     t0 <- Sys.time()
     tryCatch({
-        ai4bayescode_sourceCpp(ex$cpp, AI4BayesCode_path = ".")
+        ai4bayescode_source_checkout(ex$cpp, AI4BayesCode_path = ".")
         compiled <- TRUE
     }, error = function(e) {
         cat("  COMPILE FAIL:", conditionMessage(e), "\n")

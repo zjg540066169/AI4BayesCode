@@ -79,6 +79,21 @@ test_pg_truncation: test_pg_truncation.cpp \
     $(INC_DIR)/AI4BayesCode/pg_logistic_block.hpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 
+# KNOWN-FAILING gate for the vendored-NUTS small-step-size defect. Kept OUT of
+# TARGETS and the run: panel on purpose -- it fails today, and a permanently red
+# default suite teaches everyone to ignore red. Run it deliberately:
+#     make known_failing
+test_nuts_small_step_invariance: test_nuts_small_step_invariance.cpp \
+    $(INC_DIR)/AI4BayesCode/joint_nuts_block.hpp \
+    $(INC_DIR)/AI4BayesCode/constraints.hpp
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
+
+.PHONY: known_failing
+known_failing: test_nuts_small_step_invariance
+	@echo "=== KNOWN-FAILING: vendored NUTS at small step size ==="
+	@echo "    expected to FAIL until the kernel defect is fixed."
+	./test_nuts_small_step_invariance
+
 .PHONY: all build run clean
 
 all: run

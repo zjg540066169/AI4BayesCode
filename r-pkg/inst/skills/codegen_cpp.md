@@ -505,7 +505,7 @@ Format (every line is a `//` comment; `doc()` strips the `// ` prefix):
 //   library(AI4BayesCode)
 //   set.seed(1); N <- 200
 //   <DGP: simulate data VALID for THIS model's likelihood>
-//   ai4bayescode_sourceCpp("<ClassName>.cpp")   # compile+load; RELATIVE path ONLY
+//   ai4bayescode_source("<ClassName>.cpp")   # compile+load; RELATIVE path ONLY
 //   # ---- Everyday use: parallel chains + diagnosis ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(<ClassName>, <ctor args>, as.integer(seed), TRUE),
@@ -541,7 +541,7 @@ Rules:
   generic `rnorm` is correct ONLY for a Gaussian response. The whole point is
   copy-paste-runnable: it must actually run and return finite draws.
 - **Keep it compact** (<= ~8 lines per backend) and **use the installed-package API
-  with a RELATIVE path**: R -> `ai4bayescode_sourceCpp("<ClassName>.cpp")`
+  with a RELATIVE path**: R -> `ai4bayescode_source("<ClassName>.cpp")`
   then `new(<ClassName>, ...)`; Python -> `Mod = AI4BayesCode.source("<ClassName>.cpp")`
   then `Mod.<ClassName>(...)`. The path is ALWAYS the relative
   `<ClassName>.cpp` -- **NEVER an absolute `/Users/...` path, NEVER

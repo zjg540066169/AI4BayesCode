@@ -52,8 +52,9 @@ ai4bayescode_source(my_generated_cpp_string)   # ... or a source string
 m <- new(MyModel, ...)
 ```
 
-`ai4bayescode_source()` is the canonical self-contained compiler;
-`ai4bayescode_sourceCpp()` remains as a back-compatibility alias.
+`ai4bayescode_source()` compiles against the headers bundled inside the
+installed package -- there is no path to configure and no source checkout to
+keep around.
 
 ## Generate a sampler from natural language
 

@@ -3,7 +3,7 @@
 # the "CRAN repo": each subfolder is a reviewed, pre-validated bundle
 # (manifest.dcf + <block>.hpp + skills/ + test_<block>.cpp + optional examples/ +
 # vendor/). install_block downloads a bundle into a PER-USER block library that
-# ai4bayescode_sourceCpp() adds to the compile -I path, so #include "<block>.hpp"
+# ai4bayescode_source() adds to the compile -I path, so #include "<block>.hpp"
 # (and its vendored headers) resolve -- the local() tier in contrib.md, surfaced
 # to users as a CRAN-like install.packages() family.
 
@@ -28,7 +28,7 @@
 #' The directory where [ai4bayescode_install_block()] installs blocks: the
 #' user-global, language-agnostic store `~/.AI4BayesCode/blocks_download/`
 #' (shared with the Python package; override the root with the
-#' `AI4BAYESCODE_DATA_HOME` environment variable). `ai4bayescode_sourceCpp()`
+#' `AI4BAYESCODE_DATA_HOME` environment variable). `ai4bayescode_source()`
 #' adds every installed block (and its vendored dependencies) to the compile
 #' `-I` path automatically.
 #'
@@ -196,7 +196,7 @@ ai4bayescode_installed_blocks <- function() {
 #'
 #' Downloads a reviewed block bundle from the AI4BayesCode hub registry into the
 #' per-user block library ([ai4bayescode_blocks_path()]). After install, the block
-#' header and its vendored dependencies are on `ai4bayescode_sourceCpp()`'s
+#' header and its vendored dependencies are on `ai4bayescode_source()`'s
 #' include path and the block's skill is discoverable to codegen. Mirrors the CRAN
 #' `install.packages()` model: the registry is curated + pre-validated, so install
 #' is a download + manifest/version check (no compile-time sandbox).
@@ -323,7 +323,7 @@ ai4bayescode_remove_block <- function(name) {
     ex <- f("Example")
     if (!is.na(ex) && nzchar(ex))
         message("  example:  see ", file.path(dest, ex),
-                "  (compile with ai4bayescode_sourceCpp())")
+                "  (compile with ai4bayescode_source())")
     message("  -> usable now: the header + vendored deps are on the sourceCpp include path.")
     invisible()
 }

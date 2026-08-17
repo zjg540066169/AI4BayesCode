@@ -1143,7 +1143,7 @@ samples the WRONG posterior), so clear L2 first. Fix-and-re-run a layer before t
 
 ### Step 1: Compile check
 
-Run `ai4bayescode_sourceCpp("<file>.cpp", ...)` and verify it compiles
+Run `ai4bayescode_source("<file>.cpp", ...)` and verify it compiles
 without errors. If it fails, read the error, fix the code, and retry.
 
 ### Step 2: Validator checklist (L2 semantic -- run BEFORE the runtime checks)

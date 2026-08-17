@@ -59,7 +59,7 @@ into `env`. There is **no dependency on the location of an AI4BayesCode
 checkout** -- the headers travel with the installed package.
 }
 \details{
-Unlike the legacy [ai4bayescode_sourceCpp()] / Rcpp-plugin path -- which
+Unlike the Rcpp-plugin path -- which
 could forward only the first `-I` and dropped all `-D`, and therefore
 sourced only the simplest examples -- this function passes **all** six
 include roots and **all three** defines as real compiler flags via a
@@ -104,6 +104,5 @@ m <- new(GaussianLocationScale, rnorm(100), 1L)   # positional: y, rng_seed
 }
 }
 \seealso{
-[ai4bayescode_sourceCpp()] (a thin back-compat alias),
-  [ai4bayescode_example()].
+[ai4bayescode_example()].
 }

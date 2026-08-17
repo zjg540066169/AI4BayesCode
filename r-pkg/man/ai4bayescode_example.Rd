@@ -21,7 +21,7 @@ Invisibly `NULL`.
 }
 \description{
 Convenience wrapper: looks up `<name>.cpp` in the package's bundled
-`inst/examples/` directory and runs [ai4bayescode_sourceCpp()] on it.
+`inst/examples/` directory and runs [ai4bayescode_source()] on it.
 After the call, the corresponding Rcpp module class is loaded in the
 calling environment and can be instantiated with
 `new(<ClassName>, ...)`.

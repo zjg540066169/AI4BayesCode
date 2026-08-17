@@ -16,7 +16,7 @@ The absolute path (character).
 The directory where [ai4bayescode_install_block()] installs blocks: the
 user-global, language-agnostic store `~/.AI4BayesCode/blocks_download/`
 (shared with the Python package; override the root with the
-`AI4BAYESCODE_DATA_HOME` environment variable). `ai4bayescode_sourceCpp()`
+`AI4BAYESCODE_DATA_HOME` environment variable). `ai4bayescode_source()`
 adds every installed block (and its vendored dependencies) to the compile
 `-I` path automatically.
 }

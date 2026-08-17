@@ -1,9 +1,26 @@
 # ----------------------------------------------------------------------------
 # AI4BayesCode_helpers.R
 #
+# CHECKOUT-ONLY helpers. Use these ONLY when the R package is not installed.
+#
+# If you installed the package --
+#     remotes::install_github("zjg540066169/AI4BayesCode", subdir = "r-pkg")
+# -- then do NOT source this file. The package ships its own headers, so
+#
+#     library(AI4BayesCode)
+#     ai4bayescode_source("./MyModel.cpp")
+#
+# works from any directory with no path to configure. Sourcing this file on
+# top of the installed package used to define a same-named compiler with a
+# different signature that required a local ./AI4BayesCode tree; R masks
+# silently, so the packaged call started failing with
+# "path[1]=\"./AI4BayesCode\": No such file or directory". The compiler here
+# is now named ai4bayescode_source_checkout() so it can never shadow the
+# packaged API.
+#
 # User-facing convenience helpers for using AI4BayesCode from an R script.
 # Source this file once at the top of your analysis script and then call
-# ai4bayescode_sourceCpp("MyModel.cpp", AI4BayesCode_path = "./AI4BayesCode").
+# ai4bayescode_source_checkout("MyModel.cpp", AI4BayesCode_path = "./AI4BayesCode").
 #
 # Why this file exists
 # --------------------
@@ -17,7 +34,7 @@
 # Usage
 # -----
 #     source("path/to/AI4BayesCode/R/AI4BayesCode_helpers.R")
-#     ai4bayescode_sourceCpp("MyModel.cpp", AI4BayesCode_path = "./AI4BayesCode")
+#     ai4bayescode_source_checkout("MyModel.cpp", AI4BayesCode_path = "./AI4BayesCode")
 #     model <- new(MyModel, ...)
 #
 # Requirements
@@ -26,17 +43,7 @@
 #     - The AI4BayesCode folder reachable on disk at `AI4BayesCode_path`
 # ----------------------------------------------------------------------------
 
-AI4BayesCode_generated_dir <- function(AI4BayesCode_path = "./AI4BayesCode") {
-    gen_dir <- file.path(dirname(normalizePath(AI4BayesCode_path, mustWork = TRUE)),
-                         "generated")
-    if (!dir.exists(gen_dir)) {
-        dir.create(gen_dir, recursive = TRUE)
-        message("Created ", gen_dir)
-    }
-    gen_dir
-}
-
-ai4bayescode_sourceCpp <- function(cpp_file,
+ai4bayescode_source_checkout <- function(cpp_file,
                                 AI4BayesCode_path = "./AI4BayesCode",
                                 rebuild        = TRUE,
                                 verbose        = FALSE,

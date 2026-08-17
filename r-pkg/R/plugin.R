@@ -6,7 +6,7 @@
 #' AI4BayesCode headers + vendored mcmclib / BaseMatrixOps.
 #'
 #' Users typically do NOT call this directly: use
-#' [ai4bayescode_sourceCpp()] which injects the depends directive
+#' [ai4bayescode_source()], which needs no plugin
 #' automatically.
 #'
 #' @return Plugin list per the [Rcpp::Rcpp.plugin.maker()] contract.

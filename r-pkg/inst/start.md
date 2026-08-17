@@ -178,7 +178,7 @@ run automatically without asking.
 | Model confirmation / DAG sign-off after presenting the inline DAG + table | YES |
 | Ship-ready confirmation ("save final files and finish?") | YES |
 | **Procedural workflow steps** | NO -- run automatically |
-| Compile the generated `.cpp` (`ai4bayescode_sourceCpp(...)` in R, equivalent in Python) | NO |
+| Compile the generated `.cpp` (`ai4bayescode_source(...)` in R, equivalent in Python) | NO |
 | L3 R1 smoke test (10 steps, finiteness, `predict_at` non-mutation, freeze -> `predict_at` history) | NO |
 | L3 R2 two-chain diagnostic (4k+4k, R-hat, ESS) | NO |
 | L3 R3 posterior-predictive Bayesian p-values + PSIS-LOO | NO |
@@ -451,7 +451,7 @@ runtime -- it decides the compile call AND whether to even ask for a library pat
 **If the package IS installed (the recommended setup):**
 
 - Use the installed-package API everywhere, with a **RELATIVE** path:
-  - R:      `ai4bayescode_sourceCpp("<ClassName>.cpp")`
+  - R:      `ai4bayescode_source("<ClassName>.cpp")`
   - Python: `Mod = AI4BayesCode.source("<ClassName>.cpp")`
 - **SKIP the "Path to AI4BayesCode folder?" upfront question** -- it is not needed.
 - **NEVER** emit `AI4BayesCode_path=`, a `source(".../AI4BayesCode_helpers.R")`
@@ -467,11 +467,14 @@ runtime -- it decides the compile call AND whether to even ask for a library pat
   branch:
   ```r
   source("<path>/AI4BayesCode/R/AI4BayesCode_helpers.R")
-  ai4bayescode_sourceCpp("<ClassName>.cpp", AI4BayesCode_path = "<path>/AI4BayesCode")
+  ai4bayescode_source_checkout("<ClassName>.cpp",
+                               AI4BayesCode_path = "<path>/AI4BayesCode")
   ```
-  `AI4BayesCode_path=` is REQUIRED here (the helpers cannot locate the headers
-  otherwise) -- this is the ONE case where it is correct. Ask the user for the
-  checkout path once and reuse it.
+  The checkout compiler is `ai4bayescode_source_checkout()`, NOT
+  `ai4bayescode_source()`: it needs `AI4BayesCode_path=` because there is no
+  installed package to take headers from, and it carries a distinct name so
+  that sourcing this file can never shadow the packaged API for someone who
+  has both. Ask the user for the checkout path once and reuse it.
 - Everything after the compile is IDENTICAL to the installed branch:
   `ai4bayescode_run_chains` / `ai4bayescode_rhat_summary` /
   `ai4bayescode_diagnose` are all provided by the checkout helpers too, so the
@@ -483,7 +486,7 @@ runtime -- it decides the compile call AND whether to even ask for a library pat
 
 The generated `@example` header block (what `doc()` shows) ALWAYS uses the
 installed-package form when the package is present -- the clean relative
-`ai4bayescode_sourceCpp("<ClassName>.cpp")` ONLY: no path, no runner
+`ai4bayescode_source("<ClassName>.cpp")` ONLY: no path, no runner
 line, no absolute path. See `codegen_cpp.md` Sec.5.
 
 ---

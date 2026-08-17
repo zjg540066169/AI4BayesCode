@@ -61,7 +61,7 @@ the vetted core `include/`:
 - **The core->package sync does NOT auto-package `blocks_local/` into the R-package `inst/`.**
  Local is a dev area; "shipping a block" is the [FUTURE] registry/submission path. (Same
  rule as the `.bak` / `_archive` dev-only strip: dev content stays in dev, never ships.)
-- Compile include-path wiring for `ai4bayescode_sourceCpp` (putting `blocks_local/*/` on
+- Compile include-path wiring for `ai4bayescode_source` (putting `blocks_local/*/` on
  `-I`) is handled by `ai4bayescode_source()`, which emits `-I` for
  `./blocks_local/<block>/` and each `vendor/*` automatically (see
  `r-pkg/R/install_block.R`). Staging and compile run automatically, with no

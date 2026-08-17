@@ -19,25 +19,6 @@
 # ----------------------------------------------------------------------------
 
 
-#' Locate (and create) the AI4BayesCode generated-code directory
-#'
-#' @description Returns the path to a sibling `generated/` directory next to
-#'   the AI4BayesCode checkout, creating it if it does not exist.
-#' @param AI4BayesCode_path Path to the AI4BayesCode folder on disk.
-#' @return Absolute path to the `generated/` directory (created if missing).
-#' @noRd
-AI4BayesCode_generated_dir <- function(AI4BayesCode_path = "./AI4BayesCode") {
-    gen_dir <- file.path(dirname(normalizePath(AI4BayesCode_path, mustWork = TRUE)),
-                         "generated")
-    if (!dir.exists(gen_dir)) {
-        dir.create(gen_dir, recursive = TRUE)
-        message("Created ", gen_dir)
-    }
-    gen_dir
-}
-
-
-
 #' Render the model prediction (generative) DAG
 #'
 #' @description Draws the prediction DAG returned by `model$get_dag()` using a

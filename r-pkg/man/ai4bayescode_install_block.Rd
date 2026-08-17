@@ -19,7 +19,7 @@ Invisibly, the install path.
 \description{
 Downloads a reviewed block bundle from the AI4BayesCode hub registry into the
 per-user block library ([ai4bayescode_blocks_path()]). After install, the block
-header and its vendored dependencies are on `ai4bayescode_sourceCpp()`'s
+header and its vendored dependencies are on `ai4bayescode_source()`'s
 include path and the block's skill is discoverable to codegen. Mirrors the CRAN
 `install.packages()` model: the registry is curated + pre-validated, so install
 is a download + manifest/version check (no compile-time sandbox).

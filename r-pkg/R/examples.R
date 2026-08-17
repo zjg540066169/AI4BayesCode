@@ -1,7 +1,7 @@
 #' Compile + load a built-in AI4BayesCode example by name
 #'
 #' Convenience wrapper: looks up `<name>.cpp` in the package's bundled
-#' `inst/examples/` directory and runs [ai4bayescode_sourceCpp()] on it.
+#' `inst/examples/` directory and runs [ai4bayescode_source()] on it.
 #' After the call, the corresponding Rcpp module class is loaded in the
 #' calling environment and can be instantiated with
 #' `new(<ClassName>, ...)`.
@@ -45,7 +45,7 @@ ai4bayescode_example <- function(name, env = parent.frame(), ...) {
              call. = FALSE)
     }
 
-    ai4bayescode_sourceCpp(cpp, env = env, ...)
+    ai4bayescode_source(cpp, env = env, ...)
 }
 
 #' List all built-in AI4BayesCode examples

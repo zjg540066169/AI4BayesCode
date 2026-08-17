@@ -35,7 +35,7 @@ suppressPackageStartupMessages({
     library(loo)
 })
 
-ai4bayescode_sourceCpp(file.path(script_dir, "IRT1PL_joint.cpp"),
+ai4bayescode_source_checkout(file.path(script_dir, "IRT1PL_joint.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 
 # ============================================================================

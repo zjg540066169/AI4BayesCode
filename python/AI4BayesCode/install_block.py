@@ -131,12 +131,9 @@ def _read_dcf(text: str) -> dict:
 
 
 def _core_block_names() -> set[str]:
-    try:
-        from .sourceCpp import _pkg_root  # type: ignore
-        inc = os.path.join(str(_pkg_root()), "include", "AI4BayesCode")
-    except Exception:  # noqa: BLE001
-        root = os.path.dirname(os.path.abspath(__file__))
-        inc = os.path.join(root, "_vendored_include", "AI4BayesCode")
+    # The core block headers ship inside the installed package.
+    root = os.path.dirname(os.path.abspath(__file__))
+    inc = os.path.join(root, "_vendored_include", "AI4BayesCode")
     if not os.path.isdir(inc):
         return set()
     return {f[:-4] for f in os.listdir(inc) if f.endswith("_block.hpp")}

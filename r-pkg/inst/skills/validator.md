@@ -2432,7 +2432,7 @@ on.exit(parallel::stopCluster(cl), add = TRUE)
 
 parallel::clusterEvalQ(cl, {
     library(AI4BayesCode)
-    ai4bayescode_sourceCpp("models/<MODEL_ID>/<MODEL_ID>.cpp")  # relative to project root
+    ai4bayescode_source("models/<MODEL_ID>/<MODEL_ID>.cpp")  # relative to project root
 })
 # NOTE: run_chain_<ClassName>() takes every data input as a PARAMETER
 # (codegen_r_runner.md HARD RULE -- never closes over globals), so the

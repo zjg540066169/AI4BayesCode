@@ -21,7 +21,7 @@
 # ============================================================================
 
 source("R/AI4BayesCode_helpers.R")
-ai4bayescode_sourceCpp("r-pkg/inst/examples/GBartPoisson.cpp",
+ai4bayescode_source_checkout("r-pkg/inst/examples/GBartPoisson.cpp",
                        AI4BayesCode_path = ".")
 
 set.seed(1)

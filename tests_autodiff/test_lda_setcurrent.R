@@ -39,7 +39,7 @@ script_dir <- local({
 AI4BayesCode_dir <- normalizePath(file.path(script_dir, ".."))
 source(file.path(AI4BayesCode_dir, "R", "AI4BayesCode_helpers.R"))
 
-ai4bayescode_sourceCpp(
+ai4bayescode_source_checkout(
     file.path(AI4BayesCode_dir, "examples", "LdaCollapsedGibbs.cpp"),
     AI4BayesCode_path = AI4BayesCode_dir, verbose = FALSE)
 

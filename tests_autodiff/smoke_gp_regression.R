@@ -11,7 +11,7 @@ AI4BayesCode_dir <- normalizePath(file.path(script_dir, ".."))
 source(file.path(AI4BayesCode_dir, "R", "AI4BayesCode_helpers.R"))
 
 cat("Compiling GPRegression...\n")
-ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples", "GPRegression.cpp"),
+ai4bayescode_source_checkout(file.path(AI4BayesCode_dir, "examples", "GPRegression.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir, verbose = FALSE)
 
 # Simulate a simple 1D GP-like dataset
