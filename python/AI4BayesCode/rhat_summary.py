@@ -80,6 +80,16 @@ def rhat_summary(chains, keys=None, drop_burn=0, order_components=False, *, n_bu
     """
     if n_burn is not None:      # accept diagnose's param name too
         drop_burn = n_burn
+    # A negative drop_burn slices from the END (`a[-5:]` keeps the LAST five
+    # draws), which silently returns a different -- and wrong -- number rather
+    # than an error. R ignores negatives; both now reject them.
+    if drop_burn is None:
+        drop_burn = 0
+    if not isinstance(drop_burn, (int, np.integer)) or isinstance(drop_burn, bool) \
+            or drop_burn < 0:
+        raise ValueError(
+            f"rhat_summary: drop_burn must be a non-negative integer; "
+            f"got {drop_burn!r}")
     hists = _hist_list(chains)
     if not hists:
         raise ValueError("no chains with a history to summarise")
@@ -116,8 +126,13 @@ def rhat_summary(chains, keys=None, drop_burn=0, order_components=False, *, n_bu
 
         # R parity: scalar keys report only {rhat, ess_bulk}; matrix keys also
         # report {max_rhat, min_ess} across components.
+        # max_rhat / min_ess are reported for EVERY key, scalar or matrix: the
+        # documented usage is `max(v["max_rhat"] for v in summary.values())`,
+        # and omitting them for scalar keys made that raise KeyError on any run
+        # whose history happens to be one column.
         if dim == 1:
-            out[k] = {"rhat": float(rh[0]), "ess_bulk": float(eb[0])}
+            out[k] = {"rhat": float(rh[0]), "ess_bulk": float(eb[0]),
+                      "max_rhat": float(rh[0]), "min_ess": float(eb[0])}
         else:
             out[k] = {"rhat": rh, "ess_bulk": eb,
                       "max_rhat": float(np.nanmax(rh)), "min_ess": float(np.nanmin(eb))}

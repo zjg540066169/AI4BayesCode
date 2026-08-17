@@ -30,8 +30,8 @@
 #'
 #' # Use a shipped example
 #' ai4bayescode_example("GaussianLocationScale")
-#' m <- new(GaussianLocationScale, rnorm(100, 2, 1.5), seed = 1L,
-#'          keep_history = TRUE)
+#' # R binds constructor arguments BY POSITION: y, rng_seed, keep_history.
+#' m <- new(GaussianLocationScale, rnorm(100, 2, 1.5), 1L, TRUE)
 #' m$step(4000L)
 #'
 #' # Use a user-generated .cpp

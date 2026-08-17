@@ -175,8 +175,8 @@ def plot_dag(
         G.add_node(di)
 
     # Classify nodes
-    gibbs_reads = dag.get("gibbs_reads", {}) or {}
-    gibbs_invalidates = dag.get("gibbs_invalidates", {}) or {}
+    gibbs_reads = _dag_get(dag, "gibbs_reads", {}) or {}
+    gibbs_invalidates = _dag_get(dag, "gibbs_invalidates", {}) or {}
     sampled_blocks = set(gibbs_reads.keys())
     derived_keys = {k for keys in gibbs_invalidates.values() for k in keys}
 

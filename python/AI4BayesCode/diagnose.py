@@ -140,6 +140,13 @@ def diagnose(hist, n_burn=0, plot=True, order_components=False, *, drop_burn=Non
     """
     if drop_burn is not None:      # accept rhat_summary's param name too
         n_burn = drop_burn
+    # A negative n_burn slices from the END, so `[-1:]` keeps ONE draw, the
+    # emptiness check below sees length 1, and every statistic comes back NaN
+    # with no error. R already rejects it.
+    if not isinstance(n_burn, (int, np.integer)) or isinstance(n_burn, bool) \
+            or n_burn < 0:
+        raise ValueError(
+            f"diagnose: n_burn must be a non-negative integer; got {n_burn!r}")
     hist = _as_single_hist("diagnose", hist)
     hb = {nm: np.asarray(x)[n_burn:] for nm, x in hist.items()}
     _lens = [np.asarray(v).shape[0] for v in hb.values()]

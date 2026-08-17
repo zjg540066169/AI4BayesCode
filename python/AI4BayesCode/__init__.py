@@ -13,7 +13,7 @@ headers ship inside the installed package):
     import AI4BayesCode
     mod = AI4BayesCode.source("MyModel.cpp")   # file path ...
     mod = AI4BayesCode.source(cpp_source_str)  # ... or a string
-    m = mod.MyModel(y, X, seed=1, keep_history=True)
+    m = mod.MyModel(y, X, rng_seed=1, keep_history=True)
     m.step(5000); m.step(5000)
     hist = m.get_history()
     AI4BayesCode.plot_dag(m)

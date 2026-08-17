@@ -185,6 +185,19 @@ def _compile_flags(include_root: Path) -> list[str]:
     from .install_block import _block_include_flags   # installed contributed blocks
     flags.extend(_block_include_flags())
     arma = _find_armadillo()
+
+    if arma is None:
+        # Detected and then ignored: the -I was simply skipped and the
+        # user got the whole clang++ command line plus
+        # "fatal error: 'armadillo' file not found".
+        raise FileNotFoundError(
+            "Armadillo headers not found. AI4BayesCode compiles generated "
+            "samplers against Armadillo, so it has to be installed first:\n"
+            "  macOS:          brew install armadillo\n"
+            "  Debian/Ubuntu:  apt-get install libarmadillo-dev\n"
+            "  conda:          conda install -c conda-forge armadillo\n"
+            "If it is installed somewhere unusual, set ARMADILLO_INCLUDE_DIR "
+            "to the directory containing the 'armadillo' header.")
     if arma is not None:
         flags.append(f"-I{arma}")
     flags += [

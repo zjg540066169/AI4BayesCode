@@ -29,7 +29,7 @@ Invisibly `NULL`. Side effect: prints to stderr via `message()`.
 \description{
 Emits a friendly per-sweep performance message after a run. When
   the modular-NUTS per-sweep time is high it suggests the `joint_nuts_block`
-  escape hatch (with the validator Check #11 caveat); when the runner already
+  escape hatch; when the runner already
   uses joint NUTS it instead prints tuning hints. The generated R runner
   calls this once at the end.
 }

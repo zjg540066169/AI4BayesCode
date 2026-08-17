@@ -246,7 +246,10 @@ print(AI4BayesCode.rhat_summary(chains))   # convergence across the chains
 # Per-chain summaries + trace + autocorrelation + density plots.
 tbl, plot = AI4BayesCode.diagnose(chains[0]["hist"])
 print(tbl)
-plot()
+# matplotlib is an optional extra (pip install "AI4BayesCode[viz]"), and
+# diagnose returns plot = None without it -- calling None raises TypeError.
+if plot is not None:
+    plot()
 
 # Examples of stateful functions
 

@@ -489,6 +489,12 @@ public:
     // probabilities where the docs promise "entry i is the state z_i".
     // Publish the per-node argmax, the deterministic counterpart of
     // current_sample().
+    // Declaring the no-rng override here would otherwise HIDE
+    // vi_block's rng-taking overload from this static type: a caller
+    // holding a concrete reference would silently get the q-MEAN where
+    // it asked for a q-DRAW. Both overloads stay visible.
+    using vi_block::current_named_outputs;
+
     state_map current_named_outputs() const override {
         const std::string& nm = name();
         if (nm.empty()) return {};

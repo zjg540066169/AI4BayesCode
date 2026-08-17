@@ -339,6 +339,14 @@ public:
                     : static_cast<double>(c_new + 1);
             }
 
+            // q(z* | z) starts with the uniform choice of c_new among the
+            // currently empty slots -- see the draw above. Omitting it made
+            // splits under-accepted by exactly |empty_slots| (~17 at the usual
+            // K_trunc = 20, K_active = 3) and biased the partition posterior
+            // toward fewer clusters. The restricted-Gibbs scan accumulates on
+            // top of it below.
+            const double log_q_slot = -std::log(
+                static_cast<double>(empty_slots.size()));
             double log_q_forward = 0.0;
             for (std::size_t t = 0; t < cfg_.n_restricted_gibbs_iters; ++t) {
                 const bool accumulate = (t + 1 == cfg_.n_restricted_gibbs_iters);
@@ -392,7 +400,7 @@ public:
             // Acceptance: A = q(z|z*) / q(z*|z) * prior_ratio * lik_ratio
             //   In log: log A = log_q_reverse - log_q_forward
             //                   + log_prior_ratio + log_lik_ratio
-            const double log_A = log_q_reverse - log_q_forward
+            const double log_A = log_q_reverse - (log_q_forward + log_q_slot)
                                 + log_prior_ratio + log_lik_ratio;
             const double u_acc = uniform(rng);
             if (std::log(u_acc + 1e-300) < log_A) {
@@ -437,6 +445,24 @@ public:
             // REVERSE move at the FINAL state matching z, not actually
             // sampling from the restricted Gibbs (the destination is
             // fixed to z).
+            // The reverse move is a SPLIT out of z*, and a split first picks
+            // its new slot uniformly among the slots empty IN z*. z* has one
+            // more empty slot than z, because s_j was just vacated. This term
+            // is the mirror of log_q_slot in the split branch; without it
+            // merges were over-accepted by |empty slots in z*|.
+            std::size_t n_empty_star = 0;
+            {
+                std::vector<std::size_t> n_per_cluster_star(K, 0);
+                for (std::size_t k = 0; k < N; ++k) {
+                    ++n_per_cluster_star[
+                        static_cast<std::size_t>(std::llround(z_star[k])) - 1];
+                }
+                for (std::size_t k = 0; k < K; ++k)
+                    if (n_per_cluster_star[k] == 0) ++n_empty_star;
+            }
+            const double log_q_slot_rev =
+                -std::log(static_cast<double>(n_empty_star));
+
             std::uniform_real_distribution<double> uniform(0.0, 1.0);
             arma::vec z_aux = z_star;  // start from merged state
             // Random initial assignment to {s_i, s_j} for S members.
@@ -503,7 +529,7 @@ public:
                     - y_log_lik_at_(y_flat, kk, z_old, mu, lam_ptr, sig_ptr);
             }
 
-            const double log_A = log_q_reverse - log_q_forward
+            const double log_A = (log_q_reverse + log_q_slot_rev) - log_q_forward
                                 + log_prior_ratio + log_lik_ratio;
             const double u_acc = uniform(rng);
             if (std::log(u_acc + 1e-300) < log_A) {

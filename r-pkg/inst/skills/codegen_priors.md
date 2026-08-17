@@ -70,11 +70,36 @@ DAG distinction.
 
 ## 2a. Variance / scale parameter prior discipline (Gelman 2006)
 
-**DEFAULT for any scale parameter sigma > 0 in any model** (noise
-variance in regression, group-level variance in hierarchical models,
-etc.):
+The default depends on WHICH scale it is. The two cases differ in whether
+the likelihood vanishes as the scale goes to zero, and that decides whether
+the posterior is proper.
+
+**OBSERVATION-NOISE scale (regression sigma, and any scale that appears
+directly in the likelihood of >= 2 distinct observations) -- DEFAULT:**
 
     p(sigma) prop.to 1/sigma    (Jeffreys, scale-invariant noninformative)
+
+**GROUP-LEVEL scale in a hierarchical model (tau, sigma_alpha -- the sd of
+a random effect) -- DEFAULT:**
+
+    tau ~ half-Normal(0, A),  A ~= 2.5 x data-scale
+
+**Do NOT use Jeffreys on a group-level scale.** Gelman 2006 -- the paper
+this section cites -- is the paper that shows p(tau) prop.to 1/tau
+(equivalently, uniform on log tau) gives an IMPROPER POSTERIOR in the
+hierarchical model: unlike the noise scale, the likelihood does not vanish
+as tau -> 0, so the mass at log tau -> -inf diverges. Under the non-centered
+parameterization this skill mandates it is strictly worse, because alpha_raw
+absorbs the shrinkage and nothing at all penalises tau -> 0.
+
+Nothing in the validator can see this. Measured on J = 8 groups, n_j = 10,
+tau_true = 0.2, 20k + 20k, 2 chains: the Jeffreys default gives a posterior
+mean tau of 0.0001 (max over 20k draws: 0.137) with R-hat 1.0000 on every
+parameter, against 0.5806 under half-Normal(0, 5). Both chains agree on the
+collapsed answer, so L3 R2 passes; R3's binary BPV gates on the mean, which
+the intercept absorbs, so R3 passes too. The shipped
+`examples/HierarchicalLM_joint.cpp` uses half-Normal(0, 5) on both tau and
+sigma -- match it.
 
 Equivalently p(log sigma) = constant. Parameterize as eta = log(sigma)
 and the Jacobian of the transform exactly cancels the prior term --
@@ -149,9 +174,10 @@ posteriors and contains the degenerate state with minimal
 intervention. It is the pattern the AI agent should use by default.
 
 **For genuinely-sparse-info models** where k remains small
-(< 5) throughout MCMC (e.g., hierarchical models with 2-3 groups),
-half-Normal(0, A) with A ~= 2.5 x data-scale is Gelman 2006's
-default weakly-informative choice. Don't use half-Cauchy unless
+(< 5) throughout MCMC, half-Normal(0, A) with A ~= 2.5 x data-scale is
+Gelman 2006's default weakly-informative choice. (This is a separate
+condition from the hierarchical case above, which takes half-Normal at ANY
+number of groups -- not only 2-3.) Don't use half-Cauchy unless
 the scale parameter truly is hard to identify -- its polynomial tail
 is slower for NUTS.
 

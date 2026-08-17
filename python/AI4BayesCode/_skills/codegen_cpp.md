@@ -450,16 +450,28 @@ self-contained license reference.
 #ifndef ARMA_DONT_USE_WRAPPER
 # define ARMA_DONT_USE_WRAPPER
 #endif
+// Rcpp only exists in the R build. The standalone `int main()` demo that
+// Sec.5's authoring order asks for FIRST is compiled without it, and the
+// Python build has no Rcpp either -- so this include must be guarded. Every
+// shipped example does exactly this.
+#ifdef AI4BAYESCODE_RCPP_MODULE
 #include <RcppArmadillo.h>
+#else
+#include <armadillo>
+#endif
 #include "AI4BayesCode/block_sampler.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/nuts_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
+#include "AI4BayesCode/backend_neutral.hpp"       // ai4b::stop / ai4b::warning
+#include "AI4BayesCode/kernel_control_mixin.hpp"  // freeze / unfreeze / get_frozen
+#include "AI4BayesCode/rcpp_wrap.hpp"             // Sec.9 module declarations
 #include <cmath>
 #include <cstdint>
 #include <memory>
 #include <random>
+#include <stdexcept>
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
 using AI4BayesCode::nuts_block;
@@ -497,7 +509,7 @@ Format (every line is a `//` comment; `doc()` strips the `// ` prefix):
 //   ai4bayescode_sourceCpp("<ClassName>.cpp")   # compile+load; RELATIVE path ONLY
 //   # ---- Everyday use: parallel chains + diagnosis ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(<ClassName>, <ctor args>, seed, TRUE),
+//       function(seed) new(<ClassName>, <ctor args>, as.integer(seed), TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   ai4bayescode_diagnose(run$histories[[1]])
 //   # ---- Advanced: stateful single-chain control ----
@@ -510,7 +522,7 @@ Format (every line is a `//` comment; `doc()` strips the `// ` prefix):
 //   Mod = AI4BayesCode.source("<ClassName>.cpp")   # RELATIVE path ONLY
 //   # ---- Everyday use: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
-//       lambda seed: Mod.<ClassName>(<ctor args>, seed, True),
+//       lambda seed: Mod.<ClassName>(<ctor args>, rng_seed=int(seed), keep_history=True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000)
 //   AI4BayesCode.diagnose(chains[0]["hist"])
 //   # ---- Advanced: stateful single-chain control ----
@@ -1451,7 +1463,11 @@ verification code.
 #ifndef ARMA_DONT_USE_WRAPPER
 # define ARMA_DONT_USE_WRAPPER
 #endif
-#include <RcppArmadillo.h>
+// This file is self-contained -- no Rcpp, no pybind -- so it includes
+// Armadillo directly. The compile recipe below must therefore put
+// RcppArmadillo's include directory on the path: the repo vendors no
+// armadillo of its own, it only exists inside RcppArmadillo/include.
+#include <armadillo>
 
 #include "AI4BayesCode/block_sampler.hpp"
 #include "AI4BayesCode/shared_data.hpp"
@@ -1664,8 +1680,14 @@ edges. A non-finite lp or FD/AD mismatch = unstable there; rewrite (don't clamp)
 Compile and run it directly -- no R, no Python, no package install:
 
 ```bash
+# ARMA_INC: the repo vendors no armadillo of its own -- the headers live
+# inside RcppArmadillo, so ask R where they are. On a machine with the system
+# libarmadillo-dev package instead, leave ARMA_INC empty.
+ARMA_INC=$(Rscript -e 'cat(system.file("include", package="RcppArmadillo"))')
+
 c++ -std=c++17 -O2 -I<include> -I<include>/mcmclib \
     -I<include>/mcmclib/BaseMatrixOps/include -I<include>/eigen \
+    ${ARMA_INC:+-I$ARMA_INC} \
     -DMCMC_ENABLE_ARMA_WRAPPERS -DARMA_DONT_USE_WRAPPER \
     tests_autodiff/verify_<ClassName>.cpp -o /tmp/verify_<ClassName> \
     -framework Accelerate        # macOS; use -lblas -llapack on Linux
@@ -1674,10 +1696,8 @@ c++ -std=c++17 -O2 -I<include> -I<include>/mcmclib \
 
 It prints one PASS/FAIL line per block and exits non-zero on failure, so
 the thresholds live in the file (AD-backed < 1e-8, FD-backed < 1e-5)
-rather than in a language-specific driver.
-cat("Check #12 PASS\n")
-# => AI deletes tests_autodiff/verify_<ClassName>.cpp at this point.
-```
+rather than in a language-specific driver. On a zero exit status, Check #12
+has passed -- delete `tests_autodiff/verify_<ClassName>.cpp` at that point.
 
 If any `max_diff` exceeds its threshold -> AI pinpoints the block,
 opens the hand-written gradient, and fixes. Typical bugs:
@@ -1823,10 +1843,29 @@ in the lambda to read nuisance parameters at PPC time.
 
 1. Install fixed data + initial values: `impl_->data().set("y", y);`
 2. Declare dependencies: `impl_->data().declare_dependencies("mu", {"y", "sigma"});`
-3. (Optional) Register refreshers for deterministic derived quantities.
-4. **Declare predict DAG edges** into `y_rep` and **register the y_rep
+3. (Optional) Register refreshers for deterministic derived quantities:
+   `impl_->data().register_refresher("alpha", [](shared_data_t& d) { ... });`
+4. **For every refresher, declare which block invalidates it** --
+   `impl_->data().declare_invalidates("<block_name>", {"alpha", ...});`
+
+   This is the step that makes a derived quantity actually recompute.
+   `register_refresher` only says HOW to compute `alpha`; `declare_invalidates`
+   says WHEN. Without it, `refresh_derived_for()` finds nothing to refresh
+   after that block steps, so `shared_data["alpha"]` keeps its INITIAL value
+   for the whole run: `get_current()$alpha` is wrong forever, and a stateless
+   `predict_at()` that reads it produces y_rep from a stale parameter -- with
+   no error and no diagnostic. 23 of the 24 shipped examples that register a
+   refresher also call this.
+
+   Rule of thumb: every key you pass to `register_refresher` must appear in
+   the invalidate list of whichever block(s) it is computed from.
+5. **Seed the derived quantities once, before the first step**:
+   `impl_->data().refresh_all();` as the last line of setup. Otherwise
+   `get_current()` and `predict_at()` on a freshly-constructed model read the
+   placeholder the refresher was registered against. 11 shipped examples do this.
+6. **Declare predict DAG edges** into `y_rep` and **register the y_rep
    stochastic refresher** (see Sec.6a above).
-5. Add child blocks in Gibbs-sweep order: `impl_->add_child(...)`.
+7. Add child blocks in Gibbs-sweep order: `impl_->add_child(...)`.
 
 ---
 
@@ -1987,10 +2026,24 @@ public:
     // Kernel-control category (freeze / unfreeze / get_frozen) is provided
     // automatically by the kernel_control_mixin<Derived> base class -- do NOT
     // declare them here. The mixin's forwarders read this->impl_ (composite
-    // pointer) via the CRTP static_cast; ensure `impl_` is a member (private
-    // is fine) named exactly `impl_`. The RCPP_MODULE / PYBIND11_MODULE
-    // macros AI4BAYESCODE_BIND_KERNEL_CONTROL(<ClassName>) /
-    // AI4BAYESCODE_PYBIND_KERNEL_CONTROL(<ClassName>) binds them.
+    // pointer) via the CRTP static_cast; ensure `impl_` is a member named
+    // exactly `impl_`. If it is PRIVATE -- the usual choice -- the class MUST
+    // also declare the mixin a friend, on the line right after the class
+    // header:
+    //
+    //     class <ClassName> : public AI4BayesCode::kernel_control_mixin<<ClassName>> {
+    //         friend class AI4BayesCode::kernel_control_mixin<<ClassName>>;
+    //     public:
+    //
+    // Without it the R and Python builds fail at
+    // AI4BAYESCODE_BIND_KERNEL_CONTROL with "'impl_' is a private member",
+    // while the STANDALONE build still passes -- the mixin's forwarders are
+    // #ifdef-guarded and never instantiated there. Since Sec.5's authoring
+    // order compiles standalone FIRST, omitting this line looks green until
+    // delivery.
+    // The RCPP_MODULE / PYBIND11_MODULE macros
+    // AI4BAYESCODE_BIND_KERNEL_CONTROL(<ClassName>) /
+    // AI4BAYESCODE_PYBIND_KERNEL_CONTROL(<ClassName>) bind them.
 private:
     std::mt19937_64                             rng_;
     mutable std::mt19937_64                     predict_rng_;  // Sec.6a
@@ -2046,8 +2099,17 @@ invent others:**
 - `impl_->current_named_outputs()` -> `state_map` (the current draw).
 - `impl_->get_history()` -> `history_map`; `impl_->get_dag()` -> `dag_info`.
 - `impl_->data()` (the shared DataContext: `.set(...)`, `.declare_dependencies(...)`,
-  `.declare_data_input(...)`, `.register_stochastic_refresher(...)`),
-  `impl_->add_child(std::make_unique<...block>(...))`.
+  `.declare_invalidates(...)`, `.declare_data_input(...)`, `.register_refresher(...)`,
+  `.register_stochastic_refresher(...)`, `.refresh_all()`,
+  `.valid_predict_inputs()`), `impl_->add_child(std::make_unique<...block>(...))`.
+- `impl_->child(i)` -> `block_sampler&` -- needed to write `set_current` for a
+  joint block: `dynamic_cast<joint_nuts_block&>(impl_->child(0)).set_slot(...)`.
+  This is what `GaussianLocationScale.cpp` and every joint example do, and it
+  is the only documented route to `set_current` for joint sub-parameters.
+- `impl_->history_size()` and `impl_->clear_history()` -- both called by
+  Sec.7a's own `set_current` template.
+- `impl_->freeze(...)` / `unfreeze(...)` / `get_frozen()` are reached through
+  the kernel_control_mixin, not called directly.
 
 There is **NO `impl_->get_current()`**. Assemble the class's `get_current()`
 from shared_data, one entry per parameter:
@@ -2247,10 +2309,11 @@ AI4BayesCode::history_map predict_at(
     bool has_X = false;
     arma::vec x_flat;
     for (const auto& kv : new_data) {
-        // Membership test: shared_data_t exposes data_input_keys() (a
-        // std::set of the declared data-input keys); there is NO
-        // is_data_input(key) member. Test membership with .count(key).
-        if (impl_->data().data_input_keys().count(kv.first) == 0u) {
+        // Membership test: shared_data_t exposes valid_predict_inputs()
+        // (the declared data-input keys, as an unordered_set); there is NO
+        // is_data_input(key) and no data_input_keys() member. Test
+        // membership with .count(key).
+        if (impl_->data().valid_predict_inputs().count(kv.first) == 0u) {
             throw std::runtime_error(
                 "<ClassName>::predict_at: unknown key '" + kv.first +
                 "'. Valid keys: <list>.");
@@ -2342,19 +2405,50 @@ inject the result into the `replaced` context before forwarding.
 Use this template ONLY when the constructor has no
 `declare_data_input(...)` call:
 
+The ONLY difference from the covariate case is that `new_data` must be
+EMPTY -- the two branches below are otherwise identical to the canonical
+wrapper. **`predict_at` still has to return `y_rep`**: validator Layer 3
+R3 consumes `model$predict_at(list())$y_rep`, so a no-covariate model that
+returns an empty map cannot be posterior-predictive-checked at all, and R3
+silently has nothing to test.
+
 ```cpp
 AI4BayesCode::history_map predict_at(
         const AI4BayesCode::state_map& new_data) const {
-    if (new_data.size() > 0) {
-        throw std::runtime_error("This model has no covariate inputs.");
+    if (!new_data.empty()) {
+        throw std::runtime_error(
+            "<ClassName> has no covariate inputs. "
+            "predict_at() takes an empty map/list.");
     }
-    return AI4BayesCode::history_map();
+    AI4BayesCode::history_map out;
+
+    // Stateless mode: one row, from the CURRENT draw.
+    if (!keep_history_) {
+        block_context replaced;                      // nothing to replace
+        block_context result = impl_->predict_at(replaced, predict_rng_);
+        for (const auto& kv : result) {
+            arma::mat m(1, kv.second.n_elem);
+            for (std::size_t j = 0; j < kv.second.n_elem; ++j)
+                m(0, j) = kv.second[j];
+            out.emplace(kv.first, std::move(m));
+        }
+        return out;
+    }
+
+    // History mode: one row per kept draw. Same enumeration of sampled keys
+    // as the covariate case -- see the canonical wrapper above.
+    ...
 }
 ```
 
-If you find yourself emitting this template even though the
-constructor declares a data input, STOP -- that's the
-silent-broken-predict_at bug. Switch to the canonical wrapper above.
+Ground truth: `examples/GaussianLocationScale.cpp` (joint-block sub-outputs,
+so y_rep is computed per draw), `examples/BetaBernoulli.cpp` and
+`examples/DirichletSimplex.cpp` (sampled key IS a block name, so the
+`replaced[key] = ...` pattern applies).
+
+If you find yourself returning an empty `history_map()` -- from this branch
+or any other -- STOP: that is the silent-broken-predict_at bug, and R3 will
+report nothing rather than fail.
 
 See `examples/BartNoise.cpp` for the canonical BART predict_at pattern,
 `examples/GPRegression.cpp` for the GP + libgp kernel pattern, and

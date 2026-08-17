@@ -16,12 +16,12 @@ remotes::install_github("zjg540066169/AI4BayesCode", subdir = "r-pkg")
 Or from a local source tree (from the repo root):
 
 ```r
-remotes::install_local("AI4BayesCode/r-pkg")
+remotes::install_local("r-pkg")
 ```
 
 ```bash
 # equivalently, from a shell:
-cd AI4BayesCode/r-pkg && R CMD INSTALL .
+cd r-pkg && R CMD INSTALL .
 ```
 
 ## Quick start
@@ -31,15 +31,19 @@ library(AI4BayesCode)
 
 # Run a built-in example — no path setup
 ai4bayescode_example("GaussianLocationScale")
-m <- new(GaussianLocationScale,
-         y = rnorm(100, mean = 2, sd = 1.5),
-         seed = 1L,
-         keep_history = TRUE)
-m$step(4000L)   # warmup
-m$step(4000L)   # sampling
-h <- m$get_history()
-summary(h$mu)
-summary(h$sigma)
+# R matches constructor arguments BY POSITION -- names are ignored.
+# The order is: data args, rng_seed, keep_history.
+# (ai4bayescode_doc(GaussianLocationScale) prints it.)
+y <- rnorm(100, mean = 2, sd = 1.5)
+
+# run_chains drops the first n_burn draws, so the summary below is over the
+# POSTERIOR only. m$get_history() returns EVERY stepped draw, warmup included.
+run <- ai4bayescode_run_chains(
+  function(s) new(GaussianLocationScale, y, as.integer(s), TRUE),
+  n_chains = 4, n_burn = 4000, n_keep = 4000)
+
+ai4bayescode_rhat_summary(run)                  # convergence across chains
+ai4bayescode_diagnose(run$histories[[1]])$summary
 
 # Compile a .cpp you generated elsewhere -- no AI4BayesCode checkout needed,
 # the headers ship inside the installed package.
@@ -85,7 +89,7 @@ Prefer not to pass the key every call? Set it **once per session** (session-only
 never written to disk):
 
 ```r
-ai4bayescode_set_key("sk-ant-...", "anthropic")   # or "openai" / "google"
+ai4bayescode_set_key("sk-ant-...", "anthropic")   # or "openai"
 ai4bayescode_key_status()                              # shows what's set (masked)
 ai4bayescode_generate("Linear regression.", LLM = "gpt-5.5-codex")  # key picked up
 ```

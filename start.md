@@ -669,12 +669,12 @@ You should now:
    (a) ./generated/<ClassName>/ (default)
    (b) Other / custom
 
-   Sampler engine? (codegen.md Sec.1 #6)
+   Sampler engine?
    (a) Let codegen recommend after seeing the model (default)
    (b) MCMC for all parameters
    (c) Variational inference
 
-   Max generate->validate attempts? (codegen.md Sec.1 #8)
+   How many times should I retry if a check fails?
    (a) 5 (default)
    (b) 10
    (c) 20

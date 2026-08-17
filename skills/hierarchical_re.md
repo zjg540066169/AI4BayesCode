@@ -191,18 +191,24 @@ cfg.log_density_grad = [&, J, P, group_idx_key, y_key, x_key,
 
     // sigma_alpha: HalfNormal(0, sigma_alpha_prior_scale).
     // log p(sigma_alpha) = const - 0.5 * sigma_alpha^2 / scale^2
-    // (Jeffreys 1/sigma_alpha would be log p = -log(sigma_alpha); covered by
-    //  using sigma_alpha_prior_scale = +inf and adding -log(sigma_alpha).)
+    // sigma_alpha_prior_scale MUST be finite. The +inf branch below selects
+    // Jeffreys, which is IMPROPER for a group-level scale (Gelman 2006) and
+    // collapses tau to ~0 with a clean R-hat -- see codegen_priors.md Sec.2a.
+    // It is kept only for the non-hierarchical scales that reuse this code.
     double log_prior_sigma_alpha;
     if (std::isfinite(sigma_alpha_prior_scale)) {
         log_prior_sigma_alpha =
             -0.5 * sigma_alpha * sigma_alpha
             / (sigma_alpha_prior_scale * sigma_alpha_prior_scale);
     } else {
-        // Jeffreys: log p prop.to -log(sigma_alpha). NB: positive_constraint adds
-        // +log(sigma_alpha) Jacobian, so the natural-scale log_p is just
-        // -log(sigma_alpha). Total target on unconstrained scale = 0
-        // contribution from the prior -- Jeffreys cancels.
+        // Jeffreys: log p prop.to -log(sigma_alpha). NB: positive_constraint
+        // adds +log(sigma_alpha) Jacobian, so the natural-scale log_p is just
+        // -log(sigma_alpha) and the two cancel on the unconstrained scale.
+        // That cancellation is exactly the problem for a GROUP-LEVEL scale:
+        // nothing bounds log(sigma_alpha) from below, the likelihood does not
+        // vanish as sigma_alpha -> 0 under the non-centered parameterization,
+        // and the posterior is improper. Do not select this branch for tau /
+        // sigma_alpha.
         log_prior_sigma_alpha = -std::log(sigma_alpha);
     }
 
@@ -369,9 +375,27 @@ slice 3: beta               dim = P, type = real
 
 Log-likelihood becomes
 `log p(y | alpha, beta) = sum_n [y_n * eta_n - n_n * log1p(exp(eta_n))]`
-where `eta_n = alpha_{g(n)} + (X * beta)_n`. Gradient is hand-computable
-and structurally identical to Sec.5 (replace `resid_n / sigma_y^2` with
-the binomial residual `y_n - n_n * sigmoid(eta_n)`).
+where `eta_n = alpha_{g(n)} + (X * beta)_n`.
+
+The gradient has the same SHAPE as Sec.5 with the binomial residual
+`r_n = y_n - n_n * sigmoid(eta_n)` in place of `resid_n / sigma_y^2` -- but
+**do not copy Sec.5's code**: dropping `sigma_y` shifts every slice offset
+down by one. Sec.5's layout is `[mu, sigma_alpha, sigma_y, alpha_raw(J),
+beta(P)]` and hard-codes `(*grad_nat)[3 + g]` / `[3 + J + p]`; the 4-slice
+layout here needs `[2 + g]` and `[2 + J + p]`. A literal copy writes the
+beta gradient one slot PAST the end of a length-(2 + J + P) vector --
+`arma::operator[]` is unchecked, so it does not crash. It returns a wrong
+posterior at R-hat 1.02-1.07, with three of four parameters under the 1.05
+gate. Write the offsets out for THIS layout:
+
+```
+grad[0]         = d/d mu_alpha
+grad[1]         = d/d sigma_alpha
+grad[2 + g]     = d/d alpha_raw_g      g = 0..J-1
+grad[2 + J + p] = d/d beta_p           p = 0..P-1
+```
+Check #12's FD-vs-AD comparison catches an offset error, but only if the
+verify file exercises every slice -- give it non-zero values in all four.
 
 For Poisson `y_n ~ Poisson(exp(eta_n))`, the residual becomes
 `y_n - exp(eta_n)`. Same structure, same recipe.

@@ -68,12 +68,12 @@
 #'
 #' # From a file -- no AI4BayesCode checkout needed:
 #' ai4bayescode_source("./MyModel.cpp")
-#' m <- new(MyModel, y, seed = 1L)
+#' m <- new(MyModel, y, 1L)   # positional: y, rng_seed
 #'
 #' # From a source string:
 #' src <- readLines(ai4bayescode_examples_path("GaussianLocationScale.cpp"))
 #' ai4bayescode_source(paste(src, collapse = "\n"))
-#' m <- new(GaussianLocationScale, rnorm(100), seed = 1L)
+#' m <- new(GaussianLocationScale, rnorm(100), 1L)   # positional: y, rng_seed
 #' }
 #' @export
 ai4bayescode_source <- function(code,

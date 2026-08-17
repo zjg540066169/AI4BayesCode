@@ -197,6 +197,15 @@ def rhat(samples: np.ndarray) -> float:
         return float("nan")
     if np.all(x == x.flat[0]):    # constant: no variance to compare
         return float("nan")
+    # Every chain constant at a DIFFERENT value -- the loudest possible mixing
+    # failure, for which posterior returns Inf. Decided here on the RAW draws,
+    # because deciding it downstream from W == 0 makes the verdict ride on
+    # floating point: rank-normalizing first leaves the per-chain values equal
+    # only to within an ULP on some platforms, so W lands at ~1e-32 instead of
+    # exactly 0 and R-hat reads 6e15 rather than Inf. Same conclusion, but the
+    # test for it has to be exact.
+    if x.shape[1] > 1 and np.all(x == x[0]) and np.ptp(x[0]) > 0:
+        return float("inf")
 
     # ORDER MATTERS: posterior::rhat is .rhat(z_scale(.split_chains(x))) --
     # split first, rank-normalize second. Reversing it is identical for an
@@ -389,6 +398,12 @@ def posterior_summary(samples: np.ndarray, prob: float = 0.90,
     are included for parity with the R summary. Works for a scalar or a single
     vector component (call per-component for a vector).
     """
+    if not (0.0 < float(prob) < 1.0):
+        # prob = -1 produced ci_lower > ci_upper -- an inverted interval
+        # reported as a normal result.
+        raise ValueError(
+            f"posterior_summary: prob must be strictly between 0 and 1; "
+            f"got {prob!r}")
     a = np.asarray(samples, dtype=float)
     if a.ndim == 2 and a.shape[1] > 1 and not chains:
         raise ValueError(

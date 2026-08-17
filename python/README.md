@@ -58,8 +58,8 @@ hist = m.get_history()
 # Convergence diagnostics:
 import numpy as np
 beta_samples = np.array(hist["beta"])
-print(for j in range(beta_samples.shape[1]):
-    print(j, AI4BayesCode.posterior_summary(beta_samples[:, j])))
+for j in range(beta_samples.shape[1]):
+    print(j, AI4BayesCode.posterior_summary(beta_samples[:, j]))
 
 # Visualize the model DAG:
 AI4BayesCode.plot_dag(m, out_path="dag.png")
@@ -111,7 +111,7 @@ Prefer not to pass the key every call? Set it **once per session** (session-only
 never written to disk):
 
 ```python
-AI4BayesCode.set_key("sk-...", "openai")              # or "anthropic" / "google"
+AI4BayesCode.set_key("sk-...", "openai")              # or "anthropic"
 AI4BayesCode.key_status()                    # shows what's set (masked)
 AI4BayesCode.generate("Linear regression.", LLM="gpt-5.5-codex")  # key picked up
 ```
@@ -141,7 +141,8 @@ RCPP_MODULE(MyModel) {
 #ifdef AI4BAYESCODE_PYBIND_MODULE
 PYBIND11_MODULE(MyModel, m) {
     py::class_<MyModel>(m, "MyModel")
-        .def(py::init<...>())
+        .def(py::init<...>(), py::arg("y"), py::arg("rng_seed") = 1,
+         py::arg("keep_history") = false)
         .def("step", &MyModel::step)
         ...
         ;

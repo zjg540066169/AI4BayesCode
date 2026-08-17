@@ -443,7 +443,8 @@ full spec with priors, at Sec.3.)
 | Parameter type | Default prior | Hyperparameters |
 |---------------|--------------|-----------------|
 | Location (mu, beta) | `Normal(0, 100)` | mean=0, sd=100 |
-| **Scale (sigma, tau) -- DEFAULT** | **Jeffreys: `p(sigma) prop.to 1/sigma`** | **none (scale-invariant)** |
+| **Observation-noise scale (sigma) -- DEFAULT** | **Jeffreys: `p(sigma) prop.to 1/sigma`** | **none (scale-invariant)** |
+| **Group-level scale in a hierarchy (tau) -- DEFAULT** | **`half-Normal(0, A)`** | A ~= 2.5 x data-scale. NOT Jeffreys: improper posterior (Gelman 2006); see codegen_priors.md Sec.2a |
 | Scale -- k=0 transient guard | `half-Normal(0, 1)` pin (inline fallback) | (dimensionless reference) |
 | Scale -- genuinely sparse (k stays < 5) | `half-Normal(0, A)` | A ~= 2.5 x data-scale |
 | Precision (1/sigma^2) | DO NOT default to `Gamma(epsilon, epsilon)` -- use Jeffreys on sigma | -- |
@@ -1125,6 +1126,14 @@ samples the WRONG posterior), so clear L2 first. Fix-and-re-run a layer before t
 > the L2 gradient check + static semantic audit. That is the order REVERSED. A wrong
 > Jacobian/gradient passes L3 clean (R-hat ~= 1.00, BPV in range, LOO k < 0.5) while sampling
 > the WRONG posterior -- so a *"runtime passed"* reported before L2 is a FALSE all-clear.
+>
+> **ONE DEFERRED DECISION.** Check #18 (metric escalation) is an L2 check whose
+> rule is "enable a dense metric ONLY when runtime validation shows diagonal is
+> inadequate" -- it needs an L3 measurement (rhat / ess_ratio) that does not
+> exist yet. That is not a licence to run L3 early. Pass L2 with the DIAGONAL
+> default, run L3, and if L3's ess_ratio or R-hat says the metric is inadequate,
+> REGENERATE with the dense metric and re-run L1 -> L2 -> L3 in order. The
+> attempt budget covers this; it is the intended resolution, not an overrun.
 >
 > **SELF-CHECK before you say "validation passed":** you must have run L1 -> L2 -> L3 in that
 > order. If the status you are about to send would read *"runtime passed, still need the L2

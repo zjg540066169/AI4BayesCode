@@ -554,9 +554,17 @@ ai4bayescode_models <- function() {
                                      model = m$model_id[hit[1]],
                                      implemented = m$implemented[hit[1]]))
     }
+    # Not in models(). Resolving anyway is deliberate -- a provider model that
+    # ships after this table was written must stay usable. But a TYPO
+    # ("gpt-5.5" for "gpt-5.5-codex") resolves just as happily and comes back
+    # as a provider-side error that never mentions the name, so say so here.
     prov <- if (grepl("^(gpt|codex|openai)", key)) "openai"
             else if (grepl("^(gemini|google)", key)) "google"
             else "anthropic"
+    warning("'", LLM, "' is not in ai4bayescode_models(); dispatching to ",
+            prov, " as named. If that is a typo the provider will reject it ",
+            "-- run ai4bayescode_models() to see the selectable models.",
+            call. = FALSE)
     list(provider = prov, model = LLM, implemented = (prov %in% c("anthropic", "openai")))
 }
 
@@ -622,7 +630,8 @@ ai4bayescode_models <- function() {
 #'   detected from the `sk-ant-oat` prefix, but subscription keys may be
 #'   rate-limited for API use (a 429) -- if that happens, try a regular API key
 #'   (`"sk-ant-api03..."` from https://console.anthropic.com/settings/keys).
-#' @param provider One of `"anthropic"`, `"openai"`, `"google"`.
+#' @param provider One of `"anthropic"`, `"openai"` -- the providers
+#'   `ai4bayescode_models()` can dispatch to.
 #' @param check If `TRUE` (default), verify the key with a minimal API call
 #'   (Anthropic only) and warn if it is rejected; `FALSE` stores it unchecked.
 #' @return Invisibly, the provider name.
@@ -635,7 +644,11 @@ ai4bayescode_models <- function() {
 #' }
 #' @export
 ai4bayescode_set_key <- function(key, provider = "anthropic", check = TRUE) {
-    provider <- match.arg(provider, c("anthropic", "openai", "google"))
+    # Only providers ai4bayescode_generate() can dispatch to. "google" used
+    # to be accepted here and reported as set, while no Google model exists in
+    # ai4bayescode_models() -- so the key was stored, confirmed, and then
+    # never usable.
+    provider <- match.arg(provider, c("anthropic", "openai"))
     if (!is.character(key) || length(key) != 1L || is.na(key) || !nzchar(key))
         stop("`key` must be a single non-empty string.", call. = FALSE)
     if (grepl("\\.\\.\\.|[<>]|YOUR.?KEY", key, ignore.case = TRUE))
@@ -644,10 +657,9 @@ ai4bayescode_set_key <- function(key, provider = "anthropic", check = TRUE) {
              switch(provider,
                     anthropic = " -- it starts with 'sk-ant-'; get one at https://console.anthropic.com/settings/keys",
                     openai    = " -- get one at https://platform.openai.com/api-keys",
-                    google    = " -- get one at https://aistudio.google.com/apikey",
                     ""), ".", call. = FALSE)
     env <- switch(provider, anthropic = "ANTHROPIC_API_KEY",
-                  openai = "OPENAI_API_KEY", google = "GOOGLE_API_KEY")
+                  openai = "OPENAI_API_KEY")
     args <- list(key); names(args) <- env
     do.call(Sys.setenv, args)
     options(ai4bayescode.session_provider = provider)   # menu shows only this provider's models

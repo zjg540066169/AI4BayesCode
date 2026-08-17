@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import re
+import warnings
 import shutil
 import subprocess
 import sys
@@ -466,12 +467,21 @@ def _resolve_llm(LLM: str) -> dict:
     for m in models():
         if m["name"].lower() in cands or m["model_id"].lower() in cands:
             return {"provider": m["provider"], "model": m["model_id"], "implemented": m["implemented"]}
+    # Not in models(). Resolving anyway is deliberate -- a provider model that
+    # ships after this table was written must stay usable. But a TYPO
+    # ("gpt-5.5" for "gpt-5.5-codex") resolves just as happily and comes back
+    # as a provider-side error that never mentions the name, so say so here.
     if re.match(r"(gpt|codex|openai)", key):
         prov = "openai"
     elif re.match(r"(gemini|google)", key):
         prov = "google"
     else:
         prov = "anthropic"
+    warnings.warn(
+        f"{LLM!r} is not in AI4BayesCode.models(); dispatching to {prov} as "
+        f"named. If that is a typo the provider will reject it -- call "
+        f"AI4BayesCode.models() to see the selectable models.",
+        stacklevel=2)
     return {"provider": prov, "model": LLM, "implemented": prov in ("anthropic", "openai")}
 
 
@@ -488,8 +498,7 @@ def _provider_key(provider: str) -> str:
 # Map a provider to the environment variable set_key() writes (mirrors the R
 # `ai4bayescode_set_key` mapping; note this is the WRITE target -- the read path
 # in _provider_key additionally falls back to ANTHROPIC_AUTH_TOKEN).
-_PROVIDER_ENV = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY",
-                 "google": "GOOGLE_API_KEY"}
+_PROVIDER_ENV = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
 
 # The provider the user last chose via set_key(). When set, the interactive model
 # menu shows ONLY that provider's models -- so after set_key(..., "anthropic") the
@@ -576,13 +585,20 @@ def set_key(key: str, provider: str = "anthropic", check: bool = True) -> str:
             but subscription keys may be rate-limited for API use (a 429) -- if
             that happens, try a regular API key (``"sk-ant-api03..."`` from
             https://console.anthropic.com/settings/keys).
-        provider: One of ``"anthropic"``, ``"openai"``, ``"google"``.
+        provider: One of ``"anthropic"`` or ``"openai"`` -- the providers
+            ``AI4BayesCode.models()`` can dispatch to.
 
     Returns:
         The provider name.
     """
     if provider not in _PROVIDER_ENV:
-        raise ValueError("provider must be 'anthropic', 'openai', or 'google'")
+        # Only providers generate() can dispatch to. "google" used to be
+        # accepted here and reported as set, while no Google model exists in
+        # models() and generate() raises NotImplementedError for one -- so the
+        # key was stored, confirmed, and then never usable.
+        raise ValueError(
+            f"provider {provider!r} is not supported; use 'anthropic' or "
+            "'openai'. Call AI4BayesCode.models() for the selectable models.")
     if not isinstance(key, str) or not key:
         raise ValueError("key must be a single non-empty string")
     import re
@@ -590,7 +606,6 @@ def set_key(key: str, provider: str = "anthropic", check: bool = True) -> str:
         where = {
             "anthropic": " -- it starts with 'sk-ant-'; get one at https://console.anthropic.com/settings/keys",
             "openai": " -- get one at https://platform.openai.com/api-keys",
-            "google": " -- get one at https://aistudio.google.com/apikey",
         }.get(provider, "")
         raise ValueError(
             f"'{key}' is a PLACEHOLDER from the examples, not a real key.\n"

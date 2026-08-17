@@ -486,12 +486,20 @@ ancestor (a parent's parent) => `N` is doing its parent's job => the
 parent is inlined => bug.
 
 **(D) Replacement-roundtrip smoke test.**
-For every intermediate `N`, calling
-`model$predict_at(list(N = N_new))` (where `N_new` is a plausible-
-shape replacement) must:
+`composite_block::predict_at` accepts ONLY keys that are declared DATA
+INPUTS or CHILD BLOCK NAMES (`codegen_cpp.md Sec.6a`); a refresher output
+like `alpha` is neither, and passing it throws `unknown key 'alpha'`. So
+run this on the DATA-INPUT keys, not on every intermediate:
+
+For every declared data input `D`, calling
+`model$predict_at(list(D = D_new))` (where `D_new` is a plausible-shape
+replacement) must:
 - not error,
-- return a result where downstream nodes' values reflect `N_new`
-  (NOT the original `N`).
+- return a result where downstream nodes' values reflect `D_new`
+  (NOT the original `D`).
+
+An intermediate `N` computed by a refresher is checked INDIRECTLY: replace
+the data input it is computed from, and confirm the downstream value moves.
 
 This is the strongest check and exercises the full reconstruction
 pipeline. Add it to the model's test suite alongside the standard

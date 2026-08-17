@@ -20,7 +20,8 @@
 #' library(AI4BayesCode)
 #'
 #' ai4bayescode_example("GaussianLocationScale")
-#' m <- new(GaussianLocationScale, rnorm(100), seed = 1L, keep_history = TRUE)
+#' # R binds constructor arguments BY POSITION: y, rng_seed, keep_history.
+#' m <- new(GaussianLocationScale, rnorm(100), 1L, TRUE)
 #' m$step(2000L)
 #'
 #' ai4bayescode_example("HierarchicalLM_joint")

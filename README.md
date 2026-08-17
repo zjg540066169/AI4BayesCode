@@ -49,6 +49,11 @@ pip install "git+https://github.com/zjg540066169/AI4BayesCode.git#subdirectory=p
 ```r
 library(AI4BayesCode)
 
+# 0. Set your LLM provider key once per session (never written to disk).
+#    Without it, step 1 writes ./generated/PROMPT.txt for a coding agent
+#    instead of generating, and step 2 has no file to compile.
+ai4bayescode_set_key("sk-ant-api03-...", "anthropic")
+
 # 1. Generate a sampler from a plain-language model description.
 ai4bayescode_generate(
   "linear regression, y ~ N(X beta, sigma^2), normal prior on beta, half-normal on sigma",
@@ -59,7 +64,9 @@ ai4bayescode_source("./generated/BayesLinReg.cpp")
 
 # 3. Run several chains on your data (y, X) and check convergence.
 run <- ai4bayescode_run_chains(
-  function(s) new(BayesLinReg, y, X, seed = s, keep_history = TRUE),
+  # R matches constructor arguments BY POSITION -- argument names are
+  # ignored. Order: data args, then rng_seed, then keep_history.
+  function(s) new(BayesLinReg, y, X, as.integer(s), TRUE),
   n_chains = 4, n_burn = 5000, n_keep = 5000)
 ai4bayescode_rhat_summary(run)
 ```

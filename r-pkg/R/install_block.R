@@ -181,7 +181,10 @@ ai4bayescode_installed_blocks <- function() {
 #' }
 #' @export
 ai4bayescode_install_block <- function(name, force = FALSE, quiet = FALSE) {
-    stopifnot(is.character(name), length(name) == 1L, nzchar(name))
+    # Same validation remove_block gets: a raw stopifnot reported
+    # `is.character(name) is not TRUE` for NULL, and NA slipped through to a
+    # 404 with a raw URL in the warning.
+    .ai4b_check_block_name(name)
     dest <- ai4bayescode_blocks_path(name)
     # A project-local block of the same name shadows the download (local > download):
     # the develop -> upload -> re-download case. Flag it so the user is not surprised

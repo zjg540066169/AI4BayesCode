@@ -41,8 +41,9 @@ def perf_hint(wall_sec: float,
         print(
             "[AI4BayesCode perf] per-sweep time is high even with joint_nuts_block.\n"
             "  Possible causes: (a) N * J grad eval is genuinely expensive,\n"
-            "  (b) NUTS tree depth maxing out -> try raising n_warmup_first_call\n"
-            "      or seeding cfg.initial_step_size,\n"
+            "  (b) the sampler is still tuning -> run a longer warmup: raise\n"
+            "      n_burn in AI4BayesCode.run_chains(), or call\n"
+            "      m.readapt_NUTS(2000) before the sampling steps,\n"
             "  (c) mass-matrix adaptation not yet converged -> longer warmup.")
         return
     print(

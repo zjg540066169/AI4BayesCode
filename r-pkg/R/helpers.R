@@ -412,7 +412,7 @@ ai4bayescode_plot_dag <- function(model,
 #'
 #' @description Emits a friendly per-sweep performance message after a run. When
 #'   the modular-NUTS per-sweep time is high it suggests the `joint_nuts_block`
-#'   escape hatch (with the validator Check #11 caveat); when the runner already
+#'   escape hatch; when the runner already
 #'   uses joint NUTS it instead prints tuning hints. The generated R runner
 #'   calls this once at the end.
 #' @param wall_sec Total wall-clock time across all chains, in seconds.
@@ -434,7 +434,12 @@ ai4bayescode_perf_hint <- function(wall_sec,
         "[AI4BayesCode perf] total %.1fs across %d sweeps (%.3fs / sweep)",
         wall_sec, n_sweeps_total, per_sweep))
 
-    if (per_sweep <= thresholds$slow_sweep_sec) {
+    # thresholds = list() is a legal value of a list-typed argument, and
+    # `list()$slow_sweep_sec` is NULL, so the comparison below became
+    # `argument is of length zero` AFTER the timing line had already printed.
+    slow_sweep_sec <- thresholds$slow_sweep_sec
+    if (is.null(slow_sweep_sec)) slow_sweep_sec <- 0.5
+    if (per_sweep <= slow_sweep_sec) {
         message("[AI4BayesCode perf] per-sweep time looks OK.")
         return(invisible(NULL))
     }
@@ -443,8 +448,9 @@ ai4bayescode_perf_hint <- function(wall_sec,
         message(
             "[AI4BayesCode perf] per-sweep time is high even with joint_nuts_block.\n",
             "  Possible causes: (a) N * J grad eval is genuinely expensive,\n",
-            "  (b) NUTS tree depth maxing out -> try raising n_warmup_first_call\n",
-            "      or seeding cfg.initial_step_size,\n",
+            "  (b) the sampler is still tuning -> run a longer warmup: raise\n",
+            "      n_burn in ai4bayescode_run_chains(), or call\n",
+            "      m$readapt_NUTS(2000L) before the sampling steps,\n",
             "  (c) mass-matrix adaptation not yet converged -> longer warmup.")
         return(invisible(NULL))
     }
@@ -789,6 +795,28 @@ ai4bayescode_rhat_summary <- function(run, keys = NULL, drop_burn = 0,
     if (length(histories) < 1L) {
         stop("run$histories is empty -- nothing to summarise")
     }
+    # Validate drop_burn the way ai4bayescode_diagnose() validates n_burn. It
+    # used to be applied only when `0 < drop_burn < n`, so drop_burn = n, a
+    # negative, or a string silently returned the drop_burn = 0 answer -- and
+    # drop_burn = n - 1 left a single draw, whose R-hat is NA, whose max() over
+    # an all-NA set is -Inf, and -Inf < 1.01 PASSES a convergence gate.
+    if (!is.numeric(drop_burn) || length(drop_burn) != 1L || is.na(drop_burn) ||
+        drop_burn < 0 || drop_burn != as.integer(drop_burn)) {
+        stop("ai4bayescode_rhat_summary(): `drop_burn` must be a single ",
+             "non-negative integer; got ", paste(deparse(drop_burn), collapse = ""),
+             call. = FALSE)
+    }
+    .n_draws <- function(h) if (is.null(dim(h))) length(h) else nrow(h)
+    .shortest <- min(vapply(histories,
+                            function(h) min(vapply(h, .n_draws, numeric(1))),
+                            numeric(1)))
+    if (drop_burn >= .shortest - 1) {
+        stop("ai4bayescode_rhat_summary(): `drop_burn` = ", drop_burn,
+             " leaves ", max(0, .shortest - drop_burn),
+             " draw(s) of the shortest history (", .shortest,
+             "); at least 2 are needed for a split R-hat. Reduce drop_burn.",
+             call. = FALSE)
+    }
     if (length(histories) == 1L) {
         # Single chain: posterior::rhat() splits the one chain in half and
         # returns the rank-normalized SPLIT-R-hat (a valid within-chain
@@ -903,7 +931,11 @@ ai4bayescode_new_frozen <- function(module_class, ...,
         if (is.null(nms) || any(nms == "")) {
             stop("ai4bayescode_new_frozen(): `fixed` must be a NAMED list")
         }
-        dot_names <- grepl("\\.", nms, fixed = TRUE)
+        # fixed = TRUE makes the pattern a LITERAL string, so "\\." searched
+        # for a backslash followed by a dot and never matched anything --
+        # the guard below was dead and a dot-path silently froze the child
+        # at whatever value it happened to hold. The literal is ".".
+        dot_names <- grepl(".", nms, fixed = TRUE)
         if (any(dot_names)) {
             stop(sprintf(
                 "ai4bayescode_new_frozen(): dot-path names not allowed in `fixed` (%s). Use post-construction m$set_current(...) at the correct composite level + m$freeze(<dot.path>) instead.",
