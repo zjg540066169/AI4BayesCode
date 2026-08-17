@@ -737,7 +737,11 @@ If `shared_data_t` does not yet have `at_mat()` and the existing
 mat **once** at the top of the lambda (zero copy):
 
 ```cpp
-const arma::vec& X_flat = ctx.at("X_mat_flat");
+// The KEY is the model's own variable name -- "X", never "X_flat" or
+// "X_mat_flat". Flattening is how a matrix travels through state_map; it is
+// not something the user should have to know. `X_flat` below is a LOCAL
+// name for the flat view, which is fine.
+const arma::vec& X_flat = ctx.at("X");
 const arma::mat X(const_cast<double*>(X_flat.memptr()),
                   N, p, /*copy_aux=*/false, /*strict=*/true);
 arma::vec eta = X * theta_nat;            // BLAS gemv from here on
@@ -1292,7 +1296,7 @@ refresher kind per node:
 // === Shared-data slots -- one per node in the user-verified DAG. ===
 impl_->data().set("theta",  arma::vec(N, arma::fill::zeros));
 impl_->data().set("y_rep",  arma::vec(N, arma::fill::zeros));
-// (X, Z_mat_flat, v2 enter via .set or declare_data_input upstream;
+// (X, Z, v2 enter via .set or declare_data_input upstream;
 //  f_bart, beta, Zbeta, tau, theta_raw come from their respective blocks.)
 
 // === Predict DAG -- every edge from the user-verified DAG. ===
@@ -1304,10 +1308,13 @@ impl_->data().declare_predict_edges("theta_raw", {"theta"});
 // Layer 2: theta + observation noise feeders into y_rep.
 impl_->data().declare_predict_edges("theta",     {"y_rep"});
 impl_->data().declare_predict_edges("v2",        {"y_rep"});
-// (X is a data_input. Z_mat_flat is a data_input. v2 is a
-//  data_input -- they all enter the predict DAG via the next layer.)
+// (X, Z and v2 are data_inputs -- they enter the predict DAG via the
+//  next layer.) NAME THEM AS THE MODEL NAMES THEM: a design matrix is
+//  "Z", never "Z_flat" / "Z_mat_flat". These strings are what the user
+//  types into predict_at(), so an internal detail like flattening must
+//  not appear in them.
 impl_->data().declare_data_input("X");
-impl_->data().declare_data_input("Z_mat_flat");
+impl_->data().declare_data_input("Z");
 impl_->data().declare_data_input("v2");
 
 // === Deterministic refresher for the intermediate theta. ===
@@ -2305,6 +2312,18 @@ AI4BayesCode::history_map predict_at(
     // ---- Parse `new_data` once (shared by both modes) -------------
     // state_map is name -> arma::vec, so a design MATRIX arrives
     // FLATTENED (column-major, N_test * p).
+    //
+    // KEY NAMING -- the key is the MODEL's name for the variable ("X", "Z",
+    // "y"), never a flattened alias ("X_flat", "Z_mat_flat", "phi_flat").
+    // Flattening is how a matrix travels through state_map; the user did not
+    // ask for it and should not have to know about it. These strings are the
+    // ones they type:
+    //
+    //     m$predict_at(list(X = X_new))        # yes
+    //     m$predict_at(list(X_flat = X_new))   # no -- what is X_flat?
+    //
+    // Use a `_flat` suffix freely for LOCAL C++ variables holding the flat
+    // view; just never for a shared_data key that reaches predict_at().
     bool has_X = false;
     arma::vec x_flat;
     for (const auto& kv : new_data) {

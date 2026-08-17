@@ -147,7 +147,7 @@ double joint_log_density(const arma::vec& theta_cat,
                          const block_context& ctx,
                          arma::vec* grad) {
     const arma::vec& y           = ctx.at("y");
-    const arma::vec& Bsp_flat    = ctx.at("Bsp_flat");      // (N*K_s) col-major
+    const arma::vec& Bsp_flat    = ctx.at("Bsp");      // (N*K_s) col-major
     const double     sds_prior_sd = ctx.at("sds_prior_sd")[0];
 
     const std::size_t N   = y.n_elem;
@@ -266,7 +266,7 @@ public:
 
         // shared_data
         impl_->data().set("y",            y);
-        impl_->data().set("Bsp_flat",     Bsp_flat);
+        impl_->data().set("Bsp",     Bsp_flat);
         impl_->data().set("N",            arma::vec{static_cast<double>(N)});
         impl_->data().set("K_s",          arma::vec{static_cast<double>(K_s)});
         impl_->data().set("sds_prior_sd", arma::vec{sds_prior_sd});
@@ -302,7 +302,7 @@ public:
         impl_->add_child(std::make_unique<joint_nuts_block>(std::move(cfg)));
 
         impl_->data().declare_dependencies(
-            "bspline_joint", {"y", "Bsp_flat", "sds_prior_sd"});
+            "bspline_joint", {"y", "Bsp", "sds_prior_sd"});
 
         // ---- Full predict-DAG: real posterior predictive ---------------
         // (Replaces the old stub predict_at that echoed the training y.)
@@ -330,7 +330,7 @@ public:
         impl_->data().register_refresher(
             "f",
             [](const AI4BayesCode::shared_data_t& d) -> arma::vec {
-                const arma::vec& Bsp_flat = d.get("Bsp_flat");
+                const arma::vec& Bsp_flat = d.get("Bsp");
                 const arma::vec& s        = d.get("s");
                 const std::size_t K = s.n_elem;
                 const std::size_t Nn = Bsp_flat.n_elem / K;
@@ -363,13 +363,13 @@ public:
                 return yr;
             });
 
-        // Predict DAG (full generative chain). Bsp_flat is the
+        // Predict DAG (full generative chain). "Bsp" is the
         // PRECOMPUTED basis at (new) x supplied R-side (Q3=A).
-        impl_->data().declare_data_input("Bsp_flat");
+        impl_->data().declare_data_input("Bsp");
         impl_->data().declare_predict_edges("log_sds",  {"s"});
         impl_->data().declare_predict_edges("z",        {"s"});
         impl_->data().declare_predict_edges("s",        {"f"});
-        impl_->data().declare_predict_edges("Bsp_flat", {"f"});
+        impl_->data().declare_predict_edges("Bsp", {"f"});
         impl_->data().declare_predict_edges("f",        {"mu"});
         impl_->data().declare_predict_edges("Intercept",{"mu"});
         impl_->data().declare_predict_edges("mu",       {"y_rep"});
@@ -413,31 +413,31 @@ public:
     // the old stub that echoed the training y). Single current-draw
     // sample, consistent with the state_map (vector) return contract.
     //   predict_at(list())              -> s,f,mu,y_rep at training x
-    //   predict_at(list(Bsp_flat=...))  -> at a NEW precomputed basis
-    //       (Bsp_flat = vectorise(Bsp_new), N_new*K_s column-major;
+    //   predict_at(list(Bsp=...))  -> at a NEW precomputed basis
+    //       (Bsp = vectorise(Bsp_new), N_new*K_s column-major;
     //        Q3=A: the spline basis is evaluated R-side at new x).
     AI4BayesCode::state_map predict_at(
         const AI4BayesCode::state_map& new_data) const {
         block_context replaced;
-        auto it = new_data.find("Bsp_flat");
+        auto it = new_data.find("Bsp");
         if (it != new_data.end()) {
             const arma::vec& bf = it->second;
             const std::size_t K =
                 impl_->data().get("s").n_elem;          // K_s
             if (bf.n_elem == 0 || bf.n_elem % K != 0) {
                 throw std::runtime_error(
-                    "BSplineRegression::predict_at: Bsp_flat length " +
+                    "BSplineRegression::predict_at: Bsp length " +
                     std::to_string(bf.n_elem) +
                     " is not a positive multiple of K_s = " +
                     std::to_string(K) +
                     " (pass vectorise(Bsp_new), N_new*K_s col-major).");
             }
-            replaced["Bsp_flat"] = bf;
+            replaced["Bsp"] = bf;
         } else {
             for (const auto& kv : new_data) {
                 throw std::runtime_error(
                     "BSplineRegression::predict_at: unknown key '" +
-                    kv.first + "'. Valid: 'Bsp_flat' (or empty).");
+                    kv.first + "'. Valid: 'Bsp' (or empty).");
             }
         }
         block_context r = impl_->predict_at(replaced, predict_rng_);

@@ -167,7 +167,7 @@ double joint_log_density(const arma::vec& theta_cat,
                          const block_context& ctx,
                          arma::vec* grad) {
     const arma::vec& y           = ctx.at("y");
-    const arma::vec& phi_flat    = ctx.at("phi_flat");      // (N*M) col-major
+    const arma::vec& phi_flat    = ctx.at("phi");      // (N*M) col-major
     const arma::vec& lambda      = ctx.at("lambda");        // (M)
     const double     amp_prior_sd = ctx.at("amp_prior_sd")[0];
     const double     ell_invG_a   = ctx.at("ell_invG_a")[0];
@@ -377,7 +377,7 @@ public:
         // shared_data
         impl_->data().set("y",            y);
         impl_->data().set("x",            x);
-        impl_->data().set("phi_flat",     phi_flat);
+        impl_->data().set("phi",     phi_flat);
         impl_->data().set("lambda",       lambda);
         impl_->data().set("L",            arma::vec{L});
         impl_->data().set("M",            arma::vec{static_cast<double>(M_sz)});
@@ -431,7 +431,7 @@ public:
         // Dependency DAG: the joint block reads fixed data + hyper-prior
         // scalars from shared_data. Sub-param keys are auto-included.
         impl_->data().declare_dependencies(
-            "hsgp_joint", {"y", "phi_flat", "lambda",
+            "hsgp_joint", {"y", "phi", "lambda",
                            "amp_prior_sd", "ell_invG_a", "ell_invG_b"});
 
         // ---- Full predict-DAG: real posterior predictive ---------------
@@ -470,7 +470,7 @@ public:
             [](const AI4BayesCode::shared_data_t& d) -> arma::vec {
                 const arma::vec& ss  = d.get("sqrt_spd");
                 const arma::vec& z   = d.get("z");
-                const arma::vec& phi = d.get("phi_flat");   // (N*M) col-major
+                const arma::vec& phi = d.get("phi");   // (N*M) col-major
                 const std::size_t M = ss.n_elem;
                 const std::size_t Nn = phi.n_elem / M;
                 arma::vec f(Nn, arma::fill::zeros);
@@ -502,15 +502,15 @@ public:
                 return yr;
             });
 
-        // Predict DAG (full generative chain). phi_flat is the
+        // Predict DAG (full generative chain). "phi" is the
         // PRECOMPUTED spectral basis at (new) x supplied R-side (Q3=A).
-        impl_->data().declare_data_input("phi_flat");
+        impl_->data().declare_data_input("phi");
         impl_->data().declare_predict_edges("log_amp",  {"sqrt_spd"});
         impl_->data().declare_predict_edges("log_ell",  {"sqrt_spd"});
         impl_->data().declare_predict_edges("lambda",   {"sqrt_spd"});
         impl_->data().declare_predict_edges("sqrt_spd", {"f"});
         impl_->data().declare_predict_edges("z",        {"f"});
-        impl_->data().declare_predict_edges("phi_flat", {"f"});
+        impl_->data().declare_predict_edges("phi", {"f"});
         impl_->data().declare_predict_edges("f",        {"mu"});
         impl_->data().declare_predict_edges("Intercept",{"mu"});
         impl_->data().declare_predict_edges("mu",       {"y_rep"});
@@ -561,30 +561,30 @@ public:
     // the old stub that echoed the training y). Single current-draw
     // sample (state_map vector contract).
     //   predict_at(list())                -> sqrt_spd? f,mu,y_rep at x
-    //   predict_at(list(phi_flat=...))     -> at a NEW precomputed
-    //       spectral basis (phi_flat = vectorise(Phi_new), N_new*M
+    //   predict_at(list(phi=...))     -> at a NEW precomputed
+    //       spectral basis (phi = vectorise(Phi_new), N_new*M
     //       column-major; Q3=A: basis evaluated R-side at new x).
     AI4BayesCode::state_map predict_at(
         const AI4BayesCode::state_map& new_data) const {
         block_context replaced;
-        auto it = new_data.find("phi_flat");
+        auto it = new_data.find("phi");
         if (it != new_data.end()) {
             const arma::vec& pf = it->second;
             const std::size_t M = impl_->data().get("sqrt_spd").n_elem;
             if (pf.n_elem == 0 || pf.n_elem % M != 0) {
                 throw std::runtime_error(
-                    "HSGPRegression::predict_at: phi_flat length " +
+                    "HSGPRegression::predict_at: phi length " +
                     std::to_string(pf.n_elem) +
                     " is not a positive multiple of M = " +
                     std::to_string(M) +
                     " (pass vectorise(Phi_new), N_new*M col-major).");
             }
-            replaced["phi_flat"] = pf;
+            replaced["phi"] = pf;
         } else {
             for (const auto& kv : new_data) {
                 throw std::runtime_error(
                     "HSGPRegression::predict_at: unknown key '" +
-                    kv.first + "'. Valid: 'phi_flat' (or empty).");
+                    kv.first + "'. Valid: 'phi' (or empty).");
             }
         }
         block_context r = impl_->predict_at(replaced, predict_rng_);
