@@ -16,6 +16,7 @@
 #include <armadillo>
 #include <cmath>
 #include <cstdio>
+#include <iomanip>
 #include <random>
 #include <sstream>
 

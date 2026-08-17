@@ -24,6 +24,7 @@ jobs:
   cpp-tests:
     name: C++ suite (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45   # 7m local; a 2-core runner is several times slower
     strategy:
       fail-fast: false
       matrix:
@@ -31,16 +32,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install BLAS/LAPACK (Linux)
+      - name: Install BLAS/LAPACK + Armadillo (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libblas-dev liblapack-dev libarmadillo-dev
 
+      - name: Install Armadillo (macOS)
+        if: runner.os == 'macOS'
+        run: brew install armadillo
+
       - name: Build and run
         working-directory: tests
-        # ARMA_INC is empty on Linux (system libarmadillo-dev headers are
-        # already on the default include path); on macOS the Makefile asks
-        # Rscript for RcppArmadillo's bundled copy.
-        run: make run
+        # Linux: libarmadillo-dev lands on the default include path.
+        # macOS: Homebrew's include dir is NOT on clang's default path on Apple
+        # Silicon, and this image has no R, so the Makefile's Rscript fallback
+        # yields nothing -- ARMA_INC has to be passed explicitly.
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            export ARMA_INC="$(brew --prefix armadillo)/include"
+          fi
+          make run
 
   # -------------------------------------------------------------------------
   # The extended suite: gradient/autodiff twins and block-level parity tests.
@@ -49,6 +59,7 @@ jobs:
   extended-tests:
     name: Extended suite (R / autodiff)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: r-lib/actions/setup-r@v2
@@ -72,6 +83,7 @@ jobs:
   python-tests:
     name: Python tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -80,7 +92,9 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install numpy pytest scipy
+          # pybind11 is imported at package-import time (source.py), so it is
+          # a hard runtime dependency, not just a build one.
+          pip install numpy pytest scipy pybind11
           pip install -e ./python --no-deps
       - name: Run tests
         run: python -m pytest python/tests -q
@@ -113,6 +127,7 @@ jobs:
   packaging:
     name: Packaging and tree hygiene
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -125,7 +140,7 @@ jobs:
         # 953 files to 7, including no source.py at all.
         run: |
           python -m pip install --upgrade pip build
-          python -m build --sdist --outdir /tmp/dist ./python
+          python -m build --outdir /tmp/dist ./python   # sdist AND wheel
           n=$(tar tzf /tmp/dist/*.tar.gz | wc -l)
           echo "sdist entries: $n"
           test "$n" -gt 500 || { echo "sdist is far too small -- check MANIFEST.in"; exit 1; }
@@ -134,6 +149,17 @@ jobs:
           if tar tzf /tmp/dist/*.tar.gz | grep -E '\.bak|_archive'; then
             echo "sdist contains editing backups"; exit 1
           fi
+          # The WHEEL is what `pip install` produces, and MANIFEST.in does not
+          # govern wheel package_data -- check it separately.
+          python - <<'EOF'
+          import glob, sys, zipfile
+          whl = glob.glob("/tmp/dist/*.whl")[0]
+          bad = [n for n in zipfile.ZipFile(whl).namelist()
+                 if ".bak" in n or "_archive" in n]
+          if bad:
+              print("wheel contains editing backups:"); print("\n".join(bad[:20])); sys.exit(1)
+          print(f"wheel clean ({len(zipfile.ZipFile(whl).namelist())} entries)")
+          EOF
 
       - name: No experiment material in the packages
         # sim* files are our paper-experiment protocol. They are excluded by
@@ -155,9 +181,13 @@ jobs:
         # forgets to run it, install_github users get the old copy.
         run: |
           bash tools/sync.sh
-          if ! git diff --quiet; then
+          # porcelain, not `git diff`: adding a NEW skill / example / header
+          # produces only UNTRACKED copies in the packages, which `git diff`
+          # does not see -- the gate would pass while the committed package was
+          # genuinely stale.
+          if [ -n "$(git status --porcelain)" ]; then
             echo "tools/sync.sh produced changes -- the committed package copies are stale:"
-            git --no-pager diff --stat
+            git status --porcelain
             exit 1
           fi
           echo "packages match the source tree"

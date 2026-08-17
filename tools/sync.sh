@@ -35,7 +35,13 @@ sync_dir () { rm -rf "$2"; rsync -a --exclude '.DS_Store' --exclude '*.bak*' \
 # Patterns, not a list of today's filenames: a literal set silently ships the
 # next sim file somebody adds (probed: sim2.md and sim4_workflow.md both
 # reached BOTH packages under the old four-name list).
-SKILL_EXCLUDES=(--exclude 'sim*' --exclude '*.bak*' --exclude '* [0-9].*')
+# sim[0-9]*, not sim*: the experiment protocol files are sim1 / sim2_workflow /
+# sim4_workflow, while a legitimate catalogue card is very likely to be named
+# simplex_*_block.md -- a bare sim* dropped it from both packages with no error.
+# Case-insensitive so SIM2.md cannot slip past the gate below (rsync's own
+# --exclude IS case-sensitive, so the two are spelled out separately).
+SKILL_EXCLUDES=(--exclude 'sim[0-9]*' --exclude 'SIM[0-9]*' --exclude 'Sim[0-9]*'
+                --exclude '*.bak*' --exclude '* [0-9].*')
 
 sync_skills () {
   rm -rf "$1"
@@ -48,13 +54,19 @@ sync_skills () {
   # -maxdepth 1: the skill tree's own files. A recursive -iname 'sim*'
   # would also match vendored sources such as Eigen's SimplicialCholesky.h
   # if this helper is ever pointed at an include tree.
-  leaked=$(find "$1" -maxdepth 2 -iname 'sim*' -print 2>/dev/null || true)
+  # sim[0-9]*, not sim*: the experiment files are sim1 / sim2_workflow / ...,
+  # while a legitimate catalogue card could well be named simplex_*_block.md.
+  leaked=$(find "$1" -maxdepth 1 -iname 'sim[0-9]*' -print 2>/dev/null || true)
   if [ -n "$leaked" ]; then
     echo "✗ experiment material reached $1 -- these must NEVER ship:"
     echo "$leaked" | sed 's/^/      /'
     exit 1
   fi
 }
+
+# setuptools REUSES python/build/lib if it is present, so a wheel built from a
+# working tree picked up .bak / _archive files that were deleted months ago.
+rm -rf python/build python/dist python/*.egg-info
 
 echo "• skills/        -> r-pkg/inst/skills , python/_skills (experiment + backup files excluded)"
 sync_skills r-pkg/inst/skills
@@ -77,6 +89,14 @@ sync_dir include/mcmclib      python/AI4BayesCode/_vendored_include/mcmclib
 sync_dir include/eigen        python/AI4BayesCode/_vendored_include/eigen
 sync_dir include/autodiff     python/AI4BayesCode/_vendored_include/autodiff
 sync_dir include/BaseMatrixOps python/AI4BayesCode/_vendored_include/BaseMatrixOps
+# celerite / libgp_kernels / bart_pure_cpp ship in the PYTHON package too and
+# two of them are load-bearing: source.py puts celerite/include and
+# libgp_kernels on the include path and raises "the package install looks
+# incomplete" without them. They were synced for r-pkg only, so a bump at the
+# repo root shipped stale to Python users with nothing to detect it.
+sync_dir celerite       python/AI4BayesCode/_vendored_include/celerite
+sync_dir libgp_kernels  python/AI4BayesCode/_vendored_include/libgp_kernels
+sync_dir bart_pure_cpp  python/AI4BayesCode/_vendored_include/bart_pure_cpp
 
 echo "• bart_pure_cpp/ -> r-pkg/inst ; start.md -> both"
 sync_dir bart_pure_cpp  r-pkg/inst/bart_pure_cpp

@@ -71,9 +71,12 @@ def rhat_summary(chains, keys=None, drop_burn=0, order_components=False, *, n_bu
     Returns
     -------
     dict
-        ``{param: {"rhat", "ess_bulk", "max_rhat", "min_ess"}}``. A
-        ``"_label_switch"`` entry (``{param: {"raw","ordered"}}``) is added for
-        matrix keys where ordering resolves an otherwise-high R-hat.
+        ``{param: {"rhat", "ess_bulk", "max_rhat", "min_ess"}}`` -- every
+        entry is a parameter, so iterating the result and reading
+        ``["max_rhat"]`` is always safe. Where ordering resolves an
+        otherwise-high R-hat for a matrix key, the raw/ordered pair is
+        attached as ``result.attrs["label_switch"]`` (the analogue of R's
+        ``attr(out, "label_switch")``), NOT as a ``"_label_switch"`` key.
     """
     if n_burn is not None:      # accept diagnose's param name too
         drop_burn = n_burn

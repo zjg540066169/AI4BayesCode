@@ -32,10 +32,29 @@ def _blocks_dir() -> str:
     return os.path.join(base, "blocks_download")
 
 
+def _check_block_name(name: str) -> str:
+    """A block name is ONE directory name under the block library.
+
+    Never a path, never empty. ``os.path.join(d, "")`` returns the library root,
+    which passes ``isdir()`` and made ``remove_block("")`` delete every
+    installed block; ``"../x"`` escapes the library and an ABSOLUTE path makes
+    ``os.path.join`` discard the library prefix entirely. Validated here, at the
+    single point install / remove / lookup all resolve through.
+    """
+    if not isinstance(name, str) or not name:
+        raise ValueError(
+            f"block name must be a non-empty string; got {name!r}")
+    if os.path.isabs(name) or "/" in name or "\\" in name or name in (".", ".."):
+        raise ValueError(
+            f"block name must be a plain block name, not a path: {name!r}. "
+            "Call AI4BayesCode.installed_blocks() to see what is installed.")
+    return name
+
+
 def blocks_path(name: str | None = None) -> str:
     """Path to the per-user contributed-block library (or one block under it)."""
     d = _blocks_dir()
-    return d if name is None else os.path.join(d, name)
+    return d if name is None else os.path.join(d, _check_block_name(name))
 
 
 def _block_include_flags() -> list[str]:
@@ -238,7 +257,16 @@ def install_block(name: str, force: bool = False, quiet: bool = False) -> str:
 
 def remove_block(name: str) -> bool:
     """Remove an installed contributed block (like ``remove.packages()``)."""
+    _check_block_name(name)   # explicit, so remove_block(None) reports the
+                              # name problem rather than the containment one
     dest = blocks_path(name)
+    # Defence in depth: whatever the name resolved to, it has to be a direct
+    # child of the block library before anything is deleted recursively.
+    root = os.path.realpath(_blocks_dir())
+    here = os.path.realpath(dest)
+    if os.path.dirname(here) != root or here == root:
+        raise ValueError(
+            f"refusing to remove {dest!r}: not a block directory under {root}")
     if not os.path.isdir(dest):
         print(f"Block '{name}' is not installed.")
         return False

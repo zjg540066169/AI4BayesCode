@@ -1,4 +1,3 @@
-import numpy as np
 """Ctor helper: construct wrapper + set + freeze in one call.
 
 Equivalent to the two-step form:
@@ -18,6 +17,8 @@ RESERVED KWARGS: `fixed`, `quiet_freeze`. If the wrapper's own __init__
 takes a kwarg with either of these names, use the two-step form
 (module_class(...) then m.set_current(...) then m.freeze(...)) instead.
 """
+
+import numpy as np
 
 
 def new_frozen(module_class, *args, fixed=None, quiet_freeze=True, **kwargs):

@@ -2,11 +2,12 @@
 
 Python equivalents of the R `posterior` package functions used in the
 R helper. `rhat` implements the rank-normalized split-R-hat of Vehtari
-et al. (2021) and agrees with `posterior::rhat` to ~1e-7. `ess_bulk` /
-`ess_tail` implement the same paper's split-ESS with Geyer's initial
-positive / monotone sequence and agree with `posterior::ess_bulk` /
-`ess_tail` to within 1e-3 relative (see
-`python/tests/test_diagnostics_vs_posterior.py`).
+et al. (2021); `ess_bulk` / `ess_tail` implement the same paper's split-ESS
+with Geyer's initial positive / monotone sequence. All three are checked
+against `posterior` on 28 draw sets covering odd draw counts, ties, a single
+chain, antithetic draws, collapsed scales and a total mixing failure; the
+worst relative difference measured there is 6e-5, and every NA / Inf verdict
+matches (see `python/tests/test_diagnostics_vs_posterior.py`).
 
 Inputs are numpy arrays shaped (n_draws, n_chains) or a single 1-D
 array which is treated as a single chain.
@@ -31,6 +32,18 @@ def _as_2d(x: np.ndarray) -> np.ndarray:
             f"got shape {x.shape}"
         )
     return x
+
+
+def _is_constant(x: np.ndarray) -> bool:
+    """`posterior`'s is_constant(): |x - x[0]| < .Machine$double.eps, an
+    ABSOLUTE tolerance, not exact equality.
+
+    Only the quantile path uses it (ess_tail), because only
+    `.ess_quantile` calls should_return_NA(). Draws of order 1e-300 -- a
+    collapsed variance -- are constant under this test, and posterior returns
+    NA for their tail ESS while still reporting a normal rhat and ess_bulk.
+    """
+    return bool(np.all(np.abs(x - x.flat[0]) < np.finfo(float).eps))
 
 
 def _split_chains(x: np.ndarray) -> np.ndarray:
@@ -130,16 +143,26 @@ def _rank_normalize_dispatch(x: np.ndarray) -> np.ndarray:
         return _rank_normalize_numpy(x)
 
 
-def _plain_split_rhat(x: np.ndarray) -> float:
-    """Classic split-R-hat on the values as given (no rank transform)."""
-    x = _split_chains(x)
+def _plain_split_rhat(x: np.ndarray, *, already_split: bool = False) -> float:
+    """Classic split-R-hat on the values as given (no rank transform).
+
+    `already_split` is for the rank-normalized callers: `posterior` splits
+    BEFORE it rank-normalizes, so they hand in an array that is already split.
+    """
+    if not already_split:
+        x = _split_chains(x)
     n, _ = x.shape
     chain_means = x.mean(axis=0)
     chain_vars = x.var(axis=0, ddof=1)
     B = n * np.var(chain_means, ddof=1)
     W = chain_vars.mean()
     if W <= 0:
-        return float("nan")
+        # Every chain constant. If they are constant at DIFFERENT values --
+        # four chains each stuck on a different mixture-component count, the
+        # textbook total-mixing failure -- posterior returns Inf, and it has
+        # to: NaN > 1.05 is False, so NaN sails through any convergence gate
+        # while the same draws fail on the R side.
+        return float("inf") if np.var(chain_means, ddof=1) > 0 else float("nan")
     var_hat = ((n - 1) / n) * W + B / n
     return float(np.sqrt(var_hat / W))
 
@@ -175,9 +198,19 @@ def rhat(samples: np.ndarray) -> float:
     if np.all(x == x.flat[0]):    # constant: no variance to compare
         return float("nan")
 
-    bulk = _plain_split_rhat(_rank_normalize_dispatch(x))
+    # ORDER MATTERS: posterior::rhat is .rhat(z_scale(.split_chains(x))) --
+    # split first, rank-normalize second. Reversing it is identical for an
+    # even draw count (same multiset) but not for an odd one, where posterior
+    # drops the middle draw BEFORE ranking and the reversed order drops it
+    # after. Measured on 101x4 draws: R-hat differs by 5.3e-5, ess_bulk by
+    # 2.3e-3 -- enough to flip a verdict either side of the 1.05 gate.
+    bulk = _plain_split_rhat(_rank_normalize_dispatch(_split_chains(x)),
+                             already_split=True)
+    # The fold is over the UNSPLIT draws (median of everything), matching
+    # posterior: sims_folded <- abs(x - median(x)), then split, then z_scale.
     folded = np.abs(x - np.median(x))
-    tail = _plain_split_rhat(_rank_normalize_dispatch(folded))
+    tail = _plain_split_rhat(_rank_normalize_dispatch(_split_chains(folded)),
+                             already_split=True)
 
     # NaN PROPAGATES, matching posterior: if either half is undefined (a
     # constant folded series, say -- antithetic draws fold to a constant), the
@@ -207,7 +240,7 @@ def _autocov(chain: np.ndarray) -> np.ndarray:
     return ac / n
 
 
-def _ess_raw(x: np.ndarray) -> float:
+def _ess_raw(x: np.ndarray, *, already_split: bool = False) -> float:
     """Split-ESS of the values as given (Vehtari et al. 2021, Sec. 4).
 
     The combined autocorrelation is
@@ -220,10 +253,11 @@ def _ess_raw(x: np.ndarray) -> float:
     averaged autocovariance by var_hat_plus alone (without the `1 - (W - ...)`
     wrapper) gives rho_t ~ 0 for exactly that case and reports a full ESS.
     """
-    if x.shape[0] < 4:            # too few draws for a meaningful split-ESS
-        return float("nan")
-    x = _split_chains(x)  # split-ESS (Vehtari 2021); also makes a single
-                          # chain well-defined (m becomes 2, not 1)
+    if not already_split:
+        if x.shape[0] < 4:        # too few draws for a meaningful split-ESS
+            return float("nan")
+        x = _split_chains(x)  # split-ESS (Vehtari 2021); also makes a single
+                              # chain well-defined (m becomes 2, not 1)
     n, m = x.shape
     chain_means = x.mean(axis=0)
     chain_vars = x.var(axis=0, ddof=1)
@@ -311,7 +345,10 @@ def ess_bulk(samples: np.ndarray) -> float:
         return float("nan")
     if np.all(x == x.flat[0]):
         return float("nan")
-    return _ess_raw(_rank_normalize_dispatch(x))
+    # posterior::ess_bulk is .ess(z_scale(.split_chains(x))) -- split first.
+    # See the note in rhat() for what the reversed order costs on odd n.
+    return _ess_raw(_rank_normalize_dispatch(_split_chains(x)),
+                    already_split=True)
 
 
 def ess_tail(samples: np.ndarray, quantile_lo: float = 0.05,
@@ -322,6 +359,8 @@ def ess_tail(samples: np.ndarray, quantile_lo: float = 0.05,
     if x.shape[0] < 4:
         return float("nan")
     if not np.all(np.isfinite(x)):
+        return float("nan")
+    if _is_constant(x):
         return float("nan")
     lo = np.quantile(x, quantile_lo)
     hi = np.quantile(x, quantile_hi)

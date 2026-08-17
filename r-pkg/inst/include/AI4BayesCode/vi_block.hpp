@@ -265,7 +265,38 @@ public:
         return q_draw_hist_;
     }
 
+    // ---- history bookkeeping ---------------------------------------------
+
+    /**
+     * A frozen child is stepped over, so nothing appends to its buffers --
+     * but the composite still takes one sweep, and predict_at() compares
+     * history sizes across children. Repeat the last row so a frozen VI
+     * child stays aligned with its siblings.
+     *
+     * Both buffers have to advance: q_draw_hist_ (the per-sweep draw the
+     * composite published) and the vi_history_t trajectory.
+     */
+    void record_held_history() override {
+        if (!keep_history_) return;
+        if (!q_draw_hist_.empty()) q_draw_hist_.push_back(q_draw_hist_.back());
+        if (vi_history_t* h = vi_history_buffer()) {
+            if (!h->elbo.empty())   h->elbo.push_back(h->elbo.back());
+            if (!h->mu.empty())     h->mu.push_back(h->mu.back());
+            if (!h->log_sd.empty()) h->log_sd.push_back(h->log_sd.back());
+            if (!h->gamma.empty())  h->gamma.push_back(h->gamma.back());
+            if (!h->epoch.empty())  h->epoch.push_back(h->epoch.back());
+        }
+    }
+
 protected:
+    /**
+     * The subclass's own vi_history_t, so the base class can hold a row for
+     * a frozen block. Returning nullptr (the default, for a subclass that
+     * keeps no trajectory) leaves record_held_history() to advance the
+     * q-draw buffer alone.
+     */
+    virtual vi_history_t* vi_history_buffer() { return nullptr; }
+
     /// Filled by current_named_outputs(rng); mutable because that method is
     /// const by the block_sampler contract while still being the one place
     /// the published draw exists.

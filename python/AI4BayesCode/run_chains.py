@@ -113,11 +113,18 @@ def _chain_worker_fork(seed: int, n_burn: int, n_keep: int,
     return _chain_worker(_ACTIVE_FACTORY, seed, n_burn, n_keep, history_keys)
 
 
+#: Sentinel default for `seeds`. Compared BY IDENTITY, so a caller who passes
+#: these very values explicitly alongside n_chains keeps their seeds -- an
+#: equality test made that depend on both the values and the container type
+#: (a tuple lost, the same values in a list won).
+_DEFAULT_SEEDS = (101, 202, 303, 404)
+
+
 def run_chains(
     factory: Callable[[int], Any],
     *,
     n_chains: int | None = None,
-    seeds: Iterable[int] = (101, 202, 303, 404),
+    seeds: Iterable[int] = _DEFAULT_SEEDS,
     n_burn: int = 2000,
     n_keep: int = 10000,
     n_jobs: Optional[int] = None,
@@ -165,8 +172,11 @@ def run_chains(
     """
     # R's ai4bayescode_run_chains takes n_chains; accept it so the same call
     # reads the same way in both frontends. Explicit seeds win.
-    if n_chains is not None and seeds == (101, 202, 303, 404):
-        seeds = tuple(101 * (i + 1) for i in range(int(n_chains)))
+    if n_chains is not None:
+        if int(n_chains) < 1:
+            raise ValueError(f"n_chains must be >= 1; got {n_chains}")
+        if seeds is _DEFAULT_SEEDS:
+            seeds = tuple(101 * (i + 1) for i in range(int(n_chains)))
     seeds = list(seeds)
     if not seeds:
         return []

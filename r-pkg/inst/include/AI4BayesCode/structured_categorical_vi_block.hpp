@@ -493,7 +493,12 @@ public:
         return history_.elbo.empty() ? 1 : history_.elbo.size();
     }
 
-    void clear_history() override { history_ = vi_history_t{}; }
+    void clear_history() override {
+        history_ = vi_history_t{};
+        q_draw_hist_.clear();   // the per-sweep draws are history too
+    }
+
+    vi_history_t* vi_history_buffer() override { return &history_; }
 
     // ---- vi_block interface ---------------------------------------------
 
@@ -510,16 +515,16 @@ public:
     state_map current_named_outputs() const override {
         const std::string& nm = name();
         if (nm.empty()) return {};
+        // phi_ is CLIQUE-indexed (offsets_phi_ / clique_state_counts_), not
+        // node-indexed: a joint state per clique, not a marginal per node.
+        // Marginalise first -- walking phi_ by cardinalities[i] reads another
+        // clique's joint probabilities as if they were node i's marginal.
+        const arma::mat marg = per_node_marginals();
         arma::vec z(n_);
-        std::size_t off = 0;
         for (std::size_t i = 0; i < n_; ++i) {
             const std::size_t Ki = cfg_.cardinalities[i];
-            std::size_t best = 0;
-            double best_p = -1.0;
-            for (std::size_t k = 0; k < Ki; ++k)
-                if (phi_[off + k] > best_p) { best_p = phi_[off + k]; best = k; }
-            z[i] = static_cast<double>(best);
-            off += Ki;
+            z[i] = static_cast<double>(
+                marg.row(i).cols(0, Ki - 1).index_max());
         }
         state_map out;
         out.emplace(nm, std::move(z));

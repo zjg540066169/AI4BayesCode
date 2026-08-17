@@ -37,7 +37,28 @@
 #' @export
 ai4bayescode_blocks_path <- function(name = NULL) {
     d <- .ai4b_blocks_dir()
-    if (is.null(name)) d else file.path(d, name)
+    if (is.null(name)) d else file.path(d, .ai4b_check_block_name(name))
+}
+
+# A block name is ONE directory name under the block library -- never a path,
+# never empty. file.path(d, "") returns the library root with a trailing
+# separator, which passes dir.exists() and made remove_block("") delete every
+# installed block; "../x" escapes the library altogether. Validated here, at
+# the single point install / remove / lookup all resolve through.
+#' @keywords internal
+#' @noRd
+.ai4b_check_block_name <- function(name) {
+    if (!is.character(name) || length(name) != 1L || is.na(name) ||
+        !nzchar(name)) {
+        stop("block name must be a single non-empty, non-NA character string.",
+             call. = FALSE)
+    }
+    if (grepl("[/\\\\]", name) || name %in% c(".", "..")) {
+        stop("block name must be a plain block name, not a path: '", name,
+             "'. Run ai4bayescode_installed_blocks() to see what is installed.",
+             call. = FALSE)
+    }
+    invisible(name)
 }
 
 # -I flags for every contributed block (block dir for "<block>.hpp" + each vendored
@@ -227,7 +248,22 @@ ai4bayescode_install_block <- function(name, force = FALSE, quiet = FALSE) {
 #' @return Invisibly `TRUE` if removed, `FALSE` if it was not installed.
 #' @export
 ai4bayescode_remove_block <- function(name) {
+    .ai4b_check_block_name(name)   # explicit, so remove_block(NULL) reports the
+                                   # name problem rather than the containment one
     dest <- ai4bayescode_blocks_path(name)
+    # Defence in depth: whatever the name resolved to, it has to be a direct
+    # child of the block library before anything is deleted recursively.
+    # Compare the PARENT, not the block dir itself: normalizePath() only
+    # resolves symlinks for a path that exists, so once the block is gone
+    # (the remove-twice case) the block path stays "/var/..." while the
+    # library root resolves to "/private/var/..." and an otherwise-correct
+    # call looks like an escape. dirname() of the parent always exists.
+    root   <- normalizePath(.ai4b_blocks_dir(), winslash = "/", mustWork = FALSE)
+    parent <- normalizePath(dirname(dest),      winslash = "/", mustWork = FALSE)
+    if (!identical(parent, root)) {
+        stop("refusing to remove '", dest, "': not a block directory under ",
+             root, call. = FALSE)
+    }
     if (!dir.exists(dest)) {
         message("Block '", name, "' is not installed.")
         return(invisible(FALSE))

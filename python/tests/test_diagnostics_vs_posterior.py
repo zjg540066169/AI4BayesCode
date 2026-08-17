@@ -44,6 +44,36 @@ REFERENCE = {
     "counts":      (1.000024, 7378.184710, 8056.149193),
     "antithetic":  (    None, 4000.000000,        None),
     "single_chain":(1.000110, 1809.042119, 1598.706469),
+    # ---- v3: the ORDER cases -------------------------------------------
+    # posterior computes .rhat(z_scale(.split_chains(x))) and
+    # .ess(z_scale(.split_chains(x))) -- it SPLITS first and rank-normalizes
+    # second. Doing it the other way round is identical for an even draw
+    # count (same multiset) and different for an odd one, where posterior
+    # drops the middle draw BEFORE ranking. Reversed, these cases were off by
+    # up to 5.1e-4 (rhat) and 4.7e-3 (ess_bulk).
+    #
+    # "each_chain_const" is the W == 0 case: four chains each pinned at a
+    # DIFFERENT constant, the textbook total-mixing failure. posterior returns
+    # Inf; returning NaN instead passes `> 1.05` and the draws sail through
+    # the convergence gate on the Python side while failing on the R side.
+    #
+    # "tiny" is 1e-300 draws (a collapsed variance): posterior's
+    # should_return_NA uses an ABSOLUTE eps tolerance, and only the quantile
+    # path consults it -- NA for ess_tail, ordinary numbers for rhat/ess_bulk.
+    "odd_101_4c":     (1.001741075,  417.9480804,  409.8369591),
+    "odd_51_3c":      (1.02028806,   144.7131602,  124.650838),
+    "odd_999_4c":     (1.000482594, 4024.579545,  3687.319357),
+    "odd_7_2c":       (1.147326054,    6.0,           6.0),
+    "even_500_4c":    (0.9995666145, 2009.609305,  1918.768759),
+    "odd_off_201":    (1.027511925,  137.9234355,  740.4970083),
+    "odd_scale_301":  (1.1232793,   1085.283216,    53.80526743),
+    "odd_t2_101":     (1.001622344,  394.8256772,  412.7666377),
+    "odd_ties_101":   (1.000224694,  400.3773875,  None),
+    "odd_pois_101":   (0.9989343396, 348.7991688,  346.7186123),
+    "each_chain_const": (float("inf"),  4.166666667, None),
+    "tiny":           (1.002609256, 1082.28311,    None),
+    "single_odd":     (1.037678363,   73.35211161, 110.0531444),
+    "stuck":          (1.508725532,    7.603737128,  36.72985169),
 }
 
 
@@ -80,7 +110,31 @@ def _draws_v2() -> dict[str, np.ndarray]:
     }
 
 
-DRAWS = {**_draws(), **_draws_v2()}
+def _draws_v3() -> dict[str, np.ndarray]:
+    """Split-vs-rank ORDER, W == 0, and the absolute constant tolerance.
+    Own generator and own seed so the earlier cases keep their references."""
+    rng = np.random.default_rng(424242)
+    return {
+        "odd_101_4c":   rng.normal(size=(101, 4)),
+        "odd_51_3c":    rng.normal(size=(51, 3)),
+        "odd_999_4c":   rng.normal(size=(999, 4)),
+        "odd_7_2c":     rng.normal(size=(7, 2)),
+        "even_500_4c":  rng.normal(size=(500, 4)),
+        "odd_off_201":  rng.normal(size=(201, 4)) + np.array([0, 0, 0, 0.7]),
+        "odd_scale_301": rng.normal(size=(301, 4)) * np.array([1, 1, 1, 2.5]),
+        "odd_t2_101":   rng.standard_t(2, size=(101, 4)),
+        "odd_ties_101": (rng.uniform(size=(101, 4)) < 0.3).astype(float),
+        "odd_pois_101": rng.poisson(3, size=(101, 4)).astype(float),
+        # Four chains, each constant at a DIFFERENT value.
+        "each_chain_const": np.tile(np.array([1., 2., 3., 4.]), (200, 1)),
+        "tiny":         rng.normal(size=(300, 4)) * 1e-300,
+        "single_odd":   rng.normal(size=(101, 1)),
+        "stuck":        np.column_stack([rng.normal(size=200) for _ in range(3)]
+                                        + [rng.normal(size=200) * 0.02 + 3]),
+    }
+
+
+DRAWS = {**_draws(), **_draws_v2(), **_draws_v3()}
 
 
 
@@ -97,6 +151,9 @@ def _agrees(got, expected, rel):
     """
     if expected is None:
         return np.isnan(got)
+    if np.isinf(expected):
+        # W == 0 with differing chain means. NaN here would pass `> 1.05`.
+        return np.isinf(got) and np.sign(got) == np.sign(expected)
     return got == pytest.approx(expected, rel=rel, abs=5e-3)
 
 
@@ -140,3 +197,44 @@ def test_rank_normalization_is_scipy_optional():
         a = _rank_normalize(x)
         b = _rank_normalize_numpy(x)
         assert np.allclose(a, b, atol=1e-7), f"{case}: scipy vs numpy path differ"
+
+
+def test_split_precedes_rank_normalization():
+    """`posterior` splits BEFORE it rank-normalizes. On an ODD draw count the
+    two orders differ, because the split drops the middle draw and that draw
+    is then either inside or outside the ranking. Guard the order directly, so
+    a refactor cannot silently swap it back and merely drift the table."""
+    from AI4BayesCode.utils import (_ess_raw, _plain_split_rhat,
+                                    _rank_normalize_dispatch, _split_chains)
+
+    x = DRAWS["odd_101_4c"]
+    correct = _plain_split_rhat(_rank_normalize_dispatch(_split_chains(x)),
+                                already_split=True)
+    reversed_order = _plain_split_rhat(_rank_normalize_dispatch(x))
+    assert correct != reversed_order, "the two orders must actually differ here"
+    assert rhat(x) == pytest.approx(max(
+        correct,
+        _plain_split_rhat(
+            _rank_normalize_dispatch(_split_chains(np.abs(x - np.median(x)))),
+            already_split=True)))
+
+    e_correct = _ess_raw(_rank_normalize_dispatch(_split_chains(x)),
+                         already_split=True)
+    assert ess_bulk(x) == pytest.approx(e_correct)
+
+
+def test_total_mixing_failure_is_inf_not_nan():
+    """Four chains each pinned at a different constant is the loudest possible
+    mixing failure. NaN > 1.05 is False, so reporting NaN would let it pass
+    every Python-side gate while failing the R one."""
+    x = DRAWS["each_chain_const"]
+    assert np.isinf(rhat(x)), "W == 0 with differing chain means must be Inf"
+    assert not (rhat(x) < 1.05), "the R2 gate must reject it"
+
+
+def test_tiny_draws_match_posteriors_absolute_constant_test():
+    """1e-300 draws: NA for the tail (should_return_NA uses an ABSOLUTE eps
+    tolerance) but ordinary numbers for rhat and ess_bulk, which do not."""
+    x = DRAWS["tiny"]
+    assert np.isnan(ess_tail(x))
+    assert np.isfinite(rhat(x)) and np.isfinite(ess_bulk(x))

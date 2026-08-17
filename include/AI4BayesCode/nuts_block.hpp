@@ -169,18 +169,35 @@ struct nuts_block_config {
     double initial_step_size = 0.0;
 
     /// Hard bounds on the persisted dual-averaging step size, applied after
-    /// EVERY step() call. The same guard `joint_nuts_block` carries, for the
-    /// same reason: mcmclib's dual-averaging path has no floor or cap of its
-    /// own, and `use_persistent_adapt = true` (which this block always sets)
-    /// carries the adapted epsilon into the next call. A boundary-region
-    /// conditional -- a Beta or binomial parameter pushed near 0 or 1 -- can
-    /// drive eps to underflow, and once epsilon_bar_persist reaches ~0 it is
-    /// locked there for every subsequent draw: infinitesimal leapfrog steps,
-    /// identical draws, sd = 0, R-hat = Inf. The cap bounds the opposite
-    /// runaway (eps -> 1e+77, every trajectory rejected). pi is the nuts-rs
-    /// standard. Set either to 0 to disable that side.
+    /// EVERY step() call. mcmclib's dual-averaging path has no floor or cap of
+    /// its own, and `use_persistent_adapt = true` carries the adapted epsilon
+    /// into the next call.
+    ///
+    /// The FLOOR is the one that matters. A boundary-region conditional -- a
+    /// Beta or binomial parameter pushed near 0 or 1 -- can drive eps to
+    /// underflow, and once epsilon_bar_persist reaches ~0 it is locked there
+    /// for every subsequent draw: infinitesimal leapfrog steps, identical
+    /// draws, sd = 0, R-hat = Inf.
+    ///
+    /// The CAP only has to stop the opposite runaway (a near-flat density
+    /// accepts every trajectory, so dual averaging pushes eps up without
+    /// bound, historically to ~1e77). It deliberately sits far above any real
+    /// posterior scale: nuts-rs caps at pi, but nuts-rs always normalises by
+    /// an adapted mass matrix, whereas this block runs on an IDENTITY metric
+    /// unless one is adapted -- so here the optimal eps scales with the
+    /// parameter's own sd, and a pi cap throttles any wide target. Measured on
+    /// a 1-D Gaussian, 4000 draws (cap = pi vs cap off):
+    ///
+    ///     true sd    eps      posterior sd     ESS
+    ///        10     3.14 / 18.8    9.8 / 10.2    1211 / 2272
+    ///       100     3.14 /  187  112.6 / 102.8    702 / 2317
+    ///      1000     3.14 / 1883    893 / 1022      28 / 2273
+    ///
+    /// If a parameter's unconstrained posterior sd approaches this cap,
+    /// rescale it (or the data) rather than raising the bound.
+    /// Set either to 0 to disable that side.
     double min_step_size = 1e-6;
-    double max_step_size = 3.141592653589793;  // pi (nuts-rs)
+    double max_step_size = 1e6;
 
     /// Set by the constructor: whether the USER supplied constrain /
     /// unconstrain, as opposed to the identity defaults installed below.
