@@ -58,7 +58,7 @@
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(IsingHiddenPotts, 16L, 0.7, 0.6, 0.0, 2.0, 1.0,
-//                          2024L, seed, 0L),
+//                          2024L, seed, 0L, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
@@ -85,7 +85,7 @@
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.IsingHiddenPotts(16, 0.7, 0.6, 0.0, 2.0, 1.0,
-//                                         2024, seed, 0),
+//                                         2024, seed, 0, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----
@@ -141,7 +141,8 @@ class IsingHiddenPotts : public AI4BayesCode::kernel_control_mixin<IsingHiddenPo
 public:
     IsingHiddenPotts(int L, double beta, double delta,
                      double mu0, double mu1, double sigma,
-                     int data_seed, int rng_seed, int init_label)
+                     int data_seed, int rng_seed, int init_label,
+                     bool keep_history = false)
         : rng_(static_cast<std::uint64_t>(rng_seed)),
           impl_(std::make_unique<composite_block>("IsingHiddenPotts")),
           L_(L)
@@ -198,6 +199,11 @@ public:
         cfg.delta_default = delta;       // <- partial decoupling for field mixing
         cfg.initial_state = z_init;
         impl_->add_child(std::make_unique<ising_cluster_block>(std::move(cfg)));
+
+        // Without this the composite keeps only the current draw, and any
+        // diagnostic computed from get_history() sees a single row -- sd,
+        // R-hat and ESS all come back NA.
+        if (keep_history) impl_->set_keep_history(true);
     }
 
     // ---- Canonical backend-neutral interface ---------------------------
@@ -269,6 +275,10 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(IsingHiddenPotts_module) {
     Rcpp::class_<IsingHiddenPotts>("IsingHiddenPotts")
+        .constructor<int, double, double, double, double, double, int, int, int,
+                     bool>(
+            "Hidden-Potts image segmentation, keeping the draw history "
+            "(pass keep_history = TRUE for any multi-draw diagnostic).")
         .constructor<int, double, double, double, double, double, int, int, int>(
             "Hidden-Potts image segmentation. Args: L (lattice side, N=L*L), "
             "beta (spatial interaction, >= 0), delta (partial decoupling in "
@@ -298,7 +308,7 @@ PYBIND11_MODULE(IsingHiddenPotts, m) {
     AI4BayesCode::register_ai4bayescode_types(m);
     pybind11::class_<IsingHiddenPotts>(m, "IsingHiddenPotts")
         .def(pybind11::init<int, double, double, double, double, double,
-                            int, int, int>(),
+                            int, int, int, bool>(),
              pybind11::arg("L"),
              pybind11::arg("beta"),
              pybind11::arg("delta"),
@@ -307,7 +317,8 @@ PYBIND11_MODULE(IsingHiddenPotts, m) {
              pybind11::arg("sigma"),
              pybind11::arg("data_seed"),
              pybind11::arg("rng_seed"),
-             pybind11::arg("init_label"))
+             pybind11::arg("init_label"),
+             pybind11::arg("keep_history") = false)
         .def("step", (void (IsingHiddenPotts::*)())    &IsingHiddenPotts::step, "Run one sweep.")
         .def("step", (void (IsingHiddenPotts::*)(int)) &IsingHiddenPotts::step, pybind11::arg("n_steps"))
         .def("get_current", &IsingHiddenPotts::get_current)

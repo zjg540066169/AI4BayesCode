@@ -658,7 +658,7 @@ RCPP_MODULE(HSGPRegression_module) {
 #ifdef AI4BAYESCODE_PYBIND_MODULE
 #include "AI4BayesCode/pybind_casters.hpp"
 
-PYBIND11_MODULE(HSGPRegression_module, m) {
+PYBIND11_MODULE(HSGPRegression, m) {
     AI4BayesCode::register_ai4bayescode_types(m);
     pybind11::class_<HSGPRegression>(m, "HSGPRegression")
         .def(pybind11::init<arma::vec, arma::vec, int, int, bool>(),

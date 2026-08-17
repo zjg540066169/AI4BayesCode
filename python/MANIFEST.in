@@ -7,7 +7,11 @@ include AI4BayesCode/start.md
 include LICENSE
 include THIRD_PARTY_LICENSES.md
 global-exclude *.bak*
-global-exclude * [0-9].*
+# NOTE: a MANIFEST.in pattern must NOT contain a space -- setuptools
+# splits on whitespace, so `global-exclude * [0-9].*` becomes the two
+# patterns `*` and `[0-9].*`, and the bare `*` deletes EVERY file the
+# grafts above added (measured: 953 entries -> 7, an empty package).
+# Finder's "foo 2.py" duplicates are handled by .gitignore instead.
 global-exclude *.pyc
 global-exclude __pycache__/*
 global-exclude .DS_Store

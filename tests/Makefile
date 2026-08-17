@@ -19,6 +19,7 @@ INC_DIR   := ../include
 FREEZE_HDRS := $(INC_DIR)/AI4BayesCode/joint_nuts_block.hpp \
                $(INC_DIR)/AI4BayesCode/composite_block.hpp \
                $(INC_DIR)/AI4BayesCode/block_sampler.hpp \
+               $(INC_DIR)/AI4BayesCode/shared_data.hpp \
                $(INC_DIR)/AI4BayesCode/constraints.hpp
 # mcmclib's own internal includes expect its directory to be on the
 # search path (so that "BaseMatrixOps/include/BaseMatrixOps.hpp" resolves).
@@ -41,7 +42,7 @@ LDFLAGS  ?=
 # On macOS, link directly against Accelerate for BLAS/LAPACK.
 LDLIBS   ?= -framework Accelerate
 
-TARGETS  := test_constraints test_binary_gibbs test_dirichlet_gibbs test_categorical_gibbs test_gaussian_linear test_simplex_dirichlet test_nuts_variance test_vi_mean_field_gaussian test_vi_correlated_gaussian test_vi_hybrid_composition test_vi_glmm_logistic test_vi_bnn_regression test_vi_full_rank_correlated test_vi_bnn_full_rank test_readapt_NUTS test_target_accept_config test_joint_nuts_block_mixed_stress test_bde_scorer test_score_cache test_order_mcmc_block test_order_mcmc_block_stress test_order_mcmc_block_diagnostics test_bge_scorer test_partition_geometry test_partition_mcmc_diagnostics test_partition_mcmc_rhat test_order_mcmc_block_partition test_freeze_predict_history test_freeze_element test_freeze_dense_pilot test_freeze_joint_nuts_slot test_ode_rk45_inplace test_dag_key_validation test_genbart_slice_mstep test_predict_dag_depth test_history_alignment test_wiring_guards
+TARGETS  := test_constraints test_binary_gibbs test_dirichlet_gibbs test_categorical_gibbs test_gaussian_linear test_simplex_dirichlet test_nuts_variance test_vi_mean_field_gaussian test_vi_correlated_gaussian test_vi_hybrid_composition test_vi_glmm_logistic test_vi_bnn_regression test_vi_full_rank_correlated test_vi_bnn_full_rank test_readapt_NUTS test_target_accept_config test_joint_nuts_block_mixed_stress test_bde_scorer test_score_cache test_order_mcmc_block test_order_mcmc_block_stress test_order_mcmc_block_diagnostics test_bge_scorer test_partition_geometry test_partition_mcmc_diagnostics test_partition_mcmc_rhat test_order_mcmc_block_partition test_freeze_predict_history test_freeze_element test_freeze_dense_pilot test_freeze_joint_nuts_slot test_ode_rk45_inplace test_dag_key_validation test_genbart_slice_mstep test_predict_dag_depth test_history_alignment test_wiring_guards test_composite_bare_name_slot_fallback test_freeze_normal_gamma_cluster test_freeze_rjmcmc_subkey test_joint_nuts_block_constraints test_joint_nuts_dimchanging
 
 .PHONY: all build run clean
 
@@ -160,6 +161,43 @@ run: build
 	@echo
 	@echo "=== Running test_wiring_guards ==="
 	./test_wiring_guards
+	@echo
+	@echo "=== Running test_composite_bare_name_slot_fallback ==="
+	./test_composite_bare_name_slot_fallback
+	@echo
+	@echo "=== Running test_freeze_normal_gamma_cluster ==="
+	./test_freeze_normal_gamma_cluster
+	@echo
+	@echo "=== Running test_freeze_rjmcmc_subkey ==="
+	./test_freeze_rjmcmc_subkey
+	@echo
+	@echo "=== Running test_joint_nuts_block_constraints ==="
+	./test_joint_nuts_block_constraints
+	@echo
+	@echo "=== Running test_joint_nuts_dimchanging ==="
+	./test_joint_nuts_dimchanging
+
+# These three had no rule, so make's built-in %: %.cpp applied and a
+# header-only edit left the previous binary in place, still reporting PASS.
+test_predict_dag_depth: test_predict_dag_depth.cpp \
+    $(INC_DIR)/AI4BayesCode/shared_data.hpp \
+    $(INC_DIR)/AI4BayesCode/block_sampler.hpp
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
+
+test_history_alignment: test_history_alignment.cpp \
+    $(INC_DIR)/AI4BayesCode/composite_block.hpp \
+    $(INC_DIR)/AI4BayesCode/inv_gamma_gibbs_block.hpp \
+    $(INC_DIR)/AI4BayesCode/gamma_gibbs_block.hpp \
+    $(INC_DIR)/AI4BayesCode/block_sampler.hpp
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
+
+test_wiring_guards: test_wiring_guards.cpp \
+    $(INC_DIR)/AI4BayesCode/shared_data.hpp \
+    $(INC_DIR)/AI4BayesCode/composite_block.hpp \
+    $(INC_DIR)/AI4BayesCode/nuts_block.hpp \
+    $(INC_DIR)/AI4BayesCode/piecewise_exponential_gibbs_block.hpp \
+    $(INC_DIR)/AI4BayesCode/gamma_gibbs_block.hpp
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 
 AI4BAYESCODE_HEADERS := \
   $(INC_DIR)/AI4BayesCode/block_sampler.hpp \

@@ -20,7 +20,11 @@
 set -euo pipefail
 cd "$(cd "$(dirname "$0")/.." && pwd)"
 
-sync_dir () { rm -rf "$2"; rsync -a --exclude '.DS_Store' "$1/" "$2/"; }
+# Editing backups and the local _archive/ tree are never product; without
+# these excludes a `pip install .` / R build from the working tree picks up
+# ~312 KB of old header revisions.
+sync_dir () { rm -rf "$2"; rsync -a --exclude '.DS_Store' --exclude '*.bak*' \
+                            --exclude '_archive' "$1/" "$2/"; }
 
 # The shipped skill corpus is what a USER receives. Two classes of file live
 # under skills/ but are not product and must not ship:
@@ -28,11 +32,26 @@ sync_dir () { rm -rf "$2"; rsync -a --exclude '.DS_Store' "$1/" "$2/"; }
 #   *.bak*                     -- local editing backups
 # ai4bayescode_list_skills() / AI4BayesCode.list_skills() glob the shipped
 # directory, so anything copied here shows up in a user's skill listing.
-SKILL_EXCLUDES=(--exclude 'sim1.md' --exclude 'sim1_workflow.md'
-                --exclude 'sim2_workflow.md' --exclude 'sim3_workflow.md'
-                --exclude '*.bak*' --exclude '* [0-9].*')
+# Patterns, not a list of today's filenames: a literal set silently ships the
+# next sim file somebody adds (probed: sim2.md and sim4_workflow.md both
+# reached BOTH packages under the old four-name list).
+SKILL_EXCLUDES=(--exclude 'sim*' --exclude '*.bak*' --exclude '* [0-9].*')
 
-sync_skills () { rm -rf "$1"; rsync -a --exclude '.DS_Store' "${SKILL_EXCLUDES[@]}" skills/ "$1"/; }
+sync_skills () {
+  rm -rf "$1"
+  rsync -a --exclude '.DS_Store' "${SKILL_EXCLUDES[@]}" skills/ "$1"/
+  # HARD GATE. The sim* files are our paper-experiment protocol, never product.
+  # An exclude PATTERN can be outrun by a new naming convention, so assert the
+  # outcome instead of trusting the rule: anything named sim* that reached the
+  # package is a build failure, not a warning.
+  local leaked
+  leaked=$(find "$1" -iname 'sim*' -print 2>/dev/null || true)
+  if [ -n "$leaked" ]; then
+    echo "✗ experiment material reached $1 -- these must NEVER ship:"
+    echo "$leaked" | sed 's/^/      /'
+    exit 1
+  fi
+}
 
 echo "• skills/        -> r-pkg/inst/skills , python/_skills (experiment + backup files excluded)"
 sync_skills r-pkg/inst/skills
@@ -93,9 +112,12 @@ done
 
 find r-pkg/inst python/AI4BayesCode/_skills python/AI4BayesCode/_vendored_include \
      -name '.DS_Store' -delete 2>/dev/null || true
-# Post-sync consistency gate: the .cpp sets must match exactly, in both
-# directions, or a later `install_github` ships something the source tree does
-# not have (or misses something it does).
+# Consistency report. NOTE this runs AFTER the orphan drop above, which
+# already removes every dest-only .cpp, and the copy loop guarantees the
+# forward direction -- so a mismatch here means a cp/rm actually failed
+# (set -e would normally have aborted first). It is a cheap backstop, not the
+# primary guard; the drop loop's own log line is what tells you something
+# drifted.
 sync_ok=1
 for d in r-pkg/inst/examples python/AI4BayesCode/_examples; do
   if ! diff -q <(ls examples/*.cpp | xargs -n1 basename | sort) \

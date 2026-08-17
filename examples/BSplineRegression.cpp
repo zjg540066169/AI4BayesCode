@@ -521,7 +521,7 @@ RCPP_MODULE(BSplineRegression_module) {
 #ifdef AI4BAYESCODE_PYBIND_MODULE
 #include "AI4BayesCode/pybind_casters.hpp"
 
-PYBIND11_MODULE(BSplineRegression_module, m) {
+PYBIND11_MODULE(BSplineRegression, m) {
     AI4BayesCode::register_ai4bayescode_types(m);
     pybind11::class_<BSplineRegression>(m, "BSplineRegression")
         .def(pybind11::init<arma::vec, arma::mat, int, bool>(),

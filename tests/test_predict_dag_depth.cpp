@@ -58,6 +58,32 @@ static std::string join(const std::vector<std::string>& v) {
     return s + "]";
 }
 
+// Membership is not the contract. composite_block::predict_at iterates the
+// returned vector IN ORDER (`for (dk : det_refreshed) scratch.refresh_key(dk)`),
+// so a parent listed AFTER its child is recomputed too late and the child keeps
+// a value derived from the training state. Reversing the returned order leaves
+// every membership check passing while predict_at returns a wrong number, so
+// order has to be asserted explicitly.
+static bool before(const std::vector<std::string>& v,
+                   const std::string& parent, const std::string& child) {
+    const auto ip = std::find(v.begin(), v.end(), parent);
+    const auto ic = std::find(v.begin(), v.end(), child);
+    if (ip == v.end() || ic == v.end()) return false;   // both must be present
+    return ip < ic;
+}
+
+static void check_order(const std::vector<std::string>& v,
+                        const std::string& parent, const std::string& child) {
+    check(before(v, parent, child),
+          "order: " + parent + " is refreshed before " + child);
+}
+
+static void check_absent(const std::vector<std::string>& v,
+                         const std::string& k, const std::string& why) {
+    check(std::find(v.begin(), v.end(), k) == v.end(),
+          k + " is NOT in the refresh order (" + why + ")");
+}
+
 // Registers a key with a value and an identity-ish refresher, so the node is a
 // genuine deterministic node (it has a refresher) rather than a bare value.
 static void add_derived(AI4BayesCode::shared_data_t& d, const std::string& key,
@@ -91,6 +117,9 @@ int main() {
         check(contains(order, "A"), "depth 1 (A) recomputed");
         check(contains(order, "B"), "depth 2 (B) recomputed");
         check(contains(order, "C"), "depth 3 (C) recomputed");
+        check_order(order, "A", "B");
+        check_order(order, "B", "C");
+        check_absent(order, "X", "it is the replaced input, not a downstream node");
     }
 
     // ---- Case 2: deeper chain ---------------------------------------------
@@ -114,6 +143,7 @@ int main() {
             check(contains(order, keys[i]),
                   std::string("depth ") + std::to_string(i + 1) + " (" + keys[i] +
                   ") recomputed");
+        for (int i = 1; i < 5; ++i) check_order(order, keys[i - 1], keys[i]);
     }
 
     // ---- Case 3: BSplineRegression topology, history mode -------------------
@@ -159,6 +189,9 @@ int main() {
             check(contains(order, "mu"),
                   std::string("replace ") + seed +
                   ": mu recomputed (else y_rep is drawn from the training mu)");
+            check_order(order, "s", "f");
+            check_order(order, "f", "mu");
+            check_absent(order, "y_rep", "stochastic nodes are Pass 2, not Pass 1");
         }
     }
 
@@ -197,6 +230,8 @@ int main() {
             check(contains(order, "mu"),
                   std::string("replace ") + seed +
                   ": mu recomputed (else y_rep is drawn from the training mu)");
+            check_order(order, "sqrt_spd", "f");
+            check_order(order, "f", "mu");
         }
     }
 
@@ -223,6 +258,10 @@ int main() {
         std::printf("        order = %s\n", join(order).c_str());
         for (const char* k : {"w1", "w2", "w3", "t1", "t2", "t3", "t4"})
             check(contains(order, k), std::string(k) + " recomputed");
+        check_order(order, "w1", "t1");
+        check_order(order, "t1", "t2");
+        check_order(order, "t2", "t3");
+        check_order(order, "t3", "t4");
     }
 
     std::printf("\n=== SUMMARY: %d passed, %d failed ===\n", g_pass, g_fail);

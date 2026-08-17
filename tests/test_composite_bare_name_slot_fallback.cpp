@@ -136,8 +136,8 @@ static void B_ambiguous_enumerates() {
     check(msg_contains(caught, "sub-name 'mu' is ambiguous"),
           "B.b message opens with 'sub-name 'mu' is ambiguous'",
           std::string("got: ") + caught);
-    check(msg_contains(caught, "matches slots ["),
-          "B.c message contains 'matches slots ['",
+    check(msg_contains(caught, "matches components ["),
+          "B.c message contains 'matches components ['",
           std::string("got: ") + caught);
     check(msg_contains(caught, "child_A.mu"),
           "B.d message enumerates child_A.mu",

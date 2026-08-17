@@ -246,9 +246,30 @@ public:
         const std::string& nm = name();
         if (nm.empty()) return {};
         state_map out;
-        out.emplace(nm, current_sample(rng));
+        arma::vec draw = current_sample(rng);
+        // Record the draw the composite is about to publish. This -- not the
+        // optimizer's mu path -- is what every sibling block conditioned on
+        // this sweep, so it is the only series that can be lined up with
+        // their draws. Subclasses emit it under the block's bare name in
+        // get_history(); the mu / ELBO trajectory stays under
+        // "<name>__vi_history", where vi_history_t's own note explains why it
+        // is not a posterior sample.
+        if (keep_history_) q_draw_hist_.push_back(draw);
+        out.emplace(nm, std::move(draw));
         return out;
     }
+
+    /// The per-sweep q-draws handed to the composite, in sweep order.
+    /// Empty unless keep_history is on.
+    const std::vector<arma::vec>& q_draw_history() const noexcept {
+        return q_draw_hist_;
+    }
+
+protected:
+    /// Filled by current_named_outputs(rng); mutable because that method is
+    /// const by the block_sampler contract while still being the one place
+    /// the published draw exists.
+    mutable std::vector<arma::vec> q_draw_hist_;
 };
 
 } // namespace AI4BayesCode

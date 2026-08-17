@@ -118,7 +118,7 @@
 //   y <- mu_true[z_true, ] + matrix(rnorm(N * d, sd = 0.7), N, d)
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(PYGaussianMixture, y, 12L, 0.0, seed),
+//       function(seed) new(PYGaussianMixture, y, 12L, 0.0, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
@@ -138,7 +138,7 @@
 //   Mod = AI4BayesCode.example("PYGaussianMixture")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
-//       lambda seed: Mod.PYGaussianMixture(y, 12, 0.0, seed),
+//       lambda seed: Mod.PYGaussianMixture(y, 12, 0.0, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # summary + diagnostics
 //   # ---- Advanced: stateful single-chain control ----

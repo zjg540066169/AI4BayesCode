@@ -166,7 +166,23 @@ public:
     }
 
     void step(std::mt19937_64& rng) override {
-        if (converged_) return;
+        if (converged_) {
+            // Post-convergence: q is frozen, so there is no new iterate --
+            // but the packed history must still gain a row per sweep, or it
+            // falls behind the sibling blocks and composite_block's
+            // history_size() (a MIN over children) silently truncates every
+            // joint-draw consumer to the pre-convergence prefix. Hold the last
+            // values in place, the same semantics record_held_history() uses
+            // for a frozen block.
+            if (keep_history()) {
+                history_.elbo.push_back(last_elbo_);
+                history_.mu.push_back(mu_unc_);
+                history_.log_sd.push_back(get_log_sd());
+                history_.gamma.push_back(gamma_current_);
+                history_.epoch.push_back(static_cast<int>(epoch_index_));
+            }
+            return;
+        }
         arma::vec g_lambda;
         const double elbo = compute_elbo_and_grad_(rng, &g_lambda);
         last_elbo_ = elbo;
@@ -232,20 +248,19 @@ public:
         }
         out.emplace(cfg_.name + "__vi_history", std::move(m));
 
-        // Also emit the plain "<name>" key, ALWAYS. Emitting only
-        // "<name>__vi_history" once history is on means code that indexes the
-        // composite's history by the block's name -- the way every MCMC block
-        // is read -- gets NULL / KeyError the moment keep_history is turned
-        // on. One row per recorded step keeps it aligned with the sibling
-        // blocks' draws; "<name>__vi_history" keeps the packed diagnostics.
-        // NATURAL scale, matching this key's empty-history fallback above and
-        // current(). history_.mu holds the UNCONSTRAINED mean.
-        arma::mat q(n, K_);
-        for (std::size_t i = 0; i < n; ++i) {
-            const arma::vec nat = cfg_.constrain(history_.mu[i]);
-            for (std::size_t j = 0; j < K_; ++j) q(i, j) = nat[j];
+        // The block's bare name carries the per-sweep q-DRAWS the composite
+        // actually published (vi_block::q_draw_history()), so it lines up with
+        // the sibling blocks' draws. The optimizer's mu / ELBO trajectory stays
+        // under "<name>__vi_history": q changes as the optimizer iterates, so
+        // those iterates come from a SEQUENCE of distributions and are not a
+        // Monte Carlo sample (see vi_history_t).
+        const auto& qd = q_draw_history();
+        if (!qd.empty()) {
+            arma::mat q(qd.size(), qd[0].n_elem);
+            for (std::size_t i = 0; i < qd.size(); ++i)
+                for (arma::uword j = 0; j < qd[0].n_elem; ++j) q(i, j) = qd[i][j];
+            out.emplace(cfg_.name, std::move(q));
         }
-        out.emplace(cfg_.name, std::move(q));
         return out;
     }
 

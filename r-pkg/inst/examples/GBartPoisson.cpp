@@ -73,7 +73,7 @@
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   ai4bayescode_diagnose(run$histories[[1]])      # summary + R-hat/ESS + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m <- new(GBartPoisson, X, y, 50L, 42L, TRUE)         # X, y, ntrees, seed, keep_tree
+//   m <- new(GBartPoisson, X, y, 50L, 42L, FALSE, TRUE)  # X, y, ntrees, seed, keep_tree, keep_history
 //   m$step(2000); str(m$get_current())                  # $r (log rate), $rate=exp(r)
 // @example:python
 //   import numpy as np, AI4BayesCode

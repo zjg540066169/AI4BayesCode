@@ -237,7 +237,12 @@ public:
     // history stays the same length as unfrozen siblings (composite_block
     // calls this on a frozen child). See block_sampler::record_held_history.
     void record_held_history() override {
-        if (keep_history_) history_buf_.push_back(current());
+        // BOTH buffers, or get_history()'s two series drift apart while
+        // history_size() (which reports only history_buf_) shows nothing wrong.
+        if (keep_history_) {
+            history_buf_.push_back(current());
+            kappa_hist_.push_back(kappa_);
+        }
     }
 
     void set_current(const arma::vec& x_new) override {
