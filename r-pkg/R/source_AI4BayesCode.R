@@ -138,6 +138,24 @@ ai4bayescode_source <- function(code,
         c("$(BLAS_LIBS)", "$(LAPACK_LIBS)", extra_libs)
     }
 
+    # Rcpp::sourceCpp caches on the SOURCE text; it cannot see that a
+    # contributed block's header changed underneath an unchanged -I path. Detect
+    # that here and force the rebuild, so an updated block is actually compiled
+    # in rather than silently reusing the previous binary.
+    fp  <- .ai4b_block_fingerprint()
+    key <- normalizePath(cpp_file, winslash = "/", mustWork = FALSE)
+    if (nzchar(fp)) {
+        prev <- if (exists(key, envir = .ai4b_block_fp_cache, inherits = FALSE))
+                    get(key, envir = .ai4b_block_fp_cache) else NULL
+        if (!is.null(prev) && !identical(prev, fp)) {
+            rebuild <- TRUE
+            if (!quiet)
+                message("A contributed block changed since the last build of ",
+                        basename(cpp_file), " -- recompiling.")
+        }
+        assign(key, fp, envir = .ai4b_block_fp_cache)
+    }
+
     mk_file <- .ai4b_write_makevars(cppflags, libs)
     on.exit(unlink(mk_file), add = TRUE)
 
@@ -167,6 +185,11 @@ ai4bayescode_source <- function(code,
     invisible(NULL)
 }
 
+
+# Last contributed-block fingerprint seen for each compiled .cpp, per session.
+#' @keywords internal
+#' @noRd
+.ai4b_block_fp_cache <- new.env(parent = emptyenv())
 
 # ---------------------------------------------------------------------------
 # Internal: resolve `code` (file path OR source string) to a .cpp path.

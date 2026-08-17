@@ -53,7 +53,7 @@ else
 LDLIBS   ?= -lblas -llapack
 endif
 
-TARGETS  := test_constraints test_binary_gibbs test_dirichlet_gibbs test_categorical_gibbs test_gaussian_linear test_simplex_dirichlet test_nuts_variance test_vi_mean_field_gaussian test_vi_correlated_gaussian test_vi_hybrid_composition test_vi_glmm_logistic test_vi_bnn_regression test_vi_full_rank_correlated test_vi_bnn_full_rank test_readapt_NUTS test_target_accept_config test_joint_nuts_block_mixed_stress test_bde_scorer test_score_cache test_order_mcmc_block test_order_mcmc_block_stress test_order_mcmc_block_diagnostics test_bge_scorer test_partition_geometry test_partition_mcmc_diagnostics test_partition_mcmc_rhat test_order_mcmc_block_partition test_freeze_predict_history test_freeze_element test_freeze_dense_pilot test_freeze_joint_nuts_slot test_ode_rk45_inplace test_dag_key_validation test_genbart_slice_mstep test_predict_dag_depth test_history_alignment test_wiring_guards test_composite_bare_name_slot_fallback test_freeze_normal_gamma_cluster test_freeze_rjmcmc_subkey test_joint_nuts_block_constraints test_joint_nuts_dimchanging test_vi_publish_and_history test_split_merge_exact
+TARGETS  := test_constraints test_binary_gibbs test_dirichlet_gibbs test_categorical_gibbs test_gaussian_linear test_simplex_dirichlet test_nuts_variance test_vi_mean_field_gaussian test_vi_correlated_gaussian test_vi_hybrid_composition test_vi_glmm_logistic test_vi_bnn_regression test_vi_full_rank_correlated test_vi_bnn_full_rank test_readapt_NUTS test_target_accept_config test_joint_nuts_block_mixed_stress test_bde_scorer test_score_cache test_order_mcmc_block test_order_mcmc_block_stress test_order_mcmc_block_diagnostics test_bge_scorer test_partition_geometry test_partition_mcmc_diagnostics test_partition_mcmc_rhat test_order_mcmc_block_partition test_freeze_predict_history test_freeze_element test_freeze_dense_pilot test_freeze_joint_nuts_slot test_ode_rk45_inplace test_dag_key_validation test_genbart_slice_mstep test_predict_dag_depth test_history_alignment test_wiring_guards test_composite_bare_name_slot_fallback test_freeze_normal_gamma_cluster test_freeze_rjmcmc_subkey test_joint_nuts_block_constraints test_joint_nuts_dimchanging test_vi_publish_and_history test_split_merge_exact test_pg_truncation
 
 # The VI publish/history regression guards four VI headers plus the composite
 # freeze path -- a header-only edit otherwise leaves a stale binary in place.
@@ -73,6 +73,10 @@ test_vi_publish_and_history: test_vi_publish_and_history.cpp \
 test_split_merge_exact: test_split_merge_exact.cpp \
     $(INC_DIR)/AI4BayesCode/split_merge_block.hpp \
     $(INC_DIR)/AI4BayesCode/composite_block.hpp
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
+
+test_pg_truncation: test_pg_truncation.cpp \
+    $(INC_DIR)/AI4BayesCode/pg_logistic_block.hpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 
 .PHONY: all build run clean
@@ -213,6 +217,9 @@ run: build
 	@echo
 	@echo "=== Running test_split_merge_exact ==="
 	./test_split_merge_exact
+	@echo
+	@echo "=== Running test_pg_truncation ==="
+	./test_pg_truncation
 
 # These three had no rule, so make's built-in %: %.cpp applied and a
 # header-only edit left the previous binary in place, still reporting PASS.

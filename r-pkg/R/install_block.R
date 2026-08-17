@@ -61,6 +61,37 @@ ai4bayescode_blocks_path <- function(name = NULL) {
     invisible(name)
 }
 
+# Content fingerprint of every contributed-block directory that ends up on the
+# -I path. The flags alone are NOT enough to key a compile cache on: reinstalling
+# a block (ai4bayescode_install_block(force = TRUE) fetching a new version, or a
+# hand-edit under ./blocks_local/) leaves the -I paths byte-identical, so
+# Rcpp::sourceCpp's in-session cache handed back the object built from the
+# PREVIOUS header. A user who updated a block and re-ran kept executing the old
+# sampler -- the silent-wrong-posterior failure the contrib design exists to
+# prevent. Fingerprints (relative path, size, mtime) -- a stat per file, no reads.
+#' @keywords internal
+#' @noRd
+.ai4b_block_fingerprint <- function() {
+    dirs <- c(file.path(getwd(), "blocks_local"), .ai4b_blocks_dir())
+    dirs <- dirs[dir.exists(dirs)]
+    if (!length(dirs)) return("")
+    parts <- character(0)
+    for (d in dirs) {
+        fs <- list.files(d, recursive = TRUE, full.names = TRUE,
+                         pattern = "\\.(hpp|h|hh|hxx|ipp|cpp|cc|dcf)$")
+        if (!length(fs)) next
+        fs <- sort(fs)
+        info <- file.info(fs)
+        parts <- c(parts, paste(sub(paste0("^", d, "/?"), "", fs),
+                                info$size, as.numeric(info$mtime),
+                                sep = "\x1f"))
+    }
+    if (!length(parts)) return("")
+    # digest is not a dependency; a stable paste is enough, since it is only
+    # ever compared for equality against the previous value in this session.
+    paste(parts, collapse = "\x1e")
+}
+
 # -I flags for every contributed block (block dir for "<block>.hpp" + each vendored
 # dependency dir). Folded into the compile flags by ai4bayescode_source(). Covers
 # BOTH tiers: user-global installed blocks (~/.AI4BayesCode/blocks_download/) AND
