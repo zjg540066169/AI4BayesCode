@@ -34,13 +34,21 @@ def _as_2d(x: np.ndarray) -> np.ndarray:
 
 
 def _split_chains(x: np.ndarray) -> np.ndarray:
-    """Split each chain in half — doubles chain count, halves draw count."""
+    """Split each chain in half -- doubles chain count, halves draw count.
+
+    With an ODD draw count the two halves cannot both be taken from the front:
+    `posterior` drops the MIDDLE draw and keeps the last `half`, so the second
+    half ends at the final draw. Taking `x[half:2*half]` instead drops the LAST
+    draw and shifts the second half one position earlier, which is a real
+    numerical difference -- measured on 101x4 draws, ess_bulk 447.4 (drop-last)
+    vs 436.4 (drop-middle) against posterior's 436.2.
+    """
     n_draws, n_chains = x.shape
     half = n_draws // 2
     if half == 0:
         raise ValueError("need at least 2 draws to split-R-hat")
     first = x[:half]
-    second = x[half : 2 * half]
+    second = x[n_draws - half:]
     return np.concatenate([first, second], axis=1)
 
 
@@ -171,8 +179,14 @@ def rhat(samples: np.ndarray) -> float:
     folded = np.abs(x - np.median(x))
     tail = _plain_split_rhat(_rank_normalize_dispatch(folded))
 
-    vals = [v for v in (bulk, tail) if not np.isnan(v)]
-    return float(max(vals)) if vals else float("nan")
+    # NaN PROPAGATES, matching posterior: if either half is undefined (a
+    # constant folded series, say -- antithetic draws fold to a constant), the
+    # combined statistic is undefined too. Dropping the NaN and returning the
+    # other half would report a converged-looking number for draws posterior
+    # declines to summarize.
+    if np.isnan(bulk) or np.isnan(tail):
+        return float("nan")
+    return float(max(bulk, tail))
 
 
 def _autocov(chain: np.ndarray) -> np.ndarray:
@@ -261,7 +275,19 @@ def _ess_raw(x: np.ndarray) -> float:
             rho[t + 1] = rho[t]
 
     n_total = n * m
-    tau = -1.0 + 2.0 * float(np.sum(rho[:max_t])) + float(rho[max_t])
+    if max_t == 0:
+        # The Geyer loop never advanced: rho[:0] is empty, so the general
+        # formula gives tau = -1 + 0 + rho[0] = 0, which the floor below then
+        # turns into 1/log10(N) -- an ESS several times the draw count (measured
+        # 31224 for 8000 antithetic draws, where posterior gives 4000). posterior
+        # evaluates sum(rho_hat_t[1:max_t]) as rho[1] = 1 in this case, i.e.
+        # tau = 2. Too few post-split rows to estimate anything is NaN, matching
+        # posterior's NA.
+        if n < 3:
+            return float("nan")
+        tau = 2.0
+    else:
+        tau = -1.0 + 2.0 * float(np.sum(rho[:max_t])) + float(rho[max_t])
     tau = max(tau, 1.0 / np.log10(n_total))
     return float(n_total / tau)
 
@@ -299,9 +325,19 @@ def ess_tail(samples: np.ndarray, quantile_lo: float = 0.05,
         return float("nan")
     lo = np.quantile(x, quantile_lo)
     hi = np.quantile(x, quantile_hi)
+    # BOTH indicators are "<=", as posterior does (ess_mean(x <= q)). Using
+    # `x >= hi` for the upper one is not the complement when the draws have
+    # TIES -- and ties are the norm for the parameters this matters most for:
+    # inclusion indicators, counts, cluster sizes.
     ind_lo = (x <= lo).astype(float)
-    ind_hi = (x >= hi).astype(float)
-    return float(min(_ess_raw(ind_lo), _ess_raw(ind_hi)))
+    ind_hi = (x <= hi).astype(float)
+    # A constant indicator carries no information; posterior returns NA.
+    out = []
+    for ind in (ind_lo, ind_hi):
+        if np.all(ind == ind.flat[0]):
+            return float("nan")
+        out.append(_ess_raw(ind))
+    return float(min(out))
 
 
 def posterior_summary(samples: np.ndarray, prob: float = 0.90) -> dict:

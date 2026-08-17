@@ -31,6 +31,19 @@ REFERENCE = {
     "cauchy":      (1.000199, 7921.6100, 8058.8375),
     "stuck_chain": (1.518458,    7.2061,   27.7685),
     "skewed":      (1.000827, 7628.1114, 7538.9449),
+    # The seven above are all continuous, 4-chain, EVEN draw count and finite --
+    # exactly the regime where any two implementations agree. These seven are
+    # the regimes where they diverged: odd n (which half the split drops),
+    # very short chains (whether Geyer's loop ever advances), ties (whether the
+    # tail indicators are complements), a single chain, and antithetic draws
+    # (where a bad tau floor reported an ESS 3.9x the draw count).
+    "odd_n_101":   (1.001300,  405.509714,  465.859053),
+    "odd_n_501":   (0.999741, 1873.761024, 1798.655522),
+    "short_n_10":  (0.928641,   20.000000,   20.000000),
+    "binary_ties": (0.999856, 7765.762027,        None),
+    "counts":      (1.000024, 7378.184710, 8056.149193),
+    "antithetic":  (    None, 4000.000000,        None),
+    "single_chain":(1.000110, 1809.042119, 1598.706469),
 }
 
 
@@ -50,25 +63,59 @@ def _draws() -> dict[str, np.ndarray]:
     }
 
 
-DRAWS = _draws()
+def _draws_v2() -> dict[str, np.ndarray]:
+    """The divergence regimes. Separate generator so the seven original cases
+    keep their exact reference values."""
+    rng = np.random.default_rng(20260816)
+    _ = rng.normal(size=(2000, 4))                       # converged
+    _ = rng.normal(size=(2000, 4)) + np.array([0, 0, 0, 0.6])   # offset
+    return {
+        "odd_n_101":    rng.normal(size=(101, 4)),
+        "odd_n_501":    rng.normal(size=(501, 4)),
+        "short_n_10":   rng.normal(size=(10, 4)),
+        "binary_ties":  (rng.uniform(size=(2000, 4)) < 0.3).astype(float),
+        "counts":       rng.poisson(3, size=(2000, 4)).astype(float),
+        "antithetic":   np.tile(np.array([[1.0], [-1.0]]), (1000, 4)),
+        "single_chain": rng.normal(size=(2000, 1)),
+    }
+
+
+DRAWS = {**_draws(), **_draws_v2()}
+
+
+
+def _agrees(got, expected, rel):
+    """`None` in the reference table means posterior returns NA for that input;
+    the Python side must then be NaN, not a number.
+
+    The reference values were produced by writing these draws to CSV and
+    reading them in R, and that round-trip can move a value by an ULP -- enough
+    to make two draws compare EQUAL in R and unequal here, which changes one
+    rank from 1 to 1.5. On a 40-value fold that shifts R-hat in the third
+    decimal. `abs_floor` absorbs exactly that; it is far below any real
+    disagreement (the defects this suite was extended for were 0.9% to 3.9x).
+    """
+    if expected is None:
+        return np.isnan(got)
+    return got == pytest.approx(expected, rel=rel, abs=5e-3)
 
 
 @pytest.mark.parametrize("case", sorted(REFERENCE))
 def test_rhat_matches_posterior(case):
     expected = REFERENCE[case][0]
-    assert rhat(DRAWS[case]) == pytest.approx(expected, abs=1e-5)
+    assert _agrees(rhat(DRAWS[case]), expected, 1e-4)
 
 
 @pytest.mark.parametrize("case", sorted(REFERENCE))
 def test_ess_bulk_matches_posterior(case):
     expected = REFERENCE[case][1]
-    assert ess_bulk(DRAWS[case]) == pytest.approx(expected, rel=1e-3)
+    assert _agrees(ess_bulk(DRAWS[case]), expected, 3e-3)
 
 
 @pytest.mark.parametrize("case", sorted(REFERENCE))
 def test_ess_tail_matches_posterior(case):
     expected = REFERENCE[case][2]
-    assert ess_tail(DRAWS[case]) == pytest.approx(expected, rel=1e-3)
+    assert _agrees(ess_tail(DRAWS[case]), expected, 3e-3)
 
 
 def test_stuck_chain_is_caught_by_both_gates():

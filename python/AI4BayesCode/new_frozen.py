@@ -1,3 +1,4 @@
+import numpy as np
 """Ctor helper: construct wrapper + set + freeze in one call.
 
 Equivalent to the two-step form:
@@ -51,6 +52,10 @@ def new_frozen(module_class, *args, fixed=None, quiet_freeze=True, **kwargs):
                 "instead.")
     m = module_class(*args, **kwargs)
     if fixed:
-        m.set_current(dict(fixed))
+        # set_current takes a Mapping[str, arma::vec]; a bare float raises a
+        # pybind TypeError, while the R side accepts a scalar. atleast_1d keeps
+        # the two frontends interchangeable.
+        m.set_current({k: np.atleast_1d(np.asarray(v, dtype=float))
+                       for k, v in fixed.items()})
         m.freeze(list(fixed.keys()), quiet=bool(quiet_freeze))
     return m

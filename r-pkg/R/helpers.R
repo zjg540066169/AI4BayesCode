@@ -570,7 +570,15 @@ ai4bayescode_diagnose <- function(hist, n_burn = 0, plot = TRUE, order_component
     for (nm in names(hist_use)) {
         x <- hist_use[[nm]]
         if (is.null(dim(x))) cols[[nm]] <- as.numeric(x)
-        else for (j in seq_len(ncol(x))) cols[[sprintf("%s[%d]", nm, j)]] <- x[, j]
+        else {
+            # Flatten anything with more than 2 dimensions down to
+            # (n_draws x everything-else), as the Python side does. A
+            # covariance history arrives as n x r x c, and `x[, j]` on a 3-D
+            # array raises "incorrect number of dimensions" -- a shape
+            # ai4bayescode_run_chains's own documentation promises to support.
+            if (length(dim(x)) > 2L) x <- matrix(x, nrow = dim(x)[1L])
+            for (j in seq_len(ncol(x))) cols[[sprintf("%s[%d]", nm, j)]] <- x[, j]
+        }
     }
     M <- do.call(cbind, cols); colnames(M) <- names(cols)
     drw <- posterior::as_draws_matrix(M)
