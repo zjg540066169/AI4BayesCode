@@ -51,7 +51,7 @@ Use `ai4b::stop()` (`backend_neutral.hpp`), NOT `ai4b::stop()` and not a bare
 `PYBIND11_MODULE` translation units, so `Rcpp::stop` is undefined under
 `AI4BAYESCODE_PYBIND_MODULE`. `ai4b::stop` dispatches to `ai4b::stop` under the
 R backend (so it still unwinds through R's error handling) and to a C++
-exception otherwise. All 43 shipped examples use it; none uses `Rcpp::stop`.
+exception otherwise. All 42 shipped examples use it; none uses `Rcpp::stop`.
 
 ### 5. Where Rcpp lives in the header tree
 All public `AI4BayesCode` headers under `include/AI4BayesCode/` depend on

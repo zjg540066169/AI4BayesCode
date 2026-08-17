@@ -386,16 +386,6 @@ smoke_test("FiniteGaussianMixture",
     quote(new(FiniteGaussianMixture, y_dp, 3L, colMeans(y_dp),
               0.1, 2.0, 1.0, 1.0, 1L, TRUE)))
 
-# 24. HDPGaussianMixture (truncated HDP across G groups)
-ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
-                              "HDPGaussianMixture.cpp"),
-                    AI4BayesCode_path = AI4BayesCode_dir)
-g_idx_hdp <- as.integer(rep(0:1, each = nrow(y_dp) / 2))
-smoke_test("HDPGaussianMixture",
-    quote(new(HDPGaussianMixture, y_dp, g_idx_hdp, 5L,
-              colMeans(y_dp), 0.1,
-              diag(ncol(y_dp)), 5.0, 1.0, 1.0, 1L, TRUE)))
-
 # 25. LdaCollapsedGibbs (Griffiths-Steyvers 2004 collapsed Gibbs LDA)
 ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
                               "LdaCollapsedGibbs.cpp"),

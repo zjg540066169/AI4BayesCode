@@ -13,7 +13,7 @@ description: |
 > the `AI4BAYESCODE_BIND_KERNEL_CONTROL` macro, the base class hooks in
 > `block_sampler.hpp`, the composite dispatch in `composite_block.hpp`,
 > and the `joint_nuts_block` slot-level override (Approach B per
-> `joint_nuts_block`) are all shipped. 42/43 examples migrated
+> `joint_nuts_block`) are all shipped. 42/42 examples migrated
 > (ARDLasso remains hand-Gibbs; not yet mixin-enrolled). Layer-3 R2.f
 > (frozen-parameter exclusion) is active for any wrapper that freezes
 > at least one child.

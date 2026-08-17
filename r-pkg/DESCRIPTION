@@ -14,7 +14,7 @@ Description: Header-only C++ library for stateful, modular MCMC samplers
     predict_at, get_dag, get_history, and readapt_NUTS for sequential and
     online-learning workflows. Every generated sampler is compiled, run, and
     checked for convergence and posterior-predictive fit before it is
-    delivered. Bundles the runtime, 43 reference examples, and the skill
+    delivered. Bundles the runtime, 42 reference examples, and the skill
     corpus, plus natural-language-to-code generation via
     'ai4bayescode_generate()'.
 License: GPL (>= 3)

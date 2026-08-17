@@ -87,7 +87,6 @@ likelihood and classify:
 | **Hidden discrete latent** (HMM / Ising / Potts / MRF on graph) **+ Normal emission** (Gaussian observation per latent class, possibly with per-class sigma_k) | Low for emission params given z (conjugate); High for z under spatial / sequential prior | **Hybrid composite**: specialized prior block for z (`hmm_block` for HMM, `binary_gibbs_block` for binary Ising/MRF, `categorical_gibbs_block` for K-state Potts) + **`normal_gamma_cluster_gibbs_block`** for per-class `(mu_k, lambda_k)` (Normal-Gamma conjugate; treat z as the partition). Label switching handled via post-hoc sort in runner. AVOID (not recommended) a `joint_nuts_block` with a `delta > 0` ordering constraint here -- NUTS dual-averaging interacts badly with slow-mixing z and can bias the posterior for (mu_k, sigma_k). |
 | **BNP mixture (Dirichlet Process / Pitman-Yor) -- unknown number of components K** | **Allocation z is discrete; pi is a stick-breaking simplex (correlated by construction); (mu, lambda) per cluster are conjugate** | **Truncated SBP (Ishwaran-James 2001)**: `categorical_gibbs_block` (z) + `stick_breaking_block` (pi, with DP or PY a_fn / b_fn) + `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal Normal-Gamma) + `nuts_block` on log(alpha). For alpha as a derived function of other parameters, register a `register_refresher("alpha", ...)`. CRP-marginal Neal Alg 2/8 and Jain-Neal split-merge NOT shipped. See `examples/DPGaussianMixture.cpp` / `examples/PYGaussianMixture.cpp` / `examples/DPGaussianMixture_DerivedAlpha.cpp`. **Caveat**: DP truncated SBP intrinsically over-clusters on well-separated fixtures (see the DP block notes in `block_catalogue/index.md`). When K is known, prefer the finite-K wrapper below. |
 | **Finite-K Gaussian mixture (K known)** | Allocation z discrete; pi Dirichlet conjugate; (mu, lambda) Normal-Gamma conjugate | `categorical_gibbs_block` (z) + `dirichlet_gibbs_block` (pi, posterior alpha/K + counts) + `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal). K and alpha are CONSTRUCTOR ARGS. See `examples/FiniteGaussianMixture.cpp`. **Recovers truth mu within 0.21 sigma on the same fixture where DP over-clusters** -- use this when K is known via domain knowledge or model selection. |
-| **Hierarchical DP (HDP) Gaussian mixture -- clustering with G groups sharing atoms** | Multi-level: top-level beta + per-group pi_j; atoms shared across groups | **Truncated HDP** (Wang-Paisley-Blei 2011 simplified after Teh et al. 2006): `categorical_gibbs_block` (z) + `niw_cluster_gibbs_block` (mu, Sigma shared atoms) + `stick_breaking_block` (beta top-level, **HEURISTIC** update on combined counts) + G x `dirichlet_gibbs_block` (pi_j per group, posterior alpha*beta + counts_j). See `examples/HDPGaussianMixture.cpp`. **V0 caveat**: beta update is heuristic, not the rigorous Antoniak-table CRF (BayesMix is the porting reference for full HDP). |
 | **DPMM with split-merge acceleration (mode-escape via Jain-Neal 2004)** | Cluster partition has slow single-i Gibbs mixing | Add `split_merge_block` as a child AFTER `categorical_gibbs_block` in any DPMM composite (DP / PY / Finite). Both write to `z`; composite allows multi-children writing the same key. See `block_catalogue/index.md` `split_merge_block` Sec. for details and acceptance asymmetry note. |
 | Independent prior branches with no shared latent (e.g. two disjoint submodels) | Low | modular per parameter |
 
@@ -1398,7 +1397,7 @@ prior context). These are VIZ-ONLY: predict_at's BFS never reads
 
 Gold standard: `examples/BartNoise.cpp` (hyperprior slots
 `sigma_nu`/`sigma_lambda` -> `sigma`, forest `BART` -> `f_bart`, all
-disjoint from its three predict edges). 33 of the 43 shipped examples
+disjoint from its three predict edges). 33 of the 42 shipped examples
 declare context edges.
 
 ---
@@ -2126,7 +2125,7 @@ AI4BayesCode::state_map get_current() const {
 Do NOT `return impl_->current_named_outputs();`: `composite_block` does not
 override it, so the base default returns `{ name() -> current() }` -- ONE entry
 keyed by the wrapper's class name, holding the concatenation of every child's
-vector. All 43 shipped examples assemble from `data().get(...)`.
+vector. All 42 shipped examples assemble from `data().get(...)`.
 The canonical, copy-this reference is `examples/GaussianLocationScale.cpp`
 (its `get_current` / `get_history` / `predict_at` / `get_dag` bodies).
 
@@ -2681,7 +2680,7 @@ PYBIND11_MODULE(<ClassName>, m) {
 Python users invoke via `AI4BayesCode.source("MyModel.cpp")` (packaged; no path),
 which sets `-DAI4BAYESCODE_PYBIND_MODULE` at compile time.
 
-#### Dual-module (R + Python from the same .cpp -- all 43 shipped examples)
+#### Dual-module (R + Python from the same .cpp -- all 42 shipped examples)
 
 Guard both blocks; the active backend's `-D` define picks which one
 compiles. See `examples/ODE_SIR.cpp` for a full dual-module reference.
@@ -2720,7 +2719,7 @@ clang++ -std=c++17 -O2 \
 ```
 
 The `int main()` goes in ADDITION to both module blocks, each under its own
-`#ifdef`, exactly as all 43 shipped examples do -- the `#if !defined(...)` fence
+`#ifdef`, exactly as all 42 shipped examples do -- the `#if !defined(...)` fence
 already keeps `main` out of the module builds. Never gate the binding blocks on
 the runtime-backend answer. Useful
 for benchmarking, embedding into a larger C++ program, or Docker

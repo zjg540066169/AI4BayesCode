@@ -1156,14 +1156,6 @@ Modular (codegen default):
   4-chain audit recovers truth mu within 0.21 sigma on the 6-cluster
   N=600 fixture (R-hat 1.0004) -- proves the shared infrastructure
   is unbiased when given correct K.
-- `examples/HDPGaussianMixture.cpp` -- **Hierarchical DP** Gaussian
-  mixture in TRUNCATED form. G groups, T atom slots, atoms shared
-  across groups. Composes `stick_breaking_block` (top-level beta) +
-  G x `dirichlet_gibbs_block` (per-group pi_j) + `niw_cluster_gibbs_block`
-  (full-cov atoms) + `categorical_gibbs_block` (z, group-aware).
-  V0 uses a HEURISTIC beta update on combined counts (not the rigorous
-  Antoniak-table CRF; documented prominently in the example header).
-  4-chain audit recovers K_active mode = 3 on a 3-group / 3-atom fixture.
 
 Joint (opt-in via coupling analysis in `codegen_cpp.md Sec.4a`):
 - `examples/IRT1PL_joint.cpp` -- joint (theta, b) + separate sigma_b

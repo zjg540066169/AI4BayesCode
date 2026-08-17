@@ -332,18 +332,6 @@ results$FiniteGaussianMixture <- check_predict(
               0.1, 2.0, 1.0, 1.0, 1L, TRUE)),
     predict_input = list())
 
-# 24. HDPGaussianMixture (truncated HDP across G groups)
-ai4bayescode_sourceCpp(file.path(AI4BayesCode_dir, "examples",
-                              "HDPGaussianMixture.cpp"),
-                    AI4BayesCode_path = AI4BayesCode_dir)
-g_idx_hdp <- as.integer(rep(0:1, each = nrow(y_dp) / 2))
-results$HDPGaussianMixture <- check_predict(
-    "HDPGaussianMixture",
-    quote(new(HDPGaussianMixture, y_dp, g_idx_hdp, 5L,
-              colMeans(y_dp), 0.1,
-              diag(ncol(y_dp)), 5.0, 1.0, 1.0, 1L, TRUE)),
-    predict_input = list())
-
 # ====== Summary ======
 saveRDS(results, file.path(AI4BayesCode_dir, "audit_xl_F5.rds"))
 cat("\n========== PHASE F5 SUMMARY ==========\n")

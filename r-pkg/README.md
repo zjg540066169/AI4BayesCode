@@ -3,7 +3,7 @@
 R package for the AI4BayesCode block-composite MCMC + variational
 inference library. After install, all C++ headers, vendored
 dependencies (`mcmclib`, `eigen`, `autodiff`, `libgp`, `celerite`,
-`bart`), the AI codegen skill workflow, and 43 reference examples
+`bart`), the AI codegen skill workflow, and 42 reference examples
 ship as package data — **no local `AI4BayesCode/` folder needed**.
 
 ## Install (from GitHub)
