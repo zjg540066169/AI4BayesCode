@@ -107,6 +107,7 @@
 #include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
+#include "AI4BayesCode/rcpp_predict_guard.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 
 // genBART block (Rcpp-free, transitively pulls in the GPL genBART kernel)
@@ -361,6 +362,15 @@ public:
         blk->set_tree(tree_s);
         impl_->data().set("r", blk->current());
     }
+#ifdef AI4BAYESCODE_RCPP_MODULE
+    // R-facing predict_at. An R matrix loses its dim crossing into state_map
+    // (Rcpp flattens it column-major), so the column count is checked HERE,
+    // while the SEXP still has it. See rcpp_predict_guard.hpp.
+    AI4BayesCode::history_map predict_at_r(Rcpp::List new_data) const {
+        return predict_at(ai4b::predict_input(new_data, "X", x_ncol_));
+    }
+#endif
+
 
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
 
@@ -545,7 +555,7 @@ RCPP_MODULE(GBartHeteroscedastic_module) {
         .method("set_tree",    &GBartHeteroscedastic::set_tree,
                 "Restore the genBART forest from a serialized snapshot "
                 "string previously obtained from get_tree().")
-        .method("predict_at",  &GBartHeteroscedastic::predict_at,
+        .method("predict_at",  &GBartHeteroscedastic::predict_at_r,
                 "Predict at new data. Pass list(X = as.vector(X_new)) "
                 "(flattened column-major) for new-X, or an empty list for "
                 "training-X posterior predictive. Const, no state mutation.")

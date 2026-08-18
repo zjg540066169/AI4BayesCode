@@ -111,6 +111,7 @@
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/nuts_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
+#include "AI4BayesCode/rcpp_predict_guard.hpp"
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 
@@ -531,6 +532,15 @@ public:
 
     // Full model DAG: $gibbs_reads, $gibbs_invalidates, $predict_edges,
     // $data_inputs. See composite_block::get_dag() for the semantics.
+#ifdef AI4BAYESCODE_RCPP_MODULE
+    // R-facing predict_at. An R matrix loses its dim crossing into state_map
+    // (Rcpp flattens it column-major), so the column count is checked HERE,
+    // while the SEXP still has it. See rcpp_predict_guard.hpp.
+    AI4BayesCode::history_map predict_at_r(Rcpp::List new_data) const {
+        return predict_at(ai4b::predict_input(new_data, "X", x_ncol_));
+    }
+#endif
+
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
 
     // Update parameters / data inputs from an outer sampler.
@@ -726,7 +736,7 @@ RCPP_MODULE(BartNoise_module) {
         .method("set_tree",    &BartNoise::set_tree,
                 "Restore the BART forest from a serialized snapshot "
                 "string previously obtained from get_tree().")
-        .method("predict_at",  &BartNoise::predict_at,
+        .method("predict_at",  &BartNoise::predict_at_r,
                 "Predict at new data. Pass list(X = as.vector(X_new)) "
                 "(flattened column-major). Returns a named list with "
                 "$f_bart and any derived quantities. Const, no state "

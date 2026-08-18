@@ -115,6 +115,7 @@
 #include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
+#include "AI4BayesCode/rcpp_predict_guard.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 
 // genBART block (Rcpp-free, transitively pulls in the GPL genBART kernel)
@@ -350,6 +351,15 @@ public:
 
     // Full model DAG (gibbs_reads + gibbs_invalidates + predict_edges +
     // data_inputs + context_edges). See composite_block::get_dag().
+#ifdef AI4BAYESCODE_RCPP_MODULE
+    // R-facing predict_at. An R matrix loses its dim crossing into state_map
+    // (Rcpp flattens it column-major), so the column count is checked HERE,
+    // while the SEXP still has it. See rcpp_predict_guard.hpp.
+    AI4BayesCode::history_map predict_at_r(Rcpp::List new_data) const {
+        return predict_at(ai4b::predict_input(new_data, "X", x_ncol_));
+    }
+#endif
+
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
 
     // Predict at new data. Takes a state_map with optional key "X"
@@ -527,7 +537,7 @@ RCPP_MODULE(GBartPoisson_module) {
         .method("set_tree",    &GBartPoisson::set_tree,
                 "Restore the BART forest from a serialized snapshot string "
                 "previously obtained from get_tree().")
-        .method("predict_at",  &GBartPoisson::predict_at,
+        .method("predict_at",  &GBartPoisson::predict_at_r,
                 "Predict log rate and rate at training or new X. Pass "
                 "list(X = as.vector(X_new)) (flattened column-major) for "
                 "test-set prediction, or an empty list for posterior-"

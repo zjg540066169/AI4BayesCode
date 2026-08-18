@@ -85,6 +85,7 @@
 #endif
 
 #include "AI4BayesCode/backend_neutral.hpp"
+#include "AI4BayesCode/rcpp_predict_guard.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"   // also pulls in types.hpp (state_map, ...)
 
 #include <cmath>
@@ -234,6 +235,15 @@ public:
     // Gibbs sampler (no composite_block). Structure mirrors the Gibbs
     // sweep order alpha -> sigma2 -> psi2 -> beta and the generative
     // relationship X -> y_hat used by predict_at.
+#ifdef AI4BAYESCODE_RCPP_MODULE
+    // R-facing predict_at. An R matrix loses its dim crossing into state_map
+    // (Rcpp flattens it column-major), so the column count is checked HERE,
+    // while the SEXP still has it. See rcpp_predict_guard.hpp.
+    AI4BayesCode::history_map predict_at_r(Rcpp::List new_data) const {
+        return predict_at(ai4b::predict_input(new_data, "X", p_));
+    }
+#endif
+
     AI4BayesCode::dag_info get_dag() const {
         AI4BayesCode::dag_info d;
         d.gibbs_reads["alpha"]  = {"Y", "X", "beta", "sigma2"};
@@ -413,7 +423,7 @@ RCPP_MODULE(ARDLasso_module) {
         .method("get_dag",     &ARDLasso::get_dag,
                 "Full model DAG (gibbs_reads / gibbs_invalidates / "
                 "predict_edges / data_inputs).")
-        .method("predict_at",  &ARDLasso::predict_at,
+        .method("predict_at",  &ARDLasso::predict_at_r,
                 "Predict: list(X = as.vector(X_new)) -> list(y_hat, y_rep). "
                 "Returns 1-row matrices in stateful mode, n_draws-row matrices "
                 "in history mode. Empty list -> posterior predictive at "

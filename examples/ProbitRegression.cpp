@@ -106,6 +106,7 @@
 #include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
+#include "AI4BayesCode/rcpp_predict_guard.hpp"
 #include "AI4BayesCode/types.hpp"
 
 #ifdef AI4BAYESCODE_RCPP_MODULE
@@ -492,6 +493,15 @@ public:
         }
         return out;
     }
+#ifdef AI4BAYESCODE_RCPP_MODULE
+    // R-facing predict_at. An R matrix loses its dim crossing into state_map
+    // (Rcpp flattens it column-major), so the column count is checked HERE,
+    // while the SEXP still has it. See rcpp_predict_guard.hpp.
+    AI4BayesCode::history_map predict_at_r(Rcpp::List new_data) const {
+        return predict_at(ai4b::predict_input(new_data, "X", p_));
+    }
+#endif
+
 
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag(); }
     AI4BayesCode::history_map  get_history() const { return impl_->get_history(); }
@@ -542,7 +552,7 @@ RCPP_MODULE(ProbitRegression_module) {
         .method("step", (void (ProbitRegression::*)(int)) &ProbitRegression::step, "Run n sweeps.")
         .method("get_current", &ProbitRegression::get_current)
         .method("set_current", &ProbitRegression::set_current)
-        .method("predict_at",  &ProbitRegression::predict_at)
+        .method("predict_at",  &ProbitRegression::predict_at_r)
         .method("get_dag",     &ProbitRegression::get_dag)
         .method("get_history", &ProbitRegression::get_history)
         .method("readapt_NUTS",

@@ -146,24 +146,31 @@ tryCatch(
 stopifnot(err_caught)
 cat("  Wrong key rejected: OK\n")
 
-# ---- Test 5: a wrong column count is NOT detectable -------------------------
-cat("--- Test 5: wrong column count is silently accepted ---\n")
+# ---- Test 5: a wrong column count is rejected -------------------------------
+cat("--- Test 5: wrong column count is rejected ---\n")
 # predict_at receives a state_map (map<string, arma::vec>), so an R matrix is
-# FLATTENED before C++ sees it and the column count is gone. All the wrapper
-# can check is that the length divides p. Here p = 5 and X_test[, 1:3] is
-# 100 x 3 = 300 elements; 300 %% 5 == 0, so it passes that check and is
-# reshaped into 60 x 5 -- 60 predictions from scrambled columns, no error.
+# FLATTENED before C++ sees it and the column count is gone. The wrapper alone
+# can only check that the length divides p -- and 100 x 3 = 300 elements
+# divides p = 5, so a wrong-shaped X used to be reshaped into 60 x 5 and
+# predicted from silently, columns re-cut across observation boundaries.
 #
-# This test used to assert that the call THROWS. It never did; the assertion
-# simply sat at the end of a script nothing ran. Assert the real behaviour so
-# the limitation is visible, and see the note on predict_at in BartNoise.cpp.
-p_model  <- ncol(X_train)
-bad_X    <- X_test[, 1:3]
-stopifnot((length(bad_X) %% p_model) == 0)      # why it slips through
-bad_pred <- model$predict_at(list(X = bad_X))
-cat(sprintf("  passed %d x %d (%d elements); got %d predictions, no error\n",
-            nrow(bad_X), ncol(bad_X), length(bad_X), length(bad_pred$f_bart)))
-stopifnot(length(bad_pred$f_bart) == length(bad_X) %/% p_model)
+# rcpp_predict_guard.hpp now inspects the SEXP before Rcpp converts it, while
+# the dim attribute is still there, and compares ncol to the training p.
+p_model <- ncol(X_train)
+bad_X   <- X_test[, 1:3]
+stopifnot((length(bad_X) %% p_model) == 0)      # why it used to slip through
+err5 <- tryCatch({ model$predict_at(list(X = bad_X)); "NO ERROR" },
+                 error = function(e) conditionMessage(e))
+cat(sprintf("  %d x %d against p = %d -> %s\n",
+            nrow(bad_X), ncol(bad_X), p_model, substr(err5, 1, 60)))
+stopifnot(grepl("columns", err5), grepl(sprintf("p = %d", p_model), err5))
+
+# The documented flattened form must keep working: once the caller flattens by
+# hand there is no shape left to check, and that stays their responsibility.
+flat_ok <- model$predict_at(list(X = as.vector(X_test)))
+stopifnot(length(flat_ok$f_bart) == nrow(X_test))
+cat(sprintf("  as.vector(X_test) still accepted -> %d predictions\n",
+            length(flat_ok$f_bart)))
 err_caught2 <- TRUE   # kept so the summary line below still reads sensibly
 
 # ---- Test 6: empty predict -------------------------------------------------

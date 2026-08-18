@@ -102,6 +102,7 @@
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
+#include "AI4BayesCode/rcpp_predict_guard.hpp"
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/elliptical_slice_sampling_block.hpp"
@@ -758,6 +759,15 @@ public:
         out.emplace("y_rep",  std::move(yrep_mat));
         return out;
     }
+#ifdef AI4BAYESCODE_RCPP_MODULE
+    // R-facing predict_at. An R matrix loses its dim crossing into state_map
+    // (Rcpp flattens it column-major), so the column count is checked HERE,
+    // while the SEXP still has it. See rcpp_predict_guard.hpp.
+    AI4BayesCode::history_map predict_at_r(Rcpp::List new_data) const {
+        return predict_at(ai4b::predict_input(new_data, "X", p_));
+    }
+#endif
+
 
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
@@ -810,7 +820,7 @@ RCPP_MODULE(GPClassification_module) {
         .method("step", (void (GPClassification::*)(int)) &GPClassification::step, "Run n sweeps.")
         .method("get_current",  &GPClassification::get_current)
         .method("set_current",  &GPClassification::set_current)
-        .method("predict_at",   &GPClassification::predict_at)
+        .method("predict_at",   &GPClassification::predict_at_r)
         .method("get_dag",      &GPClassification::get_dag)
         .method("get_history",  &GPClassification::get_history)
         .method("readapt_NUTS",
