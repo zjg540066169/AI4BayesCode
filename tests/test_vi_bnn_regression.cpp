@@ -294,8 +294,22 @@ int main() {
                 M, J, N, D_w, sigma_y_true);
 
     const std::size_t n_outer = 4000;
+    // Accumulate the POSTERIOR MEAN of the NUTS coordinates, not the last draw.
+    // child(1).current() is one sample, so comparing it to the true scales
+    // compares a draw to a point and its seed-to-seed spread is the posterior
+    // sd -- no number of iterations shrinks that. (The VI child's current() is
+    // a variational parameter, not a draw, so w_fit below is left as it is.)
+    const std::size_t n_burn = n_outer / 3;
+    arma::vec h_acc;
+    std::size_t n_acc = 0;
     for (std::size_t t = 0; t < n_outer; ++t) {
         comp.step(rng);
+        if (t >= n_burn) {
+            const arma::vec& h_cur = comp.child(1).current();
+            if (h_acc.n_elem == 0) h_acc = arma::zeros<arma::vec>(h_cur.n_elem);
+            h_acc += h_cur;
+            ++n_acc;
+        }
         if ((t + 1) % 500 == 0) {
             const auto& w = comp.child(0).current();
             const auto& h = comp.child(1).current();
@@ -309,7 +323,7 @@ int main() {
     const auto* vi_leaf = dynamic_cast<const mean_field_gaussian_vi_block*>(
         &comp.child(0));
     const arma::vec w_fit = vi_leaf->current();
-    const arma::vec h_fit = comp.child(1).current();
+    const arma::vec h_fit = h_acc / static_cast<double>(n_acc);
     const double sigma_y_fit = std::exp(h_fit[off_lsy]);
     const double sigma_a_fit = std::exp(h_fit[off_lsa]);
     const double sigma_b_fit = std::exp(h_fit[off_lsb]);

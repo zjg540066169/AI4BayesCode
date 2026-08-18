@@ -41,6 +41,36 @@
 #include <cstdio>
 #include <random>
 
+// ---------------------------------------------------------------------------
+// Portable draws for the SIMULATED DATA.
+//
+// std::mt19937_64 is specified bit-exactly by the standard, but the
+// DISTRIBUTIONS are not: libstdc++ and libc++ both use the polar method for
+// std::normal_distribution and return its paired variates in OPPOSITE order,
+// so the same seed yields the same numbers in a different sequence. A test
+// that simulates its data with std::normal_distribution therefore fits a
+// DIFFERENT dataset on Linux than on macOS, and no single absolute tolerance
+// on the fitted parameters can be calibrated for both. Building the draws from
+// the engine's raw output removes the library from the picture.
+namespace portable {
+
+/// 53-bit uniform in [0, 1) straight from the engine.
+inline double u01(std::mt19937_64& g) {
+    return static_cast<double>(g() >> 11) * (1.0 / 9007199254740992.0);
+}
+
+/// N(0, 1) by Box-Muller. One variate per call: returning the second of the
+/// pair is what the two standard libraries disagree about, so do not cache it.
+inline double n01(std::mt19937_64& g) {
+    double u1 = u01(g);
+    const double u2 = u01(g);
+    if (u1 < 1e-300) u1 = 1e-300;               // log(0) guard
+    return std::sqrt(-2.0 * std::log(u1)) *
+           std::cos(2.0 * 3.14159265358979323846 * u2);
+}
+
+} // namespace portable
+
 int main() {
     using namespace AI4BayesCode;
 
@@ -61,26 +91,24 @@ int main() {
 
     // ---- Simulate data ----
     std::mt19937_64 rng_data(42);
-    std::normal_distribution<double> N01(0.0, 1.0);
-    std::uniform_real_distribution<double> U01(0.0, 1.0);
 
     arma::ivec group_id(N);
     arma::mat  X(N, P);
     arma::vec  alpha_true(J);
 
     for (std::size_t j = 0; j < J; ++j) {
-        alpha_true[j] = alpha_0_true + sigma_alpha_true * N01(rng_data);
+        alpha_true[j] = alpha_0_true + sigma_alpha_true * portable::n01(rng_data);
     }
     for (std::size_t i = 0; i < N; ++i) {
         group_id[i] = static_cast<int>(i / n_per);
-        for (std::size_t p = 0; p < P; ++p) X(i, p) = N01(rng_data);
+        for (std::size_t p = 0; p < P; ++p) X(i, p) = portable::n01(rng_data);
     }
     arma::ivec y_obs(N);
     for (std::size_t i = 0; i < N; ++i) {
         const double eta_i = alpha_true[group_id[i]] +
                              arma::dot(X.row(i).t(), beta_true);
         const double p_i = 1.0 / (1.0 + std::exp(-eta_i));
-        y_obs[i] = (U01(rng_data) < p_i) ? 1 : 0;
+        y_obs[i] = (portable::u01(rng_data) < p_i) ? 1 : 0;
     }
 
     // ---- VI block: log p(z | y, X, β, α_0, σ_α)  (non-centered) ----
@@ -249,8 +277,25 @@ int main() {
                 beta_true[0], beta_true[1], beta_true[2]);
 
     const std::size_t n_outer = 3000;
+    // Accumulate the POSTERIOR MEAN of the NUTS coordinates, not the last draw.
+    // child(1).current() is one sample from the posterior, so comparing it to
+    // the true parameters compares a draw to a point: its seed-to-seed spread IS
+    // the posterior sd (measured: 0.18-0.28 per coordinate), and no number of
+    // iterations shrinks it. That is what made this test fail on ~30% of MCMC
+    // seeds and made it sensitive to the standard library's RNG stream.
+    // Averaging the post-burn-in draws shrinks the spread by 8-60x and leaves
+    // the existing tolerances with roughly a 3x margin.
+    const std::size_t n_burn = n_outer / 3;
+    arma::vec h_acc;
+    std::size_t n_acc = 0;
     for (std::size_t t = 0; t < n_outer; ++t) {
         comp.step(rng);
+        if (t >= n_burn) {
+            const arma::vec& h_cur = comp.child(1).current();
+            if (h_acc.n_elem == 0) h_acc = arma::zeros<arma::vec>(h_cur.n_elem);
+            h_acc += h_cur;
+            ++n_acc;
+        }
         if ((t + 1) % 500 == 0) {
             const auto& a = comp.child(0).current();
             const auto& h = comp.child(1).current();
@@ -264,7 +309,7 @@ int main() {
     const auto* vi_leaf = dynamic_cast<const mean_field_gaussian_vi_block*>(
         &comp.child(0));
     const arma::vec a_fit  = vi_leaf->current();
-    const arma::vec h_fit  = comp.child(1).current();
+    const arma::vec h_fit  = h_acc / static_cast<double>(n_acc);
     const arma::vec b_fit  = h_fit.subvec(off_beta, off_beta + P - 1);
     const double a0_fit    = h_fit[off_a0];
     const double sa_fit    = std::exp(h_fit[off_lsa]);
