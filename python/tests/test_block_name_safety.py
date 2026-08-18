@@ -97,3 +97,76 @@ def test_a_real_block_still_removes(library):
 def test_check_block_name_accepts_ordinary_names():
     for ok in ("particle_gibbs_block", "nngp_gaussian_gibbs_block", "b1", "A-B"):
         assert _check_block_name(ok) == ok
+
+
+# ---------------------------------------------------------------------------
+# A registry that cannot be reached is not the same as a block that is absent
+# ---------------------------------------------------------------------------
+def test_unreachable_registry_is_not_reported_as_a_missing_block(monkeypatch):
+    """install_block used to answer "Block 'x' is not in the registry" for ANY
+    failure of the manifest fetch. Offline, behind a proxy, or during a GitHub
+    outage the message is identical to a typo, so the user goes looking for a
+    misspelling that is not there. The registry INDEX settles which it is."""
+    import importlib
+    m = importlib.import_module("AI4BayesCode.install_block")
+    dead = "https://127.0.0.1:9/unreachable"
+    monkeypatch.setattr(m, "_raw_url", lambda p: dead)
+    monkeypatch.setattr(m, "_tree_url", lambda *a, **k: dead)
+
+    with pytest.raises(ConnectionError) as ei:
+        m.install_block("beta_gibbs_block")
+    msg = str(ei.value)
+    assert "Cannot reach" in msg
+    assert "is unknown" in msg
+    assert "not in the registry" not in msg
+
+
+def test_a_reachable_registry_still_reports_a_genuinely_absent_block(monkeypatch):
+    """The other direction: with the index reachable, an absent block must
+    still say so -- otherwise the fix would hide real typos behind a network
+    complaint."""
+    import importlib
+    m = importlib.import_module("AI4BayesCode.install_block")
+    monkeypatch.setattr(m, "_raw_url", lambda p: "https://127.0.0.1:9/unreachable")
+    monkeypatch.setattr(m, "available_blocks", lambda: ["beta_gibbs_block"])
+
+    with pytest.raises(ValueError) as ei:
+        m.install_block("no_such_block_xyz")
+    msg = str(ei.value)
+    assert "not in the registry" in msg
+    assert "beta_gibbs_block" in msg
+
+
+# ---------------------------------------------------------------------------
+# A project-local block is installed; it is just not the download cache's
+# ---------------------------------------------------------------------------
+def test_removing_a_project_local_block_says_where_it_is(tmp_path, monkeypatch, capsys):
+    """installed_blocks() lists both tiers and the local tier reaches the
+    compiler, so answering "not installed" here flatly contradicts what the user
+    was just shown, and leaves them with no idea how to get rid of it."""
+    import importlib
+    m = importlib.import_module("AI4BayesCode.install_block")
+    local = tmp_path / "blocks_local" / "toy_block"
+    local.mkdir(parents=True)
+    (local / "toy_block.hpp").write_text("// x\n")
+    dl = tmp_path / "dh" / "blocks_download" / "other_block"
+    dl.mkdir(parents=True)
+    (dl / "other_block.hpp").write_text("// x\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AI4BAYESCODE_DATA_HOME", str(tmp_path / "dh"))
+
+    assert "toy_block" in m.installed_blocks()
+    assert m.remove_block("toy_block") is False
+    assert "project-local block" in capsys.readouterr().out
+    assert local.is_dir()                       # nothing was deleted
+    assert m.installed_blocks("download") == ["other_block"]
+
+
+def test_a_name_in_neither_tier_still_reports_not_installed(tmp_path, monkeypatch, capsys):
+    import importlib
+    m = importlib.import_module("AI4BayesCode.install_block")
+    (tmp_path / "dh" / "blocks_download").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AI4BAYESCODE_DATA_HOME", str(tmp_path / "dh"))
+    assert m.remove_block("really_not_here") is False
+    assert "is not installed" in capsys.readouterr().out

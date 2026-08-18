@@ -222,8 +222,16 @@ def prompt(model_description: str, *, backend: str = "both", output_path: str = 
     backend = {"r": "R", "python": "Python", "both": "both"}.get(str(backend).strip().lower(), backend)
     if backend not in ("R", "Python", "both"):
         raise ValueError("backend must be 'R', 'Python', or 'both'")
-    if isinstance(model_description, str) and os.path.isfile(model_description) and \
-            model_description.endswith((".txt", ".md")):
+    if isinstance(model_description, str) and \
+            model_description.endswith((".txt", ".md")) and \
+            not any(c.isspace() for c in model_description):
+        # It ends in .txt/.md and has no whitespace, so it was meant as a path.
+        # Falling through would silently use the PATH ITSELF as the model
+        # description and build a prompt around "/no/such/file.md".
+        if not os.path.isfile(model_description):
+            raise FileNotFoundError(
+                "model_description looks like a file path but no such file "
+                f"exists: {model_description}")
         model_description = Path(model_description).read_text()
     if not isinstance(model_description, str) or not model_description.strip():
         raise ValueError("model_description must be a non-empty model description")
@@ -1288,8 +1296,14 @@ def generate(model_description: str | None = None, *, classname: str | None = No
     ``function(cpp_path, runner_path, classname, verbose)`` returning
     ``{ok, stage, detail}``) exercise the loop offline.
 
-    Returns ``{cpp_path, files, prompt, called_api, transcript, validated, attempts,
-    validation}``.
+    Returns a dict in one of two shapes; ``called_api`` says which.
+
+    ``called_api=True`` (a model was called): ``{cpp_path, files, prompt,
+    called_api, transcript, validated, attempts, validation}``.
+
+    ``called_api=False`` (no API key, so the prompt was written out instead of
+    generating): ``{prompt_path, readme_path, prompt, called_api}``. There is no
+    ``cpp_path`` in this case -- nothing was generated.
     """
     if interactive is None:
         # Match R's interactive(): ask questions in a REPL. sys.stdin.isatty() is

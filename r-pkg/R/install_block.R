@@ -189,10 +189,25 @@ ai4bayescode_blocks_path <- function(name = NULL) {
     if (!requireNamespace("jsonlite", quietly = TRUE))
         stop("install_block needs the 'jsonlite' package. install.packages('jsonlite')",
              call. = FALSE)
-    tr <- tryCatch(jsonlite::fromJSON(.ai4b_tree_url()),
-                   error = function(e)
+    # The GitHub API allows 60 unauthenticated requests per hour PER IP, which a
+    # shared or institutional address can exhaust without the user doing
+    # anything unusual. A token raises that to 5000/hr, and the failure it
+    # prevents (HTTP 403) otherwise reads as an unexplained network error.
+    hdrs <- c("User-Agent" = "AI4BayesCode-install_block")
+    tok  <- Sys.getenv("GITHUB_PAT", Sys.getenv("GITHUB_TOKEN", ""))
+    if (nzchar(tok)) hdrs <- c(hdrs, Authorization = paste("Bearer", tok))
+    tr <- tryCatch(jsonlite::fromJSON(url(.ai4b_tree_url(), headers = hdrs)),
+                   error = function(e) {
+                       msg <- conditionMessage(e)
+                       hint <- if (grepl("403|rate limit", msg, ignore.case = TRUE) &&
+                                   !nzchar(tok))
+                           paste0("\n  This looks like GitHub's unauthenticated ",
+                                  "rate limit (60 requests/hour per IP). Set ",
+                                  "GITHUB_PAT to a personal access token to raise it.")
+                       else ""
                        stop("Could not reach the AI4BayesCode block registry: ",
-                            conditionMessage(e), call. = FALSE))
+                            msg, hint, call. = FALSE)
+                   })
     if (isTRUE(tr$truncated))
         warning("registry listing was truncated by GitHub; some blocks may be hidden.",
                 call. = FALSE)
@@ -299,11 +314,25 @@ ai4bayescode_install_block <- function(name, force = FALSE, quiet = FALSE) {
         return(invisible(dest))
     }
     # 1. manifest (also the existence check)
+    man_err <- NULL
     man_txt <- tryCatch(readLines(.ai4b_raw_url(sprintf("registry/%s/manifest.dcf", name)),
                                   warn = FALSE),
-                        error = function(e) NULL)
+                        error = function(e) { man_err <<- conditionMessage(e); NULL })
     if (is.null(man_txt)) {
-        avail <- tryCatch(ai4bayescode_available_blocks(), error = function(e) character())
+        # The fetch failing does NOT mean the block is absent -- being offline,
+        # behind a proxy, or hitting a GitHub outage fails identically. The
+        # registry INDEX settles it: if that is reachable, the block is really
+        # not there; if it is not, this is a connectivity problem and saying
+        # "not in the registry" sends the user hunting for a typo.
+        idx_err <- NULL
+        avail <- tryCatch(ai4bayescode_available_blocks(),
+                          error = function(e) { idx_err <<- conditionMessage(e); NULL })
+        if (is.null(avail)) {
+            stop("Cannot reach the AI4BayesCode block registry, so whether '",
+                 name, "' exists is unknown. Check your network connection ",
+                 "(and any proxy), then retry.\n  manifest fetch: ", man_err,
+                 "\n  registry index: ", idx_err, call. = FALSE)
+        }
         stop("Block '", name, "' is not in the registry.",
              if (length(avail))
                  paste0("\nAvailable (", length(avail), "): ", paste(avail, collapse = ", "))
@@ -366,6 +395,19 @@ ai4bayescode_remove_block <- function(name) {
              root, call. = FALSE)
     }
     if (!dir.exists(dest)) {
+        # A project-local block IS installed -- it is on the compile include
+        # path and ai4bayescode_installed_blocks() lists it -- but it lives in
+        # the user's own project, not the download cache, so this function does
+        # not delete it. Saying "not installed" would flatly contradict what
+        # installed_blocks() just reported.
+        local_dir <- file.path("blocks_local", name)
+        if (dir.exists(local_dir)) {
+            message("Block '", name, "' is a project-local block at ",
+                    normalizePath(local_dir, winslash = "/", mustWork = FALSE),
+                    ".\n  ai4bayescode_remove_block() manages the download ",
+                    "cache only; delete that directory to remove it.")
+            return(invisible(FALSE))
+        }
         message("Block '", name, "' is not installed.")
         return(invisible(FALSE))
     }

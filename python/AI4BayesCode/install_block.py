@@ -152,8 +152,19 @@ def _tree_url() -> str:
     return f"https://api.github.com/repos/{_HUB_REPO}/git/trees/{_HUB_REF}?recursive=1"
 
 
+def _github_token() -> str:
+    return os.environ.get("GITHUB_PAT") or os.environ.get("GITHUB_TOKEN") or ""
+
+
 def _fetch(url: str, binary: bool = False):
-    req = urllib.request.Request(url, headers={"User-Agent": "AI4BayesCode-install_block"})
+    # The GitHub API allows 60 unauthenticated requests per hour PER IP, which a
+    # shared or institutional address can exhaust without the user doing anything
+    # unusual. A token raises that to 5000/hr.
+    headers = {"User-Agent": "AI4BayesCode-install_block"}
+    tok = _github_token()
+    if tok:
+        headers["Authorization"] = f"Bearer {tok}"
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=60) as r:  # noqa: S310 (trusted host)
         data = r.read()
     return data if binary else data.decode("utf-8")
@@ -163,7 +174,13 @@ def _hub_tree() -> list[dict]:
     try:
         tr = json.loads(_fetch(_tree_url()))
     except Exception as e:  # noqa: BLE001
-        raise RuntimeError(f"Could not reach the AI4BayesCode block registry: {e}") from e
+        hint = ""
+        if not _github_token() and ("403" in str(e) or "rate limit" in str(e).lower()):
+            hint = ("\n  This looks like GitHub's unauthenticated rate limit "
+                    "(60 requests/hour per IP). Set GITHUB_PAT to a personal "
+                    "access token to raise it.")
+        raise RuntimeError(
+            f"Could not reach the AI4BayesCode block registry: {e}{hint}") from e
     if tr.get("truncated"):
         print("warning: registry listing truncated by GitHub; some blocks may be hidden.",
               file=sys.stderr)
@@ -291,11 +308,21 @@ def install_block(name: str, force: bool = False, quiet: bool = False) -> str:
     # 1. manifest (also the existence check)
     try:
         man_txt = _fetch(_raw_url(f"registry/{name}/manifest.dcf"))
-    except Exception:  # noqa: BLE001
+    except Exception as man_err:  # noqa: BLE001
+        # The fetch failing does NOT mean the block is absent -- being offline,
+        # behind a proxy, or hitting a GitHub outage fails identically. The
+        # registry INDEX settles it: if that is reachable, the block is really
+        # not there; if it is not, this is a connectivity problem and saying
+        # "not in the registry" sends the user hunting for a typo.
         try:
             avail = available_blocks()
-        except Exception:  # noqa: BLE001
-            avail = []
+        except Exception as idx_err:  # noqa: BLE001
+            raise ConnectionError(
+                f"Cannot reach the AI4BayesCode block registry, so whether "
+                f"'{name}' exists is unknown. Check your network connection "
+                f"(and any proxy), then retry."
+                f"\n  manifest fetch: {man_err}"
+                f"\n  registry index: {idx_err}") from None
         extra = f"\nAvailable ({len(avail)}): {', '.join(avail)}" if avail else ""
         raise ValueError(f"Block '{name}' is not in the registry.{extra}") from None
     man = _read_dcf(man_txt)
@@ -345,6 +372,16 @@ def remove_block(name: str) -> bool:
         raise ValueError(
             f"refusing to remove {dest!r}: not a block directory under {root}")
     if not os.path.isdir(dest):
+        # A project-local block IS installed -- it is on the compile include
+        # path and installed_blocks() lists it -- but it lives in the user's own
+        # project, not the download cache, so this function does not delete it.
+        # Saying "not installed" would flatly contradict installed_blocks().
+        local_dir = os.path.join("blocks_local", name)
+        if os.path.isdir(local_dir):
+            print(f"Block '{name}' is a project-local block at "
+                  f"{os.path.abspath(local_dir)}.\n  remove_block() manages the "
+                  f"download cache only; delete that directory to remove it.")
+            return False
         print(f"Block '{name}' is not installed.")
         return False
     # A symlinked block dir must be unlinked, not rmtree'd: shutil.rmtree raises

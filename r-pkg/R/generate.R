@@ -377,7 +377,15 @@ ai4bayescode_prompt <- function(model_description,
     backend <- .ai4b_norm_backend(backend)
     backend <- match.arg(backend)
     if (is.character(model_description) && length(model_description) == 1L &&
-        file.exists(model_description) && grepl("\\.(txt|md)$", model_description)) {
+        grepl("\\.(txt|md)$", model_description) &&
+        !grepl("[[:space:]]", model_description)) {
+        # It ends in .txt/.md and has no whitespace, so it was meant as a path.
+        # Falling through would silently use the PATH ITSELF as the model
+        # description and build a prompt around "/no/such/file.md".
+        if (!file.exists(model_description)) {
+            stop("`model_description` looks like a file path but no such file ",
+                 "exists: ", model_description, call. = FALSE)
+        }
         model_description <- paste(readLines(model_description, warn = FALSE), collapse = "\n")
     }
     if (!is.character(model_description) || length(model_description) != 1L ||

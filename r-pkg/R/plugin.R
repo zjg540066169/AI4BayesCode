@@ -32,7 +32,11 @@ inlineCxxPlugin <- function() {
         paste0("-I", celerite_inc),
         paste0("-I", libgp_inc),
         "-DMCMC_ENABLE_ARMA_WRAPPERS",
-        "-DARMA_DONT_USE_WRAPPER",
+        # Trailing "=" makes this an EMPTY replacement, matching
+        # RcppArmadillo's own `#define ARMA_DONT_USE_WRAPPER`. A bare -D
+        # expands to "1", a different token sequence, and every single user
+        # compile then opens with a macro-redefinition warning.
+        "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_RCPP_MODULE"
     )
 

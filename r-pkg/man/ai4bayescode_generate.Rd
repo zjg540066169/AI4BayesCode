@@ -88,9 +88,17 @@ injectable `function(cpp_path, runner_path, classname, verbose)` returning
 offline without real compilation).}
 }
 \value{
-Invisibly: `cpp_path`, `files`, `prompt`, `called_api`, `transcript`,
-  `validated` (did the final attempt pass), `attempts` (number used), and
-  `validation` (the final `list(ok, stage, detail)`).
+Invisibly, an `ai4bayescode_generate` list. Check `called_api` first: it
+  tells you which of two shapes you have.
+
+  `called_api = TRUE` (a model was called): `cpp_path`, `files`, `prompt`,
+  `called_api`, `transcript`, `validated` (did the final attempt pass),
+  `attempts` (number used), and `validation` (the final
+  `list(ok, stage, detail)`).
+
+  `called_api = FALSE` (no API key, so the prompt was written out instead of
+  generating): `prompt_path`, `readme_path`, `prompt`, `called_api`. There is
+  no `cpp_path` in this case -- nothing was generated.
 }
 \description{
 LLM-agnostic NL -> code front door. With `interactive = TRUE` (default in an

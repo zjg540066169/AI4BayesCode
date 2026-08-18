@@ -91,7 +91,11 @@ ai4bayescode_source_checkout <- function(cpp_file,
         if (dir.exists(inc_libgp)) paste0("-I", shQuote(inc_libgp)) else character(),
         if (dir.exists(inc_celerite)) paste0("-I", shQuote(inc_celerite)) else character(),
         "-DMCMC_ENABLE_ARMA_WRAPPERS",
-        "-DARMA_DONT_USE_WRAPPER",
+        # Trailing "=" makes this an EMPTY replacement, matching
+        # RcppArmadillo's own `#define ARMA_DONT_USE_WRAPPER`. A bare -D
+        # expands to "1", a different token sequence, and every single user
+        # compile then opens with a macro-redefinition warning.
+        "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_RCPP_MODULE",
         extra_cppflags
     )

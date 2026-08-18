@@ -202,7 +202,11 @@ def _compile_flags(include_root: Path) -> list[str]:
         flags.append(f"-I{arma}")
     flags += [
         "-DMCMC_ENABLE_ARMA_WRAPPERS",
-        "-DARMA_DONT_USE_WRAPPER",
+        # Trailing "=" makes this an EMPTY replacement, matching
+        # RcppArmadillo's own `#define ARMA_DONT_USE_WRAPPER`. A bare -D
+        # expands to "1", a different token sequence, and every single user
+        # compile then opens with a macro-redefinition warning.
+        "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_PYBIND_MODULE",   # the only macro that differs from R
         "-std=c++17",
         "-O2",

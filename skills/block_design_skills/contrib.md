@@ -106,11 +106,16 @@ Stage B AI reads the surviving SelectWhen triggers, AUTO-selects ONE
  crisp "use this WHEN `<model structure>`" trigger is the decision-relevant text. block_design
  FORCES a clear `SelectWhen` per block -- a vague one means the block is never selected (it's a
  bundle quality bar, not boilerplate).
-- **A compact auto-generated index** is what the agent actually reads: ONE short line per
- block (`Block | EngineKind | ConstraintKinds | RoutingKey`), aggregated from core
- `block_catalogue/index.md` + every `blocks_local/*/manifest.dcf`, auto-rebuilt on add/remove (no
- manual drift). `SelectWhen` is loaded only for the Stage-A survivors. Context stays bounded
- regardless of block count N -- ONE small file, not N files, not N prose entries.
+- **A compact aggregated index** is what the agent reads: ONE short line per block
+ (`Block | EngineKind | ConstraintKinds | RoutingKey`), covering core
+ `block_catalogue/index.md` plus every `blocks_local/*/manifest.dcf`. `SelectWhen` is
+ loaded only for the Stage-A survivors, so context stays bounded regardless of block
+ count N -- ONE small file, not N files, not N prose entries.
+ **[NOT BUILT]** Today only the core `block_catalogue/index.md` exists, and it is
+ maintained by hand; `ai4bayescode_install_block()` / `ai4bayescode_remove_block()`
+ do not rebuild anything, so a contributed block is discovered through its manifest on
+ the include path, not through an index entry. Rebuilding the aggregate on add/remove
+ is the piece that is still missing.
 - When a local block is auto-selected, its block-local skill (`skills/<Block>.md`) loads
  **on demand alongside the block code** -- never preloaded (token discipline; see skill.md Sec.4,
  the two-stage selection/loading contract).
