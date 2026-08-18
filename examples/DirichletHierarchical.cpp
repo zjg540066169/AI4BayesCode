@@ -2,14 +2,12 @@
 // Licensed under the GNU General Public License v3.0 or later
 // (GPL-3.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
-//  DirichletHierarchical_joint.cpp
+//  DirichletHierarchical.cpp
 //
-//  JOINT-NUTS rewrite of DirichletHierarchical.cpp. Same model, same priors,
-//  same posterior -- but (s, kappa, theta) are sampled by ONE joint_nuts_block
-//  instead of three separate single nuts_blocks updated Gibbs-style. This
-//  collapses the three tightly-coupled parameters (s and kappa share a
+//  Hierarchical Dirichlet model. (s, kappa, theta) are sampled together by a
+//  single joint_nuts_block: they are tightly coupled -- s and kappa share a
 //  kappa*s_i argument to lgamma, and s and theta share the Dirichlet prior
-//  alpha = theta/P) into a single HMC trajectory.
+//  alpha = theta/P -- so one HMC trajectory mixes the dependence directly.
 //
 //  Model (identical to DirichletHierarchical.cpp)
 //  -----------------------------------------------

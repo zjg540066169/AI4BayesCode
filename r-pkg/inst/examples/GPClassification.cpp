@@ -2,14 +2,13 @@
 // Licensed under the GNU General Public License v3.0 or later
 // (GPL-3.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
-// GPClassification_joint.cpp
+// GPClassification.cpp
 //
-// JOINT-NUTS rewrite of GPClassification.cpp. Same model, same priors,
-// same posterior -- but amplitude and lengthscale are sampled by ONE
-// joint_nuts_block instead of two separate single nuts_blocks alternated
-// Gibbs-style. The elliptical_slice_sampling_block for f stays separate.
+// Gaussian-process classification with a logit link. The amplitude and
+// lengthscale hyperparameters are sampled together by one joint_nuts_block;
+// the latent field f is sampled by an elliptical_slice_sampling_block.
 //
-// MODEL (identical to GPClassification.cpp)
+// MODEL
 // ------------------------------------------
 //   y_i | f(x_i)  ~ Bernoulli(sigmoid(f(x_i))),   y_i in {0, 1}
 //   f             ~ GP(0, K_amplitude_lengthscale(X, X))

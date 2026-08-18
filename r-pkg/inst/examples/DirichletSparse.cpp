@@ -2,14 +2,13 @@
 // Licensed under the GNU General Public License v3.0 or later
 // (GPL-3.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
-//  DirichletSparse_joint.cpp
+//  DirichletSparse.cpp
 //
-//  JOINT-NUTS rewrite of DirichletSparse.cpp. Same model/priors/posterior, but
-//  (s, theta) are sampled by ONE joint_nuts_block (sub-params SIMPLEX + POSITIVE)
-//  instead of two separate single nuts_blocks alternated Gibbs-style. s and theta
-//  are tightly coupled through alpha = theta/P, so a single joint NUTS trajectory
-//  mixes the dependence directly. This also exercises the dim-CHANGING SIMPLEX
-//  constraint as a joint sub-param (unconstrained width P-1, natural width P).
+//  Sparse Dirichlet model. (s, theta) are sampled together by one
+//  joint_nuts_block (sub-params SIMPLEX + POSITIVE): they are tightly coupled
+//  through alpha = theta/P, so a single joint NUTS trajectory mixes the
+//  dependence directly. The SIMPLEX sub-param is dimension-changing --
+//  unconstrained width P-1, natural width P.
 //
 //  Model (identical to DirichletSparse.cpp)
 //  ----------------------------------------

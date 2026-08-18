@@ -4,12 +4,10 @@
 // ============================================================================
 //  GaussianLocationScale.cpp
 //
-//  JOINT-NUTS rewrite of GaussianLocationScale.cpp. Same model, same priors,
-//  same posterior -- but mu and sigma are sampled by ONE joint_nuts_block
-//  instead of two separate single nuts_blocks updated Gibbs-style. This is the
-//  "collapse a bunch of single nuts_blocks into one joint_nuts_block" refactor.
+//  Gaussian location-scale model. mu and sigma are sampled together by a
+//  single joint_nuts_block, which mixes their posterior correlation directly.
 //
-//  Model (identical to GaussianLocationScale.cpp)
+//  Model
 //  ---------------------------------------------
 //      y_i | mu, sigma  ~ Normal(mu, sigma^2),      i = 1..N
 //      mu               ~ Normal(0, 100^2)

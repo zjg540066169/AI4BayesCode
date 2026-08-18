@@ -141,11 +141,14 @@ int main() {
         order_mcmc_block_config cfg;
         cfg.data = sim_chain_discrete(100, n, 3u);
         cfg.cardinalities = arma::uvec(n); cfg.cardinalities.fill(2u);
-        order_mcmc_block blk(cfg);        // method defaults to order
+        order_mcmc_block blk(cfg);        // method defaults to PARTITION
         std::mt19937_64 rng(5); blk.step(rng);
         const auto out = blk.current_named_outputs(rng);
-        check(out.count("order") && !out.count("order_party"),
-              "default is order mode (no 'order_party' key)");
+        // The default is partition because it is the unbiased sampler; order
+        // mode is the opt-in. Partition publishes the labelled partition
+        // alongside the order, so "order_party" is present by default.
+        check(out.count("order") && out.count("order_party"),
+              "default is partition mode ('order_party' key present)");
     }
 
     std::printf("\n====== Summary: %d PASS / %d FAIL ======\n", g_pass, g_fail);

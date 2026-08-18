@@ -206,6 +206,12 @@ static EdgeMargs run_order_mcmc_edges(
         std::size_t n, std::size_t M_burn, std::size_t M_post,
         double alpha, std::uint64_t init_seed, std::uint64_t step_seed) {
     order_mcmc_block_config cfg;
+    // Pinned to `order` explicitly: this file validates order MCMC's target,
+    // which INCLUDES the |linear_extensions(G)| weighting (see the strategy
+    // note at the top). The block DEFAULT is now `partition`, whose target
+    // does NOT carry that factor -- following the default here would check
+    // the wrong distribution.
+    cfg.method = order_mcmc_block_config::method_t::order;
     cfg.name = "order";
     cfg.data = D;
     cfg.cardinalities = cards;
@@ -467,6 +473,12 @@ static void D4_ess() {
     const arma::uvec cards(n, arma::fill::value(2));
 
     order_mcmc_block_config cfg;
+    // Pinned to `order` explicitly: this file validates order MCMC's target,
+    // which INCLUDES the |linear_extensions(G)| weighting (see the strategy
+    // note at the top). The block DEFAULT is now `partition`, whose target
+    // does NOT carry that factor -- following the default here would check
+    // the wrong distribution.
+    cfg.method = order_mcmc_block_config::method_t::order;
     cfg.name = "order";
     cfg.data = D;
     cfg.cardinalities = cards;

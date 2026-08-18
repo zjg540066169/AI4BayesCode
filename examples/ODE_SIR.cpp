@@ -4,11 +4,11 @@
 // ============================================================================
 //  ODE_SIR.cpp
 //
-//  JOINT-NUTS rewrite of ODE_SIR.cpp. Same model, same priors, same posterior,
-//  but (beta, gamma, sigma) are sampled by ONE joint_nuts_block instead of two
-//  separate nuts_blocks alternated Gibbs-style.
+//  SIR compartmental ODE model fitted to prevalence data. (beta, gamma, sigma)
+//  are sampled together by one joint_nuts_block, so the strong beta-gamma
+//  correlation the ODE induces is traversed within a single HMC trajectory.
 //
-//  Model (identical to ODE_SIR.cpp)
+//  Model
 //  ---------------------------------
 //      dS/dt = -beta * S * I / N
 //      dI/dt =  beta * S * I / N  -  gamma * I

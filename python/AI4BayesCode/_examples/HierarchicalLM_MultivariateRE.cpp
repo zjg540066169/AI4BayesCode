@@ -22,7 +22,7 @@
 //      L       ~ Cholesky factor, R = L L', R ~ LKJ(eta=2)
 //      sigma   ~ Jeffreys,  p(sigma) ~ 1/sigma
 //
-//  KEY DESIGN DECISIONS (informed by 2026-04-22 debug + convergence trials)
+//  KEY DESIGN DECISIONS
 //  ------------------------------------------------------------------------
 //  (a) NON-CENTERED on (tau, L, z): u_j = diag(tau) L z_j avoids the
 //      funnel geometry.

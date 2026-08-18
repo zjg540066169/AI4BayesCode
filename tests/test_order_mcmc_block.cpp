@@ -55,6 +55,10 @@ static order_mcmc_block_config make_chain_cfg(std::size_t n, std::size_t N,
                                                 std::uint64_t seed,
                                                 bool with_initial = false) {
     order_mcmc_block_config cfg;
+    // Pinned to `order` explicitly: these tests were written against order
+    // MCMC's own target. The block DEFAULT is now `partition` (unbiased);
+    // partition has its own test at test_order_mcmc_block_partition.cpp.
+    cfg.method = order_mcmc_block_config::method_t::order;
     cfg.name = "order";
     cfg.data = sim_chain_data(N, n, seed);
     cfg.cardinalities = arma::uvec(n, arma::fill::value(2));

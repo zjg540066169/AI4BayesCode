@@ -56,8 +56,9 @@
  *      THE TWO PRIORS PRODUCE DIFFERENT POSTERIORS. Codegen agents
  *      MUST `AskUserQuestion` when the spec doesn't disambiguate
  *      (see codegen_priors.md §3a Class 5a).
- *  v1.2.1 (SHIPPED) — opt-in via config, defaults preserve v1 exactly:
- *    * cfg.method = partition — Kuipers-Moffa 2017 partition MCMC. Samples
+ *  v1.2.1 (SHIPPED):
+ *    * cfg.method = partition — Kuipers-Moffa 2017 partition MCMC, and the
+ *      DEFAULT since it is the unbiased one (see cfg.method). Samples
  *      labelled node partitions (split/join + swap + single-node +
  *      Sec.5 edge-reversal moves), removing the order-prior bias inside
  *      Markov equivalence classes (KNOWN BIAS below). UNBIASED: verified vs
@@ -82,6 +83,9 @@
  *
  *  KNOWN BIAS (per spec §1.6, FK §4.1 last 3 paragraphs)
  *  ====================================================
+ *  This section applies to method=order, which is now an OPT-IN choice --
+ *  the default is the unbiased partition sampler.
+ *
  *  In method=order the order prior is uniform over orders; the INDUCED
  *  structure prior is NOT hypothesis-equivalent (different Markov-equivalent
  *  DAGs receive different prior weight in proportion to how many orders they
@@ -289,7 +293,21 @@ struct order_mcmc_block_config {
     /// partitions of the nodes, removing the order-prior bias inside Markov
     /// equivalence classes (unbiased DAG posterior; see partition_state.hpp).
     enum class method_t { order, partition };
-    method_t method = method_t::order;
+    // DEFAULT = partition (Kuipers-Moffa 2017), because it is UNBIASED.
+    //
+    // method_t::order is Friedman-Koller 2003 order MCMC, whose induced
+    // structure prior weights each DAG by its number of linear extensions --
+    // a DAG consistent with many topological orders is counted once per
+    // order. That is inherent to the algorithm, not an implementation defect,
+    // and it means a spec asking for a uniform P(G) does NOT get one. The
+    // skeleton is recovered faithfully either way (7/7 vs bnlearn on ASIA);
+    // the bias lives in edge orientation INSIDE a Markov equivalence class.
+    //
+    // partition costs 7-18x more per sweep (measured at n = 5, 8, 12 on
+    // 2-state chain data), so `order` remains a supported choice when you
+    // only need the skeleton, are reproducing a published order-MCMC result,
+    // or are cross-checking against BiDAG::orderMCMC. Set it explicitly.
+    method_t method = method_t::partition;
 
     /// Continuous (Gaussian) data, N x n. If NON-EMPTY, the block scores with
     /// the BGe score (Geiger-Heckerman 2002) over this data INSTEAD of BDeu over

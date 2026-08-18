@@ -2,13 +2,11 @@
 // Licensed under the GNU General Public License v3.0 or later
 // (GPL-3.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
-//  DirichletSimplex_v2.cpp
+//  DirichletSimplex.cpp
 //
-//  JOINT-NUTS rewrite of DirichletSimplex.cpp. Same model, same priors,
-//  same posterior -- but theta is sampled by ONE joint_nuts_block with a
-//  single SIMPLEX sub-param instead of a single nuts_block with
-//  constraints::simplex::wrap. This is the trivial conversion case: only one
-//  continuous parameter block, so the joint block holds exactly one sub-param.
+//  Dirichlet model on the probability simplex. theta is sampled by a
+//  joint_nuts_block holding a single SIMPLEX sub-param, which keeps NUTS on an
+//  unconstrained space of width P-1 while theta itself stays on the simplex.
 //
 //  Model (identical to DirichletSimplex.cpp)
 //  -----------------------------------------

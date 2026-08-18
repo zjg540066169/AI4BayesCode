@@ -11,7 +11,7 @@
 //  Inverse-Gamma / Gamma conditionals, alpha and beta from Normal
 //  conditionals. No Metropolis step and no gradient is needed anywhere.
 //
-//  DUAL-MODULE: this legacy example is exposed to BOTH R (RCPP_MODULE) and
+//  DUAL-MODULE: this example is exposed to BOTH R (RCPP_MODULE) and
 //  Python (PYBIND11_MODULE). The class I/O methods use the backend-neutral
 //  AI4BayesCode::state_map / history_map / dag_info API (NOT raw Rcpp::List),
 //  so the same class binds verbatim in both frontends.

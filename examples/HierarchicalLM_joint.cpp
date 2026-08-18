@@ -2,13 +2,14 @@
 // Licensed under the GNU General Public License v3.0 or later
 // (GPL-3.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
-//  HierarchicalLM_joint_v2.cpp
+//  HierarchicalLM_joint.cpp
 //
-//  NCR refactor of HierarchicalLM_joint.cpp.  Same model, same priors,
-//  same posterior -- but tau and sigma are FOLDED INTO the single
-//  joint_nuts_block alongside the non-centered random effects z_u.
+//  Hierarchical linear model with non-centered random effects. tau, sigma and
+//  the non-centered random effects z_u all sit in ONE joint_nuts_block, so the
+//  funnel between a scale and the effects it scales is traversed within a
+//  single HMC trajectory rather than across Gibbs sweeps.
 //
-//  Model (identical to HierarchicalLM_joint.cpp)
+//  Model
 //  -----------------------------------------------
 //      y_n | alpha, beta, u, sigma  ~ Normal(alpha + X_n' beta + u_{g[n]}, sigma^2)
 //      u_g | tau                     ~ Normal(0, tau^2),   g = 1..G

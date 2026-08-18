@@ -150,6 +150,12 @@ static order_mcmc_block_config make_cfg(const arma::imat& D,
                                           double p_adj = 0.5,
                                           std::uint64_t init_seed = 1u) {
     order_mcmc_block_config cfg;
+    // Pinned to `order`: R4 compares the sampler against order mode's EXACT
+    // posterior, which carries the |linear_extensions(G)| weighting. The block
+    // default is now `partition`, whose target does not -- following the
+    // default here would compare two different distributions. R7/R8 override
+    // this per-case to exercise partition.
+    cfg.method = order_mcmc_block_config::method_t::order;
     cfg.name = "order";
     cfg.data = D;
     cfg.cardinalities = cards;

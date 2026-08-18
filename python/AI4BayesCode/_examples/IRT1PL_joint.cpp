@@ -2,12 +2,12 @@
 // Licensed under the GNU General Public License v3.0 or later
 // (GPL-3.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
-//  IRT1PL_joint_v2.cpp
+//  IRT1PL_joint.cpp
 //
 //  One-parameter logistic IRT (Rasch) model with a NON-CENTERED
-//  reparameterization (NCR) for the item-difficulty hierarchy.  This
-//  resolves the funnel geometry in IRT1PL_joint.cpp, which samples
-//  (theta, b) jointly but leaves sigma_b in a SEPARATE nuts_block --
+//  reparameterization (NCR) for the item-difficulty hierarchy. NCR is what
+//  resolves the funnel between sigma_b and the difficulties it scales:
+//  sigma_b sits in the SAME joint block as (theta, b_raw) --
 //  splitting the (sigma_b, b) funnel across two Gibbs blocks.
 //
 //  Mode 1 fix (joint_nuts_failure.md): fold sigma_b INTO the joint block

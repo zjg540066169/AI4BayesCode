@@ -2,14 +2,12 @@
 // Licensed under the GNU General Public License v3.0 or later
 // (GPL-3.0-or-later). See COPYING / LICENSE at the repo root.
 // ============================================================================
-//  ICARSpatialGMRF_joint.cpp
+//  ICARSpatialGMRF.cpp
 //
-//  JOINT-NUTS rewrite of ICARSpatialGMRF.cpp. Same model, same priors,
-//  SAME posterior -- but the three scalar hyperparameters (Intercept, tau,
-//  sigma) are sampled by ONE joint_nuts_block instead of three separate
-//  single nuts_blocks updated Gibbs-style. phi is still sampled by the
-//  gmrf_precision_block (Rue 2001 direct draw + hard sum-to-zero),
-//  unchanged.
+//  Intrinsic conditional autoregressive (ICAR) spatial model. The three scalar
+//  hyperparameters (Intercept, tau, sigma) are sampled together by one
+//  joint_nuts_block; the spatial field phi is sampled by gmrf_precision_block
+//  (Rue 2001 direct draw with a hard sum-to-zero constraint).
 //
 //  Model (identical to ICARSpatialGMRF.cpp)
 //  ----------------------------------------

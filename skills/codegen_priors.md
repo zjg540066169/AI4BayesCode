@@ -1137,6 +1137,26 @@ Discrete latent z found?
       option (b) is `true`. The flag name is NOT shown to the user --
       they are choosing a prior, not a config field.)
 
+      **`use_structure_prior` is only HALF of P(G).** It controls the
+      per-family fan-in term. The OTHER half is the sampler: with
+      `cfg.method = order` (Friedman-Koller order MCMC) the induced structure
+      prior additionally weights each DAG by its number of linear extensions,
+      so answering (a) "uniform P(G)" and leaving the sampler on `order`
+      still does NOT deliver a uniform P(G). The block DEFAULT is
+      `method_t::partition` (Kuipers-Moffa 2017), which carries no such
+      factor -- so (a) is honoured out of the box and you need do nothing.
+
+      Only switch to `cfg.method = order` when the user explicitly wants it,
+      and say what it costs when you offer it:
+        - it is 7-18x faster per sweep (measured at n = 5, 8, 12);
+        - the SKELETON is recovered faithfully either way (7/7 vs bnlearn
+          on ASIA);
+        - the bias falls on edge ORIENTATION within a Markov equivalence
+          class, so it is harmless if the user only needs the skeleton, is
+          reproducing a published order-MCMC result, or is cross-checking
+          against `BiDAG::orderMCMC`.
+      Document whichever you set with an inline cite, as for the prior flag.
+
       If the spec says "Uniform DAG prior" (e.g. `G ~ Uniform(DAGs)`)
       this maps to (a). If the spec says "Friedman-Koller prior" or
       "per-family balancing" it maps to (b). If unstated, ASK -- do
