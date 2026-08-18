@@ -51,7 +51,7 @@ smoke_test <- function(name, constructor_expr) {
         if (has_readapt) {
             s_before <- m$get_current()
             ok_cont <- tryCatch({
-                m$readapt_NUTS(50L, FALSE)
+                m$readapt_NUTS(50L, FALSE, -1L)
                 identical(s_before, m$get_current())
             }, error = function(e) {
                 res$check24_why <<- paste("continue threw:", conditionMessage(e))
@@ -59,7 +59,7 @@ smoke_test <- function(name, constructor_expr) {
             })
             ok_reset <- if (ok_cont) {
                 tryCatch({
-                    m$readapt_NUTS(20L, TRUE)
+                    m$readapt_NUTS(20L, TRUE, -1L)
                     identical(s_before, m$get_current())
                 }, error = function(e) {
                     res$check24_why <<- paste("reset threw:", conditionMessage(e))
@@ -84,7 +84,7 @@ smoke_test <- function(name, constructor_expr) {
             if (res$check24) {
                 s_pre <- m$get_current()
                 sus_ok <- tryCatch({
-                    m$readapt_NUTS(100L, FALSE)  # readapt
+                    m$readapt_NUTS(100L, FALSE, -1L)  # readapt
                     for (i in 1:200) m$step(1L)   # 200 sustained steps
                     s_post <- m$get_current()
                     finite_ok <- numeric_finite(s_post)
@@ -97,7 +97,7 @@ smoke_test <- function(name, constructor_expr) {
                         FALSE
                     } else {
                         # 2nd round: readapt again + 50 more
-                        m$readapt_NUTS(50L, FALSE)
+                        m$readapt_NUTS(50L, FALSE, -1L)
                         for (i in 1:50) m$step(1L)
                         s_2nd <- m$get_current()
                         if (!numeric_finite(s_2nd)) {
@@ -407,7 +407,13 @@ cat(sprintf("Pass: %d/%d (compile + 10-step + finite + dag)\n",
     pass, length(results)))
 for (nm in names(results)) {
     r <- results[[nm]]
-    ok <- r$compile && r$step && r$finite && r$dag
+    # check24 and sustained were computed, printed, and then left OUT of the
+    # verdict -- so a model could fail readapt state preservation, skip the
+    # sustained-chain test that depends on it, and still be reported PASS.
+    # NA means the check did not apply to this model (no readapt_NUTS), which
+    # is not a failure; FALSE is.
+    ok <- r$compile && r$step && r$finite && r$dag &&
+          !isFALSE(r$check24) && !isFALSE(r$sustained)
     cat(sprintf("  %s  %s\n", ifelse(ok, "PASS", "FAIL"), nm))
     if (!ok && !is.null(r$error)) cat("     err:", r$error, "\n")
 }

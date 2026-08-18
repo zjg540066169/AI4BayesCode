@@ -52,10 +52,18 @@ run_r3 <- function(example_name, build_fn, y_obs, stats_list = bp_stats) {
     cat(sprintf("  Collected %d posterior-predictive draws (1-sweep thinning); "
                 , N_PPC_DRAWS))
     cat(sprintf("y_rep shape %d x %d\n", nrow(yrep), ncol(yrep)))
+    # MID-P, not mean(t_rep >= t_obs). On count data the order statistics are
+    # heavily tied -- for the Poisson fixture every single replicate reproduces
+    # min = 0, q25 = 0 and q75 = 1 exactly, so P(t_rep > t_obs) = 0 and
+    # P(t_rep == t_obs) = 1. The >= convention then reports p = 1.000 for all
+    # three and calls perfect agreement a FAIL, while a genuine misfit could
+    # not push it any higher. Splitting the ties (Meng 1994; BDA3 Sec. 6.4)
+    # puts exact agreement at 0.5 and leaves the statistic able to move in
+    # both directions.
     pvs <- sapply(stats_list, function(f) {
         t_obs <- f(y_obs)
         t_rep <- apply(yrep, 1, f)
-        mean(t_rep >= t_obs)
+        mean(t_rep > t_obs) + 0.5 * mean(t_rep == t_obs)
     })
     status <- sapply(pvs, function(p) {
         if (p > 0.05 && p < 0.95) "OK"
