@@ -198,7 +198,7 @@
     predict_at   = "predict_at(new_data)     posterior prediction at new_data",
     get_dag      = "get_dag()                model DAG (feed to ai4bayescode_plot_dag)",
     get_history  = "get_history()            every draw taken so far, warmup included (needs keep_history=TRUE)",
-    readapt_NUTS = "readapt_NUTS(n, reset=FALSE, max_tree_depth=-1)   re-run NUTS warm-up (online / sequential use)"
+    readapt_NUTS = "readapt_NUTS(n, reset, max_tree_depth)   re-run NUTS warm-up; pass all three (online / sequential use)"
 )
 
 #' Print a usage card for an AI4BayesCode sampler

@@ -231,3 +231,7 @@ check(length(dag_dh[["data_inputs"]]) == 0L,
 # ============================================================================
 cat(sprintf("\n=== %d passed, %d failed ===\n", n_pass, n_fail))
 cat(sprintf("%s\n", if (n_fail == 0L) "ALL TESTS PASS" else "SOME TESTS FAILED"))
+
+# Exit non-zero on failure, matching the sibling harnesses -- without this a
+# regression prints its verdict and the script still exits 0.
+if (n_fail != 0L) quit(status = 1L)

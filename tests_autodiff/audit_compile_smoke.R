@@ -402,8 +402,12 @@ ai4bayescode_source_checkout(file.path(AI4BayesCode_dir, "examples",
 # ======== Summary ========
 saveRDS(results, file.path(AI4BayesCode_dir, "audit_xl_F4.rds"))
 cat("\n========== PHASE F4 SUMMARY ==========\n")
-pass <- sum(sapply(results, function(r) r$compile && r$step && r$finite && r$dag))
-cat(sprintf("Pass: %d/%d (compile + 10-step + finite + dag)\n",
+# Same expression as the per-model verdict below, so the headline number and
+# the PASS/FAIL column can never disagree.
+.verdict <- function(r) r$compile && r$step && r$finite && r$dag &&
+                        !isFALSE(r$check24) && !isFALSE(r$sustained)
+pass <- sum(sapply(results, .verdict))
+cat(sprintf("Pass: %d/%d (compile + 10-step + finite + dag + readapt state + sustained)\n",
     pass, length(results)))
 for (nm in names(results)) {
     r <- results[[nm]]
@@ -412,8 +416,7 @@ for (nm in names(results)) {
     # sustained-chain test that depends on it, and still be reported PASS.
     # NA means the check did not apply to this model (no readapt_NUTS), which
     # is not a failure; FALSE is.
-    ok <- r$compile && r$step && r$finite && r$dag &&
-          !isFALSE(r$check24) && !isFALSE(r$sustained)
+    ok <- .verdict(r)
     cat(sprintf("  %s  %s\n", ifelse(ok, "PASS", "FAIL"), nm))
     if (!ok && !is.null(r$error)) cat("     err:", r$error, "\n")
 }

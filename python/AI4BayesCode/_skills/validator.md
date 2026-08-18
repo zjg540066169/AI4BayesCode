@@ -1743,7 +1743,7 @@ identity test (or a test of equivalent form):
 m <- new(<ClassName>, ...)
 for (i in 1:10) m$step(1L)             # advance to a non-init state
 s_before <- m$get_current()
-m$readapt_NUTS(500L)
+m$readapt_NUTS(500L, FALSE, -1L)   # all three: Rcpp ignores C++ defaults
 s_after  <- m$get_current()
 stopifnot(identical(s_before, s_after))
 ```

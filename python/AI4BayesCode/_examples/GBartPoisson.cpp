@@ -91,7 +91,7 @@
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m = Mod.GBartPoisson(X, y, 50, 42, True); m.step(2000); print(m.get_current())
+//   m = Mod.GBartPoisson(X, y, 50, 42, False, True); m.step(2000); print(m.get_current())
 // @example:end
 // ============================================================================
 

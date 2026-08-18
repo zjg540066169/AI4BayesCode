@@ -5,7 +5,7 @@
 // test_pg_logistic_block.cpp — T12 tests.
 //
 // (a) PG(1, z) truncated-series sampler matches analytical mean
-//     E[ω] = (1/(2z)) tanh(z/2) across z ∈ {0.1, 1, 5} with 10k draws.
+//     E[ω] = (1/(2z)) tanh(z/2) across z ∈ {0.1, 1, 5} with 20k draws.
 // (b) pg_logistic_block recovers synthetic logistic regression coefficients
 //     on N=500, p=5 problem after 2000 sweeps.
 // ============================================================================
@@ -56,7 +56,7 @@ Rcpp::List test_pg_logistic_block() {
         const double sample_mean = sum / N_DRAWS;
         const double analytic = pg_1_z_mean(z);
         const double rel_err = std::abs(sample_mean - analytic) / analytic;
-        // MC sd scales ~ analytic_var/sqrt(N) which is small; 2% tol.
+        // MC sd scales ~ analytic_var/sqrt(N) which is small; 3% tol.
         bool ok = rel_err < 0.03;
         record("PG(1, z=" + std::to_string(z) + ") sampler mean", ok,
                "sample=" + std::to_string(sample_mean) +

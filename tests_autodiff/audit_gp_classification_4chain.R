@@ -3,7 +3,8 @@
 #   - R-hat < 1.05 on amp, ell
 #   - f posterior correlation > 0.9 with truth
 #   - 95% credible-interval coverage of f >= 85%
-#   - classification accuracy on held-out X_test
+#   - in-sample classification accuracy against the BAYES-OPTIMAL rate for
+#     this design (0.655 -- see below). There is no held-out X_test.
 
 script_dir <- local({
     cmdargs <- commandArgs(trailingOnly = FALSE)
@@ -128,10 +129,18 @@ cat(sprintf("  train accuracy = %.3f\n", acc))
 
 rhat_ok <- all(c(rh_amp, rh_ell) < 1.05)
 f_ok    <- cor_f > 0.9 && cov95 >= 0.85
-acc_ok  <- acc > 0.75
+# The old test was acc > 0.75, which is UNSATISFIABLE: with prob_true =
+# logistic(sin(1.5x) - 0.2x) on this grid the Bayes-optimal accuracy -- what
+# you get knowing f exactly -- is 0.655 (mean 0.653, sd 0.042 over 400
+# simulated y). No sampler can reach 0.75, so the check could never pass. It
+# was computed, printed and saved but never branched on, so nobody saw it.
+# Compare against the achievable rate instead.
+bayes_acc <- mean(pmax(prob_true, 1 - prob_true))
+acc_ok    <- acc >= bayes_acc - 3 * 0.042
 cat(sprintf("\n  R-hat < 1.05 on hyperparams: %s\n", rhat_ok))
 cat(sprintf("  f recovery cor > 0.9 AND cov95 >= 0.85: %s\n", f_ok))
-cat(sprintf("  Train accuracy > 0.75: %s\n", acc_ok))
+cat(sprintf("  In-sample accuracy %.3f vs Bayes-optimal %.3f: %s\n",
+            acc, bayes_acc, acc_ok))
 
 saveRDS(
     list(n_burn = n_burn, n_keep = n_keep, seeds = seeds,
@@ -143,6 +152,11 @@ saveRDS(
 
 if (!rhat_ok) {
     cat("\n!! R-hat FAIL.\n")
+    quit(status = 1)
+}
+if (!acc_ok) {
+    cat(sprintf("\n!! accuracy %.3f is more than 3 sd below the Bayes rate %.3f.\n",
+                acc, bayes_acc))
     quit(status = 1)
 }
 if (!f_ok) {

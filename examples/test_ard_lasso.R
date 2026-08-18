@@ -226,3 +226,7 @@ cat(sprintf("Posterior SDs agree:   %s\n", ifelse(sd_agree, "YES", "NO")))
 
 all_ok <- max_rhat < 1.05 && means_agree && sd_agree
 cat(sprintf("\n%s\n", if (all_ok) "PASS" else "FAIL"))
+
+# Exit non-zero on failure, matching the sibling harnesses -- without this a
+# regression prints its verdict and the script still exits 0.
+if (!all_ok) quit(status = 1L)

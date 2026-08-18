@@ -10,8 +10,8 @@
  *  diagnostic should be very small (near 0) because q ≡ p.
  *
  *  PASS criteria:
- *    - |μ̄_i - μ*_i| < 5 σ̄_i / sqrt(M_eff)   for every i  (well-recovered mean)
- *    - 0.5 ≤ σ̄_i / σ*_i ≤ 2.0                for every i  (within 2x of truth)
+ *    - |μ̄_i - μ*_i| < max(0.05, 0.1 σ̄_i)    for every i  (well-recovered mean)
+ *    - 0.77 ≤ σ̄_i / σ*_i ≤ 1.3               for every i
  *    - final_khat < 0.5                                     (PSIS PASS tier)
  *    - converged in fewer than max_epochs
  *

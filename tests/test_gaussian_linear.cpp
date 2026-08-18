@@ -176,6 +176,15 @@ build_model(const arma::vec& y, double mu_init, double sigma_init) {
         cfg.nuts_settings.nuts_settings.max_tree_depth  = 6;
         cfg.nuts_settings.nuts_settings.target_accept_rate = 0.8;
         cfg.n_draws_per_step                            = 1;
+        // The default n_warmup_first_call = 200 is not enough here: the
+        // first-call adaptation stops before it reaches the typical set and
+        // the chain locks up. Every later step then terminated its trajectory
+        // after ONE leapfrog (2 density evaluations) and mu never moved again,
+        // printing sd = 0.0000 across all 2000 kept draws while the test still
+        // passed, because the value it froze at happened to sit inside the
+        // tolerance. This is the "Rejection lock-up" documented in
+        // nuts_block.hpp; remedy 2 there is a longer first-call warmup.
+        cfg.n_warmup_first_call                         = 2000;
         model->add_child(std::make_unique<nuts_block>(std::move(cfg)));
     }
 
@@ -200,6 +209,7 @@ build_model(const arma::vec& y, double mu_init, double sigma_init) {
         cfg.nuts_settings.nuts_settings.max_tree_depth  = 6;
         cfg.nuts_settings.nuts_settings.target_accept_rate = 0.8;
         cfg.n_draws_per_step                            = 1;
+        cfg.n_warmup_first_call                         = 2000;   // see above
         model->add_child(std::make_unique<nuts_block>(std::move(cfg)));
     }
 
@@ -286,6 +296,11 @@ int main() {
     const double sigma_tol = 4.0 * sigma_true / std::sqrt(2.0 * static_cast<double>(N));
     const bool mu_ok    = std::abs(s.mu_mean    - mu_true)    < mu_tol;
     const bool sigma_ok = std::abs(s.sigma_mean - sigma_true) < sigma_tol;
+    // A chain that never moves has no posterior mean to compare -- it reports
+    // wherever it stopped. Both sd values were already printed and neither was
+    // ever checked, so a locked-up chain read as a pass.
+    const bool mu_moved    = s.mu_sd    > 1e-9;
+    const bool sigma_moved = s.sigma_sd > 1e-9;
     const bool step_ok  = s.final_mu_stepsize    > 0.0 &&
                           s.final_sigma_stepsize > 0.0;
 
@@ -296,7 +311,10 @@ int main() {
     std::printf("persistent step sizes positive? %s\n",
                 step_ok ? "YES" : "NO");
 
-    const bool all_ok = mu_ok && sigma_ok && step_ok;
+    std::printf("mu chain moved? %s   sigma chain moved? %s\n",
+                mu_moved ? "YES" : "NO", sigma_moved ? "YES" : "NO");
+
+    const bool all_ok = mu_ok && sigma_ok && step_ok && mu_moved && sigma_moved;
     std::printf("\n%s\n", all_ok ? "PASS" : "FAIL");
     return all_ok ? 0 : 1;
 }

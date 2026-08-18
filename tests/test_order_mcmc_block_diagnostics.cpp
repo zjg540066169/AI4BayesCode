@@ -467,7 +467,7 @@ static double ess_geyer_ips(const arma::vec& x) {
 }
 
 static void D4_ess() {
-    std::printf("\n--- D4: ESS(log_score) via Geyer IPS over 5000 samples ---\n");
+    std::printf("\n--- D4: ESS(log_score) via Geyer IPS over 60000 samples ---\n");
     const std::size_t n = 6, N = 500;
     const arma::imat D = sim_chain_data(N, n, 511u);
     const arma::uvec cards(n, arma::fill::value(2));
@@ -496,7 +496,15 @@ static void D4_ess() {
     blk.set_context(ctx);
     std::mt19937_64 rng(2051u);
     const std::size_t M_burn = 2000;
-    const std::size_t M_post = 10000;
+    // 60000, not 10000. The Geyer IPS estimate for this chain is extremely
+    // noisy at 10000: across six seeds it ranged 213.9 to 1430.4 on libc++
+    // and 182.0 to 566.8 on libstdc++, so the 200 floor was a coin flip --
+    // seed offset 29 already produced 182.0 and would have failed. (The
+    // apparent 5.8x "platform gap" at the shipped seed was this same noise,
+    // not a property of the block: at 60000 the two standard libraries give
+    // overlapping ranges.) At 60000 the measured range is 1170 to 3715
+    // across the same seeds and both libraries. Costs about 1.5 s.
+    const std::size_t M_post = 60000;
     for (std::size_t s = 0; s < M_burn; ++s) blk.step(rng);
     arma::vec ls(M_post);
     for (std::size_t s = 0; s < M_post; ++s) {
@@ -505,8 +513,10 @@ static void D4_ess() {
     }
     const double ess = ess_geyer_ips(ls);
     std::printf("    ESS = %.1f / %zu samples\n", ess, M_post);
-    check(ess > 200.0,
-          "D4 ESS(log_score) > 200 on 10000 samples after burn-in",
+    // Floor set from that measurement: half the worst case seen (1170), so a
+    // genuine mixing collapse is caught while seed-to-seed noise is not.
+    check(ess > 600.0,
+          "D4 ESS(log_score) > 600 on 60000 samples after burn-in",
           "ess = " + ts(ess));
 }
 

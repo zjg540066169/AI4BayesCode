@@ -1,7 +1,9 @@
 # 4-chain 5k+5k diagnostic for GPTimeSeries v0.5 (slice-based hyperparam
 # MCMC on celerite marginal likelihood). Verifies:
 #   - R-hat < 1.05 on amp, tau, sigma
-#   - posterior means within ~30% of truth
+#   - posterior means within a multiplicative factor of truth, checked on the
+#     log scale: 1.5x for amp and sigma, 1.8x for tau (the timescale is the
+#     least identified of the three at this series length)
 #   - ESS sufficient
 #
 # Result saved to audit_gp_ts_v05_4chain.rds.

@@ -48,7 +48,7 @@ import AI4BayesCode
 mod = AI4BayesCode.source("MyModel.cpp")            # file path, or a source string
 
 # The module exposes the class defined in the .cpp:
-m = mod.MyModel(y, X, seed=1, keep_history=True)
+m = mod.MyModel(y, X, rng_seed=1, keep_history=True)
 
 # Standard MCMC workflow:
 m.step(5000)          # warmup
@@ -66,7 +66,7 @@ AI4BayesCode.plot_dag(m, out_path="dag.png")
 
 # Run 4 parallel chains from different seeds:
 def build(seed):
-    return mod.MyModel(y, X, seed=seed, keep_history=True)
+    return mod.MyModel(y, X, rng_seed=seed, keep_history=True)
 
 chains = AI4BayesCode.run_chains(
     factory=build,

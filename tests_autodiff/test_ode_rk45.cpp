@@ -13,7 +13,8 @@
 //
 //   (2) Harmonic oscillator: (x, v) with dx/dt = v, dv/dt = -omega^2 * x.
 //       Closed form x(t) = x0*cos(omega*t) + v0/omega*sin(omega*t). Check
-//       max_abs(numerical - analytical) < 1e-8 AND energy conservation
+//       max_abs(numerical - analytical) < 1e-6 AND energy conservation < 1e-6
+//       (test 1, the exponential decay, is the one held to 1e-8)
 //       E = 0.5*v^2 + 0.5*omega^2*x^2 to within rtol over 10 periods.
 //
 //   (3) Lotka-Volterra: dx/dt = alpha*x - beta*x*y, dy/dt = delta*x*y - gamma*y.

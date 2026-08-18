@@ -253,3 +253,7 @@ for (nm in names(results)) {
 cat("------------------------------------------------------------\n")
 cat(sprintf("  Threshold: %.3f\n", threshold))
 cat(sprintf("\n%s\n", if (all_ok) "ALL PASS" else "SOME FAILED"))
+
+# Exit non-zero on failure, matching the sibling harnesses -- without this a
+# regression prints its verdict and the script still exits 0.
+if (!all_ok) quit(status = 1L)

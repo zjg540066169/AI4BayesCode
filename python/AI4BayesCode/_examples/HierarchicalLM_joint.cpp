@@ -585,7 +585,13 @@ public:
         AI4BayesCode::history_map hist = impl_->get_history();
         const arma::mat& alpha_hist = hist.at("alpha");   // n_draws x 1
         const arma::mat& beta_hist  = hist.at("beta");    // n_draws x p
-        const arma::mat& u_hist     = hist.at("u");       // n_draws x G
+        // u is DERIVED, not sampled: the joint block samples z_u and
+        // u_g = tau * z_u_g (see the model description at the top of this
+        // file). The per-step history therefore holds z_u and tau, and
+        // hist.at("u") threw "key not found" -- every history-mode
+        // predict_at() call on this model failed.
+        const arma::mat& z_u_hist   = hist.at("z_u");     // n_draws x G
+        const arma::mat& tau_hist   = hist.at("tau");     // n_draws x 1
         const arma::mat& sigma_hist = hist.at("sigma");   // n_draws x 1
         const std::size_t n_draws = alpha_hist.n_rows;
         const std::size_t p_dim   = beta_hist.n_cols;
@@ -604,7 +610,8 @@ public:
                 for (std::size_t j = 0; j < p_dim; ++j)
                     xb += X_flat[i + j * N] * beta_hist(d, j);
                 const std::size_t gi = static_cast<std::size_t>(g_idx[i]);
-                const double mu = alpha_d + xb + u_hist(d, gi);
+                const double u_dg = tau_hist(d, 0) * z_u_hist(d, gi);
+                const double mu = alpha_d + xb + u_dg;
                 yrep_mat(d, i) = mu + sigma_d * norm01(predict_rng_);
             }
         }

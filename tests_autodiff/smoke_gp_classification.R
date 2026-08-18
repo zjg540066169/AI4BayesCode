@@ -104,8 +104,11 @@ cat(sprintf("  history keys: %s\n", paste(names(h), collapse = ",")))
 # hyperparameters sit in a joint_nuts_block. History therefore stores
 # {f, amplitude, lengthscale}.
 stopifnot(all(c("f", "amplitude", "lengthscale") %in% names(h)))
-stopifnot(nrow(h$z) == 4000)
-stopifnot(ncol(h$z) == N)
+# f, not z: this model samples the latent field directly. These two lines used
+# to read h$z, which does not exist -- and nrow(NULL) == 4000 is logical(0),
+# which stopifnot() accepts, so the assertions could never fail for any model.
+stopifnot(nrow(h$f) == 4000)
+stopifnot(ncol(h$f) == N)
 stopifnot(nrow(h$amplitude) == 4000)
 stopifnot(nrow(h$lengthscale) == 4000)
 

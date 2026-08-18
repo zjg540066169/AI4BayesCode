@@ -343,3 +343,18 @@ for (nm in names(results)) {
             paste(r$predict_out_keys, collapse=",")) else ""))
 }
 cat("\n[F5 DONE] saved to audit_xl_F5.rds\n")
+
+# Gate. These verdicts were computed and printed for every model and nothing
+# ever checked them, so a broken predict_at (HierarchicalLM_joint threw
+# "unordered_map::at: key not found" on every history-mode call) showed up as
+# one FALSE in a table and the script still exited 0.
+# has_predict = FALSE is not a failure -- some models expose no predict_at.
+.bad_pred  <- names(results)[vapply(results, function(r)
+                  isTRUE(r$has_predict) && !isTRUE(r$predict_ok), TRUE)]
+.bad_state <- names(results)[vapply(results, function(r)
+                  !isTRUE(r$state_preserved), TRUE)]
+if (length(.bad_pred))
+    cat(sprintf("\n  predict_at FAILED for: %s\n", paste(.bad_pred, collapse = ", ")))
+if (length(.bad_state))
+    cat(sprintf("  predict_at MUTATED state for: %s\n", paste(.bad_state, collapse = ", ")))
+if (length(.bad_pred) || length(.bad_state)) quit(status = 1L)

@@ -442,7 +442,7 @@ ai4bayescode_perf_hint <- function(wall_sec,
             "  Possible causes: (a) N * J grad eval is genuinely expensive,\n",
             "  (b) the sampler is still tuning -> run a longer warmup: raise\n",
             "      n_burn in ai4bayescode_run_chains(), or call\n",
-            "      m$readapt_NUTS(2000L) before the sampling steps,\n",
+            "      m$readapt_NUTS(2000L, FALSE, -1L) before the sampling steps,\n",
             "  (c) mass-matrix adaptation not yet converged -> longer warmup.")
         return(invisible(NULL))
     }
