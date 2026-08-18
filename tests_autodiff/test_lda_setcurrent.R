@@ -106,7 +106,11 @@ record <- function(name, ok, info = NULL) {
     m <- build_block(seed = 33L)
     m$step(5L)
     err <- tryCatch({
-        m$set_current(list(unknown_xyz = 42, foo = "bar"))
+        # Both values must be numeric: set_current takes a state_map
+        # (map<string, arma::vec>), so a character value fails Rcpp's
+        # conversion before set_current is ever entered -- that would test
+        # the signature, not unknown-key tolerance.
+        m$set_current(list(unknown_xyz = 42, foo = 3.14))
         NULL
     }, error = function(e) e)
     record("T3 unknown-key tolerance", is.null(err),
@@ -197,10 +201,16 @@ record <- function(name, ok, info = NULL) {
         if (crashed) break
     }
     cur <- m$get_current()
+    # theta and phi cross the backend boundary FLAT and column-major -- a
+    # state_map is map<string, arma::vec>, so a matrix shape cannot survive
+    # the trip (LdaCollapsedGibbs.cpp:355-367). Reshape before summing:
+    # theta is M x K (one row per document), phi is K x V (one row per topic).
+    th <- matrix(cur$theta, M, K)
+    ph <- matrix(cur$phi,   K, V)
     ok <- !crashed &&
           all(cur$z %in% seq_len(K)) &&
-          all(abs(rowSums(cur$theta) - 1) < 1e-9) &&
-          all(abs(rowSums(cur$phi)   - 1) < 1e-9)
+          all(abs(rowSums(th) - 1) < 1e-9) &&
+          all(abs(rowSums(ph) - 1) < 1e-9)
     record("T8 multi-iteration stability", ok)
 }
 

@@ -34,6 +34,10 @@ def library(tmp_path, monkeypatch):
     (root / "PRECIOUS_USER_DATA").mkdir(parents=True)
     (root / "PRECIOUS_USER_DATA" / "keepme.txt").write_text("do not delete\n")
     monkeypatch.setenv("AI4BAYESCODE_DATA_HOME", str(root))
+    # installed_blocks() reports BOTH tiers, and the local tier is relative to
+    # the working directory -- so the cwd has to be isolated too, or the repo's
+    # own ./blocks_local/ leaks into every assertion here.
+    monkeypatch.chdir(tmp_path)
     return root
 
 

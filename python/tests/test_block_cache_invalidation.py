@@ -110,3 +110,85 @@ def test_fingerprint_survives_a_vanished_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     gone = tmp_path / "blocks_local" / "not_there"
     assert _contributed_block_fingerprint([f"-I{gone}"]) is not None
+
+
+# ---------------------------------------------------------------------------
+# Bundle validation and tier listing
+# ---------------------------------------------------------------------------
+def _write_bundle(root, name, *, manifest=True, header=True, block_name=None,
+                  drop_fields=()):
+    d = root / name
+    d.mkdir(parents=True)
+    if manifest:
+        from AI4BayesCode.install_block import _REQUIRED_MANIFEST_FIELDS
+        fields = {f: "x" for f in _REQUIRED_MANIFEST_FIELDS}
+        fields["Block"] = block_name or name
+        for f in drop_fields:
+            fields.pop(f, None)
+        (d / "manifest.dcf").write_text(
+            "".join(f"{k}: {v}\n" for k, v in fields.items()))
+    if header:
+        (d / f"{name}.hpp").write_text("// x\n")
+    return d
+
+
+def test_a_well_formed_bundle_validates(tmp_path):
+    from AI4BayesCode.install_block import validate_bundle
+    d = _write_bundle(tmp_path, "toy_block")
+    assert validate_bundle(str(d)) == []
+
+
+def test_missing_manifest_header_and_fields_are_all_reported(tmp_path):
+    """A bundle with none of these used to go on the compile -I path in
+    silence, and installed_blocks() reported it as a block."""
+    from AI4BayesCode.install_block import validate_bundle
+    empty = tmp_path / "empty_block"; empty.mkdir()
+    probs = validate_bundle(str(empty))
+    assert any("manifest.dcf is missing" in p for p in probs)
+    assert any("empty_block.hpp is missing" in p for p in probs)
+
+    thin = _write_bundle(tmp_path, "thin_block",
+                         drop_fields=("Version", "License", "SelectWhen"))
+    probs = validate_bundle(str(thin))
+    assert len(probs) == 1 and "missing required field(s)" in probs[0]
+    for f in ("Version", "License", "SelectWhen"):
+        assert f in probs[0]
+
+
+def test_a_manifest_naming_a_different_block_is_reported(tmp_path):
+    from AI4BayesCode.install_block import validate_bundle
+    d = _write_bundle(tmp_path, "toy_block", block_name="something_else")
+    probs = validate_bundle(str(d))
+    assert any("directory is 'toy_block'" in p for p in probs)
+
+
+def test_invalid_bundles_are_skipped_on_the_include_path(tmp_path, monkeypatch):
+    import warnings
+    from AI4BayesCode.install_block import _block_include_flags
+    local = tmp_path / "blocks_local"
+    _write_bundle(local, "good_block")
+    (local / "junk_block").mkdir(parents=True)          # no manifest, no header
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AI4BAYESCODE_DATA_HOME", str(tmp_path / "dh"))
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        flags = [f for f in _block_include_flags() if "blocks_local" in f]
+    assert any(f.endswith("good_block") for f in flags)
+    assert not any("junk_block" in f for f in flags)
+    assert any("junk_block" in str(x.message) for x in w)
+
+
+def test_installed_blocks_sees_the_local_tier(tmp_path, monkeypatch):
+    """The local tier reaches the compiler, so a user must be able to see it.
+    installed_blocks() used to read the download cache only."""
+    from AI4BayesCode.install_block import installed_blocks
+    _write_bundle(tmp_path / "blocks_local", "local_only_block")
+    dl = tmp_path / "dh" / "blocks_download"
+    _write_bundle(dl, "downloaded_block")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AI4BAYESCODE_DATA_HOME", str(tmp_path / "dh"))
+    assert installed_blocks() == ["downloaded_block", "local_only_block"]
+    assert installed_blocks("local") == ["local_only_block"]
+    assert installed_blocks("download") == ["downloaded_block"]
+    with pytest.raises(ValueError):
+        installed_blocks("bogus")

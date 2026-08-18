@@ -22,7 +22,7 @@ y <- rpois(N, exp(truth))
 
 run_chain <- function(seed) {
     set.seed(seed)
-    m <- new(GBartPoisson, X, as.numeric(y), 200L, seed, TRUE)
+    m <- new(GBartPoisson, X, as.numeric(y), 200L, seed, FALSE, TRUE)
     t0 <- Sys.time()
     m$step(NBURN); m$step(NKEEP)
     t1 <- Sys.time()

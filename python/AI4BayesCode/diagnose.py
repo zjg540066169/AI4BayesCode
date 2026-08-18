@@ -137,6 +137,12 @@ def diagnose(hist, n_burn=0, plot=True, order_components=False, *, drop_burn=Non
         callable that draws trace + autocorrelation + density panels with
         matplotlib and returns the Figure, or ``None`` when ``plot=False``
         or matplotlib is not installed.
+
+        Label switching is reported through ``summary.attrs["label_switch"]``
+        -- a mapping of key -> {"raw", "ordered"} max split-R-hat, empty when
+        nothing was flagged. R's ai4bayescode_diagnose() returns it as a third
+        list element; here it rides on the summary so that unpacking stays a
+        two-tuple, which is what every generated runner does.
     """
     if drop_burn is not None:      # accept rhat_summary's param name too
         n_burn = drop_burn

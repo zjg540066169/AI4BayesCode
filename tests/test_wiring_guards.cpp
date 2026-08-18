@@ -25,6 +25,14 @@
  *    D. refresh_all() priming a derived-reads-derived chain in REGISTRATION
  *       order, not hash order.
  *
+ *    E. predict_at's key whitelist. A declared SOURCE of the predict DAG is
+ *       a valid replacement key even when it is neither a data input nor a
+ *       child block name -- that is the only way to replace ONE sub-param of
+ *       a joint block. The whitelist used to omit this, so DirichletSimplex's
+ *       history-mode posterior predictive (which installs a per-draw "theta",
+ *       a sub-param of the "theta_joint" block) threw on every call. Widening
+ *       it must not make a genuine typo silent, so both directions are pinned.
+ *
  *  Copyright (C) 2026 AI4BayesCode
  *  SPDX-License-Identifier: GPL-3.0-or-later
  *================================================================================*/
@@ -250,6 +258,50 @@ int main() {
               "the first derived key is computed from its input");
         check(std::abs(d.get("second")(0) - 21.0) < 1e-12,
               "the second reads the REFRESHED first, not its placeholder");
+    }
+
+    // ---- E. predict_at's key whitelist --------------------------------------
+    {
+        std::printf("\nE. predict_at key whitelist\n");
+
+        auto root = std::make_unique<AI4BayesCode::composite_block>("root");
+        AI4BayesCode::gamma_gibbs_block_config gc;
+        gc.name = "theta_joint";              // the BLOCK name
+        gc.params_fn = [](const AI4BayesCode::block_context&) {
+            AI4BayesCode::gamma_params p; p.shape = 2.0; p.rate = 1.0; return p;
+        };
+        root->add_child(
+            std::make_unique<AI4BayesCode::gamma_gibbs_block>(std::move(gc)));
+
+        auto& d = root->data();
+        // "theta" is a SUB-PARAM name: not a data input, not a block name.
+        d.set("theta", arma::vec{1.0});
+        d.set("y_rep", arma::vec{0.0});
+        d.register_refresher("y_rep", [](const AI4BayesCode::shared_data_t& s) {
+            return arma::vec{2.0 * s.get("theta")(0)};
+        });
+        d.declare_predict_edges("theta", {"y_rep"});
+
+        bool ok = false;
+        try {
+            auto out = root->predict_at(AI4BayesCode::block_context{
+                {"theta", arma::vec{3.0}}});
+            ok = out.count("y_rep") && std::abs(out.at("y_rep")(0) - 6.0) < 1e-12;
+        } catch (const std::exception& e) {
+            std::printf("      threw: %s\n", e.what());
+        }
+        check(ok, "a predict-DAG source that is neither a data input nor a "
+                  "block name is accepted, and propagates");
+
+        // The negative direction: widening the whitelist must not swallow typos.
+        check_throws([&] { root->predict_at(AI4BayesCode::block_context{
+                               {"thetaa", arma::vec{3.0}}}); },
+                     "unknown key",
+                     "a misspelled key is still rejected");
+        check_throws([&] { root->predict_at(AI4BayesCode::block_context{
+                               {"thetaa", arma::vec{3.0}}}); },
+                     "predict-DAG sources",
+                     "...and the message lists the sources it could have been");
     }
 
     std::printf("\n=== SUMMARY: %d passed, %d failed ===\n", g_pass, g_fail);

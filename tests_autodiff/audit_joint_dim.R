@@ -58,9 +58,14 @@ for (cs in irt_cases) {
         m <- new(IRT1PL_joint, Y, th0, b0, as.numeric(sb0), as.integer(seed), TRUE)
         t0 <- Sys.time(); m$step(N_BURN); m$step(N_KEEP); t1 <- Sys.time()
         h <- m$get_history()
-        list(theta   = h$theta[(N_BURN+1):(N_BURN+N_KEEP), , drop=FALSE],
-             b       = h$b[(N_BURN+1):(N_BURN+N_KEEP), , drop=FALSE],
-             sigma_b = h$sigma_b[(N_BURN+1):(N_BURN+N_KEEP)],
+        keep    <- (N_BURN+1):(N_BURN+N_KEEP)
+        sb      <- as.numeric(h$sigma_b)[keep]
+        # Non-centered: the sampled coordinate is z_b, and b_j = sigma_b * z_b_j
+        # (IRT1PL_joint.cpp:26). The history stores {theta, z_b, sigma_b}; b is
+        # derived, so derive it here rather than reading a key that is not there.
+        list(theta   = h$theta[keep, , drop=FALSE],
+             b       = h$z_b[keep, , drop=FALSE] * sb,
+             sigma_b = sb,
              wall    = as.numeric(difftime(t1, t0, units="secs")))
     }
     c1 <- run(101L, rep(0, cs$N), rep(0, cs$J), 1.0)
@@ -108,11 +113,16 @@ for (cs in hlm_cases) {
                  1.0, 1.0, as.integer(seed), TRUE)
         t0 <- Sys.time(); m$step(N_BURN); m$step(N_KEEP); t1 <- Sys.time()
         h <- m$get_history()
-        list(alpha=h$alpha[(N_BURN+1):(N_BURN+N_KEEP)],
-             beta =h$beta[(N_BURN+1):(N_BURN+N_KEEP), , drop=FALSE],
-             u    =h$u[(N_BURN+1):(N_BURN+N_KEEP), , drop=FALSE],
-             sigma=h$sigma[(N_BURN+1):(N_BURN+N_KEEP)],
-             tau  =h$tau[(N_BURN+1):(N_BURN+N_KEEP)],
+        keep  <- (N_BURN+1):(N_BURN+N_KEEP)
+        tau_v <- as.numeric(h$tau)[keep]
+        # Non-centered: z_u is sampled and u_g = tau * z_u_g
+        # (HierarchicalLM_joint.cpp:24). The history holds
+        # {alpha, beta, tau, z_u, sigma}; u is derived.
+        list(alpha=h$alpha[keep],
+             beta =h$beta[keep, , drop=FALSE],
+             u    =h$z_u[keep, , drop=FALSE] * tau_v,
+             sigma=h$sigma[keep],
+             tau  =tau_v,
              wall = as.numeric(difftime(t1, t0, units="secs")))
     }
     c1 <- run(101L); c2 <- run(202L)

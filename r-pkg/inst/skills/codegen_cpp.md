@@ -447,6 +447,20 @@ self-contained license reference.
 //  @example:R / @example:python  -- MANDATORY runnable DGP block(s) for the
 //  chosen backend(s); see "Header @example block" below.
 // ============================================================================
+//
+//  THIS HEADER IS WHAT THE USER READS. ai4bayescode_doc("<ClassName>") /
+//  AI4BayesCode.doc("<ClassName>") prints the first ~18 lines of it verbatim,
+//  so it must describe the MODEL and nothing else. Do NOT write:
+//    - a changelog, version numbers, or dates ("v0.5", "2026-04-20")
+//    - what an earlier attempt got wrong, or what is deferred to a later one
+//    - internal vocabulary: tier labels, block numbers, validator check
+//      numbers, or references to skills/*.md, which the reader cannot open
+//    - instructions addressed to the code generator rather than to the reader
+//      ("DO NOT copy this pattern")
+//    - "rewrite of <this same file>" -- the reader has only this file
+//  Anything of that kind belongs in a commit message, not in the header. If a
+//  limitation genuinely affects how the model should be USED, state it as a
+//  property of the model in plain terms, not as project history.
 
 // [[Rcpp::depends(RcppArmadillo)]]
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
@@ -1898,6 +1912,30 @@ appears as a `set_current` key:
 - **Cross-check** `X.nrow` against `y.length` when both are in the
   same call.
 
+**Read-only outputs are IGNORED, not rejected.** `get_current()` returns
+derived quantities the sampler produced -- a BART forest's `f_bart`, a
+genBART `r`, a fitted latent field. `set_current` must accept those keys and
+do nothing with them, because `set_current(get_current())` has to round-trip:
+the map you hand back is the one you were given. Ignoring has to be INERT --
+the state after the call must be bit-identical, not merely error-free. Unknown
+keys are ignored the same way, for the same reason.
+
+State this in the `.method("set_current", ...)` doc string, naming the
+read-only keys and the route that DOES restore them (`set_tree()` for a
+forest). Reject a key only when writing it would be actively misleading and
+there is a correct alternative to point at -- `LdaCollapsedGibbs` rejects
+`theta`/`phi` with "update z instead and call step()", and correspondingly
+never round-trips anything but `z`. Pick one of the two and be consistent
+within the model.
+
+**A non-centered parameterization publishes the SAMPLED coordinate.**
+If the model samples `z` and derives `u = tau * z`, the per-step history holds
+`z` and `tau`; `u` exists only in `get_current()`. That asymmetry is fine, but
+it is invisible to a reader who calls `get_history()` and finds no `u`, so the
+model header MUST state the relation and which surface has which key -- e.g.
+`u_g = tau * z_u_g (DERIVED)`, as `HierarchicalLM_joint.cpp` and
+`IRT1PL_joint.cpp` do. Without that line the reader silently gets NULL.
+
 ### Canonical template
 
 ```cpp
@@ -2371,13 +2409,18 @@ AI4BayesCode::history_map predict_at(
     }
 
     // ---- History mode: loop over all posterior draws --------------
-    // **Critical:** `composite_block::predict_at` only accepts replaced
-    // keys that are in `(data_inputs  U  block_names)`. Sub-outputs of
-    // composite blocks (e.g. `beta` from a rjmcmc block named
-    // `gamma_beta_rj`) are NOT block names -- `replaced["beta"] = ...`
-    // would fail validation. The right pattern is to compute y_rep
-    // MANUALLY per draw from the history, without going through
-    // `impl_->predict_at`:
+    // `composite_block::predict_at` accepts replaced keys in
+    // `(data_inputs  U  block_names  U  declared predict-DAG sources)`.
+    // The third set is what lets you replace ONE sub-output of a composite
+    // block: `declare_predict_edges("beta", {"y_rep"})` makes "beta" a legal
+    // key even though the block is named `gamma_beta_rj`.
+    //
+    // So `replaced[key] = ...` works whenever `key` has a predict edge -- and
+    // if it does not, nothing downstream would recompute from it anyway.
+    // Fall back to computing y_rep MANUALLY per draw only when the quantity
+    // cannot be recovered from shared_data at all (a fitted BART forest at new
+    // X, a GP kernel matrix), which is the same case that makes predict_at
+    // raise its missing-refresher error:
     AI4BayesCode::history_map hist = impl_->get_history();
     const arma::mat& beta_hist  = hist.at("beta");   // n_draws x p
     const arma::mat& sigma_hist = hist.at("sigma");  // n_draws x 1
@@ -2404,15 +2447,17 @@ AI4BayesCode::history_map predict_at(
 }
 ```
 
-**When `impl_->predict_at` IS usable in history mode**: only when every
-sampled key the refresher reads is *also* the name of a child block
-(e.g. `BetaBernoulli`'s "p" is both a sampled key and the block name).
-In that case you can use the cleaner `replaced[key] = ...` pattern --
-see `BetaBernoulli.cpp`, `DirichletSimplex.cpp`, `DirichletSparse.cpp`.
+**When `impl_->predict_at` IS usable in history mode**: whenever every
+sampled key the refresher reads is a data input, a child block name, or a
+declared source of the predict DAG. The last case covers sub-outputs of a
+composite block: `DirichletSimplex` replaces "theta", a sub-param of its
+`theta_joint` block, because it declared
+`declare_predict_edges("theta", {"y_rep"})`. Use the `replaced[key] = ...`
+pattern -- see `BetaBernoulli.cpp`, `DirichletSimplex.cpp`.
 
-If any refresher-read key is a sub-output of a composite block (rjmcmc,
-joint_nuts_block, etc.), fall back to the manual-compute pattern above
-(SpikeSlabRJMCMC.cpp, ARDLasso.cpp).
+Fall back to the manual-compute pattern above only for a quantity that
+shared_data cannot reproduce at all -- a fitted forest or kernel that has to
+be re-evaluated by its own child (SpikeSlabRJMCMC.cpp, ARDLasso.cpp).
 
 The history-mode branch needs ALL the sampled keys that downstream
 refreshers read. Enumerate each refresher's `d.get(...)` calls, pull

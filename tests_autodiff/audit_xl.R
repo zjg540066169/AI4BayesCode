@@ -268,7 +268,7 @@ run_one_example("BartNoise",
     fn_run = function(dat, cs, nb, nk) {
         set.seed(cs)
         m <- new(BartNoise, dat$X, dat$y, 50L, 2.0, 2.0, 0.95, 3.0, 100L, FALSE, FALSE,
-                 as.integer(cs), TRUE)
+                 as.integer(cs), FALSE, TRUE)
         t0 <- Sys.time(); m$step(nb); m$step(nk); t1 <- Sys.time()
         h <- m$get_history()
         list(f_bart = h$f_bart[(nb+1):(nb+nk), , drop=FALSE],
@@ -304,7 +304,7 @@ run_one_example("GBartPoisson",
         list(X=X, y=y, r_true=r_true)
     },
     fn_run = function(dat, cs, nb, nk) {
-        m <- new(GBartPoisson, dat$X, as.numeric(dat$y), 50L, as.integer(cs), TRUE)
+        m <- new(GBartPoisson, dat$X, as.numeric(dat$y), 50L, as.integer(cs), FALSE, TRUE)
         t0 <- Sys.time(); m$step(nb); m$step(nk); t1 <- Sys.time()
         h <- m$get_history()
         list(r    = h$r[(nb+1):(nb+nk), , drop=FALSE],
@@ -387,9 +387,13 @@ run_one_example("IRT1PL_joint",
                  as.integer(cs), TRUE)
         t0 <- Sys.time(); m$step(nb); m$step(nk); t1 <- Sys.time()
         h <- m$get_history()
-        list(theta = h$theta[(nb+1):(nb+nk), , drop=FALSE],
-             b = h$b[(nb+1):(nb+nk), , drop=FALSE],
-             sigma_b = h$sigma_b[(nb+1):(nb+nk)],
+        keep <- (nb+1):(nb+nk)
+        sb   <- as.numeric(h$sigma_b)[keep]
+        # Non-centered: z_b is sampled and b_j = sigma_b * z_b_j
+        # (IRT1PL_joint.cpp:26). History holds {theta, z_b, sigma_b}.
+        list(theta = h$theta[keep, , drop=FALSE],
+             b = h$z_b[keep, , drop=FALSE] * sb,
+             sigma_b = sb,
              wall = as.numeric(difftime(t1, t0, units="secs")))
     },
     fn_diagnose = function(dat, c1, c2) {
@@ -428,11 +432,16 @@ run_one_example("HierarchicalLM_joint",
                  1.0, 1.0, as.integer(cs), TRUE)
         t0 <- Sys.time(); m$step(nb); m$step(nk); t1 <- Sys.time()
         h <- m$get_history()
-        list(alpha = h$alpha[(nb+1):(nb+nk)],
-             beta  = h$beta[(nb+1):(nb+nk), , drop=FALSE],
-             u     = h$u[(nb+1):(nb+nk), , drop=FALSE],
-             sigma = h$sigma[(nb+1):(nb+nk)],
-             tau   = h$tau[(nb+1):(nb+nk)],
+        keep  <- (nb+1):(nb+nk)
+        tau_v <- as.numeric(h$tau)[keep]
+        # Non-centered: z_u is sampled and u_g = tau * z_u_g
+        # (HierarchicalLM_joint.cpp:24). History holds
+        # {alpha, beta, tau, z_u, sigma}.
+        list(alpha = h$alpha[keep],
+             beta  = h$beta[keep, , drop=FALSE],
+             u     = h$z_u[keep, , drop=FALSE] * tau_v,
+             sigma = h$sigma[keep],
+             tau   = tau_v,
              wall = as.numeric(difftime(t1, t0, units="secs")))
     },
     fn_diagnose = function(dat, c1, c2) {
@@ -517,7 +526,7 @@ run_one_example("GBartLogistic",
     },
     fn_run = function(dat, cs, nb, nk) {
         set.seed(cs)
-        m <- new(GBartLogistic, dat$X, dat$y, 50L, as.integer(cs), TRUE)
+        m <- new(GBartLogistic, dat$X, dat$y, 50L, as.integer(cs), FALSE, TRUE)
         t0 <- Sys.time(); m$step(nb); m$step(nk); t1 <- Sys.time()
         h <- m$get_history()
         list(r    = h$r[(nb+1):(nb+nk), , drop=FALSE],
@@ -572,7 +581,7 @@ run_one_example("GBartMultinomial",
     fn_run = function(dat, cs, nb, nk) {
         set.seed(cs)
         m <- new(GBartMultinomial, dat$X, as.numeric(dat$y),
-                 dat$C, 50L, as.integer(cs), TRUE)
+                 dat$C, 50L, as.integer(cs), FALSE, TRUE)
         t0 <- Sys.time(); m$step(nb); m$step(nk); t1 <- Sys.time()
         h <- m$get_history()
         # Collect non-reference r_j histories into a list of matrices.

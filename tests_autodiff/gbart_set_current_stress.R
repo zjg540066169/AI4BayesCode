@@ -13,7 +13,7 @@
 source("R/AI4BayesCode_helpers.R")
 
 test_set_current_stress <- function(example_name, build_fn, update_keys,
-                                    impossible_key, unknown_key_value) {
+                                    readonly_key, unknown_key_value) {
     cat(sprintf("\n===== %s set_current stress =====\n", example_name))
     m <- build_fn()
     m$step(20L)
@@ -37,17 +37,31 @@ test_set_current_stress <- function(example_name, build_fn, update_keys,
     before <- m2$get_current()
     m2$set_current(list(random_garbage = unknown_key_value))
     after <- m2$get_current()
+    unchanged <- isTRUE(all.equal(before, after))
     cat(sprintf("  [%s] unknown key: state unchanged = %s\n", example_name,
-                isTRUE(all.equal(before, after))))
+                unchanged))
+    stopifnot(unchanged)
 
-    # (c) Impossible key rejected
-    m3 <- build_fn()
-    rejected <- tryCatch({
-        m3$set_current(setNames(list(1.0), impossible_key)); FALSE
-    }, error = function(e) TRUE)
-    cat(sprintf("  [%s] impossible key '%s' rejected: %s\n",
-                example_name, impossible_key, rejected))
-    stopifnot(rejected)
+    # (c) The read-only forest output is INERT on input, not rejected.
+    # r (r_1 for the multinomial) is what the forest produces; there is no
+    # unique inverse, so the examples ignore it on input rather than erroring,
+    # which is what lets set_current(get_current()) round-trip
+    # (GBartPoisson.cpp:297-306). Ignoring has to be inert, not merely quiet.
+    # Restore a forest with set_tree(), not with r.
+    m3 <- build_fn(); m3$step(20L)
+    before3 <- m3$get_current()
+    m3$set_current(setNames(list(rep(1e6, length(before3[[readonly_key]]))),
+                            readonly_key))
+    after3 <- m3$get_current()
+    inert <- isTRUE(all.equal(before3, after3))
+    cat(sprintf("  [%s] read-only key '%s' inert on input: %s\n",
+                example_name, readonly_key, inert))
+    stopifnot(inert)
+
+    rt <- tryCatch({ m3$set_current(before3); TRUE }, error = function(e) FALSE)
+    cat(sprintf("  [%s] set_current(get_current()) round-trips: %s\n",
+                example_name, rt))
+    stopifnot(rt, isTRUE(all.equal(before3, m3$get_current())))
 
     # (d) predict_at does not mutate state
     m4 <- build_fn(); m4$step(30L)

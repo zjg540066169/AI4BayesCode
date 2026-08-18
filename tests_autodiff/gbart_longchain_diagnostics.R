@@ -46,7 +46,7 @@ truth_p <- -1 + X[,1] - 0.5*X[,2]
 y <- rpois(N, exp(truth_p))
 run_p <- function(seed) {
     set.seed(seed)
-    m <- new(GBartPoisson, X, as.numeric(y), 200L, seed, TRUE)
+    m <- new(GBartPoisson, X, as.numeric(y), 200L, seed, FALSE, TRUE)
     t0 <- Sys.time(); m$step(NBURN); m$step(NKEEP); t1 <- Sys.time()
     list(h=m$get_history(), wall=as.numeric(difftime(t1,t0,units="secs")))
 }
@@ -66,7 +66,7 @@ truth_l <- -0.5 + 2*X[,1] - X[,2]
 y <- rbinom(N, 1, plogis(truth_l))
 run_l <- function(seed) {
     set.seed(seed)
-    m <- new(GBartLogistic, X, as.numeric(y), 50L, seed, TRUE)
+    m <- new(GBartLogistic, X, as.numeric(y), 50L, seed, FALSE, TRUE)
     t0 <- Sys.time(); m$step(NBURN); m$step(NKEEP); t1 <- Sys.time()
     list(h=m$get_history(), wall=as.numeric(difftime(t1,t0,units="secs")))
 }
@@ -91,7 +91,7 @@ probs_true <- cbind(1/denom, exp(eta[,1])/denom, exp(eta[,2])/denom)
 y <- apply(probs_true, 1, function(pi) sample(0:2, 1, prob=pi))
 run_m <- function(seed) {
     set.seed(seed)
-    m <- new(GBartMultinomial, X, as.numeric(y), C, 50L, seed, TRUE)
+    m <- new(GBartMultinomial, X, as.numeric(y), C, 50L, seed, FALSE, TRUE)
     t0 <- Sys.time(); m$step(NBURN); m$step(NKEEP); t1 <- Sys.time()
     list(h=m$get_history(), wall=as.numeric(difftime(t1,t0,units="secs")))
 }
@@ -118,7 +118,7 @@ phi_true <- 0.5
 mu <- exp(truth_h); y <- rnorm(N, mu, sqrt(phi_true*mu))
 run_h <- function(seed) {
     set.seed(seed)
-    m <- new(GBartHeteroscedastic, X, as.numeric(y), 200L, 1.0, seed, TRUE)
+    m <- new(GBartHeteroscedastic, X, as.numeric(y), 200L, 1.0, seed, FALSE, TRUE)
     t0 <- Sys.time(); m$step(NBURN); m$step(NKEEP); t1 <- Sys.time()
     list(h=m$get_history(), cur=m$get_current(),
          wall=as.numeric(difftime(t1,t0,units="secs")))

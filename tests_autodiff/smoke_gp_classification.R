@@ -99,32 +99,21 @@ cat(sprintf("  wall = %.1fs for 4000 sweeps (%.3fs / sweep)\n",
             wall, wall / 4000))
 h <- mh$get_history()
 cat(sprintf("  history keys: %s\n", paste(names(h), collapse = ",")))
-# Whitened parameterization: z is sampled, f is recovered as f = L(amp,ell)·z.
-# History therefore stores {z, amplitude, lengthscale}, NOT f directly.
-stopifnot(all(c("z", "amplitude", "lengthscale") %in% names(h)))
+# The latent field f is sampled DIRECTLY by an elliptical_slice_sampling_block
+# (there is no whitened z: grep the example for "whiten" -- zero hits). The
+# hyperparameters sit in a joint_nuts_block. History therefore stores
+# {f, amplitude, lengthscale}.
+stopifnot(all(c("f", "amplitude", "lengthscale") %in% names(h)))
 stopifnot(nrow(h$z) == 4000)
 stopifnot(ncol(h$z) == N)
 stopifnot(nrow(h$amplitude) == 4000)
 stopifnot(nrow(h$lengthscale) == 4000)
 
-# Reconstruct f for each kept draw via f_i = L(amp_i, ell_i) · z_i.
-# Match the C++ jitter (1e-5) so that L is comparable.
-D2 <- as.matrix(dist(X))^2
-recover_f <- function(h, idx) {
-    n_kept <- length(idx)
-    f_mat  <- matrix(NA_real_, n_kept, N)
-    amp_v  <- as.numeric(h$amplitude)
-    ell_v  <- as.numeric(h$lengthscale)
-    for (k in seq_along(idx)) {
-        i <- idx[k]
-        K <- amp_v[i]^2 * exp(-D2 / (2 * ell_v[i]^2))
-        diag(K) <- diag(K) + 1e-5
-        L_lower <- t(chol(K))                  # R's chol returns U; we want L
-        f_mat[k, ] <- as.numeric(L_lower %*% h$z[i, ])
-    }
-    f_mat
-}
-f_kept <- recover_f(h, 2001:4000)
+# f is sampled directly by the elliptical_slice_sampling_block and stored in
+# the history, so there is nothing to reconstruct. (This used to rebuild
+# f_i = L(amp_i, ell_i) . z_i from a whitened z, which the model no longer
+# has -- grep the example for "whiten": zero hits.)
+f_kept <- h$f[2001:4000, , drop = FALSE]
 f_pm   <- colMeans(f_kept)
 cor_f  <- cor(f_pm, f_true)
 rmse_f <- sqrt(mean((f_pm - f_true)^2))

@@ -140,7 +140,7 @@ X_lbp <- matrix(runif(N_lbp * p_lbp), ncol = p_lbp)
 r_true <- 1 + 2 * X_lbp[, 1] - X_lbp[, 2]
 y_lbp  <- rpois(N_lbp, exp(r_true))
 
-m <- new(GBartPoisson, X_lbp, as.numeric(y_lbp), 50L, 101L, TRUE)
+m <- new(GBartPoisson, X_lbp, as.numeric(y_lbp), 50L, 101L, FALSE, TRUE)
 m$step(500L)
 m$step(500L)
 

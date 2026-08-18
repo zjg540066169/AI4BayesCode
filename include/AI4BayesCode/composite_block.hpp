@@ -804,16 +804,28 @@ public:
         const auto& valid_inputs = data_.valid_predict_inputs();
         std::unordered_set<std::string> block_names;
         for (const auto& c : children_) block_names.insert(c->name());
+        // A declared SOURCE of the predict DAG is a valid key by construction:
+        // declare_predict_edges(from, to) exists precisely so predict_at can
+        // start from `from` and recompute `to`. This is the only way to replace
+        // one sub-parameter of a joint block, whose sub-param name is neither a
+        // data input nor a child block name -- e.g. DirichletSimplex declares
+        // declare_predict_edges("theta", {"y_rep"}) on the "theta" sub-param of
+        // the "theta_joint" block and installs a per-draw theta to build the
+        // posterior predictive.
+        const auto& predict_sources = data_.predict_edges();
 
         for (const auto& kv : replaced_values) {
             if (!valid_inputs.count(kv.first) &&
-                !block_names.count(kv.first)) {
+                !block_names.count(kv.first) &&
+                !predict_sources.count(kv.first)) {
                 std::string msg =
                     "composite_block::predict_at: unknown key '"
                     + kv.first + "'. Valid data inputs: ";
                 for (const auto& k : valid_inputs) msg += "'" + k + "' ";
                 msg += ". Valid block outputs: ";
                 for (const auto& k : block_names) msg += "'" + k + "' ";
+                msg += ". Valid predict-DAG sources: ";
+                for (const auto& k : predict_sources) msg += "'" + k.first + "' ";
                 throw std::invalid_argument(msg);
             }
         }

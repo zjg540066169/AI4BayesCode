@@ -129,7 +129,14 @@
 #' @keywords internal
 #' @noRd
 .ai4b_parse_methods <- function(src) {
-    m <- gregexpr('\\.method\\(\\s*"([^"]+)"\\s*,\\s*&[^,\\)]+(?:,\\s*"((?:[^"\\\\]|\\\\.)*)")?',
+    # The pointer expression is matched loosely, NOT as `&[^,)]+`. An OVERLOADED
+    # method is registered through a cast --
+    #     .method("step", (void (C::*)()) &C::step, "Run one sweep.")
+    # -- whose commas and parentheses defeated the old pattern, so `step` and
+    # `readapt_NUTS`, the two overloaded methods every sampler has, were the
+    # exact two missing from the returned $methods while the printed card
+    # listed them. Match up to the optional trailing docstring instead.
+    m <- gregexpr('\\.method\\(\\s*"([^"]+)"\\s*,[^;]*?(?:,\\s*"((?:[^"\\\\]|\\\\.)*)")?\\s*\\)',
                   src, perl = TRUE)
     hits <- regmatches(src, m)[[1]]
     out <- list()

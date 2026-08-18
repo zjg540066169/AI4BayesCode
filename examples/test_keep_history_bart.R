@@ -206,7 +206,7 @@ check(rmse    < 0.5,  "posterior-mean prediction RMSE < 0.5")
 cat("\n=== F. MCMC diagnosis (4 chains, rank-normalized) ===\n")
 run_bart_chain <- function(seed, n_burn, n_keep) {
     m <- new(BartNoise, X, y, 50L, 2.0, 2.0, 0.95, 3.0, 100L,
-             FALSE, FALSE, as.integer(seed), TRUE)
+             FALSE, FALSE, as.integer(seed), FALSE, TRUE)
     m$step(n_burn + n_keep)
     H <- m$get_history()
     keep <- (n_burn + 1):(n_burn + n_keep)

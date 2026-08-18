@@ -98,6 +98,55 @@ ai4bayescode_blocks_path <- function(name = NULL) {
 # project-local blocks (./blocks_local/, relative to the working directory).
 #' @keywords internal
 #' @noRd
+# The manifest fields skills/block_design_skills/skill.md Sec.3 requires of a
+# contributed block. A bundle missing any of them, or missing its header, used
+# to go on the compile -I path in silence -- an empty directory dropped into
+# the library was reported as installed and was indistinguishable from a real
+# block until the compile failed with a missing-header error.
+#' @keywords internal
+#' @noRd
+.ai4b_required_manifest_fields <- c(
+    "Block", "Version", "Title", "Description", "Author", "License",
+    "EngineKind", "ConstraintKinds", "RoutingKey", "SelectWhen", "Skill",
+    "Tests", "Depends")
+
+#' Validate a contributed-block bundle
+#'
+#' @param path Bundle directory.
+#' @return Character vector of problems; empty means the bundle is well formed.
+#' @keywords internal
+#' @noRd
+.ai4b_validate_bundle <- function(path) {
+    problems <- character(0)
+    nm <- basename(normalizePath(path, winslash = "/", mustWork = FALSE))
+    if (!dir.exists(path)) return(paste0(path, " is not a directory"))
+    man_path <- file.path(path, "manifest.dcf")
+    if (!file.exists(man_path)) {
+        problems <- c(problems, "manifest.dcf is missing")
+    } else {
+        man <- tryCatch(read.dcf(man_path), error = function(e) NULL)
+        if (is.null(man) || nrow(man) < 1L) {
+            return(c(problems, "manifest.dcf could not be parsed"))
+        }
+        missing <- setdiff(.ai4b_required_manifest_fields, colnames(man))
+        missing <- c(missing, Filter(function(f)
+            f %in% colnames(man) && !nzchar(trimws(man[1, f])),
+            .ai4b_required_manifest_fields))
+        if (length(missing))
+            problems <- c(problems, paste0(
+                "manifest.dcf is missing required field(s): ",
+                paste(unique(missing), collapse = ", ")))
+        if ("Block" %in% colnames(man) && nzchar(man[1, "Block"]) &&
+            man[1, "Block"] != nm)
+            problems <- c(problems, sprintf(
+                "manifest.dcf says Block: '%s' but the directory is '%s' -- they must match",
+                man[1, "Block"], nm))
+    }
+    if (!file.exists(file.path(path, paste0(nm, ".hpp"))))
+        problems <- c(problems, paste0(nm, ".hpp is missing (the header the block is used by)"))
+    problems
+}
+
 .ai4b_block_cppflags <- function() {
     flags <- character(); seen <- character()
     # project-local FIRST, then user-global; DEDUP by block name so a locally
@@ -110,6 +159,12 @@ ai4bayescode_blocks_path <- function(name = NULL) {
             nm <- basename(b)
             if (nm %in% seen) next
             seen <- c(seen, nm)
+            probs <- .ai4b_validate_bundle(b)
+            if (length(probs)) {
+                warning("skipping block bundle '", b, "': ",
+                        paste(probs, collapse = "; "), call. = FALSE)
+                next
+            }
             flags <- c(flags, paste0("-I", shQuote(b)))
             vdir <- file.path(b, "vendor")
             if (dir.exists(vdir))
@@ -182,14 +237,26 @@ ai4bayescode_available_blocks <- function() {
     sort(sub("^registry/", "", hits))
 }
 
-#' Contributed blocks already installed in the user library (like `installed.packages()`)
+#' Contributed blocks visible to the compiler (like `installed.packages()`)
 #'
-#' @return Character vector of installed block names.
+#' @param tier Which tiers to list. BOTH reach the compile `-I` path:
+#'   `"local"` is `./blocks_local/`, `"download"` is the per-user block
+#'   library. A block present in both is listed once -- local shadows
+#'   download, exactly as the compile path does. Default `"all"`.
+#' @return Character vector of block names visible to the compiler.
 #' @export
-ai4bayescode_installed_blocks <- function() {
-    bdir <- .ai4b_blocks_dir()
-    if (!dir.exists(bdir)) return(character(0))
-    sort(basename(list.dirs(bdir, recursive = FALSE)))
+ai4bayescode_installed_blocks <- function(tier = c("all", "local", "download")) {
+    tier <- match.arg(tier)
+    dirs <- character(0)
+    if (tier %in% c("all", "local"))    dirs <- c(dirs, file.path(getwd(), "blocks_local"))
+    if (tier %in% c("all", "download")) dirs <- c(dirs, .ai4b_blocks_dir())
+    out <- character(0)
+    for (bdir in dirs) {
+        if (!dir.exists(bdir)) next
+        nms <- basename(list.dirs(bdir, recursive = FALSE))
+        out <- c(out, setdiff(nms, out))     # local shadows download, as the -I path does
+    }
+    sort(out)
 }
 
 #' Install a contributed block from the hub registry (like `install.packages()`)

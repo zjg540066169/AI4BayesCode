@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 import shutil
 import sys
 import tempfile
@@ -57,6 +58,51 @@ def blocks_path(name: str | None = None) -> str:
     return d if name is None else os.path.join(d, _check_block_name(name))
 
 
+#: The manifest fields skills/block_design_skills/skill.md Sec.3 requires of a
+#: contributed block. A bundle missing any of them, or missing its header, was
+#: previously accepted in silence and put on the compile -I path anyway -- an
+#: empty directory dropped into the library reported as "installed".
+_REQUIRED_MANIFEST_FIELDS = (
+    "Block", "Version", "Title", "Description", "Author", "License",
+    "EngineKind", "ConstraintKinds", "RoutingKey", "SelectWhen", "Skill",
+    "Tests", "Depends",
+)
+
+
+def validate_bundle(path: str) -> list[str]:
+    """Problems with the block bundle at `path`; empty list means it is well formed.
+
+    Checks what can be checked without compiling: the manifest parses, carries
+    every required field, and names the block consistently with the directory
+    and the header file that has to exist.
+    """
+    problems: list[str] = []
+    name = os.path.basename(os.path.normpath(path))
+    if not os.path.isdir(path):
+        return [f"{path} is not a directory"]
+    man_path = os.path.join(path, "manifest.dcf")
+    if not os.path.isfile(man_path):
+        problems.append("manifest.dcf is missing")
+    else:
+        try:
+            with open(man_path, encoding="utf-8", errors="replace") as fh:
+                man = _read_dcf(fh.read())
+        except Exception as e:  # noqa: BLE001
+            return [f"manifest.dcf could not be parsed ({e})"]
+        missing = [f for f in _REQUIRED_MANIFEST_FIELDS if not man.get(f)]
+        if missing:
+            problems.append("manifest.dcf is missing required field(s): "
+                            + ", ".join(missing))
+        declared = man.get("Block", "")
+        if declared and declared != name:
+            problems.append(
+                f"manifest.dcf says Block: {declared!r} but the directory is "
+                f"{name!r} -- they must match")
+    if not os.path.isfile(os.path.join(path, f"{name}.hpp")):
+        problems.append(f"{name}.hpp is missing (the header the block is used by)")
+    return problems
+
+
 def _block_include_flags() -> list[str]:
     """``-I`` flags for every contributed block (block dir + each vendored dep dir).
 
@@ -76,6 +122,16 @@ def _block_include_flags() -> list[str]:
             if not os.path.isdir(bp) or b in seen:
                 continue
             seen.add(b)
+            # A malformed bundle used to go on the -I path in silence -- an
+            # empty directory, or one with a manifest missing 12 of its 13
+            # required fields, was indistinguishable from a real block until
+            # the compile failed with a missing-header error.
+            problems = validate_bundle(bp)
+            if problems:
+                warnings.warn(
+                    f"skipping block bundle {bp!r}: " + "; ".join(problems),
+                    RuntimeWarning, stacklevel=3)
+                continue
             flags.append(f"-I{bp}")
             vdir = os.path.join(bp, "vendor")
             if os.path.isdir(vdir):
@@ -179,12 +235,36 @@ def available_blocks() -> list[str]:
     return sorted(names)
 
 
-def installed_blocks() -> list[str]:
-    """Contributed blocks already installed (like ``installed.packages()``)."""
-    bdir = _blocks_dir()
-    if not os.path.isdir(bdir):
-        return []
-    return sorted(b for b in os.listdir(bdir) if os.path.isdir(os.path.join(bdir, b)))
+def installed_blocks(tier: str = "all") -> list[str]:
+    """Contributed blocks visible to the compiler (like ``installed.packages()``).
+
+    Two tiers reach the compile ``-I`` path: project-local blocks under
+    ``./blocks_local/`` and downloaded ones under the block library. This used
+    to report only the download tier, so a user with four live blocks under
+    ``blocks_local/`` was told ``[]`` while those four were being compiled in.
+
+    ``tier`` is ``"all"`` (default), ``"local"`` or ``"download"``. A block
+    present in both is reported once: local shadows download, matching what
+    the compile path does.
+    """
+    if tier not in ("all", "local", "download"):
+        raise ValueError(
+            f"tier must be 'all', 'local' or 'download'; got {tier!r}")
+    out: list[str] = []
+    seen: set[str] = set()
+    dirs = []
+    if tier in ("all", "local"):
+        dirs.append(os.path.join(os.getcwd(), "blocks_local"))
+    if tier in ("all", "download"):
+        dirs.append(_blocks_dir())
+    for bdir in dirs:
+        if not os.path.isdir(bdir):
+            continue
+        for b in sorted(os.listdir(bdir)):
+            if b in seen or not os.path.isdir(os.path.join(bdir, b)):
+                continue
+            seen.add(b); out.append(b)
+    return sorted(out)
 
 
 def install_block(name: str, force: bool = False, quiet: bool = False) -> str:

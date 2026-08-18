@@ -63,3 +63,7 @@ tests/test_*
 # R CMD check / build artifacts
 *.Rcheck/
 AI4BayesCode_*.tar.gz
+
+# Harness result dumps: tests_autodiff/*.R saveRDS() their summaries into the
+# repo root, so running the suite would otherwise dirty the tree.
+*.rds

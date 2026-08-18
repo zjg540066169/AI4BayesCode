@@ -227,7 +227,7 @@ y_b <- as.numeric(f_true_b + rnorm(N_b, 0, 0.8))
 run <- function(seed, nb, nk) {
     set.seed(seed)
     m <- new(BartNoise, X_b, y_b, 50L, 2.0, 2.0, 0.95, 3.0, 100L, FALSE, FALSE,
-             as.integer(seed), TRUE)
+             as.integer(seed), FALSE, TRUE)
     t0 <- Sys.time(); m$step(nb); m$step(nk); t1 <- Sys.time()
     h <- m$get_history()
     list(f_bart = h$f_bart[(nb+1):(nb+nk), , drop=FALSE],
@@ -262,7 +262,7 @@ X_l <- matrix(runif(N_l*p_l), N_l, p_l)
 r_true <- 1 + 2*X_l[,1] - X_l[,2]   # log-rate (r ≡ log_f in legacy notation)
 y_l <- rpois(N_l, exp(r_true))
 run <- function(seed, nb, nk) {
-    m <- new(GBartPoisson, X_l, as.numeric(y_l), 50L, as.integer(seed), TRUE)
+    m <- new(GBartPoisson, X_l, as.numeric(y_l), 50L, as.integer(seed), FALSE, TRUE)
     t0 <- Sys.time(); m$step(nb); m$step(nk); t1 <- Sys.time()
     h <- m$get_history()
     list(r    = h$r[(nb+1):(nb+nk), , drop=FALSE],
@@ -332,9 +332,14 @@ run <- function(seed, nb, nk, th_init, b_init, sb_init) {
              as.integer(seed), TRUE)
     t0 <- Sys.time(); m$step(nb); m$step(nk); t1 <- Sys.time()
     h <- m$get_history()
-    list(theta = h$theta[(nb+1):(nb+nk), , drop=FALSE],
-         b = h$b[(nb+1):(nb+nk), , drop=FALSE],
-         sigma_b = h$sigma_b[(nb+1):(nb+nk)],
+    keep <- (nb+1):(nb+nk)
+    sb   <- as.numeric(h$sigma_b)[keep]
+    # Non-centered: z_b is sampled and b_j = sigma_b * z_b_j
+    # (IRT1PL_joint.cpp:26). The history holds {theta, z_b, sigma_b} -- b is
+    # derived, so derive it rather than reading a key that is not there.
+    list(theta = h$theta[keep, , drop=FALSE],
+         b = h$z_b[keep, , drop=FALSE] * sb,
+         sigma_b = sb,
          wall = as.numeric(difftime(t1,t0, units="secs")))
 }
 c1 <- run(101L, 500L, 1500L, rep(0,N_i), rep(0,J_i), 1.0)
@@ -369,11 +374,16 @@ run <- function(seed, nb, nk) {
              1.0, 1.0, as.integer(seed), TRUE)
     t0 <- Sys.time(); m$step(nb); m$step(nk); t1 <- Sys.time()
     h <- m$get_history()
-    list(alpha = h$alpha[(nb+1):(nb+nk)],
-         beta  = h$beta[(nb+1):(nb+nk), , drop=FALSE],
-         u     = h$u[(nb+1):(nb+nk), , drop=FALSE],
-         sigma = h$sigma[(nb+1):(nb+nk)],
-         tau   = h$tau[(nb+1):(nb+nk)],
+    keep <- (nb+1):(nb+nk)
+    tau_v <- as.numeric(h$tau)[keep]
+    # Non-centered: z_u is sampled and u_g = tau * z_u_g
+    # (HierarchicalLM_joint.cpp:24). The history holds
+    # {alpha, beta, tau, z_u, sigma}; u is derived.
+    list(alpha = h$alpha[keep],
+         beta  = h$beta[keep, , drop=FALSE],
+         u     = h$z_u[keep, , drop=FALSE] * tau_v,
+         sigma = h$sigma[keep],
+         tau   = tau_v,
          wall = as.numeric(difftime(t1,t0, units="secs")))
 }
 c1 <- run(101L, 500L, 1500L); c2 <- run(202L, 500L, 1500L)

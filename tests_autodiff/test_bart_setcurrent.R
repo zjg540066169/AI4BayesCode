@@ -97,16 +97,35 @@ cat("  [PASS] untouched keys preserved across set_current\n")
 # ============================================================================
 # Test 4: rejects f_bart
 # ============================================================================
-cat("\n[T4] BartNoise: set_current(list(f_bart=...)) is rejected\n")
+cat("\n[T4] BartNoise: f_bart is inert on input, and get_current round-trips\n")
+# f_bart is a read-only OUTPUT (the forest fit). BartNoise ignores it on input
+# rather than erroring, precisely so that set_current(get_current()) round-trips
+# -- get_current() returns f_bart, so rejecting it would break the round-trip
+# the example guarantees (BartNoise.cpp:553, 565-567). Ignoring must be inert,
+# not merely quiet, so that is what is asserted here.
+#
+# LdaCollapsedGibbs takes the other side: it REJECTS theta/phi with a message
+# pointing at z, and its round-trip only ever replays z. Both are deliberate;
+# they are not the same contract.
 m4 <- new(BartNoise, X, y_raw, 50L, 2.0, 2.0, 0.95, 3.0, 100L, FALSE, FALSE,
-         104L, TRUE)
-err <- tryCatch({
-    m4$set_current(list(f_bart = rnorm(N)))
-    "NO ERROR"
-}, error = function(e) conditionMessage(e))
-stopifnot(grepl("f_bart", err))
-cat(sprintf("  err msg: %s\n", err))
-cat("  [PASS] f_bart is correctly rejected\n")
+         104L, FALSE, TRUE)
+m4$step(30L)
+cur_before <- m4$get_current()
+m4$set_current(list(f_bart = rnorm(N, 1e6, 1)))     # wildly wrong on purpose
+cur_after <- m4$get_current()
+d_f <- max(abs(cur_after$f_bart - cur_before$f_bart))
+d_s <- abs(cur_after$sigma - cur_before$sigma)
+cat(sprintf("  after a bogus f_bart: max|df|=%.3e  |dsigma|=%.3e\n", d_f, d_s))
+stopifnot(d_f == 0, d_s == 0)
+
+rt <- tryCatch({ m4$set_current(cur_before); TRUE },
+               error = function(e) { cat("  round-trip errored: ",
+                                         conditionMessage(e), "\n"); FALSE })
+stopifnot(isTRUE(rt))
+cur_rt <- m4$get_current()
+stopifnot(max(abs(cur_rt$f_bart - cur_before$f_bart)) == 0,
+          abs(cur_rt$sigma - cur_before$sigma) == 0)
+cat("  [PASS] f_bart ignored without side effects; set_current(get_current()) exact\n")
 
 # ============================================================================
 # Test 5: nested-MCMC sanity — imputed-X loop (missing-data BART)
@@ -213,17 +232,25 @@ stopifnot(cor_p > cor_o + 0.15)
 cat("  [PASS] set_current(X, y) atomic update works\n")
 
 # ============================================================================
-# Test 8: rejects r (tree forest has no unique inverse)
+# Test 8: r is inert on input (the tree forest has no unique inverse)
 # ============================================================================
-cat("\n[T8] GBartPoisson: set_current(list(r=...)) rejected\n")
-m8 <- new(GBartPoisson, X_l, as.numeric(y_l), 50L, 108L, TRUE)
-err <- tryCatch({
-    m8$set_current(list(r = rnorm(N)))
-    "NO ERROR"
-}, error = function(e) conditionMessage(e))
-stopifnot(grepl("r", err))
-cat(sprintf("  err msg: %s\n", err))
-cat("  [PASS] r is correctly rejected\n")
+cat("\n[T8] GBartPoisson: r is inert on input; use set_tree() to restore\n")
+# r is the forest's log-rate output. GBartPoisson ignores it on input rather
+# than erroring, so that set_current(get_current()) round-trips
+# (GBartPoisson.cpp:297-306, and the same wording in the .method doc string).
+# The forest is restored through get_tree()/set_tree(), not through r.
+m8 <- new(GBartPoisson, X_l, as.numeric(y_l), 50L, 108L, FALSE, TRUE)
+m8$step(30L)
+cur8 <- m8$get_current()
+m8$set_current(list(r = rnorm(length(cur8$r), 1e6, 1)))   # wildly wrong
+d_r <- max(abs(m8$get_current()$r - cur8$r))
+cat(sprintf("  after a bogus r: max|dr| = %.3e\n", d_r))
+stopifnot(d_r == 0)
+stopifnot(isTRUE(tryCatch({ m8$set_current(cur8); TRUE },
+                          error = function(e) FALSE)))
+stopifnot(max(abs(m8$get_current()$r - cur8$r)) == 0)
+
+cat("  [PASS] r ignored without side effects; round-trip exact\n")
 
 # ============================================================================
 # Summary

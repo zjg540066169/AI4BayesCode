@@ -4,7 +4,14 @@
 \alias{ai4bayescode_installed_blocks}
 \title{Contributed blocks already installed in the user library (like `installed.packages()`)}
 \usage{
-ai4bayescode_installed_blocks()
+ai4bayescode_installed_blocks(tier = c("all", "local", "download"))
+}
+\arguments{
+\item{tier}{Which tiers to list. Both reach the compile
+\code{-I} path: \code{"local"} is \file{./blocks_local/} and
+\code{"download"} is the per-user block library. A block present in
+both is listed once -- local shadows download, as the compile path
+does.}
 }
 \value{
 Character vector of installed block names.

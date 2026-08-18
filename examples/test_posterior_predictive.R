@@ -198,7 +198,7 @@ y_bart <- f_true + rnorm(N_bart, 0, 1.0)
 run_bart_chain <- function(seed, n_burnin, n_keep) {
     set.seed(seed)
     m <- new(BartNoise, X_bart, y_bart, 100L, 2.0, 2.0, 0.95, 3.0,
-             100L, FALSE, FALSE, as.integer(seed), TRUE)
+             100L, FALSE, FALSE, as.integer(seed), FALSE, TRUE)
     m$step(n_burnin)
     # Because keep_history accumulates, we can't "clear after burnin"
     # unless the wrapper exposes that. Collect all and post-trim.

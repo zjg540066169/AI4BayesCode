@@ -72,29 +72,15 @@ pack_vec <- function(chains, key) {
 arr_amp <- pack_scalar(chains, "amplitude")
 arr_ell <- pack_scalar(chains, "lengthscale")
 
-# Whitened parameterization: history stores {z, amplitude, lengthscale}, NOT
-# f. Reconstruct f for each kept draw via f_i = L(amp_i, ell_i) · z_i with
-# the same jitter as the C++ side (1e-5).
-D2_train <- as.matrix(dist(X))^2
-recover_f_chain <- function(chain, n_burn, n_keep, D2, N) {
-    idx   <- (n_burn + 1):(n_burn + n_keep)
-    amp_v <- as.numeric(chain$amplitude)
-    ell_v <- as.numeric(chain$lengthscale)
-    f_mat <- matrix(NA_real_, n_keep, N)
-    for (k in seq_along(idx)) {
-        i <- idx[k]
-        K <- amp_v[i]^2 * exp(-D2 / (2 * ell_v[i]^2))
-        diag(K) <- diag(K) + 1e-5
-        L_lower <- t(chol(K))
-        f_mat[k, ] <- as.numeric(L_lower %*% chain$z[i, ])
-    }
-    f_mat
-}
+# f is sampled directly by the elliptical_slice_sampling_block, so the
+# history stores {f, amplitude, lengthscale} and there is nothing to
+# reconstruct. (This used to rebuild f_i = L(amp_i, ell_i) . z_i from a
+# whitened z, which the model does not have -- grep the example for
+# "whiten": zero hits.)
 arr_f <- array(NA_real_, dim = c(n_keep, length(chains), N))
 for (ci in seq_along(chains)) {
-    cat(sprintf("  reconstructing f for chain %d...\n", ci))
-    arr_f[, ci, ] <- recover_f_chain(chains[[ci]], n_burn, n_keep,
-                                      D2_train, N)
+    idx <- (n_burn + 1):(n_burn + n_keep)
+    arr_f[, ci, ] <- chains[[ci]]$f[idx, , drop = FALSE]
 }
 
 ok_posterior <- requireNamespace("posterior", quietly = TRUE)
