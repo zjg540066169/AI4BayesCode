@@ -17,14 +17,24 @@ NKEEP <- 2000L
 N_PPC_DRAWS <- 1000L
 
 # Summary statistics for the p-value calculations.
-bp_stats <- list(
+# The statistic SET follows the SUPPORT of y, exactly as the generated runner
+# does (skills/codegen_r_runner.md, R3.a). On a discrete support the order
+# statistics are pinned: for a Poisson fixture every replicate reproduces
+# min = 0, q25 = 0 and q75 = 1 exactly, so mean(t_rep >= t_obs) is 1.000 by
+# construction and perfect agreement reads as a failure that no misfit could
+# make worse. Choosing the set by support is the system's answer to that --
+# not a different p-value convention.
+bp_stats_binary <- list(mean = mean)                     # binary
+
+bp_stats_count <- list(mean = mean, sd = sd,             # count
+                       max = function(x) max(x))
+
+bp_stats <- list(                                        # continuous
     mean = mean, sd = sd,
     min  = function(x) min(x),
     max  = function(x) max(x),
     q25  = function(x) quantile(x, 0.25, names = FALSE),
     q75  = function(x) quantile(x, 0.75, names = FALSE))
-
-bp_stats_binary <- list(mean = mean)
 
 # Collect posterior-predictive draws INTERSPERSED with MCMC sweeps so each
 # y_rep comes from a different posterior draw of r (not the fixed final
@@ -52,18 +62,10 @@ run_r3 <- function(example_name, build_fn, y_obs, stats_list = bp_stats) {
     cat(sprintf("  Collected %d posterior-predictive draws (1-sweep thinning); "
                 , N_PPC_DRAWS))
     cat(sprintf("y_rep shape %d x %d\n", nrow(yrep), ncol(yrep)))
-    # MID-P, not mean(t_rep >= t_obs). On count data the order statistics are
-    # heavily tied -- for the Poisson fixture every single replicate reproduces
-    # min = 0, q25 = 0 and q75 = 1 exactly, so P(t_rep > t_obs) = 0 and
-    # P(t_rep == t_obs) = 1. The >= convention then reports p = 1.000 for all
-    # three and calls perfect agreement a FAIL, while a genuine misfit could
-    # not push it any higher. Splitting the ties (Meng 1994; BDA3 Sec. 6.4)
-    # puts exact agreement at 0.5 and leaves the statistic able to move in
-    # both directions.
     pvs <- sapply(stats_list, function(f) {
         t_obs <- f(y_obs)
         t_rep <- apply(yrep, 1, f)
-        mean(t_rep > t_obs) + 0.5 * mean(t_rep == t_obs)
+        mean(t_rep >= t_obs)
     })
     status <- sapply(pvs, function(p) {
         if (p > 0.05 && p < 0.95) "OK"
@@ -83,7 +85,7 @@ set.seed(1); N <- 200L; p <- 3L; X <- matrix(runif(N*p), N, p)
 truth <- -1 + X[,1] - 0.5*X[,2]; y_p <- rpois(N, exp(truth))
 res_p <- run_r3("GBartPoisson",
                 function() new(GBartPoisson, X, as.numeric(y_p), 200L, 101L, FALSE),
-                y_p, bp_stats)
+                y_p, bp_stats_count)
 
 # -- GBartLogistic R3 (binary) --
 ai4bayescode_source_checkout("r-pkg/inst/examples/GBartLogistic.cpp",
