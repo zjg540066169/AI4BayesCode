@@ -28,7 +28,7 @@
 //      funnel geometry.
 //
 //  (b) JOINT NUTS on (beta, z, log_tau, log_sigma) via joint_nuts_block
-//      v0 with T11 DENSE METRIC adaptation.
+//      with dense-metric adaptation.
 //      Rationale: modular sampling of (tau) separately from (beta, z)
 //      causes SLOW MIXING because tau's Gibbs conditional shifts
 //      between sweeps (tau and z/beta are correlated through the mean
@@ -36,11 +36,12 @@
 //      groups recovers good mixing; persistent (between-call) adaptation
 //      carries the tuning forward with n_warmup_per_step = 0.
 //
-//  (c) Manual log-transform on tau and sigma so they fit joint_nuts_block
-//      v0 (real-only). joint_nuts_block_mixed supports POSITIVE but
-//      lacks dense metric (v1 gap). We include the half-Normal prior
-//      Jacobian and the Jeffreys-cancellation explicitly in the
-//      log-density lambda.
+//  (c) tau and sigma are carried as log_tau / log_sigma inside the single
+//      REAL slice, with the half-Normal prior Jacobian and the
+//      Jeffreys cancellation written out in the log-density lambda. (A
+//      POSITIVE sub-param would do the transform for you; this file keeps
+//      the algebra visible because the Jacobian terms are the point of the
+//      derivation below.)
 //
 //  (d) R_chol stays modular (constraints::cholesky_corr not supported
 //      in joint_nuts_block / _mixed). Its conditional given (beta, z,
@@ -56,7 +57,7 @@
 //
 //  BLOCK COMPOSITION (2 blocks, down from 5)
 //  -----------------------------------------
-//    1. joint (beta, z, log_tau, log_sigma) : joint_nuts_block v0
+//    1. joint (beta, z, log_tau, log_sigma) : joint_nuts_block
 //         dim = p + J*d + d + 1
 //         DENSE METRIC adaptation (pilot 500 + adapt 1500 iters)
 //    2. R_chol                              : nuts_block cholesky_corr

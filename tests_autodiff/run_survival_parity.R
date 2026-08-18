@@ -322,10 +322,14 @@ cat("[T3] ", if (pass3) "PASS" else "FAIL", "\n")
 # Verdict
 # ============================================================================
 cat("\n============================================================\n")
-if (pass1 && pass2 && pass3)
+# Braces are required: at TOP LEVEL R parses `if (...) expr` as a complete
+# statement, so a bare `else` on the next line is a syntax error and this file
+# would not parse at all.
+if (pass1 && pass2 && pass3) {
     cat("SURVIVAL PARITY: PASS (all 3 blocks match Stan within 5%; cross-impl R-hat < 1.02)\n")
-else
+} else {
     cat("SURVIVAL PARITY: FAIL -- see per-test output above\n")
+}
 cat("============================================================\n")
 .ok <- pass1 && pass2 && pass3
 quit(save = "no", status = if (.ok) 0L else 1L)

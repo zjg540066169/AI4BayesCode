@@ -65,8 +65,7 @@
 //  - π conditional is EXACTLY Dirichlet (Dirichlet-Categorical
 //    conjugate) -> dirichlet_gibbs_block (Exception 1 from
 //    codegen_priors.md Sec.2b).
-//  - (μ, λ): normal_gamma_cluster_gibbs_block (NEW Tier-B block,
-//    shipped 2026-05-02 with a library parity test).
+//  - (μ, λ): normal_gamma_cluster_gibbs_block.
 //
 //  No hand-written log-density: all 3 children are conjugate Gibbs.
 // ============================================================================
