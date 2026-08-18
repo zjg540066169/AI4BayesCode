@@ -119,6 +119,14 @@ int main() {
         std::printf("  FAIL: |corr| = %.4f not in [0.85, 0.99]\n", std::abs(corr));
         ok = false;
     }
+    // The header lists PSIS-k-hat < 0.7 as a PASS criterion and only finiteness
+    // was ever checked, so the criterion the test exists to demonstrate --
+    // that full-rank VI reaches the PASS/CAUTION tier on a correlated target
+    // -- could not fail. Measured khat here is -0.14.
+    if (khat != -1.0 && std::isfinite(khat) && khat >= 0.7) {
+        std::printf("FAIL: PSIS k-hat %.4f >= 0.7\n", khat);
+        ok = false;
+    }
     if (!std::isfinite(khat) && khat != -1.0) {
         std::printf("  FAIL: khat = %.4f not finite\n", khat); ok = false;
     }

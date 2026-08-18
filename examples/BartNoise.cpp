@@ -730,7 +730,11 @@ RCPP_MODULE(BartNoise_module) {
                 "Predict at new data. Pass list(X = as.vector(X_new)) "
                 "(flattened column-major). Returns a named list with "
                 "$f_bart and any derived quantities. Const, no state "
-                "mutation.")
+                "mutation. NOTE: X arrives FLAT, so the column count "
+                "cannot be checked -- only that the length divides p. A "
+                "matrix with the wrong number of columns whose element "
+                "count happens to divide p is reshaped and predicted "
+                "from silently. Check ncol(X_new) == p yourself.")
         .method("get_dag",     &BartNoise::get_dag,
                 "Return the predict DAG as a named list of edges.")
         .method("get_history", &BartNoise::get_history,

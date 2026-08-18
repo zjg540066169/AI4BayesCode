@@ -78,8 +78,12 @@ check(nrow(hA$f_bart) == 1 && ncol(hA$f_bart) == N,
       "stateful: $f_bart is 1 x N fallback")
 check(length(hA$sigma) == 1,
       "stateful: $sigma is length 1 fallback")
-check(length(hA$f_bart_trees) == 1,
-      "stateful: $f_bart_trees has 1 entry (serialized live trees)")
+# The serialized forest is reached through get_tree() / get_tree_history(),
+# not through a history key: BartNoise.cpp states that tree restoration is a
+# std::string API and "intentionally NOT part of the numeric state_map".
+# f_bart_trees does not exist anywhere in the model (grep: zero hits).
+check(length(m_A$get_tree()) == 1,
+      "stateful: get_tree() returns 1 serialized live forest")
 
 # A2. History-mode construction
 m_B <- new(BartNoise, X, y, 50L, 2.0, 2.0, 0.95, 3.0, 100L,
@@ -118,8 +122,10 @@ check(all(is.finite(d1$f_bart)) && is.finite(d1$sigma),
       "stateful: after 300 steps values stay finite")
 
 p1 <- m1$predict_at(list(X = X_test))
-check(is.numeric(p1$f_bart) && !is.matrix(p1$f_bart),
-      "stateful: predict_at$f_bart is a vector")
+# predict_at returns a history_map too, so f_bart is always a matrix: 1 x
+# N_test in stateful mode, n_draws x N_test in history mode.
+check(is.matrix(p1$f_bart) && nrow(p1$f_bart) == 1L,
+      "stateful: predict_at$f_bart is a 1 x N_test matrix")
 check(length(p1$f_bart) == N_test,
       "stateful: predict_at$f_bart length = N_test")
 
@@ -133,17 +139,24 @@ check(nrow(h1$f_bart) == 1 && length(h1$sigma) == 1,
 cat("\n=== C. History-mode behavior ===\n")
 n_burn <- 400L
 n_keep <- 600L
+# BOTH flags: the trailing TRUE alone selects the keep_tree-only overload
+# (Rcpp dispatches on arity), which leaves keep_history FALSE -- the bart
+# child gets a history because keep_tree implies one, sigma gets none, and
+# every shape check below then disagrees. Per-draw predict at NEW X also
+# needs keep_tree, so both are required here.
 m2 <- new(BartNoise, X, y, 50L, 2.0, 2.0, 0.95, 3.0, 100L,
-          FALSE, FALSE, 42L, TRUE)
+          FALSE, FALSE, 42L, TRUE, TRUE)
 m2$step(n_burn + n_keep)
 
 h2 <- m2$get_history()
 check(nrow(h2$f_bart) == (n_burn + n_keep) && ncol(h2$f_bart) == N,
       "history: $f_bart shape = (n_total, N)")
-check(length(h2$sigma) == (n_burn + n_keep),
-      "history: $sigma length = n_total")
-check(length(h2$f_bart_trees) == (n_burn + n_keep),
-      "history: $f_bart_trees length = n_total (one serialized forest per draw)")
+# get_history() is a history_map = map<string, arma::mat>: a scalar comes
+# back as an n x 1 matrix, so length() is n and nrow() is n.
+check(nrow(h2$sigma) == (n_burn + n_keep) && ncol(h2$sigma) == 1L,
+      "history: $sigma is an n_total x 1 matrix")
+check(length(m2$get_tree_history()) == (n_burn + n_keep),
+      "history: get_tree_history() has one serialized forest per draw")
 check(all(is.finite(h2$f_bart)) && all(is.finite(h2$sigma)),
       "history: every stored numeric draw is finite")
 

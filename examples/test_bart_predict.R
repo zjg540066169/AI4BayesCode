@@ -146,25 +146,41 @@ tryCatch(
 stopifnot(err_caught)
 cat("  Wrong key rejected: OK\n")
 
-# ---- Test 5: validation - wrong column count --------------------------------
-cat("--- Test 5: validation (wrong columns) ---\n")
-err_caught2 <- FALSE
-tryCatch(
-    model$predict_at(list(X = X_test[, 1:3])),
-    error = function(e) {
-        cat(sprintf("  Error caught: %s\n", conditionMessage(e)))
-        err_caught2 <<- TRUE
-    })
-stopifnot(err_caught2)
-cat("  Wrong column count rejected: OK\n")
+# ---- Test 5: a wrong column count is NOT detectable -------------------------
+cat("--- Test 5: wrong column count is silently accepted ---\n")
+# predict_at receives a state_map (map<string, arma::vec>), so an R matrix is
+# FLATTENED before C++ sees it and the column count is gone. All the wrapper
+# can check is that the length divides p. Here p = 5 and X_test[, 1:3] is
+# 100 x 3 = 300 elements; 300 %% 5 == 0, so it passes that check and is
+# reshaped into 60 x 5 -- 60 predictions from scrambled columns, no error.
+#
+# This test used to assert that the call THROWS. It never did; the assertion
+# simply sat at the end of a script nothing ran. Assert the real behaviour so
+# the limitation is visible, and see the note on predict_at in BartNoise.cpp.
+p_model  <- ncol(X_train)
+bad_X    <- X_test[, 1:3]
+stopifnot((length(bad_X) %% p_model) == 0)      # why it slips through
+bad_pred <- model$predict_at(list(X = bad_X))
+cat(sprintf("  passed %d x %d (%d elements); got %d predictions, no error\n",
+            nrow(bad_X), ncol(bad_X), length(bad_X), length(bad_pred$f_bart)))
+stopifnot(length(bad_pred$f_bart) == length(bad_X) %/% p_model)
+err_caught2 <- TRUE   # kept so the summary line below still reads sensibly
 
 # ---- Test 6: empty predict -------------------------------------------------
-cat("--- Test 6: empty predict ---\n")
+cat("--- Test 6: empty predict = posterior predictive at the training data ---\n")
+# predict_at(list()) replaces nothing, so the stochastic refreshers fire at the
+# CURRENT draw and y_rep comes back. That is the documented contract (see
+# skills/codegen_cpp.md, "this is what makes predict_at(list()) return a
+# posterior-predictive"), and DirichletSimplex/GBart* behave the same way.
+# This test used to assert an empty result, which no model has ever returned.
 empty_pred <- model$predict_at(list())
-stopifnot(length(empty_pred) == 0)
-cat("  Empty list in, empty list out: OK\n")
+stopifnot("y_rep" %in% names(empty_pred))
+stopifnot(length(empty_pred$y_rep) == length(y_train))
+cat(sprintf("  empty list in -> %s (%d values): OK\n",
+            paste(names(empty_pred), collapse = ","), length(empty_pred$y_rep)))
 
 # ---- Summary ---------------------------------------------------------------
 all_ok <- cor_val > 0.95 && rmse < 3.0 && f_diff < 1e-15 &&
           err_caught && err_caught2
 cat(sprintf("\n%s\n", if (all_ok) "ALL TESTS PASS" else "SOME TESTS FAILED"))
+if (!all_ok) quit(status = 1L)

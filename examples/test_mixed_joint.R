@@ -119,3 +119,6 @@ cat(sprintf("  max |beta err|:    %.3f   %s\n",
             beta_err,  ifelse(beta_err  < 0.5, "OK", "WARN")))
 cat(sprintf("  |sigma err|:       %.3f   %s\n",
             sigma_err, ifelse(sigma_err < 0.3, "OK", "WARN")))
+
+# Gate. Without this the verdict is printed and the script still exits 0.
+if (!all_rhat_ok) quit(status = 1L)

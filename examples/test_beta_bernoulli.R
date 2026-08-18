@@ -168,3 +168,6 @@ all_ok <- mean_ok && sd_ok && rhat < 1.05 &&
           mean_ok2 && sd_ok2 && in_range &&
           mean_ok3
 cat(sprintf("%s\n", if (all_ok) "ALL TESTS PASS" else "SOME TESTS FAILED"))
+
+# Gate. Without this the verdict is printed and the script still exits 0.
+if (!all_ok) quit(status = 1L)

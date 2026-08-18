@@ -18,15 +18,25 @@ suppressPackageStartupMessages({
     library(RcppArmadillo)
 })
 
-AI4BayesCode_include <- normalizePath(file.path("..", "include"))
-mcmclib_include   <- normalizePath(file.path("..", "include", "mcmclib"))
+# Use the shipped helper rather than hand-rolling PKG_CPPFLAGS. The hand-rolled
+# version passed its -I paths through shQuote(), which R's make did not honour
+# -- the compile line carried no AI4BayesCode include at all and every example
+# failed on "'AI4BayesCode/block_sampler.hpp' file not found". It had also
+# drifted: it never passed the BaseMatrixOps or eigen directories that every
+# other compile path supplies. One code path, maintained in one place.
+script_dir <- local({
+    cmdargs <- commandArgs(trailingOnly = FALSE)
+    farg    <- grep("^--file=", cmdargs, value = TRUE)
+    if (length(farg)) dirname(normalizePath(sub("^--file=", "", farg[1])))
+    else getwd()
+})
+AI4BayesCode_dir <- normalizePath(file.path(script_dir, ".."))
+source(file.path(AI4BayesCode_dir, "R", "AI4BayesCode_helpers.R"))
 
-Sys.setenv(PKG_CPPFLAGS = paste(
-    paste0("-I", shQuote(AI4BayesCode_include)),
-    paste0("-I", shQuote(mcmclib_include)),
-    "-DMCMC_ENABLE_ARMA_WRAPPERS",
-    "-DARMA_DONT_USE_WRAPPER"
-))
+compile_example <- function(f)
+    ai4bayescode_source_checkout(file.path(AI4BayesCode_dir, "examples", f),
+                                 AI4BayesCode_path = AI4BayesCode_dir,
+                                 rebuild = TRUE, verbose = FALSE)
 
 fail <- 0L
 
@@ -34,7 +44,7 @@ fail <- 0L
 
 cat("=== compiling GaussianLocationScale.cpp ===\n")
 ok_gauss <- tryCatch({
-    sourceCpp("GaussianLocationScale.cpp", verbose = FALSE, rebuild = TRUE)
+    compile_example("GaussianLocationScale.cpp")
     TRUE
 }, error = function(e) {
     message("GaussianLocationScale.cpp FAILED to compile:\n", conditionMessage(e))
@@ -71,7 +81,7 @@ if (ok_gauss) {
 
 cat("\n=== compiling DirichletSimplex.cpp ===\n")
 ok_dir <- tryCatch({
-    sourceCpp("DirichletSimplex.cpp", verbose = FALSE, rebuild = TRUE)
+    compile_example("DirichletSimplex.cpp")
     TRUE
 }, error = function(e) {
     message("DirichletSimplex.cpp FAILED to compile:\n", conditionMessage(e))

@@ -285,10 +285,13 @@ preds1 <- m1$predict_at(list(X = X_new))
 check(is.matrix(preds1$y_hat) && nrow(preds1$y_hat) == 200 && ncol(preds1$y_hat) == 20,
       "ARDLasso history predict_at: y_hat is n_draws x N_new matrix")
 
-# stateful-mode predict_at returns vector
+# predict_at returns a history_map (map<string, arma::mat>), so y_hat is a
+# MATRIX in both modes: 1 x N_new when stateful, n_draws x N_new in history
+# mode. This check used to require a bare vector, which no model returns.
 preds0 <- m0$predict_at(list(X = X_new))
-check(!is.matrix(preds0$y_hat) && length(preds0$y_hat) == 20,
-      "ARDLasso stateful predict_at: y_hat is vector length N_new")
+check(is.matrix(preds0$y_hat) && nrow(preds0$y_hat) == 1L &&
+      ncol(preds0$y_hat) == 20,
+      "ARDLasso stateful predict_at: y_hat is a 1 x N_new matrix")
 
 run_ard <- function(seed) {
     m <- new(ARDLasso, Xa, Ya, as.integer(seed), TRUE)

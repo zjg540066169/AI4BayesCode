@@ -1,5 +1,12 @@
-# Phase C of audit: 2-chain MCMC diagnostics for each production example.
-# For every example, run 2 chains on synthetic data and check:
+# Phase C of audit: 2-chain MCMC diagnostics.
+#
+# SCOPE: this file covers ONE example (C.1 GaussianLocationScale). The full
+# per-example sweep the name suggests lives in audit_mcmc_5k5k.R /
+# audit_mcmc_10k10k.R / audit_mcmc_full.R, which carry sections C.1 .. C.11.
+# Nothing here gates: the numbers are computed, appended to AUDIT_LOG.md and
+# printed for a human to read. It is a reporting script, not a test.
+#
+# For that one example, run 2 chains on synthetic data and report:
 #   - R-hat (rank-normalised) < 1.05 per parameter
 #   - bulk ESS > 200, tail ESS > 200
 #   - posterior recovery: |post_mean - truth| < 3 * post_sd per param

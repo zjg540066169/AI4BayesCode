@@ -68,8 +68,12 @@ check(TRUE, "step(50) runs without error")
 h <- m$get_history()
 check(is.matrix(h$theta), "$theta is a matrix")
 check(nrow(h$theta) == 50 && ncol(h$theta) == N, "$theta shape (50 x N)")
-check(is.matrix(h$b),     "$b is a matrix")
-check(nrow(h$b) == 50 && ncol(h$b) == J,         "$b shape (50 x J)")
+# b is DERIVED: the joint block samples z_b and b_j = sigma_b * z_b_j
+# (IRT1PL_joint.cpp:26), so the HISTORY holds z_b, not b. These two checks
+# used to name $b, which is NULL -- is.matrix(NULL) is FALSE, so the first
+# reported a failure nobody gated on and the second errored on NULL indexing.
+check(is.matrix(h$z_b),   "$z_b is a matrix")
+check(nrow(h$z_b) == 50 && ncol(h$z_b) == J,     "$z_b shape (50 x J)")
 check(length(h$sigma_b) == 50,                   "$sigma_b length 50")
 
 # --- set_current consistency ---------------------------------------------
@@ -95,7 +99,7 @@ cat(sprintf("  total 700 sweeps: %.2fs\n", dt))
 
 h2 <- m2$get_history()
 post_theta <- colMeans(h2$theta[201:700, ])
-post_b     <- colMeans(h2$b[201:700, ])
+post_b     <- colMeans(h2$z_b[201:700, ] * as.numeric(h2$sigma_b)[201:700])
 post_sb    <- mean(h2$sigma_b[201:700])
 
 # Correlation with truth (should be high for theta & b)

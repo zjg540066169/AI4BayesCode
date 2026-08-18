@@ -26,6 +26,17 @@ source(file.path(AI4BayesCode_dir, "R", "AI4BayesCode_helpers.R"))
 
 suppressPackageStartupMessages(library(posterior))
 
+# The modular half of this benchmark does not exist. examples/IRT1PL.cpp has
+# never been in this repository (git log --all finds no trace), so the
+# comparison cannot run. Skip cleanly rather than dying on normalizePath:
+# a benchmark with no baseline is not a failure, it is a missing baseline.
+if (!file.exists(file.path(script_dir, "IRT1PL.cpp"))) {
+    cat("SKIP: examples/IRT1PL.cpp is not present, so the modular-vs-joint\n")
+    cat("      benchmark has no baseline to compare against. Add that example\n")
+    cat("      (or delete this script) to re-enable it.\n")
+    quit(status = 0)
+}
+
 ai4bayescode_source_checkout(file.path(script_dir, "IRT1PL.cpp"),
                     AI4BayesCode_path = AI4BayesCode_dir)
 ai4bayescode_source_checkout(file.path(script_dir, "IRT1PL_joint.cpp"),

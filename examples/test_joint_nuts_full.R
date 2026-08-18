@@ -65,7 +65,10 @@ run_chain_joint <- function(Y, theta_init, b_init, sigma_b_init,
     h <- m$get_history()
     # Trim burnin.
     h$theta   <- h$theta[(n_burnin + 1):(n_burnin + n_keep), , drop = FALSE]
-    h$b       <- h$b    [(n_burnin + 1):(n_burnin + n_keep), , drop = FALSE]
+    # b is DERIVED: the joint block samples z_b and b_j = sigma_b * z_b_j
+    # (IRT1PL_joint.cpp:26), so the history holds z_b and sigma_b.
+    h$b       <- h$z_b  [(n_burnin + 1):(n_burnin + n_keep), , drop = FALSE] *
+                 as.numeric(h$sigma_b)[(n_burnin + 1):(n_burnin + n_keep)]
     h$sigma_b <- h$sigma_b[(n_burnin + 1):(n_burnin + n_keep)]
     list(hist = h,
          wall_sec = as.numeric(difftime(t1, t0, units = "secs")))

@@ -161,3 +161,6 @@ cat("\n==================================================================\n")
 all_ok <- t1_simplex && t1_rb && t1_theta_ok
 cat(sprintf(" %s\n", if (all_ok) "ALL PASS" else "SOME CHECKS FAILED"))
 cat("==================================================================\n")
+
+# Gate. Without this the verdict is printed and the script still exits 0.
+if (!all_ok) quit(status = 1L)

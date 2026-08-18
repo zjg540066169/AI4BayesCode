@@ -105,3 +105,12 @@ cat("GBartLogistic p-values: ",
 all_statuses <- c(res_p$status, res_l$status)
 cat(sprintf("\n%d / %d statistics at OK status (in (0.05, 0.95))\n",
             sum(all_statuses == "OK"), length(all_statuses)))
+# Gate on the CENTRAL statistics only, matching the generated runner's R3.a
+# rule (skills/codegen_r_runner.md): min / max are printed but never gate,
+# because an order statistic is legitimately extreme even for a correct model.
+.central <- c("mean", "sd", "q25", "q75")
+.cen_bad <- sum(c(res_p$status[names(res_p$status) %in% .central],
+                  res_l$status[names(res_l$status) %in% .central]) != "OK")
+if (.cen_bad > 0)
+    cat(sprintf("  %d CENTRAL statistic(s) outside (0.05, 0.95)\n", .cen_bad))
+if (.cen_bad > 0) quit(status = 1L)

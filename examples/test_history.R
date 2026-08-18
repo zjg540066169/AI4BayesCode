@@ -113,8 +113,15 @@ f_test_true <- sin(X_test[, 1]) + 0.5 * X_test[, 2]
 
 n_burn <- 500L
 n_keep <- 500L
+# BOTH flags. The trailing TRUE alone selects the keep_tree-only overload
+# (Rcpp matches on arity), which leaves keep_history FALSE: the bart child
+# gets a history because keep_tree implies one, sigma gets none, and the
+# history-mode predict_at below then errors on inconsistent sizes. The
+# comment here used to say "keep_history = TRUE" while the call did not.
+# history-mode predict_at at NEW X genuinely needs keep_tree as well -- the
+# per-draw forests are what it replays.
 model  <- new(BartNoise, X, y_bart, 50L, 2.0, 2.0, 0.95, 3.0, 100L,
-              FALSE, FALSE, 42L, TRUE)   # keep_history = TRUE
+              FALSE, FALSE, 42L, TRUE, TRUE)   # keep_tree, keep_history
 model$step(n_burn + n_keep)
 
 # Split the concatenated history into named blocks.
@@ -122,7 +129,11 @@ H <- model$get_history()
 check(is.matrix(H$f_bart),                        "H$f_bart is a matrix")
 check(nrow(H$f_bart) == (n_burn + n_keep),        "H$f_bart has n_total rows")
 check(ncol(H$f_bart) == N,                        "H$f_bart has N columns")
-check(is.numeric(H$sigma) && !is.matrix(H$sigma), "H$sigma is a vector")
+# get_history() is a history_map = unordered_map<string, arma::mat>, so EVERY
+# key comes back as an (n_draws x dim) matrix -- a scalar parameter is n x 1,
+# not a bare vector. (IRT1PL_joint's sigma_b, HierarchicalLM_joint's tau, and
+# every other scalar behave the same way.)
+check(is.matrix(H$sigma) && ncol(H$sigma) == 1L,  "H$sigma is an n x 1 matrix")
 check(length(H$sigma) == (n_burn + n_keep),       "H$sigma has n_total entries")
 check(all(H$sigma > 0),                           "all sigma draws positive")
 

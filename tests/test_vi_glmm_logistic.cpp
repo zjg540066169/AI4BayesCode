@@ -27,9 +27,12 @@
  *  PASS criteria (framework correctness, not MAP-fitting):
  *    - Composite runs n_outer steps without crash, NaN, or segfault
  *    - VI converges within its budget
- *    - σ_α recovered within factor 3 of truth (loose — small N)
- *    - α_0 recovered within ±1.0 of truth
- *    - β recovered to within ±0.5 of truth on each component
+ *    - σ_α recovered within factor 2 of truth
+ *    - α_0 recovered within ±0.5 of truth
+ *    - β recovered to within ±0.4 of truth on each component
+ *    (measured across 30 MCMC seeds with the data fixed, the posterior mean
+ *     uses at most 35% of the β budget and 39% of α_0's, so these hold with
+ *     roughly a 3x margin; they did NOT when the last draw was graded instead)
  *================================================================================*/
 
 #include "AI4BayesCode/mean_field_gaussian_vi_block.hpp"

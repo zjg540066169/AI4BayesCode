@@ -279,3 +279,6 @@ for (r in results) {
 
 overall_ok <- all(vapply(results, function(x) x$ok, logical(1)))
 cat(sprintf("\n%s\n", if (overall_ok) "ALL SCENARIOS PASS" else "SOME SCENARIOS WARN"))
+
+# Gate. Without this the verdict is printed and the script still exits 0.
+if (!overall_ok) quit(status = 1L)

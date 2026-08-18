@@ -51,7 +51,10 @@ run_chain <- function(seed, n_burnin, n_keep) {
     list(
         alpha = h$alpha[(n_burnin + 1):(n_burnin + n_keep)],
         beta  = h$beta [(n_burnin + 1):(n_burnin + n_keep), , drop = FALSE],
-        u     = h$u    [(n_burnin + 1):(n_burnin + n_keep), , drop = FALSE],
+        # u is DERIVED: the joint block samples z_u and u_g = tau * z_u_g
+        # (HierarchicalLM_joint.cpp:24), so the history holds z_u and tau.
+        u     = h$z_u  [(n_burnin + 1):(n_burnin + n_keep), , drop = FALSE] *
+                as.numeric(h$tau)[(n_burnin + 1):(n_burnin + n_keep)],
         sigma = h$sigma[(n_burnin + 1):(n_burnin + n_keep)],
         tau   = h$tau  [(n_burnin + 1):(n_burnin + n_keep)],
         wall_sec = as.numeric(difftime(t1, t0, units = "secs")))
