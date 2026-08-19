@@ -2168,9 +2168,35 @@ Failure at an earlier step means don't bother with the next one.
 ### R1. Smoke test
 
 **Purpose:** catch immediate failures -- non-finite values, `predict_at`
-mutating state, exceptions during `step`, AND silent default-substitution
-inside refresher bodies (Semantic #6). Must stay cheap so it is
-affordable even for slow models (BART, large data).
+mutating state, exceptions during `step`, silent default-substitution inside
+refresher bodies (Semantic #6), AND that every DATA key accepted by
+`set_current` survives `step()`. Must stay cheap so it is affordable even for
+slow models (BART, large data).
+
+**Durability of inward flow.** For each key `set_current` documents as *data*
+(as opposed to a *parameter* `step()` resamples -- see `codegen_cpp.md` Sec.7a),
+emit:
+
+```r
+.before <- model$get_current()
+model$set_current(list(<key> = <a value clearly different from the current one>))
+stopifnot(isTRUE(all.equal(model$get_current()[["<key>"]], <that value>)))
+model$step(1L)
+stopifnot(isTRUE(all.equal(model$get_current()[["<key>"]], <that value>)))   # SURVIVES
+```
+
+The second `stopifnot` is the one that matters, and it is the only one that
+discriminates. A wrapper can write a key into its child and into shared_data
+and still have `step()` read a THIRD copy -- a reference panel, a cached
+design matrix -- and revert it on the next sweep. `get_current()` reads back
+correctly right after the write, so verification naturally stops there and the
+defect survives: the outer Gibbs loop then runs one-way, parameters flowing out
+while refreshed data never flows in, and the chain converges confidently to the
+wrong posterior. Nothing else in R1/R2/R3 exercises
+set_current -> step() -> read-back: R-hat, ESS, posterior predictive p-values
+and PSIS-LOO are all computed from a run that never pushes data inward, so they
+pass unchanged against the broken build. If a model accepts no data keys, say
+so in one line and skip this check.
 
 **Budget:** ~10 steps total. Do not add a dead-parameter check here --
 with this few steps, slow-mixing variables give false positives. Dead-

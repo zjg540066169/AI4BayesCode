@@ -1912,13 +1912,47 @@ appears as a `set_current` key:
 - **Cross-check** `X.nrow` against `y.length` when both are in the
   same call.
 
-**Read-only outputs are IGNORED, not rejected.** `get_current()` returns
-derived quantities the sampler produced -- a BART forest's `f_bart`, a
-genBART `r`, a fitted latent field. `set_current` must accept those keys and
-do nothing with them, because `set_current(get_current())` has to round-trip:
-the map you hand back is the one you were given. Ignoring has to be INERT --
-the state after the call must be bit-identical, not merely error-free. Unknown
-keys are ignored the same way, for the same reason.
+**Do NOT derive the writable surface from the readable surface.** This is the
+first thing to get right, and the round-trip rule below is subordinate to it.
+`get_current()` reports the sampler's PARAMETERS. `set_current` must serve a
+second, independent purpose: letting an outer sampler push DATA inward. Those
+sets barely overlap. A quantity that is data -- a conditioning panel, an
+offset, a reference copy the kernel restores from each sweep -- never appears
+in `get_current()` at all, so if you enumerate `set_current`'s keys by reading
+off `get_current()`, it silently gets no setter and the block cannot compose.
+
+Before writing `set_current`, list separately:
+  - what must flow OUT (parameters; `get_current` reports these), and
+  - what must flow IN (data an outer loop refreshes: covariates, offsets,
+    exposures, any reference copy `step()` reads).
+Then, for EVERY accepted key, classify it as
+  - **data** -- must survive `step()` unchanged, or
+  - **parameter** -- `step()` is expected to resample it,
+and write that classification into the `.method("set_current", ...)` doc
+string. The distinction can differ WITHIN one key: in a censored-data
+augmentation the censored cells are parameters and the observed cells are
+data. Say so explicitly.
+
+A restore-from-reference-copy at the top of a sweep, e.g.
+
+    if (cens[i] < 0.5) Z[i] = Z_obs[i];   // observed cells are data
+
+is correct and worth keeping, but note what it does: it makes `Z_obs` the
+value `step()` actually reads, so a setter that writes only `Z` is reverted on
+the next sweep. Whatever the kernel reads is what the setter must write. A
+defensive invariant that never fires in ordinary operation does nothing except
+block the paths you have not anticipated yet, so it MUST ship with an explicit,
+tested channel for the legitimate case.
+
+**Read-only outputs are IGNORED, not rejected.** Having settled what must be
+writable, the remaining `get_current()` keys are derived quantities the sampler
+produced -- a BART forest's `f_bart`, a genBART `r`, a fitted latent field.
+`set_current` must accept those and do nothing with them, so that
+`set_current(get_current())` round-trips: the map you hand back is the one you
+were given. Ignoring has to be INERT -- the state after the call must be
+bit-identical, not merely error-free. Unknown keys are ignored the same way,
+for the same reason. Note this rule is about TOLERATING keys; it never tells
+you which keys must be ACCEPTED, which is the question above.
 
 State this in the `.method("set_current", ...)` doc string, naming the
 read-only keys and the route that DOES restore them (`set_tree()` for a
