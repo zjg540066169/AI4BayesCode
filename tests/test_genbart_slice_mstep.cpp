@@ -48,6 +48,8 @@
 #include <cmath>
 #include <cstdio>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <vector>
 
 using genbart::slice_leaf;
@@ -314,7 +316,7 @@ int main() {
         const std::size_t N = 200, p = 2, T = 20;
         const double sigma_mu = 0.15;
         std::mt19937_64 dgp(3);
-        std::uniform_real_distribution<double> u(-1, 1);
+        prng::uniform_real_distribution<double> u(-1, 1);
         arma::mat X(N, p);
         for (std::size_t i = 0; i < N; ++i) for (std::size_t j = 0; j < p; ++j) X(i, j) = u(dgp);
         arma::vec y(N, arma::fill::zeros);
@@ -362,13 +364,13 @@ int main() {
         bart_rng::set_seed(101u);
         const std::size_t N = 400, p = 3, T = 50;
         std::mt19937_64 dgp(11);
-        std::uniform_real_distribution<double> u(-1.2, 1.2);
+        prng::uniform_real_distribution<double> u(-1.2, 1.2);
         arma::mat X(N, p);
         arma::vec r_true(N), y(N);
         for (std::size_t i = 0; i < N; ++i) {
             for (std::size_t j = 0; j < p; ++j) X(i, j) = u(dgp);
             r_true[i] = 0.8 * std::sin(2 * X(i, 0)) + 0.6 * X(i, 1) - 0.4 * X(i, 2);
-            std::poisson_distribution<int> po(std::exp(r_true[i]));
+            prng::poisson_distribution<int> po(std::exp(r_true[i]));
             y[i] = (double)po(dgp);
         }
         genbart::lik::poisson_lik lik;
@@ -393,13 +395,13 @@ int main() {
     {
         const std::size_t N = 300, p = 3, T = 50;
         std::mt19937_64 dgp(21);
-        std::uniform_real_distribution<double> u(-1.2, 1.2);
+        prng::uniform_real_distribution<double> u(-1.2, 1.2);
         arma::mat X(N, p);
         arma::vec r_true(N), y(N);
         for (std::size_t i = 0; i < N; ++i) {
             for (std::size_t j = 0; j < p; ++j) X(i, j) = u(dgp);
             r_true[i] = 0.8 * std::sin(2 * X(i, 0)) + 0.6 * X(i, 1) - 0.4 * X(i, 2);
-            std::poisson_distribution<int> po(std::exp(r_true[i]));
+            prng::poisson_distribution<int> po(std::exp(r_true[i]));
             y[i] = (double)po(dgp);
         }
         arma::vec y_shuf = arma::shuffle(y);              // wrong signal for warm start
@@ -450,7 +452,7 @@ int main() {
         std::vector<double> ys(n), lams(n);
         std::vector<std::size_t> idx(n);
         std::mt19937_64 g2(5);
-        std::poisson_distribution<int> po(1.3);
+        prng::poisson_distribution<int> po(1.3);
         for (std::size_t i = 0; i < n; ++i) { ys[i] = po(g2); lams[i] = 0.2; idx[i] = i; }
         grid_ref ref = grid_conditional(ys, lams, idx, sigma_mu, lik, -1.0, 1.0, 2e-5);
         auto d = run_chain(ys, lams, idx, sigma_mu, lik, gen, 30000, 3, 2.0);
@@ -467,7 +469,7 @@ int main() {
         std::vector<double> ys(n), lams(n);
         std::vector<std::size_t> idx(n);
         std::mt19937_64 g2(6);
-        std::poisson_distribution<int> po(2.0);
+        prng::poisson_distribution<int> po(2.0);
         for (std::size_t i = 0; i < n; ++i) { ys[i] = po(g2); lams[i] = 0.0; idx[i] = i; }
         grid_ref ref = grid_conditional(ys, lams, idx, sigma_mu, lik, -3.0, 3.0, 5e-5);
         auto d = run_chain(ys, lams, idx, sigma_mu, lik, gen, 200000, 10, 4.5);
@@ -505,12 +507,12 @@ int main() {
     {   // vendored-kernel stateful: same-seed determinism (fresh model, re-seed)
         const std::size_t N = 120, p = 2, T = 10;
         std::mt19937_64 dgp(9);
-        std::uniform_real_distribution<double> u(-1, 1);
+        prng::uniform_real_distribution<double> u(-1, 1);
         arma::mat X(N, p);
         arma::vec y(N);
         for (std::size_t i = 0; i < N; ++i) {
             X(i, 0) = u(dgp); X(i, 1) = u(dgp);
-            std::poisson_distribution<int> po(std::exp(0.5 * X(i, 0)));
+            prng::poisson_distribution<int> po(std::exp(0.5 * X(i, 0)));
             y[i] = (double)po(dgp);
         }
         genbart::lik::poisson_lik lik1, lik2;

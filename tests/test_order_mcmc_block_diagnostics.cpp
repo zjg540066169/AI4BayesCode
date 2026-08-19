@@ -44,6 +44,8 @@
 #include <cstdio>
 #include <iomanip>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <sstream>
 #include <vector>
 
@@ -70,8 +72,8 @@ static arma::imat sim_chain_data(std::size_t N, std::size_t n,
                                    double flip = 0.20) {
     arma::imat D(N, n, arma::fill::zeros);
     std::mt19937_64 rng(seed);
-    std::uniform_real_distribution<double> U(0, 1);
-    std::uniform_int_distribution<int>     B(0, 1);
+    prng::uniform_real_distribution<double> U(0, 1);
+    prng::uniform_int_distribution<int>     B(0, 1);
     for (std::size_t i = 0; i < N; ++i) {
         D(i, 0) = B(rng);
         for (std::size_t j = 1; j < n; ++j) {

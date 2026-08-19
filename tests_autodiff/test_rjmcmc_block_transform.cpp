@@ -44,6 +44,8 @@
 #include <cmath>
 #include <memory>
 #include <random>
+
+#include "../../tests/portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <vector>
 
 using AI4BayesCode::block_context;
@@ -68,7 +70,7 @@ struct Fixture {
     double pi_val = 0.5;
     Fixture() {
         std::mt19937_64 rng(42);
-        std::normal_distribution<double> nd(0.0, 1.0);
+        prng::normal_distribution<double> nd(0.0, 1.0);
         N = 10;
         X_flat.set_size(2 * N);
         y.set_size(N);
@@ -120,7 +122,7 @@ double tgt_propose_sample(std::mt19937_64& rng,
                           const block_context& /*ctx*/) {
     // aux u ~ N(0, 1). With identity transform, this becomes beta ~ N(0, 1);
     // with scale=2 transform, beta_new = 2 u ~ N(0, 4).
-    std::normal_distribution<double> nd(0.0, 1.0);
+    prng::normal_distribution<double> nd(0.0, 1.0);
     return nd(rng);
 }
 

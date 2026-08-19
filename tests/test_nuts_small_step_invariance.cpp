@@ -66,6 +66,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <vector>
 
 using AI4BayesCode::block_context;
@@ -119,7 +121,7 @@ arma::vec exact_draw(std::mt19937_64& rng) {
     arma::vec p(4);
     double tot = 0.0;
     for (int k = 0; k < 4; ++k) {
-        std::gamma_distribution<double> G(ALPHA[k], 1.0);
+        prng::gamma_distribution<double> G(ALPHA[k], 1.0);
         p[k] = G(rng); tot += p[k];
     }
     for (int k = 0; k < 4; ++k) p[k] /= tot;

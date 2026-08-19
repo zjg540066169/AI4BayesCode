@@ -68,6 +68,8 @@
 
 #include <cmath>
 #include <random>
+
+#include "../../tests/portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <vector>
 
 namespace {
@@ -105,7 +107,7 @@ double spike_slab_continuous_update_reference(
     const double denom = xtx + 1.0 / tau2;
     const double mean  = xtr / denom;
     const double sd    = sigma / std::sqrt(denom);
-    std::normal_distribution<double> norm(mean, sd);
+    prng::normal_distribution<double> norm(mean, sd);
     return norm(rng);
 }
 
@@ -153,7 +155,7 @@ Rcpp::List test_spikeslab_beta_conditional_parity() {
     const std::size_t N = 50;
     const std::size_t p = 3;
     std::mt19937_64 data_rng(20260419);
-    std::normal_distribution<double> unit_norm(0.0, 1.0);
+    prng::normal_distribution<double> unit_norm(0.0, 1.0);
 
     arma::vec X_flat(N * p);
     for (std::size_t i = 0; i < N * p; ++i) X_flat[i] = unit_norm(data_rng);

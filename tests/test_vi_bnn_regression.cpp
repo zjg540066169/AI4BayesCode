@@ -41,6 +41,8 @@
 #include <cstdio>
 #include <random>
 
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
+
 int main() {
     using namespace AI4BayesCode;
 
@@ -66,7 +68,7 @@ int main() {
 
     // ---- Synthesize data ----
     std::mt19937_64 rng_data(123);
-    std::normal_distribution<double> N01(0.0, 1.0);
+    prng::normal_distribution<double> N01(0.0, 1.0);
 
     // Truth: a smooth 1-hidden-layer regression function f(x).
     const double sigma_y_true = 0.3;

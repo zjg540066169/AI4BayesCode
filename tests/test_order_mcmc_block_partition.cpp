@@ -15,6 +15,8 @@
 #include <cstdio>
 #include <random>
 
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
+
 using namespace AI4BayesCode;
 
 namespace {
@@ -26,7 +28,7 @@ void check(bool ok, const char* tag, const char* d = "") {
 
 // Chain 0->1->2->3->4: discrete, each node copies its parent w.p. 0.85.
 arma::imat sim_chain_discrete(std::size_t N, std::size_t n, unsigned seed) {
-    std::mt19937_64 rng(seed); std::uniform_real_distribution<double> U(0, 1);
+    std::mt19937_64 rng(seed); prng::uniform_real_distribution<double> U(0, 1);
     arma::imat X(N, n);
     for (std::size_t r = 0; r < N; ++r) {
         int prev = U(rng) < 0.5 ? 0 : 1;
@@ -38,7 +40,7 @@ arma::imat sim_chain_discrete(std::size_t N, std::size_t n, unsigned seed) {
     return X;
 }
 arma::mat sim_chain_cont(std::size_t N, std::size_t n, unsigned seed) {
-    std::mt19937_64 rng(seed); std::normal_distribution<double> z(0, 1);
+    std::mt19937_64 rng(seed); prng::normal_distribution<double> z(0, 1);
     arma::mat X(N, n);
     for (std::size_t r = 0; r < N; ++r) {
         double prev = z(rng);

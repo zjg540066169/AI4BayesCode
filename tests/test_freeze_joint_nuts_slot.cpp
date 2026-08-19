@@ -39,6 +39,8 @@
 #include <cstdio>
 #include <memory>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -118,7 +120,7 @@ static void F1_whole_block_freeze() {
     std::printf("\n--- F1: whole-block freeze on joint_nuts_block ---\n");
     const std::size_t n = 50, p = 2;
     std::mt19937_64 rng(20260720ULL);
-    std::normal_distribution<double> norm(0.0, 1.0);
+    prng::normal_distribution<double> norm(0.0, 1.0);
     arma::mat X(n, p);
     for (std::size_t i = 0; i < n; ++i)
         for (std::size_t j = 0; j < p; ++j) X(i, j) = norm(rng);
@@ -172,7 +174,7 @@ static void F2_slot_freeze() {
     std::printf("\n--- F2: slot-level freeze (log_sigma) on joint_nuts_block ---\n");
     const std::size_t n = 100, p = 3;
     std::mt19937_64 rng(2026072002ULL);
-    std::normal_distribution<double> norm(0.0, 1.0);
+    prng::normal_distribution<double> norm(0.0, 1.0);
     arma::mat X(n, p);
     for (std::size_t i = 0; i < n; ++i)
         for (std::size_t j = 0; j < p; ++j) X(i, j) = norm(rng);
@@ -240,7 +242,7 @@ static void F3_readapt_frozen() {
     std::printf("\n--- F3: readapt_NUTS on wrapper with frozen slot ---\n");
     const std::size_t n = 100, p = 3;
     std::mt19937_64 rng(20260721001ULL);
-    std::normal_distribution<double> norm(0.0, 1.0);
+    prng::normal_distribution<double> norm(0.0, 1.0);
     arma::mat X(n, p);
     for (std::size_t i = 0; i < n; ++i)
         for (std::size_t j = 0; j < p; ++j) X(i, j) = norm(rng);
@@ -314,7 +316,7 @@ static void F4_dense_metric_frozen() {
     std::printf("\n--- F4: dense metric + slot freeze end-to-end ---\n");
     const std::size_t n = 100, p = 3;
     std::mt19937_64 rng(20260721002ULL);
-    std::normal_distribution<double> norm(0.0, 1.0);
+    prng::normal_distribution<double> norm(0.0, 1.0);
     arma::mat X(n, p);
     for (std::size_t i = 0; i < n; ++i)
         for (std::size_t j = 0; j < p; ++j) X(i, j) = norm(rng);
@@ -371,7 +373,7 @@ static void F5_freeze_before_first_step() {
     std::printf("\n--- F5: freeze BEFORE first step ---\n");
     const std::size_t n = 100, p = 3;
     std::mt19937_64 rng(20260721003ULL);
-    std::normal_distribution<double> norm(0.0, 1.0);
+    prng::normal_distribution<double> norm(0.0, 1.0);
     arma::mat X(n, p);
     for (std::size_t i = 0; i < n; ++i)
         for (std::size_t j = 0; j < p; ++j) X(i, j) = norm(rng);

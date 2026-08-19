@@ -17,6 +17,8 @@
 #include <cstdio>
 #include <memory>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <string>
 
 namespace {
@@ -61,7 +63,7 @@ static std::unique_ptr<composite_block> make_ncc_composite() {
     // Cluster 1 = 20 obs near (2,2); cluster 2 = 20 obs near (-1,-1);
     // cluster 3 = 20 obs near (0,5).
     std::mt19937_64 rng(20260721099ULL);
-    std::normal_distribution<double> nd(0.0, 0.3);
+    prng::normal_distribution<double> nd(0.0, 0.3);
     arma::vec y_flat(N * d);
     arma::vec z(N);
     for (std::size_t i = 0; i < 20; ++i) {

@@ -3,6 +3,7 @@
 
 // [[Rcpp::depends(RcppArmadillo)]]
 #include <RcppArmadillo.h>
+#include "../../tests/portable_rng.hpp"
 
 #include "AI4BayesCode/autodiff_wrap.hpp"
 #include "AI4BayesCode/constraints.hpp"
@@ -63,7 +64,7 @@ Rcpp::List check_simplex_grad(const arma::vec& y_counts,
     const std::size_t K_minus_1 = K - 1;
 
     std::mt19937_64 rng(static_cast<std::uint64_t>(seed));
-    std::uniform_real_distribution<double> unif(-2.0, 2.0);
+    prng::uniform_real_distribution<double> unif(-2.0, 2.0);
 
     double max_diff = 0.0;
     for (int k = 0; k < n_points; ++k) {

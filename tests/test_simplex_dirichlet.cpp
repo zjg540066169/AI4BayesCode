@@ -55,6 +55,8 @@
 #include <limits>
 #include <memory>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <utility>
 #include <vector>
 
@@ -74,7 +76,7 @@ static arma::vec simulate_counts(const arma::vec& theta_true, std::size_t N,
     std::mt19937_64 rng(seed);
     std::vector<double> w(theta_true.n_elem);
     for (std::size_t k = 0; k < theta_true.n_elem; ++k) w[k] = theta_true[k];
-    std::discrete_distribution<int> cat(w.begin(), w.end());
+    prng::discrete_distribution<int> cat(w.begin(), w.end());
 
     arma::vec y(theta_true.n_elem, arma::fill::zeros);
     for (std::size_t i = 0; i < N; ++i) {

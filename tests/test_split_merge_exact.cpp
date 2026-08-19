@@ -37,6 +37,8 @@
 #include <cstdio>
 #include <memory>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <vector>
 
 using AI4BayesCode::composite_block;
@@ -101,7 +103,7 @@ std::size_t encode(const arma::vec& z) {
 /// One systematic-scan Gibbs sweep over z, drawn from the exact full
 /// conditionals. Correct for this target by construction.
 void gibbs_sweep(arma::vec& z, std::mt19937_64& rng) {
-    std::uniform_real_distribution<double> U(0.0, 1.0);
+    prng::uniform_real_distribution<double> U(0.0, 1.0);
     for (std::size_t i = 0; i < N; ++i) {
         double w[K], mx = -1e300;
         for (std::size_t k = 0; k < K; ++k) {

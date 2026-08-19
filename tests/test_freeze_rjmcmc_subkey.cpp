@@ -37,6 +37,8 @@
 #include <cstdio>
 #include <memory>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <stdexcept>
 #include <string>
 
@@ -79,7 +81,7 @@ static rjmcmc_block_config make_trivial_rj(std::size_t p, const arma::vec& gamma
     // propose_sample: draw new beta_j ~ N(0, 1) (identity path).
     cfg.propose_sample = [](std::mt19937_64& rng, std::size_t,
                             const block_context&) -> double {
-        std::normal_distribution<double> nd(0.0, 1.0);
+        prng::normal_distribution<double> nd(0.0, 1.0);
         return nd(rng);
     };
     cfg.propose_logq = [](double beta, std::size_t, const block_context&) -> double {
@@ -88,7 +90,7 @@ static rjmcmc_block_config make_trivial_rj(std::size_t p, const arma::vec& gamma
     // continuous_update: Gibbs from posterior N(0, 1) (no data => prior).
     cfg.continuous_update = [](std::mt19937_64& rng, std::size_t,
                                const block_context&) -> double {
-        std::normal_distribution<double> nd(0.0, 1.0);
+        prng::normal_distribution<double> nd(0.0, 1.0);
         return nd(rng);
     };
     return cfg;

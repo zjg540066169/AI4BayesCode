@@ -16,6 +16,8 @@
 #include <cmath>
 #include <cstdio>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <vector>
 
 using AI4BayesCode::bge_scorer;
@@ -32,7 +34,7 @@ void check(bool ok, const char* tag, const char* detail = "") {
 // dependent (so v-structures genuinely differ from chains).
 arma::mat sim_corr(std::size_t N, std::size_t n, unsigned seed) {
     std::mt19937_64 rng(seed);
-    std::normal_distribution<double> z(0.0, 1.0);
+    prng::normal_distribution<double> z(0.0, 1.0);
     arma::mat X(N, n);
     for (std::size_t i = 0; i < N; ++i) {
         double prev = z(rng);

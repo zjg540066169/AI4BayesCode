@@ -17,6 +17,8 @@
 #include <cmath>
 #include <cstdio>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <vector>
 
 using AI4BayesCode::block_context;
@@ -92,7 +94,7 @@ TestResult run_1d_test(int data_seed, int mcmc_seed) {
     const double prior_var = 100.0;
 
     std::mt19937_64 data_rng(data_seed);
-    std::normal_distribution<double> norm(0.0, 1.0);
+    prng::normal_distribution<double> norm(0.0, 1.0);
 
     arma::vec y(N);
     for (int i = 0; i < N; ++i) y[i] = 3.0 + 2.0 * norm(data_rng);
@@ -152,7 +154,7 @@ TestResult run_nd_test(int D, int data_seed, int mcmc_seed) {
     const double prior_var = 100.0;
 
     std::mt19937_64 data_rng(data_seed);
-    std::normal_distribution<double> norm(0.0, 1.0);
+    prng::normal_distribution<double> norm(0.0, 1.0);
 
     arma::vec sum_y(D, arma::fill::zeros);
     for (int i = 0; i < N; ++i) {

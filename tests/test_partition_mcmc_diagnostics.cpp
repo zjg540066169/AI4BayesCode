@@ -27,6 +27,8 @@
 #include <limits>
 #include <map>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <string>
 #include <vector>
 
@@ -82,7 +84,7 @@ std::string dag_key(const std::vector<std::uint64_t>& dag) {
 }
 arma::imat sim_discrete(std::size_t N, std::size_t n, unsigned seed) {
     std::mt19937_64 rng(seed);
-    std::uniform_real_distribution<double> U(0.0, 1.0);
+    prng::uniform_real_distribution<double> U(0.0, 1.0);
     arma::imat X(N, n);
     for (std::size_t r = 0; r < N; ++r) {
         int prev = U(rng) < 0.5 ? 0 : 1;
@@ -185,7 +187,7 @@ double run_case(std::size_t n, std::size_t n_samples, unsigned seed,
 }
 arma::mat sim_cont(std::size_t N, std::size_t n, unsigned seed) {
     std::mt19937_64 rng(seed);
-    std::normal_distribution<double> z(0.0, 1.0);
+    prng::normal_distribution<double> z(0.0, 1.0);
     arma::mat X(N, n);
     for (std::size_t r = 0; r < N; ++r) {
         double prev = z(rng);

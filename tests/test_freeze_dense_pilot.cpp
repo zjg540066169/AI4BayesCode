@@ -37,6 +37,8 @@
 #include <cstdio>
 #include <memory>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <string>
 
 using namespace AI4BayesCode;
@@ -113,7 +115,7 @@ static void hold_case(int metric, const std::string& slot, bool do_set,
 int main(){
     std::mt19937_64 rng(42); const int N=100; gX.set_size(N,kP);
     arma::vec bt{1.5,0.05,0.30}; const double sigma_true=0.5;
-    std::normal_distribution<double> z(0,1);
+    prng::normal_distribution<double> z(0,1);
     for(int i=0;i<N;++i){gX(i,0)=1;gX(i,1)=60+10*z(rng);gX(i,2)=(i%2);}
     gY.set_size(N); for(int i=0;i<N;++i) gY[i]=arma::dot(gX.row(i),bt.t())+sigma_true*z(rng);
 

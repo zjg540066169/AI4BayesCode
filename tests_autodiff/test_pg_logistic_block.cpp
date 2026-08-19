@@ -28,6 +28,8 @@
 #include <cmath>
 #include <random>
 
+#include "../../tests/portable_rng.hpp"   // portable draws: identical on every stdlib
+
 using AI4BayesCode::pg_logistic_block;
 using AI4BayesCode::pg_logistic_block_config;
 using AI4BayesCode::block_context;
@@ -72,8 +74,8 @@ Rcpp::List test_pg_logistic_block() {
 
     // Generate X ~ N(0, 1), y ~ Bernoulli(sigmoid(X beta_true)).
     std::mt19937_64 data_rng(20260420);
-    std::normal_distribution<double> nd(0.0, 1.0);
-    std::uniform_real_distribution<double> ud(0.0, 1.0);
+    prng::normal_distribution<double> nd(0.0, 1.0);
+    prng::uniform_real_distribution<double> ud(0.0, 1.0);
     arma::mat X(N, p);
     arma::vec y(N);
     for (std::size_t i = 0; i < N; ++i)

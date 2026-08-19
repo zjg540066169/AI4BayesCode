@@ -26,6 +26,8 @@
 #include <cmath>
 #include <cstdio>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <stdexcept>
 #include <vector>
 
@@ -72,7 +74,7 @@ static auto noop = [](const arma::vec&, const block_context&, arma::vec* g) -> d
 // ---- D1: FD per dim-changing kind --------------------------------------------
 void D1() {
     std::printf("\n[D1] FD gradient per dim-changing kind\n");
-    std::mt19937_64 g(1); std::normal_distribution<double> nz(0, 1);
+    std::mt19937_64 g(1); prng::normal_distribution<double> nz(0, 1);
     int K = 3, M = 400;
     arma::mat A(K, K); for (int i = 0; i < K; ++i) for (int j = 0; j < K; ++j) A(i, j) = nz(g);
     arma::mat St = A * A.t() / K + arma::eye(K, K), Lt = arma::chol(St, "lower"), S(K, K, arma::fill::zeros);
@@ -99,7 +101,7 @@ void D1() {
         joint_nuts_block_config cfg; cfg.name = c.name;
         joint_nuts_sub_param sp; sp.name = "x"; sp.dim = c.nat; sp.constraint = c.c; cfg.sub_params = {sp};
         cfg.log_density_grad = [&c](const arma::vec& z, const block_context&, arma::vec* gr) { return c.in(z, gr); };
-        std::mt19937_64 gi(11); std::normal_distribution<double> z(0, 0.4); arma::vec u(c.ud); for (auto& v : u) v = z(gi);
+        std::mt19937_64 gi(11); prng::normal_distribution<double> z(0, 0.4); arma::vec u(c.ud); for (auto& v : u) v = z(gi);
         if (c.c == joint_constraint::SIMPLEX) cfg.initial_cat = constraints::simplex::constrain(u);
         else if (c.c == joint_constraint::SUM_TO_ZERO) cfg.initial_cat = constraints::sum_to_zero::constrain(u);
         else if (c.c == joint_constraint::CHOLESKY_CORR) cfg.initial_cat = constraints::cholesky_corr::constrain(u);
@@ -107,7 +109,7 @@ void D1() {
         else if (c.c == joint_constraint::CORR_MATRIX) cfg.initial_cat = constraints::corr_matrix::constrain(u);
         else cfg.initial_cat = constraints::cov_matrix::constrain(u);
         joint_nuts_block blk(cfg); block_context ctx; blk.set_context(ctx);
-        std::mt19937_64 gy(7); std::normal_distribution<double> zy(0, 0.5); arma::vec y(c.ud); for (auto& v : y) v = zy(gy);
+        std::mt19937_64 gy(7); prng::normal_distribution<double> zy(0, 0.5); arma::vec y(c.ud); for (auto& v : y) v = zy(gy);
         double rel = fd_relerr(blk, y);
         check(rel < 1e-5, std::string("FD ") + c.name, "relErr=" + std::to_string(rel));
     }
@@ -116,7 +118,7 @@ void D1() {
 // ---- D2: FD all-in-one mixed block REAL+SIMPLEX+COV --------------------------
 void D2() {
     std::printf("\n[D2] FD mixed REAL(2)+SIMPLEX(3)+COV(2x2) — dual-offset dispatch\n");
-    int K = 2, M = 300; std::mt19937_64 g(2); std::normal_distribution<double> nz(0, 1);
+    int K = 2, M = 300; std::mt19937_64 g(2); prng::normal_distribution<double> nz(0, 1);
     arma::mat St = {{1.0, 0.4}, {0.4, 1.3}}, Lt = arma::chol(St, "lower"), S(K, K, arma::fill::zeros);
     for (int n = 0; n < M; ++n) { arma::vec z(K); for (int i = 0; i < K; ++i) z[i] = nz(g); arma::vec y = Lt * z; S += y * y.t(); }
     arma::vec btar = {0.6, -1.1}, alpha = {2, 3, 4};
@@ -137,7 +139,7 @@ void D2() {
     arma::vec Sf = constraints::cov_matrix::constrain(arma::vec({0.1, 0.2, 0.0})); for (int k = 0; k < 4; ++k) init[5 + k] = Sf[k];
     cfg.initial_cat = init;
     joint_nuts_block blk(cfg); block_context ctx; blk.set_context(ctx);
-    std::mt19937_64 gy(3); std::normal_distribution<double> zy(0, 0.4); arma::vec y(7); for (auto& v : y) v = zy(gy);  // unc dim = 2+2+3 = 7
+    std::mt19937_64 gy(3); prng::normal_distribution<double> zy(0, 0.4); arma::vec y(7); for (auto& v : y) v = zy(gy);  // unc dim = 2+2+3 = 7
     double rel = fd_relerr(blk, y);
     check(rel < 1e-5, "FD mixed REAL+SIMPLEX+COV", "relErr=" + std::to_string(rel));
 }
@@ -157,7 +159,7 @@ void D3() {
         joint_nuts_block_config cfg; cfg.name = r.name;
         joint_nuts_sub_param sp; sp.name = "x"; sp.dim = r.nat; sp.constraint = r.c; cfg.sub_params = {sp};
         cfg.log_density_grad = noop;
-        std::mt19937_64 gi(20); std::normal_distribution<double> z(0, 0.5); arma::vec u(r.ud); for (auto& v : u) v = z(gi);
+        std::mt19937_64 gi(20); prng::normal_distribution<double> z(0, 0.5); arma::vec u(r.ud); for (auto& v : u) v = z(gi);
         arma::vec nat;
         if (r.c == joint_constraint::SIMPLEX) nat = constraints::simplex::constrain(u);
         else if (r.c == joint_constraint::SUM_TO_ZERO) nat = constraints::sum_to_zero::constrain(u);
@@ -193,7 +195,7 @@ void D4() {
 // ---- D5: COV_MATRIX recovery (auto-diagonal; metric-crash regression guard) --
 void D5() {
     std::printf("\n[D5] COV_MATRIX recovery MVN N=500 (auto-diagonal metric)\n");
-    int K = 3, M = 500; std::mt19937_64 g(2024); std::normal_distribution<double> nz(0, 1);
+    int K = 3, M = 500; std::mt19937_64 g(2024); prng::normal_distribution<double> nz(0, 1);
     arma::mat St = {{1.0, 0.5, -0.3}, {0.5, 2.0, 0.4}, {-0.3, 0.4, 0.8}}, Lt = arma::chol(St, "lower"), S(K, K, arma::fill::zeros);
     for (int n = 0; n < M; ++n) { arma::vec z(K); for (int i = 0; i < K; ++i) z[i] = nz(g); arma::vec y = Lt * z; S += y * y.t(); }
     arma::vec Semp = arma::vectorise(S / M);
@@ -217,7 +219,7 @@ void D5() {
 // ---- D6: determinism ---------------------------------------------------------
 void D6() {
     std::printf("\n[D6] determinism (same seed -> identical)\n");
-    int K = 2, M = 300; std::mt19937_64 g(5); std::normal_distribution<double> nz(0, 1);
+    int K = 2, M = 300; std::mt19937_64 g(5); prng::normal_distribution<double> nz(0, 1);
     arma::mat St = {{1.0, 0.4}, {0.4, 1.2}}, Lt = arma::chol(St, "lower"), S(K, K, arma::fill::zeros);
     for (int n = 0; n < M; ++n) { arma::vec z(K); for (int i = 0; i < K; ++i) z[i] = nz(g); arma::vec y = Lt * z; S += y * y.t(); }
     auto lp = [&](const arma::vec& Sf, const block_context&, arma::vec* gr) -> double { arma::mat G; double l; mvn_on_sigma(Sf, K, S, M, gr ? &G : nullptr, &l); if (gr) *gr = arma::vectorise(G); return l; };

@@ -28,6 +28,8 @@
 #include <limits>
 #include <map>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <string>
 #include <vector>
 
@@ -106,7 +108,7 @@ std::string partition_key(const partition_state& s) {
 // A tiny random discrete dataset (n cols, cardinality 2), correlated.
 arma::imat sim_discrete(std::size_t N, std::size_t n, unsigned seed) {
     std::mt19937_64 rng(seed);
-    std::uniform_real_distribution<double> U(0.0, 1.0);
+    prng::uniform_real_distribution<double> U(0.0, 1.0);
     arma::imat X(N, n);
     for (std::size_t r = 0; r < N; ++r) {
         int prev = U(rng) < 0.5 ? 0 : 1;

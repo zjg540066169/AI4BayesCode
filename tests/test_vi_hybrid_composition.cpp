@@ -39,6 +39,8 @@
 #include <cstdio>
 #include <random>
 
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
+
 namespace AI4Bayes = AI4BayesCode;
 
 int main() {
@@ -55,18 +57,18 @@ int main() {
     arma::vec w_true(K);
     {
         // True weights from N(0, σ_true²); σ_true² = 0.04 → σ_true = 0.2
-        std::normal_distribution<double> N01(0.0, 1.0);
+        prng::normal_distribution<double> N01(0.0, 1.0);
         for (std::size_t j = 0; j < K; ++j) w_true[j] = 0.2 * N01(rng_data);
     }
     arma::mat X(N, K);
     {
-        std::normal_distribution<double> N01(0.0, 1.0);
+        prng::normal_distribution<double> N01(0.0, 1.0);
         for (std::size_t i = 0; i < N; ++i)
             for (std::size_t j = 0; j < K; ++j) X(i, j) = N01(rng_data);
     }
     arma::vec y_obs = X * w_true;
     {
-        std::normal_distribution<double> N0t(0.0, tau);
+        prng::normal_distribution<double> N0t(0.0, tau);
         for (std::size_t i = 0; i < N; ++i) y_obs[i] += N0t(rng_data);
     }
 

@@ -44,35 +44,8 @@
 #include <cstdio>
 #include <random>
 
-// ---------------------------------------------------------------------------
-// Portable draws for the SIMULATED DATA.
-//
-// std::mt19937_64 is specified bit-exactly by the standard, but the
-// DISTRIBUTIONS are not: libstdc++ and libc++ both use the polar method for
-// std::normal_distribution and return its paired variates in OPPOSITE order,
-// so the same seed yields the same numbers in a different sequence. A test
-// that simulates its data with std::normal_distribution therefore fits a
-// DIFFERENT dataset on Linux than on macOS, and no single absolute tolerance
-// on the fitted parameters can be calibrated for both. Building the draws from
-// the engine's raw output removes the library from the picture.
-namespace portable {
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 
-/// 53-bit uniform in [0, 1) straight from the engine.
-inline double u01(std::mt19937_64& g) {
-    return static_cast<double>(g() >> 11) * (1.0 / 9007199254740992.0);
-}
-
-/// N(0, 1) by Box-Muller. One variate per call: returning the second of the
-/// pair is what the two standard libraries disagree about, so do not cache it.
-inline double n01(std::mt19937_64& g) {
-    double u1 = u01(g);
-    const double u2 = u01(g);
-    if (u1 < 1e-300) u1 = 1e-300;               // log(0) guard
-    return std::sqrt(-2.0 * std::log(u1)) *
-           std::cos(2.0 * 3.14159265358979323846 * u2);
-}
-
-} // namespace portable
 
 int main() {
     using namespace AI4BayesCode;
@@ -100,18 +73,18 @@ int main() {
     arma::vec  alpha_true(J);
 
     for (std::size_t j = 0; j < J; ++j) {
-        alpha_true[j] = alpha_0_true + sigma_alpha_true * portable::n01(rng_data);
+        alpha_true[j] = alpha_0_true + sigma_alpha_true * prng::n01(rng_data);
     }
     for (std::size_t i = 0; i < N; ++i) {
         group_id[i] = static_cast<int>(i / n_per);
-        for (std::size_t p = 0; p < P; ++p) X(i, p) = portable::n01(rng_data);
+        for (std::size_t p = 0; p < P; ++p) X(i, p) = prng::n01(rng_data);
     }
     arma::ivec y_obs(N);
     for (std::size_t i = 0; i < N; ++i) {
         const double eta_i = alpha_true[group_id[i]] +
                              arma::dot(X.row(i).t(), beta_true);
         const double p_i = 1.0 / (1.0 + std::exp(-eta_i));
-        y_obs[i] = (portable::u01(rng_data) < p_i) ? 1 : 0;
+        y_obs[i] = (prng::u01(rng_data) < p_i) ? 1 : 0;
     }
 
     // ---- VI block: log p(z | y, X, β, α_0, σ_α)  (non-centered) ----

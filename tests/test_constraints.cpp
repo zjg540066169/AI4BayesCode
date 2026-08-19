@@ -22,6 +22,8 @@
 #include <functional>
 #include <limits>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <string>
 #include <vector>
 
@@ -103,7 +105,7 @@ static void record(const std::string& name, bool pass,
 static void test_real() {
     std::printf("[real]\n");
     std::mt19937_64 rng(1);
-    std::normal_distribution<double> nd(0.0, 2.0);
+    prng::normal_distribution<double> nd(0.0, 2.0);
 
     // Use a simple non-trivial target: sum of log densities of a multivariate
     // normal so gradients are not identically zero.
@@ -139,7 +141,7 @@ static void test_real() {
 static void test_positive() {
     std::printf("[positive]\n");
     std::mt19937_64 rng(2);
-    std::normal_distribution<double> nd(0.0, 1.0);
+    prng::normal_distribution<double> nd(0.0, 1.0);
 
     for (std::size_t trial = 0; trial < 5; ++trial) {
         arma::vec x(4);
@@ -182,7 +184,7 @@ static void test_positive() {
 static void test_simplex() {
     std::printf("[simplex]\n");
     std::mt19937_64 rng(3);
-    std::normal_distribution<double> nd(0.0, 1.0);
+    prng::normal_distribution<double> nd(0.0, 1.0);
 
     for (std::size_t trial = 0; trial < 5; ++trial) {
         const std::size_t K = 5;
@@ -239,7 +241,7 @@ static void test_simplex() {
 static void test_lower_bounded() {
     std::printf("[lower_bounded]\n");
     std::mt19937_64 rng(4);
-    std::normal_distribution<double> nd(0.0, 1.0);
+    prng::normal_distribution<double> nd(0.0, 1.0);
     const double lo = 0.5;
 
     for (std::size_t trial = 0; trial < 5; ++trial) {
@@ -290,7 +292,7 @@ static void test_lower_bounded() {
 static void test_upper_bounded() {
     std::printf("[upper_bounded]\n");
     std::mt19937_64 rng(5);
-    std::normal_distribution<double> nd(0.0, 1.0);
+    prng::normal_distribution<double> nd(0.0, 1.0);
     const double up = 2.0;
 
     for (std::size_t trial = 0; trial < 5; ++trial) {
@@ -341,7 +343,7 @@ static void test_upper_bounded() {
 static void test_interval() {
     std::printf("[interval]\n");
     std::mt19937_64 rng(6);
-    std::normal_distribution<double> nd(0.0, 1.0);
+    prng::normal_distribution<double> nd(0.0, 1.0);
     const double lo = -1.0, up = 2.0;
 
     for (std::size_t trial = 0; trial < 5; ++trial) {
@@ -391,7 +393,7 @@ static void test_interval() {
 static void test_ordered() {
     std::printf("[ordered]\n");
     std::mt19937_64 rng(7);
-    std::normal_distribution<double> nd(0.0, 1.0);
+    prng::normal_distribution<double> nd(0.0, 1.0);
 
     for (std::size_t trial = 0; trial < 5; ++trial) {
         arma::vec x(5);
@@ -443,7 +445,7 @@ static void test_ordered() {
 static void test_cholesky_corr() {
     std::printf("[cholesky_corr]\n");
     std::mt19937_64 rng(8);
-    std::normal_distribution<double> nd(0.0, 0.8);
+    prng::normal_distribution<double> nd(0.0, 0.8);
 
     // Round-trip + valid-correlation check across several K values.
     for (std::size_t K : {2u, 3u, 5u}) {
@@ -543,7 +545,7 @@ static void test_cholesky_corr() {
 static void test_unit_vector() {
     std::printf("[unit_vector]\n");
     std::mt19937_64 rng(9);
-    std::normal_distribution<double> nd(0.0, 2.0);
+    prng::normal_distribution<double> nd(0.0, 2.0);
 
     // constrain: any non-zero y maps to a unit vector.
     for (std::size_t K : {2u, 3u, 5u}) {

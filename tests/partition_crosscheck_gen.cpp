@@ -18,6 +18,8 @@
 #include <cstdio>
 #include <fstream>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <vector>
 
 using namespace AI4BayesCode;
@@ -29,7 +31,7 @@ int main(int argc, char** argv) {
 
     // ---- random sparse ground-truth DAG in topo order 0..n-1 ----
     std::mt19937_64 grng(20260706ULL);
-    std::uniform_real_distribution<double> U(0.0, 1.0);
+    prng::uniform_real_distribution<double> U(0.0, 1.0);
     std::vector<std::vector<std::size_t>> pa(n);
     for (std::size_t i = 1; i < n; ++i)
         for (std::size_t j = 0; j < i; ++j)

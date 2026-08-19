@@ -39,6 +39,8 @@
 #include <cstdio>
 #include <memory>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <string>
 #include <vector>
 
@@ -61,7 +63,7 @@ static void check(bool ok, const std::string& what) {
 
 namespace {
 
-// shape this small makes std::gamma_distribution underflow to exactly 0 on
+// shape this small makes prng::gamma_distribution underflow to exactly 0 on
 // essentially every draw -- the numeric fallback path both blocks must handle.
 constexpr double kDegenerateShape = 1e-8;
 constexpr double kDegenerateRate  = 1e8;

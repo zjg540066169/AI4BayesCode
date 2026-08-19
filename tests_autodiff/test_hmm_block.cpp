@@ -30,6 +30,8 @@
 
 #include <cmath>
 #include <random>
+
+#include "../../tests/portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <vector>
 
 using AI4BayesCode::block_context;
@@ -56,8 +58,8 @@ struct HMMFixture {
         pi     = {0.6, 0.4};
         // Synthesize y using true z sequence for repeatability.
         std::mt19937_64 rng(42);
-        std::uniform_real_distribution<double> ud(0.0, 1.0);
-        std::normal_distribution<double> nd(0.0, sigma);
+        prng::uniform_real_distribution<double> ud(0.0, 1.0);
+        prng::normal_distribution<double> nd(0.0, sigma);
         std::vector<std::size_t> z_true(T);
         // Draw z_true
         z_true[0] = (ud(rng) < pi[0]) ? 0 : 1;

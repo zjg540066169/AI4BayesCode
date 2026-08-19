@@ -20,6 +20,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <vector>
 
 using AI4BayesCode::block_context;
@@ -36,7 +38,7 @@ namespace constraints = AI4BayesCode::constraints;
 
 static arma::vec gen_data(std::size_t N, double mu_t, double sg_t, std::uint64_t s) {
     std::mt19937_64 rng(s);
-    std::normal_distribution<double> nd(mu_t, sg_t);
+    prng::normal_distribution<double> nd(mu_t, sg_t);
     arma::vec y(N);
     for (std::size_t i = 0; i < N; ++i) y[i] = nd(rng);
     return y;

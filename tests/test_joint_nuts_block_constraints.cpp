@@ -25,6 +25,8 @@
 #include <cstdio>
 #include <iomanip>
 #include <random>
+
+#include "portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -187,7 +189,7 @@ static void C5_allkinds_fd() {
     joint_nuts_block blk(build_allkinds());
     block_context ctx; blk.set_context(ctx);
     std::mt19937_64 rng(7u);
-    std::uniform_real_distribution<double> U(-1.5, 1.5);
+    prng::uniform_real_distribution<double> U(-1.5, 1.5);
     double worst = 0.0;
     for (int t = 0; t < 6; ++t) {
         arma::vec unc(9);

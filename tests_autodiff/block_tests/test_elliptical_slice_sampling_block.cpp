@@ -52,6 +52,8 @@
 
 #include <cmath>
 #include <random>
+
+#include "../../tests/portable_rng.hpp"   // portable draws: identical on every stdlib
 #include <vector>
 
 using AI4BayesCode::elliptical_slice_sampling_block;
@@ -71,7 +73,7 @@ Rcpp::List test_elliptical_slice_sampling_block() {
 
     // Synthetic y = f_true + noise, with f_true itself drawn from the prior
     std::mt19937_64 data_rng(2024);
-    std::normal_distribution<double> ndn(0.0, 1.0);
+    prng::normal_distribution<double> ndn(0.0, 1.0);
     arma::vec f_true(N);
     for (std::size_t i = 0; i < N; ++i) f_true[i] = ndn(data_rng);
     arma::vec y(N);
