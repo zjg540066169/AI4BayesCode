@@ -46,10 +46,11 @@ is the DEFAULT** for continuous parameters not owned by a specialized
 block: you write ONE joint natural-scale log-density (likelihood + all
 priors + per-slice constraints) and the block runs NUTS over the
 concatenated unconstrained vector. Modular `nuts_block` is a LOW-priority
-fallback -- for a genuinely scalar parameter, a post-NCR funnel branch, or
-deliberate isolation. Coupled continuous parameters mix ~10x slower per
-ESS when split and FREEZE outright on funnels, so joint is the default,
-not an optimization. (Specialized / conjugate-Gibbs blocks still take
+fallback -- for a genuinely scalar parameter, a post-NCR funnel branch, a
+`joint_nuts_failure.md` Mode 4 non-member, or deliberate isolation.
+Coupled continuous parameters mix ~10x slower per ESS when split and
+FREEZE outright on funnels, so joint is the default, not an
+optimization. (Specialized / conjugate-Gibbs blocks still take
 precedence WHEN THEY GENUINELY APPLY -- for EFFICIENCY, not correctness:
 an AI-written joint log-density is validator-checkable term by term, so
 correctness no longer requires picking from the built-in menu. Never
@@ -126,9 +127,11 @@ likelihood and classify:
 
 When Sec.4a lists no matching pattern, the DEFAULT is still ONE
 `joint_nuts_block` over a hand-written joint log-density for the coupled
-/ unclaimed continuous parameters. You do NOT need to recognize a named
-model class to justify joint -- writing the model's own log-density is
-the point. Just satisfy the correctness checklist below.
+continuous parameters. You do NOT need to recognize a named model class
+to justify joint -- writing the model's own log-density is the point.
+Just satisfy the correctness checklist below. "Unclaimed" is not a reason
+to join: a parameter no specialized block wants still has to be coupled
+in the posterior to belong, per Modes 1-4.
 
 **The general principle.** Identify whether the likelihood, as written,
 makes two (or more) parameters jointly identifiable but each
@@ -168,7 +171,7 @@ back to the likelihood as written. **Do not invoke a coupling pattern
 by recognizing the model's name** -- that argument is not portable
 across novel models the catalogue hasn't seen.
 
-Joint NUTS IS the default for coupled / unclaimed continuous parameters.
+Joint NUTS IS the default for coupled continuous parameters.
 The list below is the **correctness checklist you MUST satisfy when
 hand-writing the joint log-density** (enforced by Check #11 / #24 / #12)
 -- it is not a reason to fall back to modular.
@@ -220,8 +223,10 @@ When you write the joint log-density you MUST:
 
 (b) is mandatory and is NOT a reason to fragment a coupled model into
 modular blocks -- it is the same prior / Jacobian content you would need
-either way. A standalone `nuts_block` is fine only for a genuinely
-separable / scalar parameter (the low-priority fallback).
+either way. A standalone `nuts_block` is fine for a genuinely separable
+parameter (the low-priority fallback) -- separable in the POSTERIOR, which
+a residual scale beside the locations it does not multiply is, however
+many terms it shares with them in the likelihood.
 
 Document in the header comment:
 
