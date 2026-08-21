@@ -649,12 +649,7 @@ RCPP_MODULE(IRT1PL_joint_module) {
         .method("predict_at",      &IRT1PL_joint::predict_at)
         .method("get_dag",         &IRT1PL_joint::get_dag)
         .method("get_history",     &IRT1PL_joint::get_history)
-        .method("readapt_NUTS",
-                (void (IRT1PL_joint::*)(int, bool, int)) &IRT1PL_joint::readapt_NUTS,
-                "Re-tune NUTS dual-averaging (3-arg backward-compat; target_accept unchanged).")
-        .method("readapt_NUTS",
-                (void (IRT1PL_joint::*)(int, bool, int, double)) &IRT1PL_joint::readapt_NUTS,
-                "Re-tune NUTS; 4th arg target_accept in (0,1] overrides the block's target (default 0.55); sentinel <= 0 keeps current.")
+        AI4BAYESCODE_BIND_READAPT_NUTS(IRT1PL_joint)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(IRT1PL_joint);
 }
 #endif

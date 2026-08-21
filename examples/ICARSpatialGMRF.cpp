@@ -602,12 +602,7 @@ RCPP_MODULE(ICARSpatialGMRF_module) {
                 "Returns empty list — no y_rep refresher registered.")
         .method("get_dag",      &ICARSpatialGMRF::get_dag)
         .method("get_history",  &ICARSpatialGMRF::get_history)
-        .method("readapt_NUTS",
-                (void (ICARSpatialGMRF::*)(int, bool, int)) &ICARSpatialGMRF::readapt_NUTS,
-                "Re-tune NUTS dual-averaging (3-arg backward-compat; target_accept unchanged).")
-        .method("readapt_NUTS",
-                (void (ICARSpatialGMRF::*)(int, bool, int, double)) &ICARSpatialGMRF::readapt_NUTS,
-                "Re-tune NUTS; 4th arg target_accept in (0,1] overrides the block's target (default 0.55); sentinel <= 0 keeps current.")
+        AI4BAYESCODE_BIND_READAPT_NUTS(ICARSpatialGMRF)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(ICARSpatialGMRF);
 }
 #endif

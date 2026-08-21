@@ -877,12 +877,7 @@ RCPP_MODULE(HierarchicalLM_MultivariateRE_module) {
         .method("predict_at",  &HierarchicalLM_MultivariateRE::predict_at)
         .method("get_dag",     &HierarchicalLM_MultivariateRE::get_dag)
         .method("get_history", &HierarchicalLM_MultivariateRE::get_history)
-        .method("readapt_NUTS",
-                (void (HierarchicalLM_MultivariateRE::*)(int, bool, int)) &HierarchicalLM_MultivariateRE::readapt_NUTS,
-                "Re-tune NUTS dual-averaging (3-arg backward-compat; target_accept unchanged).")
-        .method("readapt_NUTS",
-                (void (HierarchicalLM_MultivariateRE::*)(int, bool, int, double)) &HierarchicalLM_MultivariateRE::readapt_NUTS,
-                "Re-tune NUTS; 4th arg target_accept in (0,1] overrides the block's target (default 0.55); sentinel <= 0 keeps current.")
+        AI4BAYESCODE_BIND_READAPT_NUTS(HierarchicalLM_MultivariateRE)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(HierarchicalLM_MultivariateRE);
 }
 #endif

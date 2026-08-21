@@ -2718,24 +2718,27 @@ RCPP_MODULE(<ClassName>_module) {
         .method("predict_at",   &ClassName::predict_at)
         .method("get_dag",      &ClassName::get_dag)
         .method("get_history",  &ClassName::get_history)
-        // CONDITIONAL -- only emit the two lines below if the composite
-        // contains any NUTS-family child (nuts_block /
-        // joint_nuts_block). Rcpp modules IGNORE C++ default args, so
-        // BOTH the 3-arg backward-compat form AND the 4-arg current form
-        // MUST be bound as separate overloads (explicit function-pointer
-        // casts pick the right method).
-        .method("readapt_NUTS",
-                (void (ClassName::*)(int, bool, int)) &ClassName::readapt_NUTS,
-                "Re-adapt NUTS metric (3-arg backward-compat form; "
-                "target_accept unchanged).")
-        .method("readapt_NUTS",
-                (void (ClassName::*)(int, bool, int, double)) &ClassName::readapt_NUTS,
-                "Re-adapt NUTS metric; 4th arg target_accept in (0,1] "
-                "overrides the block's dual-averaging target (default "
-                "0.55); sentinel <= 0 keeps current.")
+        // CONDITIONAL, and the condition is a property of the MODEL, not of
+        // your method list: emit this if and only if the composite CONTAINS a
+        // NUTS-family child (nuts_block / joint_nuts_block). If it does, the
+        // method is mandatory -- validator.md Check #23(0), no exception. A
+        // NUTS chain that cannot be re-adapted cannot be used online or
+        // sequentially, and the caller can only discover that by the method
+        // being absent. A pure Gibbs / VI / BART model does NOT define
+        // readapt_NUTS and must NOT emit this line.
+        //
+        // Use the macro. It binds BOTH arities, which is the whole reason it
+        // exists: Rcpp modules dispatch on ARITY and ignore C++ default
+        // arguments, so binding only (int, bool, int) leaves the documented
+        // 4-argument call unreachable and binding only the 4-argument form
+        // breaks every 3-argument call site.
+        AI4BAYESCODE_BIND_READAPT_NUTS(ClassName)
         // ALWAYS -- kernel-control category (interface.md Sec.1).
         // The macro emits `.method("freeze", ...)`, `.method("unfreeze", ...)`,
-        // `.method("get_frozen", ...)` bound to the mixin's forwarders.
+        // `.method("get_frozen", ...)` bound to the mixin's forwarders. It is
+        // separate from AI4BAYESCODE_BIND_READAPT_NUTS because THIS one is
+        // unconditional -- every wrapper inherits the mixin -- while
+        // readapt_NUTS exists only on models that have a NUTS kernel.
         AI4BAYESCODE_BIND_KERNEL_CONTROL(ClassName);
 }
 #endif

@@ -555,12 +555,7 @@ RCPP_MODULE(ProbitRegression_module) {
         .method("predict_at",  &ProbitRegression::predict_at_r)
         .method("get_dag",     &ProbitRegression::get_dag)
         .method("get_history", &ProbitRegression::get_history)
-        .method("readapt_NUTS",
-                (void (ProbitRegression::*)(int, bool, int)) &ProbitRegression::readapt_NUTS,
-                "Re-tune NUTS dual-averaging (3-arg backward-compat; target_accept unchanged).")
-        .method("readapt_NUTS",
-                (void (ProbitRegression::*)(int, bool, int, double)) &ProbitRegression::readapt_NUTS,
-                "Re-tune NUTS; 4th arg target_accept in (0,1] overrides the block's target (default 0.55); sentinel <= 0 keeps current.")
+        AI4BAYESCODE_BIND_READAPT_NUTS(ProbitRegression)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(ProbitRegression);
 }
 #endif

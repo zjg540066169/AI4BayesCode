@@ -699,12 +699,7 @@ RCPP_MODULE(SoftBartNoise_module) {
         .method("get_tree_history", &SoftBartNoise::get_tree_history,
                 "Return per-draw serialized SoftBart forests (one per "
                 "stored draw when keep_tree=TRUE; else the current forest).")
-        .method("readapt_NUTS",
-                (void (SoftBartNoise::*)(int, bool, int)) &SoftBartNoise::readapt_NUTS,
-                "Re-tune NUTS dual-averaging (3-arg backward-compat; target_accept unchanged).")
-        .method("readapt_NUTS",
-                (void (SoftBartNoise::*)(int, bool, int, double)) &SoftBartNoise::readapt_NUTS,
-                "Re-tune NUTS; 4th arg target_accept in (0,1] overrides the block's target (default 0.55); sentinel <= 0 keeps current.")
+        AI4BAYESCODE_BIND_READAPT_NUTS(SoftBartNoise)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(SoftBartNoise);
 }
 #endif

@@ -510,12 +510,7 @@ RCPP_MODULE(BSplineRegression_module) {
         .method("predict_at",  &BSplineRegression::predict_at)
         .method("get_dag",     &BSplineRegression::get_dag)
         .method("get_history", &BSplineRegression::get_history)
-        .method("readapt_NUTS",
-                (void (BSplineRegression::*)(int, bool, int)) &BSplineRegression::readapt_NUTS,
-                "Re-tune NUTS dual-averaging (3-arg backward-compat; target_accept unchanged).")
-        .method("readapt_NUTS",
-                (void (BSplineRegression::*)(int, bool, int, double)) &BSplineRegression::readapt_NUTS,
-                "Re-tune NUTS; 4th arg target_accept in (0,1] overrides the block's target (default 0.55); sentinel <= 0 keeps current.")
+        AI4BAYESCODE_BIND_READAPT_NUTS(BSplineRegression)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(BSplineRegression);
 }
 #endif

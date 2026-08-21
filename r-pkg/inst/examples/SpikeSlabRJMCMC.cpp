@@ -1072,12 +1072,7 @@ RCPP_MODULE(SpikeSlabRJMCMC_module) {
         .method("predict_at",  &SpikeSlabRJMCMC::predict_at_r)
         .method("get_dag",     &SpikeSlabRJMCMC::get_dag)
         .method("get_history", &SpikeSlabRJMCMC::get_history)
-        .method("readapt_NUTS",
-                (void (SpikeSlabRJMCMC::*)(int, bool, int)) &SpikeSlabRJMCMC::readapt_NUTS,
-                "Re-tune NUTS dual-averaging (3-arg backward-compat; target_accept unchanged).")
-        .method("readapt_NUTS",
-                (void (SpikeSlabRJMCMC::*)(int, bool, int, double)) &SpikeSlabRJMCMC::readapt_NUTS,
-                "Re-tune NUTS; 4th arg target_accept in (0,1] overrides the block's target (default 0.55); sentinel <= 0 keeps current.")
+        AI4BAYESCODE_BIND_READAPT_NUTS(SpikeSlabRJMCMC)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(SpikeSlabRJMCMC);
 }
 #endif

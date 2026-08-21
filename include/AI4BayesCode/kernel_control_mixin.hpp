@@ -241,4 +241,59 @@ public:
          "List currently-frozen block names (DFS pre-order)")
 #endif // AI4BAYESCODE_PYBIND_MODULE
 
+// ----------------------------------------------------------------------------
+//  AI4BAYESCODE_BIND_READAPT_NUTS(CLASSNAME) -- bind readapt_NUTS, both arities
+//
+//  EVERY model with a nuts_block or joint_nuts_block child exposes
+//  readapt_NUTS. No exception: a NUTS chain that cannot be re-adapted cannot be
+//  used online or sequentially, and the caller has no way to discover that
+//  except by the method being absent.
+//
+//  This is deliberately NOT folded into AI4BAYESCODE_BIND_KERNEL_CONTROL. That
+//  macro is unconditional -- every wrapper inherits freeze / unfreeze /
+//  get_frozen from kernel_control_mixin -- whereas readapt_NUTS exists only on
+//  models that actually have a NUTS kernel (22 of the 42 shipped examples), so
+//  folding it in would fail to compile for the other 20.
+//
+//  BOTH arities are bound, and that is the point of having a macro at all:
+//  Rcpp modules dispatch on ARITY and ignore C++ default arguments, so binding
+//  only (int, bool, int) leaves the documented 4-argument call unreachable,
+//  and binding only the 4-argument form breaks every 3-argument call site.
+//  Written by hand 22 times, that is 22 chances to bind one and forget the
+//  other.
+//
+//  Usage, inside RCPP_MODULE, on a class defining both overloads:
+//
+//      .method("step", &MyModel::step)
+//      AI4BAYESCODE_BIND_READAPT_NUTS(MyModel)
+//      AI4BAYESCODE_BIND_KERNEL_CONTROL(MyModel)
+// ----------------------------------------------------------------------------
+#ifdef AI4BAYESCODE_RCPP_MODULE
+#define AI4BAYESCODE_BIND_READAPT_NUTS(CLASSNAME)                          \
+    .method("readapt_NUTS",                                                \
+            (void (CLASSNAME::*)(int, bool, int))                          \
+                &CLASSNAME::readapt_NUTS,                                   \
+            "Re-tune NUTS dual-averaging: readapt_NUTS(n, reset, "          \
+            "max_tree_depth). Pass all three -- Rcpp dispatches on arity "  \
+            "and does not honour the C++ default arguments.")               \
+    .method("readapt_NUTS",                                                \
+            (void (CLASSNAME::*)(int, bool, int, double))                   \
+                &CLASSNAME::readapt_NUTS,                                   \
+            "Re-tune NUTS; 4th argument target_accept in (0, 1] overrides " \
+            "the block's target (default 0.55) for this re-adaptation.")
+#endif // AI4BAYESCODE_RCPP_MODULE
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#define AI4BAYESCODE_PYBIND_READAPT_NUTS(CLASSNAME)                        \
+    .def("readapt_NUTS",                                                   \
+         (void (CLASSNAME::*)(int, bool, int, double))                     \
+             &CLASSNAME::readapt_NUTS,                                      \
+         pybind11::arg("n"), pybind11::arg("reset") = false,               \
+         pybind11::arg("max_tree_depth") = -1,                             \
+         pybind11::arg("target_accept") = -1.0,                            \
+         "Re-tune NUTS dual-averaging. pybind11 honours the defaults, so "  \
+         "readapt_NUTS(n) works here even though R requires all three.")
+#endif // AI4BAYESCODE_PYBIND_MODULE
+
+
 #endif // AI4BAYESCODE_KERNEL_CONTROL_MIXIN_HPP

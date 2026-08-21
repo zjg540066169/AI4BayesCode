@@ -441,12 +441,7 @@ RCPP_MODULE(VCBart_module) {
                 "X = as.vector(X_new)) (flattened column-major).")
         .method("get_dag",      &VCBart::get_dag,     "Predict DAG as edge list.")
         .method("get_history",  &VCBart::get_history, "History as named matrices.")
-        .method("readapt_NUTS",
-                (void (VCBart::*)(int, bool, int)) &VCBart::readapt_NUTS,
-                "Re-tune NUTS dual-averaging (3-arg backward-compat; target_accept unchanged).")
-        .method("readapt_NUTS",
-                (void (VCBart::*)(int, bool, int, double)) &VCBart::readapt_NUTS,
-                "Re-tune NUTS; 4th arg target_accept in (0,1] overrides the block's target (default 0.55); sentinel <= 0 keeps current.")
+        AI4BAYESCODE_BIND_READAPT_NUTS(VCBart)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(VCBart);
 }
 #endif

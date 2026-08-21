@@ -509,12 +509,7 @@ RCPP_MODULE(LinearRegJointMixed_module) {
         .method("get_history",  &LinearRegJointMixed::get_history)
         .method("predict_at",   &LinearRegJointMixed::predict_at_r)
         .method("get_dag",      &LinearRegJointMixed::get_dag)
-        .method("readapt_NUTS",
-                (void (LinearRegJointMixed::*)(int, bool, int)) &LinearRegJointMixed::readapt_NUTS,
-                "Re-tune NUTS dual-averaging (3-arg backward-compat; target_accept unchanged).")
-        .method("readapt_NUTS",
-                (void (LinearRegJointMixed::*)(int, bool, int, double)) &LinearRegJointMixed::readapt_NUTS,
-                "Re-tune NUTS; 4th arg target_accept in (0,1] overrides the block's target (default 0.55); sentinel <= 0 keeps current.")
+        AI4BAYESCODE_BIND_READAPT_NUTS(LinearRegJointMixed)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(LinearRegJointMixed);
 }
 #endif

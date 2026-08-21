@@ -1699,12 +1699,34 @@ do not reinvent the step-size logic.
 
 ### 23. readapt_NUTS state-preservation + RNG separation
 
-**Trigger:** Any user-facing wrapper that exposes the kernel-control
-method `readapt_NUTS` (interface.md Sec.1). Equivalently: any wrapper whose
-composite contains at least one `nuts_block` or `joint_nuts_block`
-child.
+**Trigger:** Any wrapper whose composite CONTAINS at least one `nuts_block`
+or `joint_nuts_block` child. This is a property of the MODEL, not of the
+bindings, and the distinction is load-bearing.
 
-**Three sub-checks** (all must pass):
+An earlier wording made "exposes readapt_NUTS" and "contains a NUTS child"
+interchangeable. They are not: a wrapper that contains a NUTS kernel but
+FORGETS to bind readapt_NUTS satisfies the second and fails the first, so
+reading the trigger off the bindings made the check vanish for exactly the
+model that needed it -- the omission cancelled its own detection. Decide the
+trigger from the composite's children, never from the method list.
+
+**(0) The method must be there. Every model with a NUTS kernel exposes
+`readapt_NUTS`. No exception.** A NUTS chain that cannot be re-adapted cannot
+be used online or sequentially, and the caller has no way to discover that
+except by the method being absent. A missing binding is a FAIL of this check,
+never an N/A.
+
+Both arities must be bound, as separate `.method("readapt_NUTS", ...)`
+overloads with explicit casts -- `(int, bool, int)` and
+`(int, bool, int, double)` -- because Rcpp modules dispatch on arity and
+IGNORE C++ default arguments. Note this is why the binding cannot live in
+`AI4BAYESCODE_BIND_KERNEL_CONTROL`: that macro is unconditional and every
+wrapper inherits freeze/unfreeze/get_frozen from `kernel_control_mixin`,
+whereas `readapt_NUTS` exists only on the models that have a NUTS kernel
+(22 of the 42 shipped examples) and needs the concrete class name in its
+casts. Bind it in each model's RCPP_MODULE block.
+
+**Sub-checks** (all must pass):
 
 **(a) State preservation -- static grep.** The wrapper's
 `readapt_NUTS(int n, bool reset)` body must:
