@@ -531,6 +531,95 @@ across a genuine coupling -- that silently biases inference.
 
 ---
 
+## Failure Mode 4 -- An UNCOUPLED scale parameter inside the joint block
+
+### Symptom
+R-hat and coverage are FINE -- the posterior is right -- but ESS collapses on
+the LOCATION coordinates while the scale coordinate's ESS stays healthy. The
+gap against a reference sampler is one to three orders of magnitude, and it
+grows with the magnitude of the data. Nothing looks wrong: no divergence, no
+NaN, correct posterior means.
+
+Distinguish from Mode 3: there the param count is large and R-hat is fine
+because everything is merely SLOW; here the count can be under ten, and one
+slice is starved while its blockmate is not.
+
+### Why
+A joint block runs ONE step size and ONE metric over all its slices. Putting a
+parameter in the block buys the ability to move it together with its
+blockmates -- worth paying for when they are coupled, worth nothing when they
+are not.
+
+In a Gaussian model with an additive linear mean the residual scale is exactly
+uncoupled from the location parameters: with beta | sigma ~ N(bhat,
+sigma^2 (X'X)^-1), E[beta | sigma] = bhat does not depend on sigma, so
+Cov(beta_j, sigma) = 0 EXACTLY, not merely asymptotically. (Measured on
+synthetic data, 20000 posterior draws, p = 7: max |cor(beta_j, log sigma)| =
+0.0062.) There is no coupling to buy, and the shared step size is pure cost.
+
+The cost is set by the UNCONSTRAINED geometry, and this is the part that is
+easy to miss. A POSITIVE-constrained scale is sampled as log(sigma), whose
+posterior sd is about 1/sqrt(2n) REGARDLESS of magnitude, while an
+unconstrained location coordinate's sd grows with the scale of the data. The
+two coordinates therefore drift apart without bound as the data scale grows,
+and a single step size cannot serve both -- it settles near what the scale
+coordinate wants, which is far too large for the location coordinates.
+
+### Empirical evidence (synthetic, controlled; one variable changed)
+y = X beta + eps, N = 80, p = 7, OLS start, 2000 warmup + 4000 draws, the same
+data and seed in every arm. "scale gap" multiplies the response, moving beta
+and sigma together and leaving the geometry otherwise fixed.
+
+| scale gap | A: sigma in / diagonal | C: sigma in / dense | B: sigma OUT |
+|---|---|---|---|
+| 1     | beta ESS 1635 | -- | beta ESS 1814 |
+| 1e3   | beta ESS  786 | beta ESS 791 | beta ESS 1575 |
+| 1e6   | beta ESS **92** | beta ESS **17** | beta ESS 1811 |
+
+The mechanism shows in the adapted step sizes at gap 1e6: arm A settles at
+1.647, while arm B's beta block wants 0.244 and its sigma block wants 1.965.
+The joint step size lands near what the SCALE wants and is about 7x too large
+for the location coordinates -- which is why sigma's ESS in arm A is a healthy
+2215 while beta's is 92. Measured sd(log sigma) is 0.095 at every gap, exactly
+the magnitude-independent 1/sqrt(2n); beta's sd goes 1.17 -> 1183 -> 1.25e6,
+so the unconstrained ratio runs 12 -> 1.2e4 -> 1.3e7 and the penalty tracks it.
+
+**A dense metric does NOT rescue this, and at a large gap makes it worse**
+(92 -> 17). The problem is not correlation, which is what a dense metric buys;
+it is that a dense metric has MORE entries to estimate over the same warmup,
+and the extra noise costs more than the (absent) correlation is worth. Do not
+reach for the escalation ladder here.
+
+### Detection (from the model, before codegen)
+Ask of every parameter you are about to put in one joint block: **is it
+coupled to its blockmates in the POSTERIOR?** Two reliable cases:
+
+- **Couple them** -- a non-centered pair `(sigma_k, z_k)` where the scale
+  multiplies the raw effect. That is a genuine funnel (Mode 1) and the joint
+  block is what fixes it.
+- **Separate them** -- an observation-level residual scale alongside location
+  parameters it does not multiply. `codegen_cpp.md` Sec.4a already says this in
+  its coupling table: for `y ~ N(alpha + X beta, sigma^2)` the default is
+  `joint_nuts_block(alpha, beta)`, **sigma separate**; for
+  `y ~ N(X beta + Z u, sigma^2)` with `u ~ N(0, tau^2)` it is
+  `joint_nuts_block(alpha, beta, u)`, **sigma + tau separate**.
+
+Note that a model can need BOTH in one sampler: the hierarchical scales pair
+with their raw effects in the joint block, while the residual scale stays
+outside. "Every sigma goes in" and "every sigma goes out" are both wrong.
+
+### Fix
+Move the uncoupled scale into its own `nuts_block`. Each block then adapts its
+own step size, and neither is compromised by the other. This is not a tuning
+knob -- it is the block decomposition the coupling analysis already prescribes.
+
+If a wrapper is already written the wrong way, the diagnostic that confirms it
+before any rewrite is the step-size comparison above: put the scale in its own
+block, and if its adapted step size is far from the joint block's, the joint
+block was serving the wrong coordinate.
+
+---
+
 ## Escalation ladder
 
 ```

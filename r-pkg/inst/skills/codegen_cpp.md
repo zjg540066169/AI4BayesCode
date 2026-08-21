@@ -191,7 +191,26 @@ them):
 
 ### Writing the joint log-density (mandatory checks)
 
-`joint_nuts_block` is the default; when you write its log-density you MUST:
+`joint_nuts_block` is the default FOR A COUPLED GROUP -- it is not an
+unconditional default, and the coupling table in Sec.4a is what decides the
+grouping. Read that table first and honour its right-hand column: for
+`y ~ N(alpha + X beta, sigma^2)` it says `joint_nuts_block(alpha, beta)`,
+**sigma separate**, and for `y ~ N(X beta + Z u, sigma^2)` with
+`u ~ N(0, tau^2)` it says `joint_nuts_block(alpha, beta, u)`, **sigma + tau
+separate**. Sweeping every continuous parameter into one joint block because
+"joint is the default" is the mistake that table exists to prevent: one step
+size then has to serve coordinates with nothing to gain from each other, and
+the location parameters starve. `joint_nuts_failure.md` Failure Mode 4 has the
+measurement -- min ESS over beta 1811 with the scale outside versus 92 with it
+inside, on the same data, and a dense metric makes it worse rather than better.
+
+A model can need both groupings at once: a non-centered `(sigma_k, z_k)` pair
+belongs INSIDE the joint block (that is Failure Mode 1, the funnel), while an
+observation-level residual scale belongs outside. "All scales in" and "all
+scales out" are both wrong; ask of each one whether it multiplies something in
+the block.
+
+When you write the joint log-density you MUST:
 
 - (a) State the coupling / model structure in one sentence (header
   comment).
