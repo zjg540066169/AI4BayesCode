@@ -39,6 +39,13 @@ For the R runner template, see `codegen_r_runner.md`.
 
 ## 4a. Coupling analysis: modular vs joint NUTS
 
+**MANDATORY: if the sampler will contain a `joint_nuts_block`, read
+`skills/joint_nuts_failure.md` Modes 1-4 in full BEFORE writing the block.**
+They are how its MEMBERSHIP is decided -- what goes in (Mode 1) and what stays
+out (Mode 4) -- not a post-mortem. Mode 4 leaves no runtime signal, so nothing
+downstream re-raises it: a model carrying it passes L3 with clean R-hat and
+high ESS.
+
 The framework supports both `nuts_block` (one parameter, one NUTS
 trajectory per Gibbs sweep) and `joint_nuts_block` (several named
 sub-parameters, one joint NUTS trajectory per sweep). **`joint_nuts_block`

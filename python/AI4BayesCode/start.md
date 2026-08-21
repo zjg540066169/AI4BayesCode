@@ -364,7 +364,7 @@ class), not separate classes.
 | 1. Upfront questions | after reading this file | `skills/codegen.md` Sec.1 |
 | 2. Prior elicitation | when a user prior is missing / ambiguous | `skills/codegen_priors.md` |
 | 3. Model confirmation | before writing any code | `skills/codegen.md` Sec.3 (inline DAG + summary table) |
-| 4. C++ emission | when starting to write `.cpp` | `skills/codegen_cpp.md` |
+| 4. C++ emission | when starting to write `.cpp` | `skills/codegen_cpp.md` -- **and, if the sampler will contain a `joint_nuts_block`, `skills/joint_nuts_failure.md` Modes 1-4 as well, BEFORE the block is written** |
 | 5. L1 compile + L2 semantic validation | after `.cpp` is written, BEFORE any runner file exists | `skills/validator.md` (L2 semantic checklist + AD-twin Check #12); PRINT the per-check verdict table |
 | 6. R / Python runner emission | ONLY after the printed L2 verdict PASSES | `skills/codegen_r_runner.md` (R backend) / `skills/codegen_python_runner.md` (Python backend; load whichever the chosen backend needs) |
 | 7. L3 runtime verification | after the runner compiles | `skills/validator.md` Layer 3 (R1 smoke -> R2 two-chain -> R3) |
@@ -422,13 +422,16 @@ many generations need 0 of these):
 - `skills/system_design.md` -- for measure-theory questions, BLAS
   patterns, DAG semantics, the metric (diagonal/dense) + warmup
   (single-pilot/3-phase) decision (Sec.13)
-- `skills/joint_nuts_failure.md` -- when a `joint_nuts_block` will not
-  converge (funnel OR ridge: R-hat large, max tree depth, divergences, a scale
-  stuck near zero, ESS=NA). Leads with a general signature -- S1 (scale x latent
-  funnel) and S2 (correlated-latent ridge: GP / spline / state-space) -- plus a
-  universal fix ladder (marginalize / NCR / QR / dense metric). Load this before
-  retrying a stuck joint-NUTS model, and before ever concluding it is
-  "multimodal".
+- `skills/joint_nuts_failure.md` -- NOT on-demand. **Every model that uses
+  `joint_nuts_block` loads Modes 1-4 in phase 4, before the block is written**
+  (see the phase table). Listing it here as a converge-failure lookup is what
+  kept it unread: an agent writing a model it believes is fine has no reason to
+  open a file about failures, and the default-to-not-loading rule below settles
+  it. The modes are how the block's MEMBERSHIP is decided, not a post-mortem --
+  Mode 4 has no runtime signal at all, so there is no later trigger to catch it.
+  It also serves the runtime lookup it used to be listed for: a stuck joint-NUTS
+  model (funnel OR ridge -- R-hat large, max tree depth, divergences, a scale
+  stuck near zero, ESS=NA), and before ever concluding a model is "multimodal".
 - `skills/hierarchical_re.md` -- hierarchical random-effects models
 - `skills/label_switching.md` -- mixture / HMM identifiability
 - `skills/constraints.md` -- constraint transforms + Jacobians
@@ -436,7 +439,9 @@ many generations need 0 of these):
 
 If unsure whether an instruction file is needed now, default to NOT
 loading it. You can always load it later if a specific question
-demands it.
+demands it. The one exception is `joint_nuts_failure.md`: using
+`joint_nuts_block` at all is the trigger, and it fires in phase 4, not
+when something goes wrong.
 
 ---
 
