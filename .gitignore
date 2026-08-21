@@ -67,3 +67,14 @@ AI4BayesCode_*.tar.gz
 # Harness result dumps: tests_autodiff/*.R saveRDS() their summaries into the
 # repo root, so running the suite would otherwise dirty the tree.
 *.rds
+
+# Paper-experiment protocol and local-tier blocks: LOCAL ONLY, never published.
+# tools/sync.sh already keeps these out of the two installable packages; these
+# entries keep them out of the repo itself. Case variants are spelled out
+# because git's ignore patterns are case-sensitive while macOS's filesystem
+# is not, so SIM2.md would otherwise slip past a lone sim[0-9]* rule.
+# sim[0-9]*, not sim*: a catalogue card named simplex_*_block.md is product.
+skills/sim[0-9]*
+skills/SIM[0-9]*
+skills/Sim[0-9]*
+blocks_local/
