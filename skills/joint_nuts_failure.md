@@ -9,9 +9,11 @@ description: |
   hierarchical funnel + NCR, (2) multi-modal / label-switching, (3) high-dim
   slowness, plus Forms A-H -- are WORKED EXAMPLES. The escalation ladder and the
   funnel NCR recipe live HERE (codegen_priors.md and validator Check #24 point
-  here). Consult this skill BEFORE emitting a joint_nuts_block, and when a
-  joint model shows pathology (max tree depth, divergences, R-hat large,
-  a scale parameter stuck near zero, or random-effect ESS = NA).
+  here). READ MODES 1-4 BEFORE EMITTING ANY joint_nuts_block -- they are how
+  the block's membership is decided, and Mode 4 leaves no runtime signal to
+  come back on. Also consult when a joint model shows pathology (max tree
+  depth, divergences, R-hat large, a scale parameter stuck near zero, or
+  random-effect ESS = NA).
 ---
 
 # joint_nuts_block -- failure modes + fixes
@@ -20,15 +22,31 @@ description: |
 single concatenated unconstrained vector. It is the **default** for coupled
 continuous targets (block-decomposed per-parameter NUTS mixes ~10x slower per
 ESS when parameters are correlated, and FREEZES outright on hierarchical
-funnels -- see Mode 1 evidence). But joint NUTS has three well-characterized
-failure modes. Each is detectable and fixable; this skill is the reference.
+funnels -- see Mode 1 evidence). Being the default is not a licence to put
+everything in one block: four failure modes are characterized below, and
+Modes 1-4 are read BEFORE emitting the block, to decide what it contains.
 
 ## When to consult
 
-- **Codegen agent**: BEFORE emitting any `joint_nuts_block`, check the prompt
-  against Mode 1 (funnel) -- NCR is **mandatory** when the pattern matches.
-- **Validator**: target reference when Check #24 (joint-NUTS pre-flight) fails.
-- **Debug**: lookup when a joint model shows pathology at runtime.
+**Codegen agent -- READ MODES 1-4 BEFORE EMITTING ANY `joint_nuts_block`.**
+Not "consult when something looks wrong": the four modes are how you DECIDE
+the block, so they are read while you are choosing its membership. Mode 4 has
+no runtime signal to come back on, so there is no second chance.
+
+The membership decision has two halves, and both can apply to one block --
+scales pair with their raw effects INSIDE, the residual scale stays OUTSIDE:
+
+1. **What goes IN** -- Mode 1 (funnel). NCR is **mandatory** on a match.
+2. **What stays OUT** -- Mode 4. An uncoupled parameter costs the block a
+   shared step size and buys nothing.
+
+Modes 2 (multi-modal) and 3 (high-dim) shape the same decision: if the target
+is label-switching or the block is about to exceed the dimension where one
+metric can serve, that is decided now, not after a bad run.
+
+**Debug**: lookup when a joint model shows pathology at runtime -- max tree
+depth, divergences, large R-hat, a scale stuck near zero, random-effect
+ESS = NA. Modes 1-3 leave these traces. Mode 4 does not.
 
 ---
 
@@ -531,92 +549,54 @@ across a genuine coupling -- that silently biases inference.
 
 ---
 
-## Failure Mode 4 -- An UNCOUPLED scale parameter inside the joint block
+## Failure Mode 4 -- An UNCOUPLED parameter inside the joint block
 
-### Symptom
-R-hat and coverage are FINE -- the posterior is right -- but ESS collapses on
-the LOCATION coordinates while the scale coordinate's ESS stays healthy. The
-gap against a reference sampler is one to three orders of magnitude, and it
-grows with the magnitude of the data. Nothing looks wrong: no divergence, no
-NaN, correct posterior means.
+**Decide this BEFORE codegen, from the model. Runtime will not tell you.** The
+penalty is proportional to the spread of the data, so a well-scaled validation
+dataset shows nothing: measured below, at gap 1 the ESS cost is zero. A model
+carrying this defect passes L3 with high ESS and clean R-hat, and only starves
+on data whose scale is large. There is no runtime gate to fall back on.
 
-Distinguish from Mode 3: there the param count is large and R-hat is fine
-because everything is merely SLOW; here the count can be under ten, and one
-slice is starved while its blockmate is not.
+### The question to ask
+Of every parameter you are about to put in one joint block: **is it coupled to
+its blockmates in the POSTERIOR?**
 
-### Why
-A joint block runs ONE step size and ONE metric over all its slices. Putting a
-parameter in the block buys the ability to move it together with its
-blockmates -- worth paying for when they are coupled, worth nothing when they
-are not.
+- **In** -- a non-centered `(sigma_k, z_k)` pair, where the scale multiplies
+  the raw effect. That is Mode 1 and the block is the fix.
+- **Out** -- an observation-level residual scale beside locations it does not
+  multiply. In `y ~ N(alpha + X beta, sigma^2)`, `Cov(beta_j, sigma) = 0`
+  analytically, so membership buys nothing. Give it its own `nuts_block`.
 
-In a Gaussian model with an additive linear mean the residual scale is exactly
-uncoupled from the location parameters: with beta | sigma ~ N(bhat,
-sigma^2 (X'X)^-1), E[beta | sigma] = bhat does not depend on sigma, so
-Cov(beta_j, sigma) = 0 EXACTLY, not merely asymptotically. (Measured on
-synthetic data, 20000 posterior draws, p = 7: max |cor(beta_j, log sigma)| =
-0.0062.) There is no coupling to buy, and the shared step size is pure cost.
+Both can apply to one sampler. `codegen_cpp.md` Sec.4a's table is the short
+form: joint(alpha, beta), **sigma separate**.
 
-The cost is set by the UNCONSTRAINED geometry, and this is the part that is
-easy to miss. A POSITIVE-constrained scale is sampled as log(sigma), whose
-posterior sd is about 1/sqrt(2n) REGARDLESS of magnitude, while an
-unconstrained location coordinate's sd grows with the scale of the data. The
-two coordinates therefore drift apart without bound as the data scale grows,
-and a single step size cannot serve both -- it settles near what the scale
-coordinate wants, which is far too large for the location coordinates.
+### Why membership costs anything
+One step size serves the whole block, and it settles near what the scale wants
+-- far too large for the locations. The gap grows without bound because a
+POSITIVE slice is sampled as `log(sigma)`, whose posterior sd is ~`1/sqrt(2n)`
+at ANY magnitude, while an unconstrained location's sd grows with the data.
 
-### Empirical evidence (synthetic, controlled; one variable changed)
-y = X beta + eps, N = 80, p = 7, OLS start, 2000 warmup + 4000 draws, the same
-data and seed in every arm. "scale gap" multiplies the response, moving beta
-and sigma together and leaving the geometry otherwise fixed.
+### Empirical evidence (synthetic, one variable changed)
+`y = X beta + eps`, N=80, p=7, OLS start, 2000 warmup + 4000 draws, same data
+and seed per arm; "gap" multiplies the response.
 
-| scale gap | A: sigma in / diagonal | C: sigma in / dense | B: sigma OUT |
+| gap | sigma in / diag | sigma in / dense | sigma OUT |
 |---|---|---|---|
-| 1     | beta ESS 1635 | -- | beta ESS 1814 |
-| 1e3   | beta ESS  786 | beta ESS 791 | beta ESS 1575 |
-| 1e6   | beta ESS **92** | beta ESS **17** | beta ESS 1811 |
+| 1 | beta ESS 1635 | -- | 1814 |
+| 1e3 | 786 | 791 | 1575 |
+| 1e6 | **92** | **17** | 1811 |
 
-The mechanism shows in the adapted step sizes at gap 1e6: arm A settles at
-1.647, while arm B's beta block wants 0.244 and its sigma block wants 1.965.
-The joint step size lands near what the SCALE wants and is about 7x too large
-for the location coordinates -- which is why sigma's ESS in arm A is a healthy
-2215 while beta's is 92. Measured sd(log sigma) is 0.095 at every gap, exactly
-the magnitude-independent 1/sqrt(2n); beta's sd goes 1.17 -> 1183 -> 1.25e6,
-so the unconstrained ratio runs 12 -> 1.2e4 -> 1.3e7 and the penalty tracks it.
+At gap 1e6 the joint step size is 1.647 while a separate beta block wants 0.244
+and a separate sigma block 1.965 -- ~7x too large for beta, which is why
+sigma's own ESS inside stays 2215 while beta's is 92. **A dense metric makes it
+worse** (92 -> 17): the problem is not correlation, and dense has more to
+estimate from the same warmup. Do not escalate here.
 
-**A dense metric does NOT rescue this, and at a large gap makes it worse**
-(92 -> 17). The problem is not correlation, which is what a dense metric buys;
-it is that a dense metric has MORE entries to estimate over the same warmup,
-and the extra noise costs more than the (absent) correlation is worth. Do not
-reach for the escalation ladder here.
-
-### Detection (from the model, before codegen)
-Ask of every parameter you are about to put in one joint block: **is it
-coupled to its blockmates in the POSTERIOR?** Two reliable cases:
-
-- **Couple them** -- a non-centered pair `(sigma_k, z_k)` where the scale
-  multiplies the raw effect. That is a genuine funnel (Mode 1) and the joint
-  block is what fixes it.
-- **Separate them** -- an observation-level residual scale alongside location
-  parameters it does not multiply. `codegen_cpp.md` Sec.4a already says this in
-  its coupling table: for `y ~ N(alpha + X beta, sigma^2)` the default is
-  `joint_nuts_block(alpha, beta)`, **sigma separate**; for
-  `y ~ N(X beta + Z u, sigma^2)` with `u ~ N(0, tau^2)` it is
-  `joint_nuts_block(alpha, beta, u)`, **sigma + tau separate**.
-
-Note that a model can need BOTH in one sampler: the hierarchical scales pair
-with their raw effects in the joint block, while the residual scale stays
-outside. "Every sigma goes in" and "every sigma goes out" are both wrong.
-
-### Fix
-Move the uncoupled scale into its own `nuts_block`. Each block then adapts its
-own step size, and neither is compromised by the other. This is not a tuning
-knob -- it is the block decomposition the coupling analysis already prescribes.
-
-If a wrapper is already written the wrong way, the diagnostic that confirms it
-before any rewrite is the step-size comparison above: put the scale in its own
-block, and if its adapted step size is far from the joint block's, the joint
-block was serving the wrong coordinate.
+### If it already shipped
+Symptom on wide-scale data: R-hat and coverage FINE (the posterior is right),
+ESS collapsed on some slices while the offending parameter's own ESS is
+healthy. Confirm by moving it to its own block and comparing adapted step
+sizes; if they differ a lot, the joint block was serving the wrong coordinate.
 
 ---
 
