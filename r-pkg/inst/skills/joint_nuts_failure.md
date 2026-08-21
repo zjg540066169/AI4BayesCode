@@ -552,23 +552,35 @@ across a genuine coupling -- that silently biases inference.
 ## Failure Mode 4 -- An UNCOUPLED parameter inside the joint block
 
 **Decide this BEFORE codegen, from the model. Runtime will not tell you.** The
-penalty is proportional to the spread of the data, so a well-scaled validation
-dataset shows nothing: measured below, at gap 1 the ESS cost is zero. A model
-carrying this defect passes L3 with high ESS and clean R-hat, and only starves
-on data whose scale is large. There is no runtime gate to fall back on.
+penalty scales with the spread of the data -- measured below, zero at gap 1 --
+so a model carrying it passes L3 with clean R-hat and high ESS, and starves
+only on data of a larger scale. There is no runtime gate to fall back on.
 
 ### The question to ask
-Of every parameter you are about to put in one joint block: **is it coupled to
-its blockmates in the POSTERIOR?**
-
-- **In** -- a non-centered `(sigma_k, z_k)` pair, where the scale multiplies
-  the raw effect. That is Mode 1 and the block is the fix.
-- **Out** -- an observation-level residual scale beside locations it does not
-  multiply. In `y ~ N(alpha + X beta, sigma^2)`, `Cov(beta_j, sigma) = 0`
-  analytically, so membership buys nothing. Give it its own `nuts_block`.
-
-Both can apply to one sampler. `codegen_cpp.md` Sec.4a's table is the short
+Of every parameter about to go in one joint block: **is its posterior
+COVARIANCE with its blockmates non-zero?** Mechanically: **does it MULTIPLY a
+blockmate's sampled value?** In `b_k = sigma_k * z_k` the scale does -- that is
+Mode 1, and the block is the fix. An observation-level residual scale
+multiplies the RESIDUAL, not the locations: give it its own `nuts_block`. Both
+cases can occur in one sampler. `codegen_cpp.md` Sec.4a's table is the short
 form: joint(alpha, beta), **sigma separate**.
+
+### Two arguments that smuggle a residual scale in. Both are refuted.
+For `y ~ N(X beta, sigma^2)` with a flat beta prior and Jeffreys on sigma:
+
+1. *"they are coupled through the residual `(y - X beta) / sigma`."* Every
+   parameter in a likelihood is coupled through it, so this argues for any
+   membership at all. Vacuous.
+2. *"sigma sets the effective posterior variance of beta."* True, and the
+   textbook case of ZERO correlation -- Normal-Inverse-Gamma:
+   `beta | sigma ~ N(bhat, sigma^2 (X'X)^-1)` has a mean that does not move
+   with sigma, so `Cov(beta_j, sigma) = Cov(E[beta_j | sigma], sigma) = 0`
+   exactly. Maximal conditional dependence, zero covariance. Scaling a
+   blockmate's conditional VARIANCE is not coupling.
+
+Generating agents have produced both, in that order, each time reading a
+criterion the previous wording had tightened. A third rewording will come. The
+test is the covariance, not the prose.
 
 ### Why membership costs anything
 One step size serves the whole block, and it settles near what the scale wants
@@ -586,17 +598,15 @@ and seed per arm; "gap" multiplies the response.
 | 1e3 | 786 | 791 | 1575 |
 | 1e6 | **92** | **17** | 1811 |
 
-At gap 1e6 the joint step size is 1.647 while a separate beta block wants 0.244
-and a separate sigma block 1.965 -- ~7x too large for beta, which is why
-sigma's own ESS inside stays 2215 while beta's is 92. **A dense metric makes it
-worse** (92 -> 17): the problem is not correlation, and dense has more to
-estimate from the same warmup. Do not escalate here.
+At gap 1e6 the joint step size is 1.647 against 0.244 for a separate beta block
+and 1.965 for a separate sigma block -- ~7x too large for beta, so sigma's own
+ESS inside stays 2215 while beta's is 92. **Dense makes it worse** (92 -> 17):
+the problem is not correlation. Do not escalate here.
 
 ### If it already shipped
-Symptom on wide-scale data: R-hat and coverage FINE (the posterior is right),
-ESS collapsed on some slices while the offending parameter's own ESS is
-healthy. Confirm by moving it to its own block and comparing adapted step
-sizes; if they differ a lot, the joint block was serving the wrong coordinate.
+Symptom on wide-scale data: R-hat and coverage FINE, ESS collapsed on some
+slices while the offending parameter's own ESS is healthy. Confirm by moving it
+out and comparing adapted step sizes.
 
 ---
 

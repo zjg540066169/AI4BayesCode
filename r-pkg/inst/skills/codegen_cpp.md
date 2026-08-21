@@ -107,8 +107,8 @@ likelihood and classify:
    **Except where a failure mode says otherwise.** "Remaining" is not
    "everything left over" -- settle the list against
    `joint_nuts_failure.md` Modes 1-4 first. Mode 4 is the one that bites
-   here: a member uncoupled from its blockmates in the POSTERIOR starves
-   them of step size and buys nothing. The standard non-member is an
+   here: a member whose posterior covariance with its blockmates is zero
+   starves them of step size and buys nothing. The standard non-member is an
    observation-level residual scale that multiplies no member of the
    block, which is why the Sec.4a row for `y ~ N(alpha + X beta,
    sigma^2)` reads "sigma separate" -- `Cov(beta_j, sigma) = 0` there
@@ -235,9 +235,10 @@ Document in the header comment:
   posterior is correlated, and joint updates mix better than
   one-at-a-time updates.` (The subset / metric / verified-terms
   bookkeeping goes in the L2 verdict table, not the delivered file.)
-  Say POSTERIOR, and mean it. "Coupled through the likelihood" is not a
-  criterion -- every parameter in a likelihood is coupled through it, so
-  the phrase justifies any membership at all, including a Mode 4 one.
+  The criterion is a non-zero posterior COVARIANCE. Not that the
+  parameters appear together in the density, and not that one scales
+  another's conditional variance -- `joint_nuts_failure.md` Mode 4
+  refutes both wordings, with the arithmetic. Do not invent a third.
 - If shipping a standalone modular `nuts_block` (fallback), write:
   `// NOTE: <param> is sampled on its own -- it is separable from the
   rest because <plain reason>.`
