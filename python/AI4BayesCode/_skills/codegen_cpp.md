@@ -102,9 +102,19 @@ likelihood and classify:
    hand-written joint log-density. This is the DEFAULT.** Do NOT fragment
    a coupled model into separate `nuts_block`s, and do NOT contort it to
    fit a built-in block.
+
+   **Except where a failure mode says otherwise.** "Remaining" is not
+   "everything left over" -- settle the list against
+   `joint_nuts_failure.md` Modes 1-4 first. Mode 4 is the one that bites
+   here: a member uncoupled from its blockmates in the POSTERIOR starves
+   them of step size and buys nothing. The standard non-member is an
+   observation-level residual scale that multiplies no member of the
+   block, which is why the Sec.4a row for `y ~ N(alpha + X beta,
+   sigma^2)` reads "sigma separate" -- `Cov(beta_j, sigma) = 0` there
+   analytically. Honouring that row is not fragmenting.
 4. A standalone `nuts_block` is the **LOW-priority** fallback: a
-   genuinely scalar parameter, a post-NCR funnel branch, or deliberate
-   isolation.
+   genuinely scalar parameter, a post-NCR funnel branch, a Mode 4
+   non-member, or deliberate isolation.
 5. **Structural gap (`codegen_priors.md Sec.2c` Exception 4):** if -- judged
    at generation time -- no block fits AND NUTS is structurally
    inapplicable (e.g. a bespoke tree ensemble, a novel trans-dimensional
@@ -216,10 +226,13 @@ separable / scalar parameter (the low-priority fallback).
 Document in the header comment:
 
 - If shipping joint (the default), write the plain-language NOTE defined
-  in Sec.4a: `// NOTE: <names> are sampled jointly with NUTS -- they are
-  tightly coupled through the likelihood, and joint updates mix better
-  than one-at-a-time updates.` (The subset / metric / verified-terms
+  in Sec.4a: `// NOTE: <names> are sampled jointly with NUTS -- their
+  posterior is correlated, and joint updates mix better than
+  one-at-a-time updates.` (The subset / metric / verified-terms
   bookkeeping goes in the L2 verdict table, not the delivered file.)
+  Say POSTERIOR, and mean it. "Coupled through the likelihood" is not a
+  criterion -- every parameter in a likelihood is coupled through it, so
+  the phrase justifies any membership at all, including a Mode 4 one.
 - If shipping a standalone modular `nuts_block` (fallback), write:
   `// NOTE: <param> is sampled on its own -- it is separable from the
   rest because <plain reason>.`
@@ -261,9 +274,8 @@ WHICH parameters are sampled jointly and WHY, in words the
 non-programmer audience can read:
 
 ```
-# NOTE: <names> are sampled jointly with NUTS -- they are tightly
-# coupled through the likelihood, and joint updates mix better than
-# one-at-a-time updates.
+# NOTE: <names> are sampled jointly with NUTS -- their posterior is
+# correlated, and joint updates mix better than one-at-a-time updates.
 ```
 
 Do NOT emit validator jargon into delivered files: no "semantic-bug
