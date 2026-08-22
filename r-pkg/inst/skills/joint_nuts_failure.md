@@ -557,13 +557,16 @@ so a model carrying it passes L3 with clean R-hat and high ESS, and starves
 only on data of a larger scale. There is no runtime gate to fall back on.
 
 ### The question to ask
-Of every parameter about to go in one joint block: **is its posterior
-COVARIANCE with its blockmates non-zero?** Mechanically: **does it MULTIPLY a
-blockmate's sampled value?** In `b_k = sigma_k * z_k` the scale does -- that is
-Mode 1, and the block is the fix. An observation-level residual scale
-multiplies the RESIDUAL, not the locations: give it its own `nuts_block`. Both
-cases can occur in one sampler. `codegen_cpp.md` Sec.4a's table is the short
-form: joint(alpha, beta), **sigma separate**.
+Of every parameter about to go in one joint block: **does it MULTIPLY a
+blockmate's SAMPLED value -- in the prior or in the likelihood?** A name, or
+nothing. `u = mu + tau * z` (tau multiplies z), `beta = lambda * tau * z`
+(horseshoe / ARD / Lasso), `beta = b0 + sigma * L0 * z` (g-prior / conjugate
+NIG) -- all IN, all Mode 1. Nothing to name means it scales a RESIDUAL, not a
+sampled coordinate (`y` is data): its own `nuts_block`. Both cases can occur in
+one sampler. `codegen_cpp.md` Sec.4a's table is the short form.
+
+**Use the structure, not the covariance.** Zero posterior covariance is
+necessary for OUT and never sufficient -- see the flip in argument 2 below.
 
 ### Two arguments that smuggle a residual scale in. Both are refuted.
 For `y ~ N(X beta, sigma^2)` with a flat beta prior and Jeffreys on sigma:
@@ -571,12 +574,16 @@ For `y ~ N(X beta, sigma^2)` with a flat beta prior and Jeffreys on sigma:
 1. *"they are coupled through the residual `(y - X beta) / sigma`."* Every
    parameter in a likelihood is coupled through it, so this argues for any
    membership at all. Vacuous.
-2. *"sigma sets the effective posterior variance of beta."* True, and the
-   textbook case of ZERO correlation -- Normal-Inverse-Gamma:
-   `beta | sigma ~ N(bhat, sigma^2 (X'X)^-1)` has a mean that does not move
-   with sigma, so `Cov(beta_j, sigma) = Cov(E[beta_j | sigma], sigma) = 0`
-   exactly. Maximal conditional dependence, zero covariance. Scaling a
-   blockmate's conditional VARIANCE is not coupling.
+2. *"sigma sets the effective posterior variance of beta."* True, and not
+   membership. Under a FLAT beta prior the posterior is
+   `beta | sigma ~ N(bhat, sigma^2 (X'X)^-1)` with `bhat` the OLS estimate,
+   which does not move with sigma, so `Cov(beta_j, sigma) = 0` exactly.
+   Maximal conditional dependence, zero covariance -- and, by the test above,
+   nothing for sigma to name. Scaling a blockmate's conditional VARIANCE is
+   not coupling; multiplying its sampled value is. **The flip:** give beta a
+   g-prior / conjugate `beta | sigma ~ N(b0, sigma^2 V0)` and sigma goes IN --
+   `Cov(beta_j, sigma)` is STILL 0 there, so covariance cannot be the test;
+   sigma now multiplies beta's prior scale, and separating them opens a funnel.
 
 Generating agents have produced both, in that order, each time reading a
 criterion the previous wording had tightened. A third rewording will come. The

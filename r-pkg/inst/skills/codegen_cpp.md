@@ -72,8 +72,8 @@ likelihood and classify:
 | Pattern in likelihood | Coupling | Default |
 |---|---|---|
 | `y ~ f(theta_i - b_j)`, `y ~ f(alpha - beta)` -- shift invariance | **High** | `joint_nuts_block(theta, b)` |
-| `y ~ N(alpha + X beta, sigma^2)` -- additive linear mean | **High** | `joint_nuts_block(alpha, beta)`, sigma separate |
-| `y ~ N(X beta + Z u, sigma^2)`, `u ~ N(0, tau^2)` -- fixed + random effect sharing mean | **High** | `joint_nuts_block(alpha, beta, u)`, sigma + tau separate |
+| `y ~ N(alpha + X beta, sigma^2)` -- additive linear mean | **High** | **IN:** `joint_nuts_block(alpha, beta)`. **OUT:** `nuts_block(sigma)` -- its own block, ONLY when `p(beta)` does not involve sigma (flat, or a fixed-scale normal). Under a g-prior / conjugate `beta \| sigma ~ N(b0, sigma^2 V0)` sigma multiplies beta's prior scale and goes IN. |
+| `y ~ N(X beta + Z u, sigma^2)`, `u ~ N(0, tau^2)` -- fixed + random effect sharing mean | **High** | **IN:** `joint_nuts_block(alpha, beta, u_raw, tau)` -- non-centered `u = tau * u_raw`, so tau multiplies a blockmate and belongs (Mode 1). **OUT:** `nuts_block(sigma)`, subject to the same prior condition as the row above. Then read the hierarchical row below, which governs. |
 | Correlation between continuous params visible in the generative model | **High** | joint |
 | Hierarchical hyperparameter over vector of children: `u_i ~ N(mu_u, tau^2)` -- hyper and children both continuous | **High** (REQUIRED) | **MANDATORY: read `skills/hierarchical_re.md` in full BEFORE generating code.** Single `joint_nuts_block` over `(mu_u, tau, [sigma_y if Gaussian likelihood], u_raw, beta)` with **non-centered (NC) reparameterization** `u_i = mu_u + tau * z_i, z_i ~ N(0, 1)`. NEVER split these across separate `nuts_block`s -- the funnel between `(tau, u_i)` returns immediately, even with NC, because separated Gibbs steps re-create the inverse funnel (Betancourt-Girolami 2015 Sec.3.3). Empirical failure mode: coverage collapses well below nominal vs the reference across single-RE hierarchical models (centered and non-centered) and a binomial-RE model -- caused by separate-block composition, not by the parameterization label. The rule applies regardless of G (no "small enough G" exception). Set `cfg.use_dense_metric = true` as a Check #18 escalation when 2-chain rhat > 1.05 OR ess_ratio is low (the WARN/FAIL zone) at 20k+20k on the joint posterior -- START DIAGONAL, measure, then escalate, and measure-then-keep (keep dense only if ESS materially improves, else revert -- see `hierarchical_re.md Sec.8`); do NOT gate dense on a dimension threshold (large G makes dense *likely*, not mandatory -- confirm via R-hat/ESS). For CROSSED effects (e.g. `a_g + b_s` with shared `sigma_y`): TWO joint_nuts_block instances, one per RE level, sharing `sigma_y` via shared_data; see `hierarchical_re.md Sec.6`. |
 | **Multivariate hierarchical** with d-dim per-unit random effects: `u_i ~ MultiNormal(0, Sigma)` where `Sigma` has d scale parameters `sigma_1..sigma_d` and possibly correlations `rho_{jk}` (e.g., bivariate normal latent species effect, random intercept + slope, multi-output GLMM) | **High** | **`joint_nuts_block` over `(sigma_1..sigma_d` POSITIVE`, [rho_jk` REAL via z-transform`], u_raw[G*d]` REAL`)`** -- the d scales, the d*(d-1)/2 correlations, and the G*d non-centered raw effects are all multiplicatively / Cholesky-coupled and CANNOT be separated into independent NUTS blocks without catastrophic cross-impl bias (same bug class as univariate hierarchical-LM: separated POSITIVE-scale + REAL-vec joint NUTS gives wrong cross-impl posteriors even when single-chain rhat looks fine). at large `G*d` dense metric is often needed, but **start diagonal and escalate to `cfg.use_dense_metric = true` as a Check #18 step only when R2/R3 diagnostics show diagonal is inadequate (rhat > 1.05 OR low ess_ratio), measure-then-keep per `hierarchical_re.md Sec.8`** (measure, don't predict -- no fixed dimension threshold). For `Sigma` parameterization: the simplest correct path is `Sigma = diag(sigma) * L_corr * L_corr' * diag(sigma)` with `L_corr` from `cholesky_corr` constraint sampled in its own block, leaving `(sigma, u_raw)` jointly POSITIVE+REAL in the joint block. For d=2 with a single correlation `rho`, a reparameterization `rho = 2*sigmoid(z_rho) - 1` keeps `z_rho` in the joint block as REAL. |
@@ -242,10 +242,26 @@ Document in the header comment:
   posterior is correlated, and joint updates mix better than
   one-at-a-time updates.` (The subset / metric / verified-terms
   bookkeeping goes in the L2 verdict table, not the delivered file.)
-  The criterion is a non-zero posterior COVARIANCE. Not that the
-  parameters appear together in the density, and not that one scales
-  another's conditional variance -- `joint_nuts_failure.md` Mode 4
-  refutes both wordings, with the arithmetic. Do not invent a third.
+
+  **Before that NOTE, settle membership with this table, not with a
+  sentence.** One row per sub-param you are about to put in the block:
+
+  | sub-param | constraint | multiplies which blockmate's SAMPLED value? |
+  |---|---|---|
+  | `beta` | REAL | -- |
+  | `sigma` | POSITIVE | ??? |
+
+  The third column takes a NAME or nothing. Prior or likelihood both
+  count, and the prior is where scales usually do it: `u = mu + tau * z`
+  (tau multiplies z), `beta = lambda * tau * z` (horseshoe / ARD / Lasso),
+  `beta = b0 + sigma * L0 * z` (g-prior / conjugate NIG -- sigma multiplies
+  z and STAYS IN). A POSITIVE sub-param with `--` in that column scales a
+  RESIDUAL, not a sampled coordinate -- y is data -- and belongs in its own
+  `nuts_block`. There is no sentence to write here, which is the point: a
+  free-text coupling justification has been used to keep an uncoupled
+  residual scale in the block four separate times, with four different
+  arguments. "It multiplies X" is a fact you can check; "they are coupled"
+  is not.
 - If shipping a standalone modular `nuts_block` (fallback), write:
   `// NOTE: <param> is sampled on its own -- it is separable from the
   rest because <plain reason>.`
