@@ -9,11 +9,9 @@ description: |
   hierarchical funnel + NCR, (2) multi-modal / label-switching, (3) high-dim
   slowness, plus Forms A-H -- are WORKED EXAMPLES. The escalation ladder and the
   funnel NCR recipe live HERE (codegen_priors.md and validator Check #24 point
-  here). READ MODES 1-4 BEFORE EMITTING ANY joint_nuts_block -- they are how
-  the block's membership is decided, and Mode 4 leaves no runtime signal to
-  come back on. Also consult when a joint model shows pathology (max tree
-  depth, divergences, R-hat large, a scale parameter stuck near zero, or
-  random-effect ESS = NA).
+  here). Consult this skill BEFORE emitting a joint_nuts_block, and when a
+  joint model shows pathology (max tree depth, divergences, R-hat large,
+  a scale parameter stuck near zero, or random-effect ESS = NA).
 ---
 
 # joint_nuts_block -- failure modes + fixes
@@ -22,31 +20,15 @@ description: |
 single concatenated unconstrained vector. It is the **default** for coupled
 continuous targets (block-decomposed per-parameter NUTS mixes ~10x slower per
 ESS when parameters are correlated, and FREEZES outright on hierarchical
-funnels -- see Mode 1 evidence). Being the default is not a licence to put
-everything in one block: four failure modes are characterized below, and
-Modes 1-4 are read BEFORE emitting the block, to decide what it contains.
+funnels -- see Mode 1 evidence). But joint NUTS has three well-characterized
+failure modes. Each is detectable and fixable; this skill is the reference.
 
 ## When to consult
 
-**Codegen agent -- READ MODES 1-4 BEFORE EMITTING ANY `joint_nuts_block`.**
-Not "consult when something looks wrong": the four modes are how you DECIDE
-the block, so they are read while you are choosing its membership. Mode 4 has
-no runtime signal to come back on, so there is no second chance.
-
-The membership decision has two halves, and both can apply to one block --
-scales pair with their raw effects INSIDE, the residual scale stays OUTSIDE:
-
-1. **What goes IN** -- Mode 1 (funnel). NCR is **mandatory** on a match.
-2. **What stays OUT** -- Mode 4. An uncoupled parameter costs the block a
-   shared step size and buys nothing.
-
-Modes 2 (multi-modal) and 3 (high-dim) shape the same decision: if the target
-is label-switching or the block is about to exceed the dimension where one
-metric can serve, that is decided now, not after a bad run.
-
-**Debug**: lookup when a joint model shows pathology at runtime -- max tree
-depth, divergences, large R-hat, a scale stuck near zero, random-effect
-ESS = NA. Modes 1-3 leave these traces. Mode 4 does not.
+- **Codegen agent**: BEFORE emitting any `joint_nuts_block`, check the prompt
+  against Mode 1 (funnel) -- NCR is **mandatory** when the pattern matches.
+- **Validator**: target reference when Check #24 (joint-NUTS pre-flight) fails.
+- **Debug**: lookup when a joint model shows pathology at runtime.
 
 ---
 
@@ -546,74 +528,6 @@ independence structure (each group < ~50 params). Automated "obvious
 independence" auto-split is a v1.2 codegen feature (F4); until then, split
 manually when the factorization is clear, or accept the cost. Do NOT split
 across a genuine coupling -- that silently biases inference.
-
----
-
-## Failure Mode 4 -- An UNCOUPLED parameter inside the joint block
-
-**Decide this BEFORE codegen, from the model. Runtime will not tell you.** The
-penalty scales with the spread of the data -- measured below, zero at gap 1 --
-so a model carrying it passes L3 with clean R-hat and high ESS, and starves
-only on data of a larger scale. There is no runtime gate to fall back on.
-
-### The question to ask
-Of every parameter about to go in one joint block: **does it MULTIPLY a
-blockmate's SAMPLED value -- in the prior or in the likelihood?** A name, or
-nothing. `u = mu + tau * z` (tau multiplies z), `beta = lambda * tau * z`
-(horseshoe / ARD / Lasso), `beta = b0 + sigma * L0 * z` (g-prior / conjugate
-NIG) -- all IN, all Mode 1. Nothing to name means it scales a RESIDUAL, not a
-sampled coordinate (`y` is data): its own `nuts_block`. Both cases can occur in
-one sampler. `codegen_cpp.md` Sec.4a's table is the short form.
-
-**Use the structure, not the covariance.** Zero posterior covariance is
-necessary for OUT and never sufficient -- see the flip in argument 2 below.
-
-### Two arguments that smuggle a residual scale in. Both are refuted.
-For `y ~ N(X beta, sigma^2)` with a flat beta prior and Jeffreys on sigma:
-
-1. *"they are coupled through the residual `(y - X beta) / sigma`."* Every
-   parameter in a likelihood is coupled through it, so this argues for any
-   membership at all. Vacuous.
-2. *"sigma sets the effective posterior variance of beta."* True, and not
-   membership. Under a FLAT beta prior the posterior is
-   `beta | sigma ~ N(bhat, sigma^2 (X'X)^-1)` with `bhat` the OLS estimate,
-   which does not move with sigma, so `Cov(beta_j, sigma) = 0` exactly.
-   Maximal conditional dependence, zero covariance -- and, by the test above,
-   nothing for sigma to name. Scaling a blockmate's conditional VARIANCE is
-   not coupling; multiplying its sampled value is. **The flip:** give beta a
-   g-prior / conjugate `beta | sigma ~ N(b0, sigma^2 V0)` and sigma goes IN --
-   `Cov(beta_j, sigma)` is STILL 0 there, so covariance cannot be the test;
-   sigma now multiplies beta's prior scale, and separating them opens a funnel.
-
-Generating agents have produced both, in that order, each time reading a
-criterion the previous wording had tightened. A third rewording will come. The
-test is the covariance, not the prose.
-
-### Why membership costs anything
-One step size serves the whole block, and it settles near what the scale wants
--- far too large for the locations. The gap grows without bound because a
-POSITIVE slice is sampled as `log(sigma)`, whose posterior sd is ~`1/sqrt(2n)`
-at ANY magnitude, while an unconstrained location's sd grows with the data.
-
-### Empirical evidence (synthetic, one variable changed)
-`y = X beta + eps`, N=80, p=7, OLS start, 2000 warmup + 4000 draws, same data
-and seed per arm; "gap" multiplies the response.
-
-| gap | sigma in / diag | sigma in / dense | sigma OUT |
-|---|---|---|---|
-| 1 | beta ESS 1635 | -- | 1814 |
-| 1e3 | 786 | 791 | 1575 |
-| 1e6 | **92** | **17** | 1811 |
-
-At gap 1e6 the joint step size is 1.647 against 0.244 for a separate beta block
-and 1.965 for a separate sigma block -- ~7x too large for beta, so sigma's own
-ESS inside stays 2215 while beta's is 92. **Dense makes it worse** (92 -> 17):
-the problem is not correlation. Do not escalate here.
-
-### If it already shipped
-Symptom on wide-scale data: R-hat and coverage FINE, ESS collapsed on some
-slices while the offending parameter's own ESS is healthy. Confirm by moving it
-out and comparing adapted step sizes.
 
 ---
 

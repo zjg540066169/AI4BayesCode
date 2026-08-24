@@ -364,7 +364,7 @@ class), not separate classes.
 | 1. Upfront questions | after reading this file | `skills/codegen.md` Sec.1 |
 | 2. Prior elicitation | when a user prior is missing / ambiguous | `skills/codegen_priors.md` |
 | 3. Model confirmation | before writing any code | `skills/codegen.md` Sec.3 (inline DAG + summary table) |
-| 4. C++ emission | when starting to write `.cpp` | `skills/codegen_cpp.md` -- **and, if the sampler will contain a `joint_nuts_block`, `skills/joint_nuts_failure.md` Modes 1-4 as well, BEFORE the block is written** |
+| 4. C++ emission | when starting to write `.cpp` | `skills/codegen_cpp.md` -- **and, if the sampler will contain a `joint_nuts_block`, `skills/joint_nuts_failure.md` Modes 1-3 as well, BEFORE the block is written** |
 | 5. L1 compile + L2 semantic validation | after `.cpp` is written, BEFORE any runner file exists | `skills/validator.md` (L2 semantic checklist + AD-twin Check #12); PRINT the per-check verdict table |
 | 6. R / Python runner emission | ONLY after the printed L2 verdict PASSES | `skills/codegen_r_runner.md` (R backend) / `skills/codegen_python_runner.md` (Python backend; load whichever the chosen backend needs) |
 | 7. L3 runtime verification | after the runner compiles | `skills/validator.md` Layer 3 (R1 smoke -> R2 two-chain -> R3) |
@@ -423,12 +423,12 @@ many generations need 0 of these):
   patterns, DAG semantics, the metric (diagonal/dense) + warmup
   (single-pilot/3-phase) decision (Sec.13)
 - `skills/joint_nuts_failure.md` -- NOT on-demand. **Every model that uses
-  `joint_nuts_block` loads Modes 1-4 in phase 4, before the block is written**
+  `joint_nuts_block` loads Modes 1-3 in phase 4, before the block is written**
   (see the phase table). Listing it here as a converge-failure lookup is what
   kept it unread: an agent writing a model it believes is fine has no reason to
   open a file about failures, and the default-to-not-loading rule below settles
-  it. The modes are how the block's MEMBERSHIP is decided, not a post-mortem --
-  Mode 4 has no runtime signal at all, so there is no later trigger to catch it.
+  it. Mode 1 decides what the block must CONTAIN and makes NCR mandatory on a
+  match, which is a choice made while writing the block, not after a bad run.
   It also serves the runtime lookup it used to be listed for: a stuck joint-NUTS
   model (funnel OR ridge -- R-hat large, max tree depth, divergences, a scale
   stuck near zero, ESS=NA), and before ever concluding a model is "multimodal".
