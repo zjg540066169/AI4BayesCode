@@ -2,7 +2,7 @@
 # test_mixed_joint.R
 #
 # Smoke + diagnostic test for LinearRegJointMixed (demonstrates
-# joint_nuts_block_mixed with REAL + POSITIVE sub-parameters).
+# joint_nuts_block with REAL + POSITIVE sub-parameters).
 #
 # Checks:
 #   - compiles and constructs

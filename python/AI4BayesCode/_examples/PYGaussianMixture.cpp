@@ -39,12 +39,11 @@
 //  prior; mechanics correct, modal K is not a function of truth alone).
 //
 //  In this v0 example, `discount` is FIXED at construction (not sampled).
-//  Sampling discount jointly with alpha would require a `joint_nuts_block_mixed`
-//  with an INTERVAL constraint on discount in (0, 1); that constraint
-//  family is NOT in v1 of `joint_nuts_block_mixed` (constraints.md
-//  joint_constraint table -- only REAL + POSITIVE shipped). Two options:
-//    - sample discount via a separate `nuts_block` with interval(0, 1)
-//      constraint, OR
+//  Sampling it jointly with alpha is possible: `joint_nuts_block` ships
+//  an INTERVAL constraint, so discount in (0, 1) is a valid slice.
+//  Two options:
+//    - add discount as an INTERVAL sub-param of the joint block, or
+//      sample it via a separate `nuts_block` with interval(0, 1), OR
 //    - keep it fixed (this file) and explore by re-running the chain at
 //      multiple discount values.
 //  We choose the second for the v0 reference; the first is a trivial

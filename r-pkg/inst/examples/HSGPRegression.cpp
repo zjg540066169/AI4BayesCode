@@ -24,9 +24,11 @@
 //  -------------------------------------------------------
 //   1. Reparameterize EVERY positive scalar (amp, ell, sigma) to the log
 //      scale and treat them as REAL parameters. This unlocks
-//      `joint_nuts_block` (real-only) and its dense-metric pilot phase.
-//      `joint_nuts_block_mixed` does NOT support dense metric (the
-//      banana / funnel cannot be navigated with the identity metric).
+//      `joint_nuts_block` and its dense-metric pilot phase, with the
+//      log|Jacobian| added by hand in step 3 so it stays explicit.
+//      (A POSITIVE slice would apply the same log transform internally
+//      and is equally compatible with the dense metric -- the pilot sees
+//      the unconstrained vector either way.)
 //   2. Put ALL real parameters into ONE `joint_nuts_block` and set
 //      `cfg.use_dense_metric = true`. The Welford pilot covariance learns
 //      the (amp, ell) banana, the (amp, zs) funnel, and the (Intercept,

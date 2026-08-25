@@ -247,7 +247,7 @@ struct nuts_block_config {
     /// and its raw-effect partner are in separate Gibbs blocks but their
     /// conditionals are multiplicatively coupled. The correct fix is
     /// methodological:
-    ///   1. `joint_nuts_block_mixed` over (sigma_*, z_*) per
+    ///   1. `joint_nuts_block` over (sigma_*, z_*) per
     ///      `skills/codegen_cpp.md §4a` row "scale + raw effect, non-
     ///      centered" — the joint block samples the multiplicative
     ///      coupling exactly.

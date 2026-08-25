@@ -27,8 +27,8 @@
  *  sweep, drawing populated clusters from the data-driven posterior and
  *  EMPTY clusters from the prior (matches Ishwaran & James 2001 §3.2).
  *
- *  WHY NOT joint_nuts_block_mixed
- *  ------------------------------
+ *  WHY NOT joint_nuts_block
+ *  ------------------------
  *  Two reasons:
  *    1. Empty clusters have a flat-prior posterior; NUTS gets stuck on
  *       flat regions while exact Gibbs samples directly from the prior.

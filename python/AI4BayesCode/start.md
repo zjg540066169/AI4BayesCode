@@ -604,8 +604,7 @@ full list but the critical ones:
 
 - **No hand-written Gibbs**: prefer existing blocks (`nuts_block`,
   `joint_nuts_block` -- handles real + per-slice POSITIVE/INTERVAL/
-  ORDERED/SUM_TO_ZERO constraints; the old `joint_nuts_block_mixed`
-  was folded into it 2026-06-18 -- `pg_logistic_block`, conjugate-Gibbs
+  ORDERED/SUM_TO_ZERO constraints -- `pg_logistic_block`, conjugate-Gibbs
   blocks, `bart_block`, etc.) over emitting a custom block from
   scratch. See `block_catalogue/index.md` for the full menu.
 - **Block-selection priority** (TWO-PHASE, not a linear "first item wins"):

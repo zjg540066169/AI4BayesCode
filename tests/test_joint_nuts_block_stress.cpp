@@ -1,5 +1,5 @@
 /*================================================================================
- *  AI4BayesCode joint_nuts_block_mixed stress / robustness tests.
+ *  AI4BayesCode joint_nuts_block stress / robustness tests.
  *
  *    R1  Reproducibility (same rng_seed → identical theta sequence)
  *    R2  Positive constraint correctness: sigma stays > 0 always
@@ -251,7 +251,7 @@ static void R6_sub_param_slicing() {
 } // anonymous namespace
 
 int main() {
-    std::printf("====== joint_nuts_block_mixed stress / robustness tests ======\n");
+    std::printf("====== joint_nuts_block stress / robustness tests ======\n");
     R1_reproducibility();
     R2_positivity();
     R3_recovery();
