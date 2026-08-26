@@ -59,7 +59,8 @@ per-site Gibbs on coupled discrete sites converges in the limit but is useless).
 shipped remedy as the leading option BEFORE letting the user author a bespoke block:
 
 - Sec.11.2(a) -> `rjmcmc_block` (identity-coordinate, Jacobian-free; ref `SpikeSlabRJMCMC.cpp`); or
- the truncated-SBP stack for BNP-K (`stick_breaking_block` + `normal_gamma_cluster_gibbs_block`
+ the truncated-SBP stack for BNP-K (`stick_breaking_block` +
+ `normal_gamma_cluster_gibbs_block` / `cluster_atom_block`
  + `categorical_gibbs_block`); or a continuous relaxation (tight Gaussian spike).
 - Sec.11.2(b) -> the matching shipped specialized block (`hmm_block`, `ising_cluster_block`,
  `gmrf_precision_block` / `gmrf_whitened_ess_block`, `order_mcmc_block`).

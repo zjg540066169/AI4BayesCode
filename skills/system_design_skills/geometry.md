@@ -238,7 +238,8 @@ When designing a new block or a new example:
      variable selection + most change-point / basis-birth cases);
      see reference template `SpikeSlabRJMCMC.cpp`;
    - for BNP mixture-K subcase, use the truncated SBP infrastructure
-     (`stick_breaking_block` + `normal_gamma_cluster_gibbs_block` +
+     (`stick_breaking_block` + `normal_gamma_cluster_gibbs_block`
+     or `cluster_atom_block` when the atom prior is non-conjugate +
      `categorical_gibbs_block`; reference templates
      `examples/DPGaussianMixture.cpp` / `examples/PYGaussianMixture.cpp`).
      Future Neal Alg 2/8 marginal CRP and Jain-Neal split-merge are

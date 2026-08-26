@@ -85,6 +85,14 @@ results$beta_gibbs <- run_parity(
     file.path(AI4BayesCode_dir, "tests_autodiff/block_tests/test_beta_gibbs_block.cpp"),
     "test_beta_gibbs_block", list())
 
+# 1b. cluster_atom_block library parity (Check #15). Non-conjugate slice
+# sampler fed a CONJUGATE target so its output has closed-form moments to
+# match; the two EMPTY components additionally pin Ishwaran & James (2001)
+# step (a) -- an unoccupied component's conditional IS the prior.
+results$cluster_atom <- run_parity(
+    file.path(AI4BayesCode_dir, "tests_autodiff/block_tests/test_cluster_atom_block.cpp"),
+    "test_cluster_atom_block", list())
+
 # 2. Poisson-multinomial aug block library parity
 # (parity test to be authored in a follow-up — for now the block is
 #  exercised end-to-end via GBartMultinomial compile-smoke + 2-chain

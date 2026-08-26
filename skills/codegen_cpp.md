@@ -90,8 +90,8 @@ likelihood and classify:
 | **ICAR / BYM / spatial CAR random effect** + **Gaussian** observation | Improper prior on phi (sum-to-zero needed) + (Intercept, mean phi) ridge | **Hybrid composite**: `gmrf_precision_block` over `phi[N]` (Rue 2001 sparse-Cholesky direct draw + hard sum-to-zero projection) + three separate `nuts_block` for Intercept (real), `log_tau` (positive), `log_sigma` (positive). The GMRF block samples phi via the exact Gaussian full-conditional in canonical form `Q = tau R + (1/sigma^2) diag(n_i)`; the NUTS blocks each see phi via shared_data. ~60x faster than a NUTS-only joint workaround. Use Half-Normal sigma prior (NOT Jeffreys) -- ICAR can absorb all variance, Half-Normal pushes back at sigma -> 0. See `examples/ICARSpatialGMRF.cpp`. |
 | **ICAR / CAR / RW1 / RW2 sparse-precision random effect** + **non-Gaussian** observation (Poisson / Bernoulli / NB) | Improper prior on the latent (sum-to-zero needed for ICAR-style) + (Intercept, mean latent) ridge + likelihood-induced extra curvature | **Hybrid composite**: **`gmrf_whitened_ess_block`** over the latent (Murray 2010 ESS on the implicit GMRF prior via Rue 2001 sparse-Cholesky backsolve; sum-to-zero preserved by ESS rotation linearity) + separate `nuts_block` for the linear-predictor intercept (real), log-precision (positive), and any non-spatial random effect scales. User supplies `Q_fn(ctx) -> arma::sp_mat` and `log_lik(x, ctx) -> double` (the user's observation log-density evaluated at the proposed latent). See `block_catalogue/index.md` `gmrf_whitened_ess_block` section for the example recipe and verified convergence budgets at N=16 / N=64. |
 | **Hidden discrete latent** (HMM / Ising / Potts / MRF on graph) **+ Normal emission** (Gaussian observation per latent class, possibly with per-class sigma_k) | Low for emission params given z (conjugate); High for z under spatial / sequential prior | **Hybrid composite**: specialized prior block for z (`hmm_block` for HMM, `binary_gibbs_block` for binary Ising/MRF, `categorical_gibbs_block` for K-state Potts) + **`normal_gamma_cluster_gibbs_block`** for per-class `(mu_k, lambda_k)` (Normal-Gamma conjugate; treat z as the partition). Label switching handled via post-hoc sort in runner. AVOID (not recommended) a `joint_nuts_block` with a `delta > 0` ordering constraint here -- NUTS dual-averaging interacts badly with slow-mixing z and can bias the posterior for (mu_k, sigma_k). |
-| **BNP mixture (Dirichlet Process / Pitman-Yor) -- unknown number of components K** | **Allocation z is discrete; pi is a stick-breaking simplex (correlated by construction); (mu, lambda) per cluster are conjugate** | **Truncated SBP (Ishwaran-James 2001)**: `categorical_gibbs_block` (z) + `stick_breaking_block` (pi, with DP or PY a_fn / b_fn) + `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal Normal-Gamma) + `nuts_block` on log(alpha). For alpha as a derived function of other parameters, register a `register_refresher("alpha", ...)`. CRP-marginal Neal Alg 2/8 and Jain-Neal split-merge NOT shipped. See `examples/DPGaussianMixture.cpp` / `examples/PYGaussianMixture.cpp` / `examples/DPGaussianMixture_DerivedAlpha.cpp`. **Caveat**: DP truncated SBP intrinsically over-clusters on well-separated fixtures (see the DP block notes in `block_catalogue/index.md`). When K is known, prefer the finite-K wrapper below. |
-| **Finite-K Gaussian mixture (K known)** | Allocation z discrete; pi Dirichlet conjugate; (mu, lambda) Normal-Gamma conjugate | `categorical_gibbs_block` (z) + `dirichlet_gibbs_block` (pi, posterior alpha/K + counts) + `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal). K and alpha are CONSTRUCTOR ARGS. See `examples/FiniteGaussianMixture.cpp`. **Recovers truth mu within 0.21 sigma on the same fixture where DP over-clusters** -- use this when K is known via domain knowledge or model selection. |
+| **BNP mixture (Dirichlet Process / Pitman-Yor) -- unknown number of components K** | **Allocation z is discrete; pi is a stick-breaking simplex (correlated by construction); (mu, lambda) per cluster are conjugate** | **Truncated SBP (Ishwaran-James 2001)**: `categorical_gibbs_block` (z) + `stick_breaking_block` (pi, with DP or PY a_fn / b_fn) + `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal Normal-Gamma) + `nuts_block` on log(alpha). **If the per-component prior is NOT Normal-Gamma (or NIW), the cluster-atom step is `cluster_atom_block`, NOT a `joint_nuts_block` over all K components** -- see the note below the table. For alpha as a derived function of other parameters, register a `register_refresher("alpha", ...)`. CRP-marginal Neal Alg 2/8 and Jain-Neal split-merge NOT shipped. See `examples/DPGaussianMixture.cpp` / `examples/PYGaussianMixture.cpp` / `examples/DPGaussianMixture_DerivedAlpha.cpp`. **Caveat**: DP truncated SBP intrinsically over-clusters on well-separated fixtures (see the DP block notes in `block_catalogue/index.md`). When K is known, prefer the finite-K wrapper below. |
+| **Finite-K Gaussian mixture (K known)** | Allocation z discrete; pi Dirichlet conjugate; (mu, lambda) Normal-Gamma conjugate | `categorical_gibbs_block` (z) + `dirichlet_gibbs_block` (pi, posterior alpha/K + counts) + `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal). Non-conjugate per-component prior -> `cluster_atom_block` for the atoms. K and alpha are CONSTRUCTOR ARGS. See `examples/FiniteGaussianMixture.cpp`. **Recovers truth mu within 0.21 sigma on the same fixture where DP over-clusters** -- use this when K is known via domain knowledge or model selection. |
 | **DPMM with split-merge acceleration (mode-escape via Jain-Neal 2004)** | Cluster partition has slow single-i Gibbs mixing | Add `split_merge_block` as a child AFTER `categorical_gibbs_block` in any DPMM composite (DP / PY / Finite). Both write to `z`; composite allows multi-children writing the same key. See `block_catalogue/index.md` `split_merge_block` Sec. for details and acceptance asymmetry note. |
 | Independent prior branches with no shared latent (e.g. two disjoint submodels) | Low | modular per parameter |
 
@@ -116,6 +116,30 @@ likelihood and classify:
    move), author a custom block/sampler with the plain-language
    "// Sampling note: ..." comment (the Exception-4 justification goes in
    the L2 verdict table). Last resort; never a runtime swap.
+
+### Mixture-component parameters: never fall back to one joint block
+
+A mixture with explicit allocations `z` has a cluster-ATOM step, and it is its
+own decision. Given `z` the components are conditionally independent (Ishwaran
+& James 2001 blocked Gibbs step (a), Eq. 18), so:
+
+| per-component prior | block |
+|---|---|
+| diagonal Normal-Gamma | `normal_gamma_cluster_gibbs_block` (exact) |
+| Normal-Inverse-Wishart | `niw_cluster_gibbs_block` (exact) |
+| **anything else** | **`cluster_atom_block`** |
+
+**The last row is the one that gets missed.** When no conjugate block matches,
+the reflex is to sweep the component parameters into one `joint_nuts_block`
+over all K of them. Do not: a truncated mixture keeps most components EMPTY,
+an empty component's conditional is its PRIOR (one to two orders of magnitude
+wider than an occupied one's), and which components are empty changes every
+sweep as `z` moves. One trajectory has one step size, it must be frozen after
+warmup to stay valid (Check #20), and it cannot track that. Measured on a
+truncated-DP mixture (K = 10, 20 datasets, 20k+20k), the fraction of sweeps in
+which the location vector did not move AT ALL: one joint block **74%**,
+per-component NUTS **15%**, `cluster_atom_block` **0%**; median cross-chain
+rank R-hat 1.1018 / 1.0866 / 1.0018.
 
 ### Coupling outside the table (no Sec.4a match)
 

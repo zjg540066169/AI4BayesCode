@@ -468,7 +468,7 @@ emission likelihood `y_i | z_i = k ~ N(mu_k, sigma_k)` (possibly with
 per-class sigma_k), route as a hybrid composite: the specialized
 prior block for z (`hmm_block`, `binary_gibbs_block`,
 `categorical_gibbs_block` per the prior structure) + cluster-conjugate
-`normal_gamma_cluster_gibbs_block` for per-class `(mu_k, lambda_k)`
+`normal_gamma_cluster_gibbs_block` for per-class `(mu_k, lambda_k)` when that prior IS Normal-Gamma; otherwise `cluster_atom_block`
 (treat z as the cluster partition). DO NOT use NUTS on `(mu_k,
 sigma_k)` with an identifying ordering constraint (e.g. `delta > 0`
 to force mu_0 < mu_1) -- NUTS dual-averaging interacts badly with
@@ -1062,7 +1062,8 @@ Discrete latent z found?
         - A rows: `dirichlet_gibbs_block` per row
         - pi     : `dirichlet_gibbs_block`
         - emission means / variances:
-          `normal_gamma_cluster_gibbs_block` per Sec.2b (treat z as the
+          `normal_gamma_cluster_gibbs_block` (or `cluster_atom_block` if the
+          per-component prior is not conjugate) per Sec.2b (treat z as the
           cluster partition). Do NOT put `(mu_k, sigma_k)` in a
           `nuts_block`: NUTS dual-averaging interacts badly with the
           slow-mixing z and silently biases those posteriors.

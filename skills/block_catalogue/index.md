@@ -103,6 +103,7 @@ can switch. (Full design: `block_design_skills/contrib.md`.)
 | **hierarchical random effects** (`u_i ~ N(mu_u, tau)` with group-level `mu_u`, `tau`) -- Gaussian, binomial, Poisson, or any GLMM family | **`joint_nuts_block`** with NC reparameterization (read `skills/hierarchical_re.md` BEFORE coding) | **(positive constraints on `tau, sigma_y`; real on `mu_u, u_raw, beta`)** |
 | **truncated stick-breaking simplex (DP / PY / HDP weights)** | **`stick_breaking_block`** | **(none -- per-stick Beta gamma-trick)** |
 | **diagonal-Gaussian cluster (mu_k, lambda_k) with conjugate Normal-Gamma prior across K_trunc clusters** | **`normal_gamma_cluster_gibbs_block`** | **(none -- per-cluster, per-dim conjugate)** |
+| **mixture-component parameters with NO conjugate closed form** (any prior, any component density -- Student-t, Gamma, Weibull, skew-normal, ...) across K_trunc clusters, given explicit allocations z | **`cluster_atom_block`** | **Ishwaran & James (2001) step (a) per component, univariate slice; empty components fall back to the prior automatically. Do NOT fall back to one `joint_nuts_block` over all K components -- one frozen step size cannot track a target that flips prior-wide / data-narrow every sweep.** |
 | **full-covariance Gaussian cluster (mu_k, Sigma_k) with conjugate NIW prior across K_trunc clusters** | **`niw_cluster_gibbs_block`** | **(none -- per-cluster Bartlett decomposition)** |
 | **scalar positive with conjugate Gamma posterior (DP alpha under truncated SBP, Normal-Gamma marginal precision, ...)** | **`gamma_gibbs_block`** | **(none -- exact draw via gamma-trick)** |
 | **survival regression with piecewise-constant baseline hazard `lambda_1..lambda_K` (proportional-hazards, right-censored + optional left-truncation; supports Cox linear `x^T beta`, BART, GP, ... offset from a sibling block)** | **`piecewise_exponential_gibbs_block`** (Kalbfleisch 1978; Ibrahim-Chen-Sinha 2001 Sec.3.2) | **(none -- exact Gamma-Poisson conjugate draw of `lambda[K]`)** |
@@ -191,6 +192,7 @@ for its full configuration / discipline (do NOT read them all):
 - **`joint_nuts_block -- per-slice constraints`** -> `block_catalogue/joint_nuts_block_per_slice_constraints.md`
 - **`stick_breaking_block`** -> `block_catalogue/stick_breaking_block.md`
 - **`normal_gamma_cluster_gibbs_block`** -> `block_catalogue/normal_gamma_cluster_gibbs_block.md`
+- **`cluster_atom_block`** -> `block_catalogue/cluster_atom_block.md`
 - **`niw_cluster_gibbs_block`** -> `block_catalogue/niw_cluster_gibbs_block.md`
 - **`split_merge_block`** -> `block_catalogue/split_merge_block.md`
 - **`bnp_utils.hpp`** -> `block_catalogue/bnp_utils_hpp.md`
