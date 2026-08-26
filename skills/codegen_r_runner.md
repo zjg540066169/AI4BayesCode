@@ -1113,16 +1113,18 @@ Modular (codegen default):
   on amp, InverseGamma(5, s_med) on ell, Jeffreys on sigma.
 - `examples/GPClassification.cpp` -- multi-D GP binary classification
   with Bernoulli-logit likelihood. **Whitened parameterization**
-  (Murray & Adams 2010): the latent is `z ~ N(0, I)`, recovered as
-  `f = L(amp, ell) * z` whenever the likelihood is evaluated. ESS
-  samples z with prior `L_identity`; one
-  `joint_nuts_block({amp, ell})` (POSITIVE x 2) samples the
-  hyperparameters jointly under a shared mass matrix and includes the
-  Bernoulli-logit likelihood `sum y_i f_i - softplus(f_i)` at proposed
-  `(amp, ell)`. Joint sampling is the default because the `(amp, ell)`
-  posterior has a banana-shaped ridge that modular NUTS slow-mixes
-  along. half-Normal(0, 1) on amp, InverseGamma(5, s_med) on ell.
-  No sigma block.
+  (Murray & Adams 2010) in ONE block: the latent is `z ~ N(0, I)`,
+  recovered as `f = L(amp, ell) * z` wherever the likelihood is
+  evaluated, and `joint_nuts_block` samples
+  `[{amp,1,POSITIVE},{ell,1,POSITIVE},{z,N,REAL}]` together under a
+  diagonal metric. The density is
+  `sum y_i f_i - softplus(f_i) - 0.5 z'z + log p(amp) + log p(ell)`;
+  the GP prior's log-determinant cancels against the whitening
+  Jacobian. Sampling the hyperparameters and z in one trajectory
+  rather than alternating is what makes it converge -- the alternation
+  leaves amp R-hat above 1.1 at this budget. half-Normal(0, 1) on amp,
+  InverseGamma(5, s_med) on ell. No sigma block. `get_current()`
+  reports amplitude / lengthscale / z / f (f derived as L z).
 - `examples/GPTimeSeries.cpp` -- 1-D time-series GP via celerite
   O(N) Cholesky + `univariate_slice_sampling_block` for amp, tau,
   sigma on celerite-marginalized likelihood. Latent f marginalized

@@ -387,30 +387,43 @@ rank -- do NOT read "item 1" as "try this first":
    closed-form posterior conditional. NO `elliptical_slice_sampling_block`,
    NO latent f or z in the sampling state.
 
-   ### Whitened ESS architecture (non-Gaussian observations)
+   ### Whitened architecture (non-Gaussian observations)
 
    See `examples/GPClassification.cpp`. The latent is reparameterised
-   as `z ~ N(0, I)`; we recover `f = L(amp, ell) * z` whenever a
-   likelihood evaluation needs f. `elliptical_slice_sampling_block`
-   samples z with prior `L_identity` (the chol of I); the block's
-   `log_lik` callback computes `f = L_chol * z` and evaluates the
-   non-Gaussian likelihood (Bernoulli-logit, Poisson, ...). The
-   hyperparameters are sampled together by one
-   `joint_nuts_block({amp, ell})` (POSITIVE x 2) whose log-
-   density includes `Bernoulli(y | sigmoid(L(amp, ell) * z))` --
-   NOT a `p(f | amp, ell)` prior factor -- so the `(amp, ell)` chain
-   sees the data via the likelihood only and does NOT collapse to
-   `(amp ~= 0, f ~= 0)`. Joint NUTS is the default because the
-   `(amp, ell)` posterior has a banana-shaped ridge that modular
-   NUTS slow-mixes along (typically dropping `amp` ESS by 5-10x).
+   as `z ~ N(0, I)` and recovered as `f = L(amp, ell) * z` wherever a
+   likelihood evaluation needs f. `(amp, ell, z)` all go in ONE
+   `joint_nuts_block` -- sub_params `[{amp,1,POSITIVE},
+   {ell,1,POSITIVE},{z,N,REAL}]`, diagonal metric -- targeting
 
-   When `(amp, ell)` ESS is still inadequate at the extended budget
-   (typically `ell` lingering at low ESS due to bulk autocorrelation
-   from finite-difference gradient noise), the next escalation is to
-   replace the FD gradient inside the joint log-density with a
-   reverse-mode Cholesky-AD analytic gradient (Murray 2016). See
-   `block_catalogue/index.md` **"GP convergence troubleshooting ladder"**
-   for the full escalation order, and **"GP composition recipes"**
+       loglik(y | L z) - 0.5 z'z + log p(amp) + log p(ell)
+
+   The GP prior's `-0.5 log|K|` cancels against the whitening
+   Jacobian, so only z's unit-Normal survives. Whitening is what stops
+   the `(amp ~= 0, f ~= 0)` collapse of the centered parameterisation:
+   z's prior does not depend on `(amp, ell)`, so the hyperparameters
+   see the data through the likelihood only.
+
+   **Do NOT alternate.** Sampling z with an
+   `elliptical_slice_sampling_block` and `(amp, ell)` in a separate
+   block is whitened but still Gibbs, and with z held fixed
+   `f = L(theta) z` is a deterministic function of theta, so
+   `p(theta | z, y)` is far sharper than `p(theta | y)` and the
+   alternation random-walks. Measured on `GPClassification.cpp`'s own
+   dataset at 4 chains x (1000 + 2000): amp R-hat 1.62 (ESS 7) with a
+   diagonal metric, 1.10 (ESS 28) with a dense one, versus 1.001
+   (ESS 1937) for the single joint block.
+
+   **Jitter multiplicatively.** Write `K = amp^2 (R + eps I)` rather
+   than `amp^2 R + eps I`. Then `L = amp * L_R` holds exactly, so
+   `df/d amp = f / amp` and the amplitude gradient is
+   `(r . f) / amp` in O(N), with `r = d loglik / d f`. Only the
+   lengthscale then needs the Cholesky derivative
+   `dL = L Phi(L^-1 dK L^-T)`, `Phi(A) = tril(A)` with the diagonal
+   halved (Murray 2016); `dK/d ell = amp^2 R .* r_ij^2 / ell^3` uses
+   the UN-jittered R.
+
+   See `block_catalogue/index.md` **"GP convergence troubleshooting
+   ladder"** for the escalation order, and **"GP composition recipes"**
    for heteroscedastic / hierarchical / multi-output GP patterns.
 
    ### ODE-model gradients: forward sensitivities by DEFAULT
@@ -983,8 +996,20 @@ Discrete latent z found?
         - BART mean f(X):     bart_block with `cfg.binary = true` so the
                               leaf prior tau matches BART::pbart's
                               `3 / (k * sqrt(ntrees))`
-        - GP latent f:        elliptical_slice_sampling_block reading
-                              z as Gaussian "data"
+        - GP latent f:        MARGINALISE f out. Given the augmented
+                              z, the likelihood is Gaussian
+                              (`z_i | f_i ~ N(f_i, 1)`), so
+                              `z ~ N(0, K + I)` and only the covariance
+                              hyperparameters are sampled -- one
+                              `joint_nuts_block`, Rasmussen & Williams
+                              Eq. (5.9) gradient, exactly
+                              `examples/GPRegression.cpp` with sigma
+                              pinned to 1. Do NOT sample an explicit f
+                              with `elliptical_slice_sampling_block`:
+                              its elliptical proposal cancels
+                              `log p(f | amp, ell)`, so hyperparameter
+                              blocks that omit that term are drawn from
+                              their PRIORS
       sigma is FIXED at 1 (probit identifiability) -- `probit_aug_block`
       hardcodes this; do NOT add a sigma block.
 

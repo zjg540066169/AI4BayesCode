@@ -7,13 +7,40 @@ returns posterior draws of the latent vector f. No gradient needed, no
 step-size tuning, handles arbitrary cross-correlation in the prior
 covariance.
 
-**Use cases** -- latent-Gaussian models with **non-Gaussian** likelihoods:
-- GP **classification** with Bernoulli-logit (see `examples/GPClassification.cpp`)
-- GP regression with non-Gaussian observation noise (Student-t, Poisson, etc.)
+**Use cases** -- latent-Gaussian models with **non-Gaussian**
+likelihoods, where the prior covariance L is **FIXED** (a graph
+Laplacian, a random-walk penalty, a kernel at hyperparameters that are
+themselves held fixed or updated far from the latent):
 - CAR / ICAR / GMRF spatial models with non-Gaussian observation
 - Intrinsic GMRF time-series smoothing with non-Gaussian likelihood
 - Any latent-Gaussian-with-non-Gaussian-likelihood model (Rue & Held
   2005 book scope)
+
+**DO NOT use when L depends on parameters you are also sampling.**
+This is the case that looks like ESS's home turf and is not: a GP whose
+`(amplitude, lengthscale)` are sampled. Two things go wrong.
+
+First, correctness. The elliptical rotation proposes from the Gaussian
+prior and accepts on `log_lik` alone, so the prior factor CANCELS --
+`log N(f; 0, L L')` appears in NO block's log-density. A hyperparameter
+block that does not write that term in by hand is sampled FROM ITS
+PRIOR, on every dataset, while the latent fit and every R-hat still
+look healthy.
+
+Second, mixing. Even done right -- whitened, with the hyperparameter
+block carrying the likelihood at the proposed `(amp, ell)` -- the
+Gibbs alternation between "theta given z" and "z given theta" is slow,
+because with z held fixed `f = L(theta) z` is a deterministic function
+of theta, so `p(theta | z, y)` is much sharper than `p(theta | y)`.
+Measured on `examples/GPClassification.cpp`'s dataset, 4 chains x
+(1000 + 2000), worst cross-chain rank R-hat / bulk ESS on amplitude:
+1.623 / 7 (diagonal metric), 1.102 / 28 (dense), against 1.001 / 1937
+for putting `(amp, ell, z)` in ONE `joint_nuts_block`.
+
+For a sampled-hyperparameter GP, use the architecture in
+`codegen_cpp.md` Sec.4a instead: marginalise f out for a Gaussian
+likelihood, or whiten and sample `(amp, ell, z)` in a single
+`joint_nuts_block` for a non-Gaussian one.
 
 **DO NOT use for GP regression with Gaussian observations.** When the
 observation likelihood is Gaussian, the latent f admits a closed-form
@@ -29,8 +56,10 @@ implementation marginalizes f for Gaussian observations).
 instead of "ESS" to avoid collision with "Effective Sample Size" in
 MCMC diagnostics vocabulary.
 
-**Reference example**: `examples/GPClassification.cpp` (Bernoulli-logit
-likelihood -- the canonical case where ESS is the correct choice).
+**Reference example**: none of the shipped examples uses this block --
+both GP examples moved to the architectures above. The behavioural
+reference is the parity test below, which is also where to look for the
+config contract.
 
 **JUSTIFICATION (Check #16)**: Exception 1 -- specialized latent-
 Gaussian sampler; NUTS on f with strongly-correlated Sigma suffers
