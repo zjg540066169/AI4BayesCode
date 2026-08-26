@@ -43,6 +43,41 @@
 #     - The AI4BayesCode folder reachable on disk at `AI4BayesCode_path`
 # ----------------------------------------------------------------------------
 
+# ----------------------------------------------------------------------------
+# Pin the native BLAS to one thread, as early as possible.
+#
+# ai4bayescode_run_chains() parallelises with parallel::mclapply(), i.e.
+# fork(). A multithreaded BLAS -- macOS Accelerate/vecLib above all, but also
+# OpenBLAS with pthreads and MKL -- keeps a worker-thread pool; fork() copies
+# only the calling thread, so the child inherits a pool whose threads do not
+# exist and the first heavy BLAS call there dies. On macOS the crash is inside
+# libdispatch (`_dispatch_root_queue_push` under a LAPACK entry point,
+# reported as "crashed on child side of fork pre-exec"), and it aborts the
+# whole R session -- it cannot be caught and retried.
+#
+# The cap has to be in place BEFORE the first BLAS call, because that is when
+# Accelerate decides whether to use its dispatch queues. Setting it later --
+# inside ai4bayescode_run_chains(), say -- has no effect whatsoever. Hence:
+# here, at load.
+#
+# Only variables the caller has not already set are touched.
+#
+# The cap costs nothing in practice: the chains are separate processes
+# already, so mc.cores workers x k BLAS threads each would only oversubscribe
+# the machine. Measured on the GP examples, per-chain wall time is the same or
+# slightly better at one thread, and the parallel speedup is a clean 4.2x on
+# four cores.
+.ai4b_pin_blas_threads <- function() {
+    vars <- c("VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS",
+              "OMP_NUM_THREADS", "MKL_NUM_THREADS")
+    unset <- vars[is.na(Sys.getenv(vars, unset = NA))]
+    if (length(unset)) {
+        do.call(Sys.setenv, as.list(stats::setNames(rep("1", length(unset)), unset)))
+    }
+    invisible(NULL)
+}
+.ai4b_pin_blas_threads()
+
 ai4bayescode_source_checkout <- function(cpp_file,
                                 AI4BayesCode_path = "./AI4BayesCode",
                                 rebuild        = TRUE,
@@ -821,23 +856,43 @@ ai4bayescode_run_chains <- function(model_ctor,
 
     chain_ok <- function(r) !inherits(r, "try-error") && !is.null(r$history)
 
+    # The BLAS is pinned to one thread at load (.ai4b_pin_blas_threads above),
+    # which is the only place it can work -- Accelerate decides whether to use
+    # its dispatch queues at the FIRST BLAS call, so a cap applied here would
+    # change nothing. If a variable is not "1" by now the caller overrode it,
+    # and forking a BLAS-heavy model may abort the session.
+    warn_if_blas_unpinned <- function() {
+        vars <- c("VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS",
+                  "OMP_NUM_THREADS", "MKL_NUM_THREADS")
+        cur  <- Sys.getenv(vars, unset = NA)
+        bad  <- vars[!is.na(cur) & cur != "1"]
+        if (length(bad))
+            warning("ai4bayescode_run_chains: ",
+                    paste(sprintf("%s=%s", bad, cur[bad]), collapse = ", "),
+                    " -- the native BLAS may be multithreaded. fork() and a ",
+                    "multithreaded BLAS do not mix; on macOS Accelerate this ",
+                    "aborts the whole R session rather than failing a chain. ",
+                    "Set these to \"1\" before starting R, or pass ",
+                    "parallel = FALSE.", call. = FALSE, immediate. = TRUE)
+    }
+
     if (use_parallel && mc.cores > 1) {
         if (verbose)
             message("ai4bayescode_run_chains: running ", n_chains,
                     " chains on ", mc.cores, " cores (parallel)")
+        warn_if_blas_unpinned()
         results <- parallel::mclapply(seeds, one_chain, mc.cores = mc.cores,
                                       mc.set.seed = TRUE)
         if (!all(vapply(results, chain_ok, logical(1)))) {
-            # A forked worker died before returning a history. The usual cause
-            # is a fork-unsafe multithreaded BLAS -- notably macOS Accelerate
-            # (vecLib), whose GCD worker threads do not survive fork(), so a
-            # chain doing heavier linear algebra segfaults under mclapply.
-            # Recover by re-running every chain sequentially (no fork).
-            warning("ai4bayescode_run_chains: a parallel chain failed (likely a ",
-                    "fork-unsafe multithreaded BLAS, e.g. macOS Accelerate); ",
-                    "re-running all chains sequentially. To keep parallelism set ",
-                    "VECLIB_MAXIMUM_THREADS=1 before starting R, or pass ",
-                    "parallel = FALSE.", call. = FALSE, immediate. = TRUE)
+            # Second line of defence: a forked worker returned no history.
+            # With the BLAS pinned above the fork-unsafety is gone, so this is
+            # now most likely a genuine model or data error -- but re-running
+            # sequentially costs one run and rules out anything fork-specific.
+            warning("ai4bayescode_run_chains: a parallel chain failed; ",
+                    "re-running all chains sequentially to rule out a ",
+                    "fork-specific cause. Pass parallel = FALSE to skip the ",
+                    "parallel attempt entirely.",
+                    call. = FALSE, immediate. = TRUE)
             results <- lapply(seeds, one_chain)
         }
     } else {

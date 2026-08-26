@@ -101,6 +101,31 @@ def _chain_worker(factory: Callable[[int], Any], seed: int,
 _ACTIVE_FACTORY: Optional[Callable[[int], Any]] = None
 
 
+_BLAS_THREAD_VARS = ("VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS",
+                     "OMP_NUM_THREADS", "MKL_NUM_THREADS")
+
+
+def _warn_if_blas_unpinned() -> None:
+    """Warn when the fork path is about to run with a multithreaded BLAS.
+
+    `AI4BayesCode/__init__.py` pins these to one thread at import, which is
+    the only place it can work: Accelerate decides whether to use its dispatch
+    queues at the FIRST BLAS call, so a cap applied later -- here, for
+    instance -- changes nothing. If the variable is not "1" by now, the caller
+    overrode it, and a fork with a BLAS-heavy model may kill every worker.
+    """
+    unpinned = [v for v in _BLAS_THREAD_VARS
+                if os.environ.get(v) not in (None, "1")]
+    if not unpinned:
+        return
+    warnings.warn(
+        "run_chains: " + ", ".join(f"{v}={os.environ[v]}" for v in unpinned) +
+        " is set, so the native BLAS may be multithreaded. fork() and a "
+        "multithreaded BLAS do not mix -- on macOS Accelerate every worker "
+        "dies inside libdispatch and the run falls back to sequential. Set "
+        "these to \"1\" before starting Python, or pass n_jobs=1.")
+
+
 def _chain_worker_fork(seed: int, n_burn: int, n_keep: int,
                        history_keys: Optional[list[str]] = None) -> dict:
     """Fork-path worker: read the inherited factory from the module global.
@@ -206,13 +231,16 @@ def run_chains(
         # NOT through the task queue -- so only the picklable seed/counts are
         # serialized and a lambda / closure runs in true parallel, exactly like
         # R's mclapply. ProcessPoolExecutor (not multiprocessing.Pool) is used so
-        # a crashed worker -- e.g. a fork-unsafe native BLAS like macOS
-        # Accelerate -- raises BrokenProcessPool instead of hanging; we then fall
-        # back to sequential, the same graceful degradation R does.
+        # a crashed worker raises BrokenProcessPool instead of hanging, and we
+        # then fall back to sequential. That fallback is a second line of
+        # defence only: the fork-unsafe-BLAS case it used to catch is
+        # PREVENTED by the one-thread pin in this package's __init__, because
+        # degrading to sequential silently costs the user the whole speedup.
         from concurrent.futures import ProcessPoolExecutor
         global _ACTIVE_FACTORY
         _ACTIVE_FACTORY = factory
         try:
+            _warn_if_blas_unpinned()
             ctx = mp.get_context("fork")
             with ProcessPoolExecutor(max_workers=n_jobs, mp_context=ctx) as ex:
                 futs = [ex.submit(_chain_worker_fork, int(s),

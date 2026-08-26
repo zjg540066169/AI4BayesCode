@@ -716,10 +716,31 @@ ai4bayescode_run_chains <- function(model_ctor,
 
     chain_ok <- function(r) !inherits(r, "try-error") && !is.null(r$history)
 
+    # The BLAS is pinned to one thread in .onLoad (zzz.R), which is the only
+    # place it can work -- Accelerate decides whether to use its dispatch
+    # queues at the FIRST BLAS call, so a cap applied here would change
+    # nothing. If a variable is not "1" by now the caller overrode it, and
+    # forking a BLAS-heavy model may abort the session.
+    warn_if_blas_unpinned <- function() {
+        vars <- c("VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS",
+                  "OMP_NUM_THREADS", "MKL_NUM_THREADS")
+        cur  <- Sys.getenv(vars, unset = NA)
+        bad  <- vars[!is.na(cur) & cur != "1"]
+        if (length(bad))
+            warning("ai4bayescode_run_chains: ",
+                    paste(sprintf("%s=%s", bad, cur[bad]), collapse = ", "),
+                    " -- the native BLAS may be multithreaded. fork() and a ",
+                    "multithreaded BLAS do not mix; on macOS Accelerate this ",
+                    "aborts the whole R session rather than failing a chain. ",
+                    "Set these to \"1\" before starting R, or pass ",
+                    "parallel = FALSE.", call. = FALSE, immediate. = TRUE)
+    }
+
     if (use_parallel && mc.cores > 1) {
         if (verbose)
             message("ai4bayescode_run_chains: running ", n_chains,
                     " chains on ", mc.cores, " cores (parallel)")
+        warn_if_blas_unpinned()
         results <- parallel::mclapply(seeds, one_chain, mc.cores = mc.cores,
                                       mc.set.seed = TRUE)
         if (!all(vapply(results, chain_ok, logical(1)))) {
