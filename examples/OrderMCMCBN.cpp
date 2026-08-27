@@ -79,13 +79,13 @@
 //   cards <- rep(2, n)                                  # all variables binary
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(OrderMCMCBN, data, cards, 1.0, 3L, 20L, 4000L, 10.0, 0.5, numeric(0), seed, TRUE),
+//       function(seed) new(OrderMCMCBN, data, cards, "fk_eq2", 1.0, 3L, 20L, 4000L, 10.0, 0.5, numeric(0), seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m <- new(OrderMCMCBN, data, cards, 1.0, 3L, 20L, 4000L, 10.0, 0.5,
-//            numeric(0), 7L, TRUE)   # bdeu_alpha,max_parents,top_C,cache_F,prune,p_adj,init_order=empty,seed,keep_history
+//   m <- new(OrderMCMCBN, data, cards, "fk_eq2", 1.0, 3L, 20L, 4000L, 10.0, 0.5,
+//            numeric(0), 7L, TRUE)   # structure_prior,bdeu_alpha,max_parents,top_C,cache_F,prune,p_adj,init_order=empty,seed,keep_history
 //   m$step(2500L); cur <- m$get_current(); str(cur); print(cur$sampled_DAG)
 // @example:python
 //   import numpy as np, AI4BayesCode
@@ -97,15 +97,16 @@
 //       data[:, j] = np.where(flipmask, 1.0 - data[:, j-1], data[:, j-1])
 //   cards = np.full(n, 2.0)                                        # all binary
 //   Mod = AI4BayesCode.example("OrderMCMCBN")
-//   # bdeu_alpha, max_parents, top_C, cache_F, prune, p_adj, init_order(empty), seed, keep_history
+//   # structure_prior ("uniform" | "fk_eq2"), then bdeu_alpha, max_parents, top_C,
+//   # cache_F, prune, p_adj, init_order(empty), seed, keep_history
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
-//       lambda seed: Mod.OrderMCMCBN(data, cards, 1.0, 3, 20, 4000, 10.0, 0.5, np.zeros(0), seed, True),
+//       lambda seed: Mod.OrderMCMCBN(data, cards, "fk_eq2", 1.0, 3, 20, 4000, 10.0, 0.5, np.zeros(0), seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m = Mod.OrderMCMCBN(data, cards, 1.0, 3, 20, 4000, 10.0, 0.5,
+//   m = Mod.OrderMCMCBN(data, cards, "fk_eq2", 1.0, 3, 20, 4000, 10.0, 0.5,
 //                       np.zeros(0), 7, True)
 //   m.step(2500); cur = m.get_current(); print(cur["sampled_DAG"].reshape(n, n, order="F"))
 // @example:end
@@ -137,6 +138,7 @@
 #include <cstdint>
 #include <memory>
 #include <random>
+#include <string>
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -154,6 +156,7 @@ class OrderMCMCBN : public AI4BayesCode::kernel_control_mixin<OrderMCMCBN> {
 public:
     OrderMCMCBN(const arma::mat& data,            // N x n, integer-valued
                 const arma::vec& cardinalities,   // length n, r_i per variable
+                const std::string& structure_prior, // "uniform" | "fk_eq2" -- see below
                 double bdeu_alpha,
                 int max_parents,
                 int candidate_top_C,
@@ -217,7 +220,29 @@ public:
         cfg.family_cache_F = static_cast<std::size_t>(family_cache_F);
         cfg.gamma_prune_nats = gamma_prune_nats;
         cfg.prob_adjacent_swap = prob_adjacent_swap;
-        cfg.structure_prior = AI4BayesCode::dag_prior::FK_EQ2;
+        // The DAG prior is a MODELLING choice with no safe default, so it is a
+        // constructor argument rather than something buried in this file: the
+        // two priors give different posteriors and the caller has to say which
+        // one their model means. Note that neither of the two neighbouring
+        // knobs decides it -- `max_parents` above is an in-degree CAP applied
+        // under both priors, and picking Friedman-Koller order MCMC as the
+        // SAMPLER does not pick the Friedman-Koller PRIOR.
+        if (structure_prior == "uniform") {
+            // P(G) proportional to 1 over DAGs obeying the in-degree cap.
+            // Matches BiDAG (edgepf = 1) and bnlearn defaults; this is what a
+            // spec saying "G ~ Uniform(DAGs)" or "P(G) propto 1" asks for.
+            cfg.structure_prior = AI4BayesCode::dag_prior::UNIFORM;
+        } else if (structure_prior == "fk_eq2") {
+            // Friedman-Koller 2003 Eq 2 per-family balancing:
+            // P(G) proportional to prod_j 1 / C(p-1, |Pa_j|). Penalises high
+            // fan-in; the FK paper's own recommended default.
+            cfg.structure_prior = AI4BayesCode::dag_prior::FK_EQ2;
+        } else {
+            ai4b::stop("OrderMCMCBN: structure_prior must be \"uniform\" "
+                       "(P(G) proportional to 1) or \"fk_eq2\" "
+                       "(Friedman-Koller 2003 Eq 2 per-family balancing); got \"%s\"",
+                       structure_prior.c_str());
+        }
         cfg.init_rng_seed = static_cast<std::uint64_t>(rng_seed);
         // EMPTY initial_order = random init; otherwise it is a 1-based
         // (R/Python-style) length-n permutation converted to 0-based.
@@ -350,11 +375,11 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(OrderMCMCBN_module) {
     Rcpp::class_<OrderMCMCBN>("OrderMCMCBN")
-        .constructor<arma::mat, arma::vec, double, int,
+        .constructor<arma::mat, arma::vec, std::string, double, int,
                       int, int, double, double,
                       arma::vec, int>(
             "Legacy constructor; keep_history defaults to FALSE.")
-        .constructor<arma::mat, arma::vec, double, int,
+        .constructor<arma::mat, arma::vec, std::string, double, int,
                       int, int, double, double,
                       arma::vec, int, bool>(
             "Bayesian-network structure learning via Friedman-Koller 2003 "
@@ -392,11 +417,12 @@ RCPP_MODULE(OrderMCMCBN_module) {
 PYBIND11_MODULE(OrderMCMCBN, m) {
     AI4BayesCode::register_ai4bayescode_types(m);
     pybind11::class_<OrderMCMCBN>(m, "OrderMCMCBN")
-        .def(pybind11::init<arma::mat, arma::vec, double, int,
+        .def(pybind11::init<arma::mat, arma::vec, std::string, double, int,
                             int, int, double, double,
                             arma::vec, int, bool>(),
              pybind11::arg("data"),
              pybind11::arg("cardinalities"),
+             pybind11::arg("structure_prior"),          // REQUIRED: "uniform" | "fk_eq2"
              pybind11::arg("bdeu_alpha")        = 1.0,
              pybind11::arg("max_parents")       = 5,
              pybind11::arg("candidate_top_C")   = 20,
@@ -465,6 +491,12 @@ int main() {
 
     // ---- Fit order MCMC --------------------------------------------------
     OrderMCMCBN model(data, cards,
+                      // The DAG prior is a required argument -- there is no
+                      // default, because the two priors give different
+                      // posteriors. This demo asks for the Friedman-Koller
+                      // Eq 2 per-family prior; pass "uniform" for P(G)
+                      // proportional to 1.
+                      /*structure_prior=*/"fk_eq2",
                       /*bdeu_alpha=*/1.0,
                       /*max_parents=*/3,
                       /*candidate_top_C=*/20,
