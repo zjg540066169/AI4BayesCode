@@ -84,7 +84,7 @@ int main() {
         arma::uvec card(n); card.fill(2u);
         order_mcmc_block_config cp;
         cp.data = data; cp.cardinalities = card; cp.bdeu_alpha = 1.0;
-        cp.max_parents = 4; cp.use_structure_prior = false;
+        cp.max_parents = 4; cp.structure_prior = AI4BayesCode::dag_prior::UNIFORM;
         cp.method = order_mcmc_block_config::method_t::partition;
         order_mcmc_block blk_p(cp);
         std::mt19937_64 rp(11); for (int i = 0; i < 2000; ++i) blk_p.step(rp);
@@ -118,7 +118,7 @@ int main() {
     {
         arma::mat data = sim_chain_cont(400, n, 23u);
         order_mcmc_block_config cp;
-        cp.continuous_data = data; cp.max_parents = 4; cp.use_structure_prior = false;
+        cp.continuous_data = data; cp.max_parents = 4; cp.structure_prior = AI4BayesCode::dag_prior::UNIFORM;
         cp.method = order_mcmc_block_config::method_t::partition;
         order_mcmc_block blk_p(cp);
         std::mt19937_64 rp(29); for (int i = 0; i < 2000; ++i) blk_p.step(rp);
@@ -143,6 +143,10 @@ int main() {
         order_mcmc_block_config cfg;
         cfg.data = sim_chain_discrete(100, n, 3u);
         cfg.cardinalities = arma::uvec(n); cfg.cardinalities.fill(2u);
+        // structure_prior is MANDATORY (no default); this case is about
+        // `method` defaulting, so the prior is set explicitly and the
+        // assertion below is unaffected.
+        cfg.structure_prior = AI4BayesCode::dag_prior::FK_EQ2;
         order_mcmc_block blk(cfg);        // method defaults to PARTITION
         std::mt19937_64 rng(5); blk.step(rng);
         const auto out = blk.current_named_outputs(rng);

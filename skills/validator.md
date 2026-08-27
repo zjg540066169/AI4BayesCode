@@ -176,6 +176,18 @@ std::gamma_distribution<double> gam(shape, scale);
   `std::gamma_distribution<double>(a, 1.0/r)`.
 - `std::normal_distribution(mean, STDDEV)` -- not variance.
 - InvGamma: draw `Gamma(shape, 1/scale)` then invert. NOT `Gamma(shape, scale)`.
+- **A config field that SELECTS between two priors is a parameterization
+  choice and is audited here.** The canonical case is
+  `order_mcmc_block`'s `cfg.structure_prior` (`dag_prior::UNIFORM`
+  = P(G) proportional to 1, vs `dag_prior::FK_EQ2` = Friedman-Koller
+  Eq 2 per-family balancing). It must match the SPEC'S OWN WORDS, and
+  the L2 report must quote the sentence that decided it. Two adjacent
+  facts that have both been mistaken for this choice in shipped code:
+  picking Friedman-Koller order MCMC as the SAMPLER does not pick the FK
+  PRIOR, and `max_parents` is an in-degree cap, not a prior shape. (The
+  block now throws on `dag_prior::UNSET`, so the choice cannot be
+  skipped -- but nothing except this audit checks that it is the RIGHT
+  one.)
 
 **Fix:** add comment with E[X] next to every distribution call.
 

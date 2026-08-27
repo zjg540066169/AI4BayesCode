@@ -158,6 +158,10 @@ static order_mcmc_block_config make_cfg(const arma::imat& D,
     // default here would compare two different distributions. R7/R8 override
     // this per-case to exercise partition.
     cfg.method = order_mcmc_block_config::method_t::order;
+    // structure_prior is MANDATORY since the tri-state change; FK_EQ2
+    // reproduces what the old `use_structure_prior = true` default gave
+    // these tests.
+    cfg.structure_prior = AI4BayesCode::dag_prior::FK_EQ2;
     cfg.name = "order";
     cfg.data = D;
     cfg.cardinalities = cards;

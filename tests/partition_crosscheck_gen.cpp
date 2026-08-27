@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
     cfg.cardinalities = arma::uvec(n); cfg.cardinalities.fill(2u);
     cfg.bdeu_alpha = 1.0; cfg.max_parents = K_MAX;
     cfg.method = order_mcmc_block_config::method_t::partition;
-    cfg.use_structure_prior = false;          // uniform DAG prior == BiDAG edgepf=1
+    cfg.structure_prior = AI4BayesCode::dag_prior::UNIFORM;          // uniform DAG prior == BiDAG edgepf=1
     order_mcmc_block blk(cfg);
 
     std::mt19937_64 srng(12345ULL);

@@ -1143,11 +1143,27 @@ Discrete latent z found?
         - max_parents k_max <= 5 default (tractability cliff at k~=7-8)
         - BDeu scoring (Heckerman-Geiger-Chickering 1995 + Buntine 1991)
 
-      **MANDATORY clarification -- DAG prior P(G).** order_mcmc_block
-      exposes `cfg.use_structure_prior` (default TRUE) which selects
-      between two distinct priors on G. These give MEASURABLY
-      DIFFERENT posteriors -- silent disagreement is a real risk if the
-      user expected one and the codegen picks the other. ALWAYS ask:
+      **MANDATORY -- DAG prior P(G). There is NO default; the block
+      THROWS if you do not set it.** `cfg.structure_prior` takes
+      `dag_prior::UNIFORM` or `dag_prior::FK_EQ2`, and its initial value
+      `dag_prior::UNSET` is rejected at construction. The two priors give
+      MEASURABLY DIFFERENT posteriors.
+
+      **Two things are NOT this choice. Both have shipped as bugs:**
+        - **The sampler is not the prior.** Friedman-Koller order MCMC is
+          a SAMPLER; FK Eq 2 is a PRIOR. Running FK order MCMC under a
+          uniform DAG prior is a normal, valid combination. "The spec
+          wants FK order MCMC" is NOT a reason to set `FK_EQ2`.
+        - **`max_parents` is not the prior.** It is an in-degree CAP,
+          applied identically under both priors. Setting
+          `cfg.max_parents = k_max` does NOT implement a uniform prior;
+          a generated model once reported "uniform DAG prior ... is set
+          by cfg.max_parents = k_max" and graded itself deviation-free
+          while sampling under FK Eq 2.
+
+      Take the value from the SPEC'S OWN WORDS whenever it states one,
+      and record in the L2 report which sentence decided it. Ask only
+      when the spec is genuinely silent about P(G):
 
       ```
       AskUserQuestion: "DAG prior P(G) on the Bayesian-network
@@ -1161,11 +1177,12 @@ Discrete latent z found?
             for empirical BN learning.
       ```
 
-      (Agent-side: option (a) is `cfg.use_structure_prior = false`,
-      option (b) is `true`. The flag name is NOT shown to the user --
+      (Agent-side: option (a) is
+      `cfg.structure_prior = dag_prior::UNIFORM`, option (b) is
+      `dag_prior::FK_EQ2`. The field name is NOT shown to the user --
       they are choosing a prior, not a config field.)
 
-      **`use_structure_prior` is only HALF of P(G).** It controls the
+      **`structure_prior` is only HALF of P(G).** It controls the
       per-family fan-in term. The OTHER half is the sampler: with
       `cfg.method = order` (Friedman-Koller order MCMC) the induced structure
       prior additionally weights each DAG by its number of linear extensions,
@@ -1185,17 +1202,20 @@ Discrete latent z found?
           against `BiDAG::orderMCMC`.
       Document whichever you set with an inline cite, as for the prior flag.
 
-      If the spec says "Uniform DAG prior" (e.g. `G ~ Uniform(DAGs)`)
-      this maps to (a). If the spec says "Friedman-Koller prior" or
-      "per-family balancing" it maps to (b). If unstated, ASK -- do
-      NOT default to the library flag's default (TRUE = FK Eq 2)
-      without confirming, because the flag NAME suggests "structure
-      prior" but the FALSE state IS itself a structural prior (the
-      uniform one) -- the naming is unfortunately ambiguous.
+      If the spec says "Uniform DAG prior", `G ~ Uniform(DAGs)`, or
+      "P(G) proportional to 1", that IS the answer: `dag_prior::UNIFORM`,
+      no question needed. If it says "Friedman-Koller prior" or
+      "per-family balancing", that is `dag_prior::FK_EQ2`. Ask only when
+      the spec says nothing about P(G) at all.
 
       Document the chosen value with an inline cite in the generated
-      .cpp wrapper, e.g.:
-        `cfg.use_structure_prior = false;   // per spec: uniform P(G)`
+      .cpp wrapper, quoting the spec sentence that decided it:
+        `cfg.structure_prior = dag_prior::UNIFORM;  // spec: "P(G) propto 1"`
+
+      **L2 report requirement.** For any sampler using
+      `order_mcmc_block`, the L2 report MUST state which DAG prior was
+      chosen and quote the spec sentence behind it. A report that omits
+      the prior cannot claim "no methodology deviations".
 
       SHIPPED since this text was first written -- use them:
         - Kuipers-Moffa 2017 partition MCMC via `cfg.method =
@@ -1226,9 +1246,11 @@ Discrete latent z found?
   `continuous_update` for good mixing.
 - Class 3 IS supported via `hmm_block` (FFBS, O(T*K^2)).
 - Class 5a (Bayesian-network structure learning) IS supported via
-  `order_mcmc_block`; **MUST `AskUserQuestion` on the DAG prior**
-  (uniform vs FK Eq 2) -- do NOT default to library flag default
-  without confirming spec intent (the flag's name is ambiguous).
+  `order_mcmc_block`; **`cfg.structure_prior` is MANDATORY -- the block
+  throws if it is left `dag_prior::UNSET`.** Take it from the spec's own
+  words (uniform vs FK Eq 2) and `AskUserQuestion` only when the spec is
+  silent. Choosing FK order MCMC as the SAMPLER does not choose FK Eq 2
+  as the PRIOR, and `max_parents` is an in-degree cap, not a prior.
 - Class 5b (Ising / MRF) declined -- no library support in v1.2.
 - Class 4 splits into BNP (truncated SBP via `stick_breaking_block` +
   `cluster_atom_block` by default, `normal_gamma_cluster_gibbs_block` on an

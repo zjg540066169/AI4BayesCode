@@ -217,7 +217,7 @@ public:
         cfg.family_cache_F = static_cast<std::size_t>(family_cache_F);
         cfg.gamma_prune_nats = gamma_prune_nats;
         cfg.prob_adjacent_swap = prob_adjacent_swap;
-        cfg.use_structure_prior = true;
+        cfg.structure_prior = AI4BayesCode::dag_prior::FK_EQ2;
         cfg.init_rng_seed = static_cast<std::uint64_t>(rng_seed);
         // EMPTY initial_order = random init; otherwise it is a 1-based
         // (R/Python-style) length-n permutation converted to 0-based.

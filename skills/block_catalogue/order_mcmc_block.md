@@ -140,6 +140,13 @@ cfg.data              = D;              // arma::imat (N x n) of
                                        //   non-negative integers
                                        //   in {0, ..., r_i - 1}
 cfg.cardinalities     = arma::uvec(n, arma::fill::value(2));
+// MANDATORY -- no default; the constructor THROWS on dag_prior::UNSET.
+//   dag_prior::UNIFORM -> P(G) proportional to 1 (BiDAG edgepf=1 / bnlearn)
+//   dag_prior::FK_EQ2  -> Friedman-Koller 2003 Eq 2 per-family balancing
+// Take it from the spec's own words. Note that choosing FK order MCMC as the
+// SAMPLER does not choose the FK prior, and max_parents below is an in-degree
+// CAP, not a prior shape -- both have been mistaken for this field.
+cfg.structure_prior   = dag_prior::UNIFORM;   // quote the deciding spec line
 cfg.bdeu_alpha        = 1.0;           // BDeu equivalent sample size
 cfg.max_parents       = 5;             // hard cap (FK Sec.4.2 typical 4-6)
 cfg.candidate_top_C   = 7;             // FK Sec.4.2 top-C candidates

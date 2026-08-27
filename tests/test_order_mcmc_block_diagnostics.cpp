@@ -218,7 +218,7 @@ static EdgeMargs run_order_mcmc_edges(
     cfg.data = D;
     cfg.cardinalities = cards;
     cfg.bdeu_alpha = alpha;
-    cfg.use_structure_prior = true;
+    cfg.structure_prior = AI4BayesCode::dag_prior::FK_EQ2;
     cfg.max_parents = n - 1;
     cfg.candidate_top_C = n - 1;
     cfg.family_cache_F = (n - 1 == 0) ? 1u : (1u << (n - 1));
@@ -485,7 +485,7 @@ static void D4_ess() {
     cfg.data = D;
     cfg.cardinalities = cards;
     cfg.bdeu_alpha = 1.0;
-    cfg.use_structure_prior = true;
+    cfg.structure_prior = AI4BayesCode::dag_prior::FK_EQ2;
     cfg.max_parents = 3;
     cfg.candidate_top_C = 5;
     cfg.family_cache_F = 80;

@@ -61,6 +61,10 @@ static order_mcmc_block_config make_chain_cfg(std::size_t n, std::size_t N,
     // MCMC's own target. The block DEFAULT is now `partition` (unbiased);
     // partition has its own test at test_order_mcmc_block_partition.cpp.
     cfg.method = order_mcmc_block_config::method_t::order;
+    // structure_prior is MANDATORY since the tri-state change; FK_EQ2
+    // reproduces what the old `use_structure_prior = true` default gave
+    // these tests.
+    cfg.structure_prior = AI4BayesCode::dag_prior::FK_EQ2;
     cfg.name = "order";
     cfg.data = sim_chain_data(N, n, seed);
     cfg.cardinalities = arma::uvec(n, arma::fill::value(2));

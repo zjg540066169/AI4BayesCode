@@ -46,13 +46,18 @@
  *      FK §4.2 three-tier candidate cache).
  *    * Max parents k = 5 default (configurable; tractability cliff
  *      at k ≈ 7-8).
- *    * DAG prior P(G) selectable via `use_structure_prior` flag:
- *        - false → strict uniform on DAGs: P(G) ∝ 1 (matches BiDAG
- *                   edgepf=1 + bnlearn defaults; the natural reading
- *                   of a spec saying "G ~ Uniform(DAGs)").
- *        - true  → Friedman-Koller 2003 Eq 2 per-family balancing:
- *                   P(G) ∝ ∏_j 1/C(p-1, |Pa_j|) (penalises high
- *                   fan-in; FK's recommended empirical default).
+ *    * DAG prior P(G) via the MANDATORY `structure_prior` selector --
+ *      there is NO default; construction THROWS if it is left UNSET:
+ *        - dag_prior::UNIFORM → strict uniform on DAGs: P(G) ∝ 1
+ *                   (matches BiDAG edgepf=1 + bnlearn defaults; the
+ *                   natural reading of "G ~ Uniform(DAGs)").
+ *        - dag_prior::FK_EQ2  → Friedman-Koller 2003 Eq 2 per-family
+ *                   balancing: P(G) ∝ ∏_j 1/C(p-1, |Pa_j|) (penalises
+ *                   high fan-in; FK's recommended empirical default).
+ *      Choosing the SAMPLER (FK order MCMC) does NOT choose the PRIOR:
+ *      FK order MCMC with a uniform DAG prior is a normal, valid
+ *      combination. And `max_parents` is only an in-degree CAP -- it
+ *      does not set the prior's shape.
  *      THE TWO PRIORS PRODUCE DIFFERENT POSTERIORS. Codegen agents
  *      MUST `AskUserQuestion` when the spec doesn't disambiguate
  *      (see codegen_priors.md §3a Class 5a).
@@ -235,6 +240,19 @@
 
 namespace AI4BayesCode {
 
+/// DAG prior P(G) selector for `order_mcmc_block_config::structure_prior`.
+///
+/// There is deliberately NO default: the two priors give DIFFERENT
+/// posteriors, neither is universally right, and a silent default is how a
+/// spec that says "P(G) proportional to 1" ends up sampled under Friedman-
+/// Koller Eq 2 without anyone noticing. `order_mcmc_block`'s constructor
+/// throws on UNSET.
+enum class dag_prior {
+    UNSET = 0,   ///< not chosen -- constructing the block THROWS
+    UNIFORM,     ///< P(G) proportional to 1, subject to the in-degree cap
+    FK_EQ2       ///< Friedman-Koller 2003 Eq 2 per-family balancing
+};
+
 struct order_mcmc_block_config {
     /// Block name (default "order").
     std::string name = "order";
@@ -264,20 +282,33 @@ struct order_mcmc_block_config {
     /// Default 0.5.
     double prob_adjacent_swap = 0.5;
 
-    /// DAG prior P(G) selector:
-    ///   true  → Friedman-Koller 2003 Eq 2 per-family balancing
-    ///           prior: P(G) ∝ ∏_j 1/C(p-1, |Pa_j|). Penalises high
-    ///           fan-in; FK paper's recommended empirical default.
-    ///   false → Strict uniform DAG prior: P(G) ∝ 1 (with the same
-    ///           in-degree cap). Matches BiDAG (`edgepf=1`) +
+    /// DAG prior P(G). MANDATORY -- there is no default, and the
+    /// constructor throws if this is left `dag_prior::UNSET`:
+    ///   dag_prior::FK_EQ2  → Friedman-Koller 2003 Eq 2 per-family
+    ///           balancing prior: P(G) ∝ ∏_j 1/C(p-1, |Pa_j|).
+    ///           Penalises high fan-in; FK paper's recommended
+    ///           empirical default.
+    ///   dag_prior::UNIFORM → Strict uniform DAG prior: P(G) ∝ 1 (with
+    ///           the same in-degree cap). Matches BiDAG (`edgepf=1`) +
     ///           bnlearn defaults; pick this when the spec says
     ///           "uniform DAG prior" or "P(G) proportional to 1".
+    ///
     /// THE TWO PRIORS PRODUCE DIFFERENT POSTERIORS — they are NOT
-    /// equivalent up to a normalising constant. Codegen agents MUST
-    /// AskUserQuestion when the spec doesn't disambiguate (see
-    /// codegen_priors.md §3a Class 5a). Default true preserves
-    /// backwards compatibility with FK-style usage.
-    bool use_structure_prior = true;
+    /// equivalent up to a normalising constant.
+    ///
+    /// Two things that are NOT this choice, and have both been mistaken
+    /// for it in generated code:
+    ///   * The SAMPLER. Friedman-Koller order MCMC is the sampler; FK
+    ///     Eq 2 is a prior. Running FK order MCMC under a uniform DAG
+    ///     prior is a normal, valid combination -- picking the FK
+    ///     sampler does not pick the FK prior.
+    ///   * `max_parents`. That is an in-degree CAP applied to both
+    ///     priors alike; it does not make the prior uniform.
+    ///
+    /// Codegen agents: set this from the spec's own words and say in the
+    /// L2 report which sentence decided it (codegen_priors.md §3a Class
+    /// 5a). AskUserQuestion only when the spec is genuinely silent.
+    dag_prior structure_prior = dag_prior::UNSET;
 
     /// Initial order: optional. If empty, the constructor generates a
     /// random permutation using init_rng_seed.
@@ -324,7 +355,7 @@ struct order_mcmc_block_config {
     /// weights forwarded to whichever scorer is used. edge_log_prior(i, j) is
     /// added to node i's family score when j is a parent of i (edge j -> i),
     /// letting a user up/down-weight individual edges. Composes with either
-    /// method and with use_structure_prior. Empty (default) = no per-edge prior.
+    /// method and with structure_prior. Empty (default) = no per-edge prior.
     arma::mat edge_log_prior;
 };
 
@@ -341,6 +372,20 @@ public:
     explicit order_mcmc_block(order_mcmc_block_config cfg)
         : cfg_(std::move(cfg))
     {
+        // The DAG prior is a modelling decision with no safe default: the
+        // two priors give different posteriors, and a silent default is how
+        // a spec saying "P(G) proportional to 1" gets sampled under FK Eq 2
+        // with nothing flagging it. Refuse to guess.
+        if (cfg_.structure_prior == dag_prior::UNSET) {
+            throw std::invalid_argument(
+                "order_mcmc_block: cfg.structure_prior is MANDATORY and was "
+                "left UNSET. Set dag_prior::UNIFORM for a uniform DAG prior "
+                "P(G) proportional to 1 (BiDAG edgepf=1 / bnlearn default), "
+                "or dag_prior::FK_EQ2 for the Friedman-Koller 2003 Eq 2 "
+                "per-family balancing prior. Note that choosing FK order "
+                "MCMC as the SAMPLER does not choose the FK prior, and that "
+                "max_parents is only an in-degree cap, not a prior shape.");
+        }
         const bool use_bge = (cfg_.continuous_data.n_cols > 0);
         if (use_bge) {
             if (cfg_.continuous_data.n_rows < 2) {
@@ -406,7 +451,7 @@ public:
             gcfg.data = cfg_.continuous_data;
             gcfg.am = cfg_.bge_am;
             gcfg.aw = cfg_.bge_aw;
-            gcfg.use_structure_prior = cfg_.use_structure_prior;
+            gcfg.use_structure_prior = (cfg_.structure_prior == dag_prior::FK_EQ2);
             gcfg.edge_log_prior = cfg_.edge_log_prior;
             cache_ = std::make_unique<score_cache>(
                 std::make_unique<bge_scorer>(std::move(gcfg)), sc);
@@ -415,7 +460,7 @@ public:
             bcfg.data = cfg_.data;
             bcfg.cardinalities = cfg_.cardinalities;
             bcfg.alpha = cfg_.bdeu_alpha;
-            bcfg.use_structure_prior = cfg_.use_structure_prior;
+            bcfg.use_structure_prior = (cfg_.structure_prior == dag_prior::FK_EQ2);
             bcfg.max_parents = cfg_.max_parents;
             bcfg.edge_log_prior = cfg_.edge_log_prior;
             cache_ = std::make_unique<score_cache>(
