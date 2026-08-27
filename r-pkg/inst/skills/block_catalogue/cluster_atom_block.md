@@ -1,9 +1,11 @@
-## cluster_atom_block (per-component atoms, NON-conjugate)
+## cluster_atom_block (per-component atoms -- THE DEFAULT)
 
-**Use when** a mixture model has explicit cluster allocations `z` and the
-per-component parameters have **no conjugate closed form**. This is the
-non-conjugate member of the cluster-atom family; prefer the exact blocks when
-they apply:
+**Use when** a mixture model has explicit cluster allocations `z`. This is the
+DEFAULT cluster-atom block: it accepts any per-component prior and any
+component density, so it is always a valid answer. Leave it only when the
+per-component prior is an EXACT conjugate match to one of the specialised
+blocks -- a Normal location with an independent half-Normal / half-Cauchy /
+log-Normal scale is NOT Normal-Gamma and stays here:
 
 | per-component prior | block |
 |---|---|

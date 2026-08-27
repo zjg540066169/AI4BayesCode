@@ -1320,7 +1320,8 @@ run, and produce reasonable samples out of the box.
   `examples/PYGaussianMixture.cpp` /
   `examples/DPGaussianMixture_DerivedAlpha.cpp` (composes
   `categorical_gibbs_block` + `stick_breaking_block` +
-  `normal_gamma_cluster_gibbs_block` + `nuts_block` on log alpha);
+  `cluster_atom_block` by default -- `normal_gamma_cluster_gibbs_block` only
+  on an exact conjugate match -- + `nuts_block` on log alpha);
   for non-BNP unknown-K use `rjmcmc_block` with
   `examples/SpikeSlabRJMCMC.cpp` as template; or decline. See
   `skills/system_design.md` Sec.11 for the measure-theory reason.

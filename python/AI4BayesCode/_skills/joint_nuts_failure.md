@@ -262,7 +262,8 @@ the codegen agent MUST rewrite as NCR before shipping, same as Form A / B.
 All variants below reduce to Form A / B / C geometry (shared scale governs a
 vector of Gaussian children) with the same NCR fix. Listed to close DETECTION
 gaps. Patterns fully handled by a shipped specialized block (DP concentration
-via `stick_breaking_block`; DP cluster atoms via `normal_gamma_cluster_gibbs_block`;
+via `stick_breaking_block`; DP cluster atoms via `cluster_atom_block` by
+default (`normal_gamma_cluster_gibbs_block` only on an exact conjugate match);
 CAR/ICAR/BYM2/GP/1-D-GP via `gmrf_precision_block`/`gmrf_whitened_ess_block`/
 `elliptical_slice_sampling_block`/`celerite_gp_block` -- see `codegen_cpp.md`
 Sec.4a routing table; Dirac spike-slab via `examples/SpikeSlabRJMCMC.cpp` --

@@ -81,7 +81,7 @@ likelihood and classify:
 | Multinomial logistic BART (C >= 2 classes) | Medium | **C-1 x `genbart_block(poisson_lik, offset_key="log_phi_aug")` + one `poisson_multinomial_aug_block`** via the Baker 1994 / Forster 2010 gamma trick in the Murray 2021 Sec.3.1 reference-category identified architecture. See `examples/GBartMultinomial.cpp`. For binary (C=2) prefer the simpler `GBartLogistic` direct path. |
 | Dirichlet-Categorical conjugate | Low | `dirichlet_gibbs_block` + `categorical_gibbs_block` |
 | GP regression with **Gaussian** observation likelihood | (no latent f sampled) | **Marginal-likelihood architecture**: integrate f out, sample only `(amplitude, lengthscale, sigma)` from `y ~ N(0, K + sigma^2 I)` via one `joint_nuts_block` (3 POSITIVE slices). Analytic gradient via Rasmussen & Williams Sec.5.5 Eq. (5.9) `0.5 tr((alpha alpha' - K^-1) dK/dtheta)`. NO ESS, NO latent f or z. See `examples/GPRegression.cpp`. Matches Stan / libgp / GaussianProcesses. |
-| Latent **dense GP** + **non-Gaussian** likelihood (GP classification, GP regression with Poisson / Student-t / NB observations) | N/A for the latent f | **Whitened ESS via z**: sample `z ~ N(0, I)` via `elliptical_slice_sampling_block` with `L_chol_key = "L_identity"`; recover `f = L(amp, ell) * z` inside the block's `log_lik`. Hyperparameter blocks include the non-Gaussian likelihood at proposed `(amp, ell)` in their log-density. See `examples/GPClassification.cpp`. |
+| Latent **dense GP** + **non-Gaussian** likelihood (GP classification, GP regression with Poisson / Student-t / NB observations) | **High** -- `(amp, f)` is a funnel, and whitening alone does not fix it if `(amp, ell)` and `z` are then Gibbs-alternated | **Whitened, in ONE `joint_nuts_block`**: reparameterise `f = L(amp, ell) * z` with `z ~ N(0, I)`, and put `[{amp,1,POSITIVE},{ell,1,POSITIVE},{z,N,REAL}]` in a SINGLE `joint_nuts_block` (diagonal metric). The GP prior's `-0.5 log\|K\|` cancels against the whitening Jacobian, so the density is `loglik(y \| L z) - 0.5 z'z + log p(amp) + log p(ell)`. Use a MULTIPLICATIVE jitter `K = amp^2 (R + eps I)` so that `L = amp * L_R` holds exactly and `d/d amp = (r . f) / amp` is O(N) (`r = d loglik / d f`); only the lengthscale needs the Cholesky derivative `dL = L Phi(L^-1 dK L^-T)`, `Phi(A) = tril(A)` with the diagonal halved (Murray 2016). Do NOT split this into a hyperparameter block plus an `elliptical_slice_sampling_block` on z: with z held fixed `p(theta \| z, y)` is far sharper than `p(theta \| y)`, so the alternation random-walks -- measured on `examples/GPClassification.cpp`'s own dataset at 4 chains x (1000 + 2000), amp R-hat 1.62 (ESS 7) diagonal / 1.10 (ESS 28) dense, against 1.001 (ESS 1937) for the single joint block. See `examples/GPClassification.cpp`. |
 | Latent **sparse GMRF** (Q sparse PSD: CAR / ICAR / RW1 / RW2 / 2D lattice GMRF) + **non-Gaussian** likelihood (Poisson / Bernoulli / Student-t / NB / log-Gaussian Cox) | N/A for the latent x | **`gmrf_whitened_ess_block`** (Murray 2010 ESS on the IMPLICIT GMRF prior; Rue 2001 sparse-Cholesky permuted backsolve for prior draws). User supplies `Q_fn(ctx) -> arma::sp_mat` and `log_lik(x, ctx) -> double`. Strictly more efficient than the dense `elliptical_slice_sampling_block` path when Q is sparse (e.g. 4-NN / 6-NN lattice -- Q has O(n) non-zeros, dense Sigma has n^2 non-zeros). Sum-to-zero preserved exactly by ESS rotation linearity. Compose with `nuts_block` for hyperparameters (linear-predictor intercept on the real line, log-precision on the positive line, ...). See `block_catalogue/index.md` `gmrf_whitened_ess_block` section for the example recipe and verified convergence budgets at N=16 / N=64. |
 | GP hyperparameters under the **whitened ESS** path -- known `(amp, ell)` **banana ridge** | **High** for `(log_amp, log_ell)` | Default: one `joint_nuts_block({amp, ell})` (POSITIVE x 2), reading the latent `z` and computing the likelihood at proposed `(amp, ell)` via `f = L(amp, ell) * z`. Modular per-slice NUTS slow-mixes along the banana ridge (5-10x ESS loss on `amp` at long chains) and is NOT recommended even as a starting point. If `ell` ESS is still inadequate at the extended budget, escalate to a reverse-mode Cholesky-AD analytic gradient inside the joint log-density. See `block_catalogue/index.md` "GP convergence troubleshooting ladder". |
 | 1-D time-series GP | N/A | `celerite_gp_block` + `univariate_slice_sampling_block` on hyperparameters |
@@ -90,8 +90,8 @@ likelihood and classify:
 | **ICAR / BYM / spatial CAR random effect** + **Gaussian** observation | Improper prior on phi (sum-to-zero needed) + (Intercept, mean phi) ridge | **Hybrid composite**: `gmrf_precision_block` over `phi[N]` (Rue 2001 sparse-Cholesky direct draw + hard sum-to-zero projection) + three separate `nuts_block` for Intercept (real), `log_tau` (positive), `log_sigma` (positive). The GMRF block samples phi via the exact Gaussian full-conditional in canonical form `Q = tau R + (1/sigma^2) diag(n_i)`; the NUTS blocks each see phi via shared_data. ~60x faster than a NUTS-only joint workaround. Use Half-Normal sigma prior (NOT Jeffreys) -- ICAR can absorb all variance, Half-Normal pushes back at sigma -> 0. See `examples/ICARSpatialGMRF.cpp`. |
 | **ICAR / CAR / RW1 / RW2 sparse-precision random effect** + **non-Gaussian** observation (Poisson / Bernoulli / NB) | Improper prior on the latent (sum-to-zero needed for ICAR-style) + (Intercept, mean latent) ridge + likelihood-induced extra curvature | **Hybrid composite**: **`gmrf_whitened_ess_block`** over the latent (Murray 2010 ESS on the implicit GMRF prior via Rue 2001 sparse-Cholesky backsolve; sum-to-zero preserved by ESS rotation linearity) + separate `nuts_block` for the linear-predictor intercept (real), log-precision (positive), and any non-spatial random effect scales. User supplies `Q_fn(ctx) -> arma::sp_mat` and `log_lik(x, ctx) -> double` (the user's observation log-density evaluated at the proposed latent). See `block_catalogue/index.md` `gmrf_whitened_ess_block` section for the example recipe and verified convergence budgets at N=16 / N=64. |
 | **Hidden discrete latent** (HMM / Ising / Potts / MRF on graph) **+ Normal emission** (Gaussian observation per latent class, possibly with per-class sigma_k) | Low for emission params given z (conjugate); High for z under spatial / sequential prior | **Hybrid composite**: specialized prior block for z (`hmm_block` for HMM, `binary_gibbs_block` for binary Ising/MRF, `categorical_gibbs_block` for K-state Potts) + **`normal_gamma_cluster_gibbs_block`** for per-class `(mu_k, lambda_k)` (Normal-Gamma conjugate; treat z as the partition). Label switching handled via post-hoc sort in runner. AVOID (not recommended) a `joint_nuts_block` with a `delta > 0` ordering constraint here -- NUTS dual-averaging interacts badly with slow-mixing z and can bias the posterior for (mu_k, sigma_k). |
-| **BNP mixture (Dirichlet Process / Pitman-Yor) -- unknown number of components K** | **Allocation z is discrete; pi is a stick-breaking simplex (correlated by construction); (mu, lambda) per cluster are conjugate** | **Truncated SBP (Ishwaran-James 2001)**: `categorical_gibbs_block` (z) + `stick_breaking_block` (pi, with DP or PY a_fn / b_fn) + `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal Normal-Gamma) + `nuts_block` on log(alpha). **If the per-component prior is NOT Normal-Gamma (or NIW), the cluster-atom step is `cluster_atom_block`, NOT a `joint_nuts_block` over all K components** -- see the note below the table. For alpha as a derived function of other parameters, register a `register_refresher("alpha", ...)`. CRP-marginal Neal Alg 2/8 and Jain-Neal split-merge NOT shipped. See `examples/DPGaussianMixture.cpp` / `examples/PYGaussianMixture.cpp` / `examples/DPGaussianMixture_DerivedAlpha.cpp`. **Caveat**: DP truncated SBP intrinsically over-clusters on well-separated fixtures (see the DP block notes in `block_catalogue/index.md`). When K is known, prefer the finite-K wrapper below. |
-| **Finite-K Gaussian mixture (K known)** | Allocation z discrete; pi Dirichlet conjugate; (mu, lambda) Normal-Gamma conjugate | `categorical_gibbs_block` (z) + `dirichlet_gibbs_block` (pi, posterior alpha/K + counts) + `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal). Non-conjugate per-component prior -> `cluster_atom_block` for the atoms. K and alpha are CONSTRUCTOR ARGS. See `examples/FiniteGaussianMixture.cpp`. **Recovers truth mu within 0.21 sigma on the same fixture where DP over-clusters** -- use this when K is known via domain knowledge or model selection. |
+| **BNP mixture (Dirichlet Process / Pitman-Yor) -- unknown number of components K** | **Allocation z is discrete; pi is a stick-breaking simplex (correlated by construction); the per-cluster atoms may or may not be conjugate -- CHECK, do not assume** | **Truncated SBP (Ishwaran-James 2001)**: `categorical_gibbs_block` (z) + `stick_breaking_block` (pi, with DP or PY a_fn / b_fn) + **`cluster_atom_block` for the atoms BY DEFAULT** (swap in `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal Normal-Gamma) only on an EXACT conjugate match) + `nuts_block` on log(alpha). **If the per-component prior is NOT Normal-Gamma (or NIW), the cluster-atom step is `cluster_atom_block`, NOT a `joint_nuts_block` over all K components** -- see the note below the table. For alpha as a derived function of other parameters, register a `register_refresher("alpha", ...)`. CRP-marginal Neal Alg 2/8 and Jain-Neal split-merge NOT shipped. See `examples/DPGaussianMixture.cpp` / `examples/PYGaussianMixture.cpp` / `examples/DPGaussianMixture_DerivedAlpha.cpp`. **Caveat**: DP truncated SBP intrinsically over-clusters on well-separated fixtures (see the DP block notes in `block_catalogue/index.md`). When K is known, prefer the finite-K wrapper below. |
+| **Finite-K Gaussian mixture (K known)** | Allocation z discrete; pi Dirichlet conjugate; the per-cluster atoms may or may not be conjugate -- CHECK, do not assume | `categorical_gibbs_block` (z) + `dirichlet_gibbs_block` (pi, posterior alpha/K + counts) + `cluster_atom_block` for the atoms BY DEFAULT (swap in `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal) only on an EXACT conjugate match). K and alpha are CONSTRUCTOR ARGS. See `examples/FiniteGaussianMixture.cpp`. **Recovers truth mu within 0.21 sigma on the same fixture where DP over-clusters** -- use this when K is known via domain knowledge or model selection. |
 | **DPMM with split-merge acceleration (mode-escape via Jain-Neal 2004)** | Cluster partition has slow single-i Gibbs mixing | Add `split_merge_block` as a child AFTER `categorical_gibbs_block` in any DPMM composite (DP / PY / Finite). Both write to `z`; composite allows multi-children writing the same key. See `block_catalogue/index.md` `split_merge_block` Sec. for details and acceptance asymmetry note. |
 | Independent prior branches with no shared latent (e.g. two disjoint submodels) | Low | modular per parameter |
 
@@ -117,21 +117,30 @@ likelihood and classify:
    "// Sampling note: ..." comment (the Exception-4 justification goes in
    the L2 verdict table). Last resort; never a runtime swap.
 
-### Mixture-component parameters: never fall back to one joint block
+### Mixture-component parameters: `cluster_atom_block` is the DEFAULT
 
 A mixture with explicit allocations `z` has a cluster-ATOM step, and it is its
 own decision. Given `z` the components are conditionally independent (Ishwaran
-& James 2001 blocked Gibbs step (a), Eq. 18), so:
+& James 2001 blocked Gibbs step (a), Eq. 18).
+
+**Start at `cluster_atom_block` and stay there unless the per-component prior
+is an EXACT conjugate match to one of the two specialised blocks.** It accepts
+any prior and any component density, so it is always a valid answer; the
+conjugate blocks are the optimisation, not the baseline.
 
 | per-component prior | block |
 |---|---|
-| diagonal Normal-Gamma | `normal_gamma_cluster_gibbs_block` (exact) |
-| Normal-Inverse-Wishart | `niw_cluster_gibbs_block` (exact) |
-| **anything else** | **`cluster_atom_block`** |
+| **anything -- THE DEFAULT** | **`cluster_atom_block`** |
+| EXACTLY diagonal Normal-Gamma | `normal_gamma_cluster_gibbs_block` (exact) |
+| EXACTLY Normal-Inverse-Wishart | `niw_cluster_gibbs_block` (exact) |
 
-**The last row is the one that gets missed.** When no conjugate block matches,
-the reflex is to sweep the component parameters into one `joint_nuts_block`
-over all K of them. Do not: a truncated mixture keeps most components EMPTY,
+"Exactly" means the prior IS that conjugate pair, not merely close to it. A
+Normal location with an independent half-Normal / half-Cauchy / log-Normal
+scale is NOT Normal-Gamma -- it takes the default.
+
+**Never sweep the component parameters into one `joint_nuts_block` over all K
+of them.** That is the reflex when no conjugate block matches, and it is the
+failure this default exists to prevent: a truncated mixture keeps most components EMPTY,
 an empty component's conditional is its PRIOR (one to two orders of magnitude
 wider than an occupied one's), and which components are empty changes every
 sweep as `z` moves. One trajectory has one step size, it must be frozen after
@@ -2583,8 +2592,10 @@ or any other -- STOP: that is the silent-broken-predict_at bug, and R3 will
 report nothing rather than fail.
 
 See `examples/BartNoise.cpp` for the canonical BART predict_at pattern,
-`examples/GPRegression.cpp` for the GP + libgp kernel pattern, and
-`examples/GPClassification.cpp` for the Bernoulli-logit variant.
+`examples/GPRegression.cpp` for the GP + libgp kernel pattern (f integrated
+out, recovered from the predictive equations), and
+`examples/GPClassification.cpp` for the whitened variant (f = L z rebuilt
+per draw before conditioning).
 
 **Important:** predict_at is `const` -- it must NOT modify MCMC state.
 

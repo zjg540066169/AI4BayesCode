@@ -1,5 +1,11 @@
 ## normal_gamma_cluster_gibbs_block (diagonal Gaussian clusters)
 
+**This block is the EXCEPTION, not the default.** The default cluster-atom
+block is `cluster_atom_block`; use this one only when the per-component prior
+IS exactly the diagonal Normal-Gamma pair below. If the scale carries an
+independent half-Normal / half-Cauchy / log-Normal prior, it is not
+Normal-Gamma -- use `cluster_atom_block`.
+
 Closed-form vectorized Gibbs leaf that samples per-cluster diagonal
 Normal-Gamma parameters (mu_k, lambda_k) for k = 1..K_trunc under
 

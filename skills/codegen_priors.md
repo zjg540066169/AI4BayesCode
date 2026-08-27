@@ -481,7 +481,8 @@ emission likelihood `y_i | z_i = k ~ N(mu_k, sigma_k)` (possibly with
 per-class sigma_k), route as a hybrid composite: the specialized
 prior block for z (`hmm_block`, `binary_gibbs_block`,
 `categorical_gibbs_block` per the prior structure) + cluster-conjugate
-`normal_gamma_cluster_gibbs_block` for per-class `(mu_k, lambda_k)` when that prior IS Normal-Gamma; otherwise `cluster_atom_block`
+`cluster_atom_block` for per-class `(mu_k, sigma_k)` by DEFAULT, swapping in
+`normal_gamma_cluster_gibbs_block` only when that prior IS exactly Normal-Gamma
 (treat z as the cluster partition). DO NOT use NUTS on `(mu_k,
 sigma_k)` with an identifying ordering constraint (e.g. `delta > 0`
 to force mu_0 < mu_1) -- NUTS dual-averaging interacts badly with
@@ -1086,10 +1087,10 @@ Discrete latent z found?
       A / pi / emission params are also sampled, add sibling blocks:
         - A rows: `dirichlet_gibbs_block` per row
         - pi     : `dirichlet_gibbs_block`
-        - emission means / variances:
-          `normal_gamma_cluster_gibbs_block` (or `cluster_atom_block` if the
-          per-component prior is not conjugate) per Sec.2b (treat z as the
-          cluster partition). Do NOT put `(mu_k, sigma_k)` in a
+        - emission means / variances: `cluster_atom_block` by DEFAULT (or
+          `normal_gamma_cluster_gibbs_block` when the per-component prior is
+          exactly Normal-Gamma) per Sec.2b (treat z as the cluster
+          partition). Do NOT put `(mu_k, sigma_k)` in a
           `nuts_block`: NUTS dual-averaging interacts badly with the
           slow-mixing z and silently biases those posteriors.
         - z      : `hmm_block` (this entry)
@@ -1111,9 +1112,10 @@ Discrete latent z found?
               - z          : `categorical_gibbs_block`
               - pi         : `stick_breaking_block` (DP / PY / custom
                               via user-supplied a_fn / b_fn)
-              - cluster_params : `normal_gamma_cluster_gibbs_block`
-                                 (diagonal Gaussian) -- or future
-                                 `niw_cluster_gibbs_block` for full cov
+              - cluster_params : `cluster_atom_block` by DEFAULT; use
+                                 `normal_gamma_cluster_gibbs_block` (diagonal
+                                 Gaussian) or `niw_cluster_gibbs_block` (full
+                                 cov) only on an exact conjugate match
               - alpha      : `nuts_block` on log(alpha) with Gamma prior
               - alpha derived: `register_refresher("alpha", ...)`
                               (DPGaussianMixture_DerivedAlpha.cpp)
@@ -1229,6 +1231,7 @@ Discrete latent z found?
   without confirming spec intent (the flag's name is ambiguous).
 - Class 5b (Ising / MRF) declined -- no library support in v1.2.
 - Class 4 splits into BNP (truncated SBP via `stick_breaking_block` +
-  `normal_gamma_cluster_gibbs_block`; see `DPGaussianMixture.cpp` /
+  `cluster_atom_block` by default, `normal_gamma_cluster_gibbs_block` on an
+  exact conjugate match; see `DPGaussianMixture.cpp` /
   `PYGaussianMixture.cpp` / `DPGaussianMixture_DerivedAlpha.cpp`) vs
   non-BNP (`rjmcmc_block` v0 covers most).

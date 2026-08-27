@@ -45,7 +45,8 @@ unknown-K (non-BNP).
 
 **NOT appropriate for:**
 - BNP mixtures (DP, PY, HDP) -- use the **truncated SBP** path
-  (`stick_breaking_block` + `normal_gamma_cluster_gibbs_block` +
+  (`stick_breaking_block` + `cluster_atom_block` (or
+  `normal_gamma_cluster_gibbs_block` on an exact conjugate match) +
   `categorical_gibbs_block`); see `examples/DPGaussianMixture.cpp`
   / `examples/PYGaussianMixture.cpp` /
   `examples/DPGaussianMixture_DerivedAlpha.cpp`. **The cluster-prior
