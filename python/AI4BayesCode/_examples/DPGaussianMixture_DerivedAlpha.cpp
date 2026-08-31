@@ -11,13 +11,14 @@
 //  This file demonstrates the COMPOSITION mechanics. Identical to
 //  `DPGaussianMixture.cpp` except:
 //
-//   - We introduce a real-valued scalar `phi` sampled by a `nuts_block`
+//   - We introduce a real-valued scalar `phi` sampled by a
+//     `univariate_slice_sampling_block`
 //     with prior phi ~ Normal(0, 1).
 //   - alpha is REGISTERED as a deterministic refresher of phi:
 //                   alpha = exp(phi)
 //     via `register_refresher("alpha", ...)` and
 //     `declare_invalidates("phi", {"alpha"})`. Whenever phi is updated
-//     by its NUTS step, alpha is automatically refreshed.
+//     by its slice step, alpha is automatically refreshed.
 //   - Downstream blocks (`stick_breaking_block`'s b_fn, etc.) read
 //     `alpha` from ctx UNCHANGED -- they don't know or care that alpha
 //     came from a refresher rather than a sampler. This is the core
@@ -33,7 +34,7 @@
 //      child(0) z              categorical_gibbs_block
 //      child(1) cluster_params normal_gamma_cluster_gibbs_block
 //      child(2) pi             stick_breaking_block (DP a_fn / b_fn)
-//      child(3) phi            nuts_block (REAL constraint)
+//      child(3) phi            univariate_slice_sampling_block (REAL constraint)
 //
 //  LABEL SWITCHING
 //  ---------------
@@ -149,6 +150,7 @@
 
 #include "AI4BayesCode/categorical_gibbs_block.hpp"
 #include "AI4BayesCode/nuts_block.hpp"
+#include "AI4BayesCode/univariate_slice_sampling_block.hpp"
 #include "AI4BayesCode/stick_breaking_block.hpp"
 #include "AI4BayesCode/normal_gamma_cluster_gibbs_block.hpp"
 #include "AI4BayesCode/bnp_utils.hpp"
@@ -168,6 +170,8 @@ using AI4BayesCode::categorical_gibbs_block;
 using AI4BayesCode::categorical_gibbs_block_config;
 using AI4BayesCode::nuts_block;
 using AI4BayesCode::nuts_block_config;
+using AI4BayesCode::univariate_slice_sampling_block;
+using AI4BayesCode::univariate_slice_sampling_block_config;
 using AI4BayesCode::stick_breaking_block;
 using AI4BayesCode::stick_breaking_block_config;
 using AI4BayesCode::normal_gamma_cluster_gibbs_block;
@@ -330,10 +334,6 @@ public:
                    ? std::mt19937_64{std::random_device{}()}
                    : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
                                      ^ 0x9E3779B97F4A7C15ULL}),
-          readapt_rng_(rng_seed == 0
-                   ? std::mt19937_64{std::random_device{}()}
-                   : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
-                                     ^ 0xBF58476D1CE4E5B9ULL}),
           impl_(std::make_unique<composite_block>(
                 "DPGaussianMixture_DerivedAlpha")),
           keep_history_(keep_history)
@@ -565,18 +565,17 @@ public:
                 std::make_unique<stick_breaking_block>(std::move(cfg)));
         }
 
-        // child(3) phi (NUTS on REAL)
+        // child(3) phi (univariate slice on REAL)
         {
-            nuts_block_config cfg;
+            univariate_slice_sampling_block_config cfg;
             cfg.name        = "phi";
             cfg.initial_unc = arma::vec{0.0};
             // No constrain/unconstrain => identity (REAL).
-            cfg.log_density_grad =
-                [](const arma::vec& t_unc, const block_context& ctx,
-                   arma::vec* grad) -> double {
-                    return phi_natural_log_density(t_unc, ctx, grad);
+            cfg.log_density =
+                [](const arma::vec& t_unc, const block_context& ctx) -> double {
+                    return phi_natural_log_density(t_unc, ctx, nullptr);
                 };
-            impl_->add_child(std::make_unique<nuts_block>(std::move(cfg)));
+            impl_->add_child(std::make_unique<univariate_slice_sampling_block>(std::move(cfg)));
         }
 
         if (keep_history_) impl_->set_keep_history(true);
@@ -653,7 +652,7 @@ public:
         if (it_phi != params.end()) {
             const double p_new = it_phi->second[0];
             if (!std::isfinite(p_new)) ai4b::stop("phi must be finite");
-            dynamic_cast<nuts_block&>(impl_->child(3))
+            dynamic_cast<univariate_slice_sampling_block&>(impl_->child(3))
                 .set_current(arma::vec{p_new});
             impl_->data().set("phi", arma::vec{p_new});
             impl_->data().refresh_derived_for("phi");  // updates alpha
@@ -722,35 +721,9 @@ public:
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag(); }
     AI4BayesCode::history_map  get_history() const { return impl_->get_history(); }
 
-    /// 7th R-level method: re-tune NUTS metric (mass matrix + step size +
-    /// dual averaging) without advancing chain state. Available because
-    /// the composite contains NUTS-family children. See system_design.md
-    /// Sec.13 NUTS-family + validator.md Sec.24.
-    // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
-    // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
-    // C++ default args so both arities are also exposed as separate
-    // bindings below; from C++, this forwarder keeps pre-existing
-    // readapt_NUTS(n, reset, mtd) call sites working.
-    void readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept) {
-        if (n < 0) {
-            ai4b::stop("readapt_NUTS: n must be non-negative");
-        }
-        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_,
-                                max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth),
-                                target_accept);
-    }
-
-    /// 3-arg backward-compat overload; target_accept defaults to -1.0
-    /// (sentinel = leave the block's target unchanged).
-    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
-        readapt_NUTS(n, reset, max_tree_depth, -1.0);
-    }
-
-
 private:
     std::mt19937_64                  rng_;
     mutable std::mt19937_64          predict_rng_;
-    mutable std::mt19937_64          readapt_rng_; // readapt_NUTS() advances it (7th method)
     std::unique_ptr<composite_block> impl_;
     bool                             keep_history_ = false;
     std::size_t                      N_ = 0;
@@ -781,7 +754,7 @@ RCPP_MODULE(DPGaussianMixture_DerivedAlpha_module) {
             "kappa_0, a_lambda_0, b_lambda_0, seed, keep_history). "
             "DP mixture where alpha = exp(phi) is DERIVED from phi via "
             "register_refresher; phi has Normal(0, 1) prior and is "
-            "sampled by NUTS. Demonstrates the alpha-as-derived "
+            "sampled by slice. Demonstrates the alpha-as-derived "
             "composition pattern.")
         .method("step", (void (DPGaussianMixture_DerivedAlpha::*)())    &DPGaussianMixture_DerivedAlpha::step, "Run one sweep.")
         .method("step", (void (DPGaussianMixture_DerivedAlpha::*)(int)) &DPGaussianMixture_DerivedAlpha::step, "Run n sweeps.")
@@ -792,7 +765,6 @@ RCPP_MODULE(DPGaussianMixture_DerivedAlpha_module) {
                 "Posterior predictive y_rep at training X.")
         .method("get_dag",     &DPGaussianMixture_DerivedAlpha::get_dag)
         .method("get_history", &DPGaussianMixture_DerivedAlpha::get_history)
-        AI4BAYESCODE_BIND_READAPT_NUTS(DPGaussianMixture_DerivedAlpha)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(DPGaussianMixture_DerivedAlpha);
 }
 #endif
@@ -833,10 +805,6 @@ PYBIND11_MODULE(DPGaussianMixture_DerivedAlpha, m) {
              pybind11::arg("new_data"))
         .def("get_dag",      &DPGaussianMixture_DerivedAlpha::get_dag)
         .def("get_history",  &DPGaussianMixture_DerivedAlpha::get_history)
-        .def("readapt_NUTS", (void (DPGaussianMixture_DerivedAlpha::*)(int, bool, int, double)) &DPGaussianMixture_DerivedAlpha::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false,
-             pybind11::arg("max_tree_depth") = -1,
-             pybind11::arg("target_accept") = -1.0)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(DPGaussianMixture_DerivedAlpha);
 }
 #endif

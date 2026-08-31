@@ -677,7 +677,7 @@ public:
         }
 
         // ================================================================
-        // Block 2: sigma (nuts_block, positive-constrained, Jeffreys)
+        // Block 2: sigma (univariate_slice_sampling_block, positive, Jeffreys)
         // Natural-scale density in sigma_natural_log_density(). Accounts
         // for the sigma-dependent slab-prior contribution from active beta.
         // ================================================================
@@ -701,7 +701,7 @@ public:
         }
 
         // ================================================================
-        // Block 3: tau (nuts_block, positive-constrained, Jeffreys)
+        // Block 3: tau (univariate_slice_sampling_block, positive, Jeffreys)
         // Dimensionless scale; natural-scale density in
         // tau_natural_log_density().
         // ================================================================
@@ -778,8 +778,8 @@ public:
         // how X is stored in data() (arma::vectorise of the N x p design)
         // and how predict_at receives it.
         auto* pi_blk = dynamic_cast<beta_gibbs_block*>(&impl_->child(0));
-        auto* sg_blk = dynamic_cast<nuts_block*>(&impl_->child(1));
-        auto* tu_blk = dynamic_cast<nuts_block*>(&impl_->child(2));
+        auto* sg_blk = dynamic_cast<univariate_slice_sampling_block*>(&impl_->child(1));
+        auto* tu_blk = dynamic_cast<univariate_slice_sampling_block*>(&impl_->child(2));
         auto* rj_blk = dynamic_cast<rjmcmc_block*>(&impl_->child(3));
 
         auto it_g = params.find("gamma");
@@ -1006,8 +1006,6 @@ public:
 
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
-
-
 
 private:
     std::mt19937_64                  rng_;

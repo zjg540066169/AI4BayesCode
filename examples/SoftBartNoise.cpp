@@ -383,7 +383,7 @@ public:
     // set_current(get_current()) round-trips cleanly.
     void set_current(const AI4BayesCode::state_map& params) {
         auto* sb_blk = dynamic_cast<softbart_block*>(&impl_->child(0));
-        auto* sg_blk = dynamic_cast<nuts_block*>(&impl_->child(1));
+        auto* sg_blk = dynamic_cast<univariate_slice_sampling_block*>(&impl_->child(1));
 
         // f_softbart is read-only output; silently ignored on input so
         // that round-trip set_current(get_current()) is supported per
@@ -602,8 +602,6 @@ public:
         auto& sb_child = dynamic_cast<softbart_block&>(impl_->child(0));
         return sb_child.get_tree_history();
     }
-
-
 
 private:
     std::mt19937_64                  rng_;

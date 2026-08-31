@@ -52,11 +52,11 @@
 //    1. beta_gibbs_block  : pi | gamma      (scalar textbook
 //                           Beta-Bernoulli conjugate)
 //
-//    2. nuts_block        : sigma (log-transformed, Jeffreys prior +
+//    2. univariate_slice  : sigma (log-transformed, Jeffreys prior +
 //                           likelihood incl. slab-prior contribution
 //                           from active beta_j ~ N(0, sigma^2 tau^2))
 //
-//    3. nuts_block        : tau   (log-transformed, Jeffreys prior +
+//    3. univariate_slice  : tau   (log-transformed, Jeffreys prior +
 //                           slab likelihood contribution;
 //                           dimensionless so no hyperparameter)
 //
@@ -141,6 +141,7 @@
 #include "AI4BayesCode/rcpp_predict_guard.hpp"
 #include "AI4BayesCode/beta_gibbs_block.hpp"
 #include "AI4BayesCode/nuts_block.hpp"
+#include "AI4BayesCode/univariate_slice_sampling_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/rjmcmc_block.hpp"
@@ -162,6 +163,8 @@ using AI4BayesCode::beta_gibbs_block_config;
 using AI4BayesCode::beta_dist_params;
 using AI4BayesCode::nuts_block;
 using AI4BayesCode::nuts_block_config;
+using AI4BayesCode::univariate_slice_sampling_block;
+using AI4BayesCode::univariate_slice_sampling_block_config;
 using AI4BayesCode::rjmcmc_block;
 using AI4BayesCode::rjmcmc_block_config;
 
@@ -458,10 +461,6 @@ public:
                    ? std::mt19937_64{std::random_device{}()}
                    : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
                                      ^ 0x9E3779B97F4A7C15ULL}),
-          readapt_rng_(rng_seed == 0
-                   ? std::mt19937_64{std::random_device{}()}
-                   : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
-                                     ^ 0xBF58476D1CE4E5B9ULL}),
           impl_(std::make_unique<composite_block>("SpikeSlabRJMCMC")),
           keep_history_(keep_history)
     {
@@ -678,53 +677,51 @@ public:
         }
 
         // ================================================================
-        // Block 2: sigma (nuts_block, positive-constrained, Jeffreys)
+        // Block 2: sigma (univariate_slice_sampling_block, positive, Jeffreys)
         // Natural-scale density in sigma_natural_log_density(). Accounts
         // for the sigma-dependent slab-prior contribution from active beta.
         // ================================================================
         {
-            nuts_block_config cfg;
+            univariate_slice_sampling_block_config cfg;
             cfg.name        = "sigma";
             cfg.initial_unc = arma::vec{std::log(sigma_init)};
             cfg.constrain   = constraints::positive::constrain;
             cfg.unconstrain = constraints::positive::unconstrain;
-            cfg.log_density_grad =
-                [](const arma::vec& theta_unc, const block_context& ctx,
-                   arma::vec* grad) {
+            cfg.log_density =
+                [](const arma::vec& theta_unc, const block_context& ctx) {
                     return constraints::positive::wrap(
-                        theta_unc, grad,
+                        theta_unc, nullptr,
                         [&](const arma::vec& sigma_nat,
                             arma::vec* grad_nat) {
                             return sigma_natural_log_density(
                                 sigma_nat, ctx, grad_nat);
                         });
                 };
-            impl_->add_child(std::make_unique<nuts_block>(std::move(cfg)));
+            impl_->add_child(std::make_unique<univariate_slice_sampling_block>(std::move(cfg)));
         }
 
         // ================================================================
-        // Block 3: tau (nuts_block, positive-constrained, Jeffreys)
+        // Block 3: tau (univariate_slice_sampling_block, positive, Jeffreys)
         // Dimensionless scale; natural-scale density in
         // tau_natural_log_density().
         // ================================================================
         {
-            nuts_block_config cfg;
+            univariate_slice_sampling_block_config cfg;
             cfg.name        = "tau";
             cfg.initial_unc = arma::vec{std::log(tau_init)};
             cfg.constrain   = constraints::positive::constrain;
             cfg.unconstrain = constraints::positive::unconstrain;
-            cfg.log_density_grad =
-                [](const arma::vec& theta_unc, const block_context& ctx,
-                   arma::vec* grad) {
+            cfg.log_density =
+                [](const arma::vec& theta_unc, const block_context& ctx) {
                     return constraints::positive::wrap(
-                        theta_unc, grad,
+                        theta_unc, nullptr,
                         [&](const arma::vec& tau_nat,
                             arma::vec* grad_nat) {
                             return tau_natural_log_density(
                                 tau_nat, ctx, grad_nat);
                         });
                 };
-            impl_->add_child(std::make_unique<nuts_block>(std::move(cfg)));
+            impl_->add_child(std::make_unique<univariate_slice_sampling_block>(std::move(cfg)));
         }
 
         // ================================================================
@@ -781,8 +778,8 @@ public:
         // how X is stored in data() (arma::vectorise of the N x p design)
         // and how predict_at receives it.
         auto* pi_blk = dynamic_cast<beta_gibbs_block*>(&impl_->child(0));
-        auto* sg_blk = dynamic_cast<nuts_block*>(&impl_->child(1));
-        auto* tu_blk = dynamic_cast<nuts_block*>(&impl_->child(2));
+        auto* sg_blk = dynamic_cast<univariate_slice_sampling_block*>(&impl_->child(1));
+        auto* tu_blk = dynamic_cast<univariate_slice_sampling_block*>(&impl_->child(2));
         auto* rj_blk = dynamic_cast<rjmcmc_block*>(&impl_->child(3));
 
         auto it_g = params.find("gamma");
@@ -1010,35 +1007,9 @@ public:
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
 
-    /// 7th R-level method: re-tune NUTS metric (mass matrix + step size +
-    /// dual averaging) without advancing chain state. Available because
-    /// the composite contains NUTS-family children. See system_design.md
-    /// Sec.13 NUTS-family + validator.md Sec.24.
-    // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
-    // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
-    // C++ default args so both arities are also exposed as separate
-    // bindings below; from C++, this forwarder keeps pre-existing
-    // readapt_NUTS(n, reset, mtd) call sites working.
-    void readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept) {
-        if (n < 0) {
-            ai4b::stop("readapt_NUTS: n must be non-negative");
-        }
-        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_,
-                                max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth),
-                                target_accept);
-    }
-
-    /// 3-arg backward-compat overload; target_accept defaults to -1.0
-    /// (sentinel = leave the block's target unchanged).
-    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
-        readapt_NUTS(n, reset, max_tree_depth, -1.0);
-    }
-
-
 private:
     std::mt19937_64                  rng_;
     mutable std::mt19937_64          predict_rng_;
-    mutable std::mt19937_64          readapt_rng_; // readapt_NUTS() advances it (7th method)
     std::unique_ptr<composite_block> impl_;
     bool                             keep_history_ = false;
     std::size_t                      N_ = 0;
@@ -1072,7 +1043,6 @@ RCPP_MODULE(SpikeSlabRJMCMC_module) {
         .method("predict_at",  &SpikeSlabRJMCMC::predict_at_r)
         .method("get_dag",     &SpikeSlabRJMCMC::get_dag)
         .method("get_history", &SpikeSlabRJMCMC::get_history)
-        AI4BAYESCODE_BIND_READAPT_NUTS(SpikeSlabRJMCMC)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(SpikeSlabRJMCMC);
 }
 #endif
@@ -1229,10 +1199,6 @@ PYBIND11_MODULE(SpikeSlabRJMCMC, m) {
         .def("predict_at",   &SpikeSlabRJMCMC::predict_at,  pybind11::arg("new_data"))
         .def("get_dag",      &SpikeSlabRJMCMC::get_dag)
         .def("get_history",  &SpikeSlabRJMCMC::get_history)
-        .def("readapt_NUTS", (void (SpikeSlabRJMCMC::*)(int, bool, int, double)) &SpikeSlabRJMCMC::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false,
-             pybind11::arg("max_tree_depth") = -1,
-             pybind11::arg("target_accept") = -1.0)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(SpikeSlabRJMCMC);
 }
 #endif

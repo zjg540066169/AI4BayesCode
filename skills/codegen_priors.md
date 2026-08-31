@@ -296,8 +296,14 @@ rank -- do NOT read "item 1" as "try this first":
    frozen out of date -- which is the failure a scalar NUTS block is
    prone to, because Check #20 requires the step size to stay frozen
    after warmup while the scalar's conditional keeps moving with its
-   Gibbs siblings. Measured (Sec.2b.1): per-component 1-D NUTS froze
-   15% of sweeps at rank R-hat 1.0866; slice froze 0% at 1.0018.
+   Gibbs siblings. The nearest measurement is the truncated-DP one in
+   `block_catalogue/cluster_atom_block.md`: a per-component
+   `joint_nuts_block` (2 params per component, one frozen step size)
+   froze 15% of sweeps at rank R-hat 1.0866, while the slice-backed
+   block froze 0% at 1.0018. That arm is per-component, not a scalar
+   block, so read it as evidence about a FROZEN STEP SIZE under a
+   moving conditional -- the mechanism, which is identical for a
+   scalar -- not as a scalar-vs-scalar benchmark.
    `initial_unc` MUST be length 1 -- that is what makes "scalar" the
    trigger. See Sec.2b.1.
 3. **`rjmcmc_block`** -- trans-dimensional. Class 4; only applicable
@@ -598,8 +604,11 @@ broken out on its own.
      from scratch every step (stepping-out), so a moving conditional
      costs it nothing. Measured on a truncated-DP mixture (K = 10, 20
      datasets, 20k+20k), fraction of sweeps in which the parameter did
-     not move AT ALL: per-component 1-D NUTS **15%** (median cross-chain
-     rank R-hat 1.0866), slice **0%** (1.0018).
+     not move AT ALL: a per-component `joint_nuts_block` **15%** (median
+     cross-chain rank R-hat 1.0866), the slice-backed block **0%**
+     (1.0018). That arm is per-component rather than scalar; what it
+     measures is a frozen step size against a moving conditional, which
+     is the same mechanism a scalar block faces.
   2. **It cannot lock up.** Slice is guaranteed to accept within finite
      shrinkage iterations -- the bracket converges onto the current
      point -- so there is no rejection-stall state at all. Compare the

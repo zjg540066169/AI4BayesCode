@@ -2,9 +2,9 @@
 
 | Example | Process | Hyperparam sampler | Cluster sampler | discount |
 |---|---|---|---|---|
-| `DPGaussianMixture.cpp`             | DP truncated SBP | `nuts_block` on `log(alpha)` | `normal_gamma_cluster_gibbs_block` | n/a |
-| `PYGaussianMixture.cpp`             | PY truncated SBP | `nuts_block` on `log(alpha)` (digamma terms) | same as DP | FIXED at construction |
-| `DPGaussianMixture_DerivedAlpha.cpp` | DP truncated SBP, alpha = exp(phi) via refresher | `nuts_block` on `phi` (REAL) | same as DP | n/a |
+| `DPGaussianMixture.cpp`             | DP truncated SBP | `univariate_slice_sampling_block` on `log(alpha)` | `normal_gamma_cluster_gibbs_block` | n/a |
+| `PYGaussianMixture.cpp`             | PY truncated SBP | `univariate_slice_sampling_block` on `log(alpha)` (digamma terms) | same as DP | FIXED at construction |
+| `DPGaussianMixture_DerivedAlpha.cpp` | DP truncated SBP, alpha = exp(phi) via refresher | `univariate_slice_sampling_block` on `phi` (REAL) | same as DP | n/a |
 | `FiniteGaussianMixture.cpp`         | **Finite K** (NOT BNP); pi via Dirichlet(alpha/K) symmetric prior | n/a (alpha fixed at construction) | same as DP | n/a |
 
 **The architectural rule for BNP mixtures with truncated SBP**:
@@ -14,7 +14,7 @@
 | z (length N) | `categorical_gibbs_block` | Class-1 conditional independence given (pi, mu, lambda) |
 | pi (length K_trunc) | `stick_breaking_block` | Per-stick Beta conjugate; user supplies a_fn/b_fn |
 | (mu, lambda) | `normal_gamma_cluster_gibbs_block` | Per-(k,d) Normal-Gamma conjugate; empty clusters draw from prior |
-| alpha (scalar) | `nuts_block` on the Antoniak (1974) (k, n) marginal | Reads `cluster_counts` (k = occupied clusters, n = observations), NOT the empty-tail sticks `stick_V` -- those Beta(1, alpha) draws are chain-specific and broke mixing (rank-R-hat ~ 1.42). Staying on NUTS also keeps the prior swappable. See `DPGaussianMixture.cpp`. |
+| alpha (scalar) | `univariate_slice_sampling_block` on the Antoniak (1974) (k, n) marginal | Reads `cluster_counts` (k = occupied clusters, n = observations), NOT the empty-tail sticks `stick_V` -- those Beta(1, alpha) draws are chain-specific and broke mixing (rank-R-hat ~ 1.42). Slice keeps the prior swappable too, and needs no gradient at all. See `DPGaussianMixture.cpp`. |
 | (alpha derived) | `register_refresher("alpha", ...)` | Pattern shown in `DPGaussianMixture_DerivedAlpha.cpp` |
 
 Truncation choice: default `K_trunc = max(20, ceil(N / 5))`. The

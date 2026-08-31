@@ -828,8 +828,6 @@ public:
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag(); }
     AI4BayesCode::history_map  get_history() const { return impl_->get_history(); }
 
-
-
 private:
     std::mt19937_64                  rng_;
     mutable std::mt19937_64          predict_rng_;

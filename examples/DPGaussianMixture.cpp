@@ -609,7 +609,7 @@ public:
                 std::make_unique<stick_breaking_block>(std::move(cfg)));
         }
 
-        // child(3) alpha (nuts_block on log scale, positive constraint)
+        // child(3) alpha (univariate_slice_sampling_block, log scale, positive)
         {
             univariate_slice_sampling_block_config cfg;
             cfg.name        = "alpha";
@@ -833,8 +833,6 @@ public:
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag(); }
     AI4BayesCode::history_map  get_history() const { return impl_->get_history(); }
 
-
-
 private:
     std::mt19937_64                  rng_;
     mutable std::mt19937_64          predict_rng_;
@@ -876,7 +874,7 @@ RCPP_MODULE(DPGaussianMixture_module) {
             "a_lambda_0, b_lambda_0, a_alpha, b_alpha, seed, keep_history). "
             "y is N x d. Truncated stick-breaking at level K_trunc; "
             "diagonal-Gaussian likelihood with conjugate Normal-Gamma "
-            "cluster prior; DP concentration alpha sampled by NUTS. "
+            "cluster prior; DP concentration alpha sampled by slice. "
             "WARNING: mis-scaled fixed hypers (e.g. b_lambda_0 = 1 on "
             "non-unit-variance data) mix poorly -- prefer the data-driven "
             "constructor.")

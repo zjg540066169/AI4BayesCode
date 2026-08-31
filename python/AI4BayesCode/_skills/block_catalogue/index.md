@@ -150,7 +150,7 @@ NUTS-wasteful efficiency profile):**
    the block construction site. Which Exception applies is recorded in
    the L2 verdict table, not in the delivered file.
 
-Prefer `nuts_block` with `constraints::interval::wrap(0, 1)` when:
+Prefer `univariate_slice_sampling_block` with `constraints::interval::wrap(0, 1)` when:
 - The conditional is NOT exactly Beta (e.g. p enters a logistic link,
   a nonlinear function, or has non-conjugate factors)
 - You're not sure the conditional is exactly Beta (when in doubt, slice

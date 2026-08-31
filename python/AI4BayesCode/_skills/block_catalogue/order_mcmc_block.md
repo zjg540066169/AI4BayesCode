@@ -91,9 +91,11 @@ BiDAG 1.00000). **Outcome (A): our code converges to the same
 target as the reference.**
 
 **Reference template:** `examples/OrderMCMCBN.cpp` -- Tier A R
-wrapper (`new(OrderMCMCBN, D, cardinalities, bdeu_alpha,
-max_parents, candidate_top_C, family_cache_F, gamma_prune_nats,
-prob_adjacent_swap, initial_order, rng_seed, keep_history)`)
+wrapper (`new(OrderMCMCBN, D, cardinalities, structure_prior,
+bdeu_alpha, max_parents, candidate_top_C, family_cache_F,
+gamma_prune_nats, prob_adjacent_swap, initial_order, rng_seed,
+keep_history)` -- `structure_prior` is the 3rd argument and is
+REQUIRED: `"uniform"` or `"fk_eq2"`)
 with the core-6 R state contract (step / get_current /
 set_current / predict_at / get_dag / get_history) plus the kernel-control
 category (freeze / unfreeze / get_frozen) per interface.md Sec.1.

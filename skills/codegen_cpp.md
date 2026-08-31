@@ -51,8 +51,10 @@ is the DEFAULT** for continuous parameters not owned by a specialized
 block: you write ONE joint natural-scale log-density (likelihood + all
 priors + per-slice constraints) and the block runs NUTS over the
 concatenated unconstrained vector. Modular `nuts_block` is a LOW-priority
-fallback -- for a genuinely scalar parameter, a post-NCR funnel branch, or
-deliberate isolation. Coupled continuous parameters mix ~10x slower per
+fallback, and only for a MULTI-dimensional group -- a post-NCR funnel branch
+or deliberate isolation. A genuinely SCALAR parameter broken out on its own
+goes to `univariate_slice_sampling_block` (codegen_priors.md Sec.2b.1): no
+step size to freeze, no gradient to write. Coupled continuous parameters mix ~10x slower per
 ESS when split and FREEZE outright on funnels, so joint is the default,
 not an optimization. (Specialized / conjugate-Gibbs blocks still take
 precedence WHEN THEY GENUINELY APPLY -- for EFFICIENCY, not correctness:
@@ -90,7 +92,7 @@ likelihood and classify:
 | **ICAR / BYM / spatial CAR random effect** + **Gaussian** observation | Improper prior on phi (sum-to-zero needed) + (Intercept, mean phi) ridge | **Hybrid composite**: `gmrf_precision_block` over `phi[N]` (Rue 2001 sparse-Cholesky direct draw + hard sum-to-zero projection) + three separate `nuts_block` for Intercept (real), `log_tau` (positive), `log_sigma` (positive). The GMRF block samples phi via the exact Gaussian full-conditional in canonical form `Q = tau R + (1/sigma^2) diag(n_i)`; the NUTS blocks each see phi via shared_data. ~60x faster than a NUTS-only joint workaround. Use Half-Normal sigma prior (NOT Jeffreys) -- ICAR can absorb all variance, Half-Normal pushes back at sigma -> 0. See `examples/ICARSpatialGMRF.cpp`. |
 | **ICAR / CAR / RW1 / RW2 sparse-precision random effect** + **non-Gaussian** observation (Poisson / Bernoulli / NB) | Improper prior on the latent (sum-to-zero needed for ICAR-style) + (Intercept, mean latent) ridge + likelihood-induced extra curvature | **Hybrid composite**: **`gmrf_whitened_ess_block`** over the latent (Murray 2010 ESS on the implicit GMRF prior via Rue 2001 sparse-Cholesky backsolve; sum-to-zero preserved by ESS rotation linearity) + separate `nuts_block` for the linear-predictor intercept (real), log-precision (positive), and any non-spatial random effect scales. User supplies `Q_fn(ctx) -> arma::sp_mat` and `log_lik(x, ctx) -> double` (the user's observation log-density evaluated at the proposed latent). See `block_catalogue/index.md` `gmrf_whitened_ess_block` section for the example recipe and verified convergence budgets at N=16 / N=64. |
 | **Hidden discrete latent** (HMM / Ising / Potts / MRF on graph) **+ Normal emission** (Gaussian observation per latent class, possibly with per-class sigma_k) | Low for emission params given z (conjugate); High for z under spatial / sequential prior | **Hybrid composite**: specialized prior block for z (`hmm_block` for HMM, `binary_gibbs_block` for binary Ising/MRF, `categorical_gibbs_block` for K-state Potts) + **`normal_gamma_cluster_gibbs_block`** for per-class `(mu_k, lambda_k)` (Normal-Gamma conjugate; treat z as the partition). Label switching handled via post-hoc sort in runner. AVOID (not recommended) a `joint_nuts_block` with a `delta > 0` ordering constraint here -- NUTS dual-averaging interacts badly with slow-mixing z and can bias the posterior for (mu_k, sigma_k). |
-| **BNP mixture (Dirichlet Process / Pitman-Yor) -- unknown number of components K** | **Allocation z is discrete; pi is a stick-breaking simplex (correlated by construction); the per-cluster atoms may or may not be conjugate -- CHECK, do not assume** | **Truncated SBP (Ishwaran-James 2001)**: `categorical_gibbs_block` (z) + `stick_breaking_block` (pi, with DP or PY a_fn / b_fn) + **`cluster_atom_block` for the atoms BY DEFAULT** (swap in `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal Normal-Gamma) only on an EXACT conjugate match) + `nuts_block` on log(alpha). **If the per-component prior is NOT Normal-Gamma (or NIW), the cluster-atom step is `cluster_atom_block`, NOT a `joint_nuts_block` over all K components** -- see the note below the table. For alpha as a derived function of other parameters, register a `register_refresher("alpha", ...)`. CRP-marginal Neal Alg 2/8 and Jain-Neal split-merge NOT shipped. See `examples/DPGaussianMixture.cpp` / `examples/PYGaussianMixture.cpp` / `examples/DPGaussianMixture_DerivedAlpha.cpp`. **Caveat**: DP truncated SBP intrinsically over-clusters on well-separated fixtures (see the DP block notes in `block_catalogue/index.md`). When K is known, prefer the finite-K wrapper below. |
+| **BNP mixture (Dirichlet Process / Pitman-Yor) -- unknown number of components K** | **Allocation z is discrete; pi is a stick-breaking simplex (correlated by construction); the per-cluster atoms may or may not be conjugate -- CHECK, do not assume** | **Truncated SBP (Ishwaran-James 2001)**: `categorical_gibbs_block` (z) + `stick_breaking_block` (pi, with DP or PY a_fn / b_fn) + **`cluster_atom_block` for the atoms BY DEFAULT** (swap in `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal Normal-Gamma) only on an EXACT conjugate match) + `univariate_slice_sampling_block` on log(alpha) (a scalar in its own block; the DP/PY examples all do this). **If the per-component prior is NOT Normal-Gamma (or NIW), the cluster-atom step is `cluster_atom_block`, NOT a `joint_nuts_block` over all K components** -- see the note below the table. For alpha as a derived function of other parameters, register a `register_refresher("alpha", ...)`. CRP-marginal Neal Alg 2/8 and Jain-Neal split-merge NOT shipped. See `examples/DPGaussianMixture.cpp` / `examples/PYGaussianMixture.cpp` / `examples/DPGaussianMixture_DerivedAlpha.cpp`. **Caveat**: DP truncated SBP intrinsically over-clusters on well-separated fixtures (see the DP block notes in `block_catalogue/index.md`). When K is known, prefer the finite-K wrapper below. |
 | **Finite-K Gaussian mixture (K known)** | Allocation z discrete; pi Dirichlet conjugate; the per-cluster atoms may or may not be conjugate -- CHECK, do not assume | `categorical_gibbs_block` (z) + `dirichlet_gibbs_block` (pi, posterior alpha/K + counts) + `cluster_atom_block` for the atoms BY DEFAULT (swap in `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal) only on an EXACT conjugate match). K and alpha are CONSTRUCTOR ARGS. See `examples/FiniteGaussianMixture.cpp`. **Recovers truth mu within 0.21 sigma on the same fixture where DP over-clusters** -- use this when K is known via domain knowledge or model selection. |
 | **DPMM with split-merge acceleration (mode-escape via Jain-Neal 2004)** | Cluster partition has slow single-i Gibbs mixing | Add `split_merge_block` as a child AFTER `categorical_gibbs_block` in any DPMM composite (DP / PY / Finite). Both write to `z`; composite allows multi-children writing the same key. See `block_catalogue/index.md` `split_merge_block` Sec. for details and acceptance asymmetry note. |
 | Independent prior branches with no shared latent (e.g. two disjoint submodels) | Low | modular per parameter |
@@ -107,9 +109,11 @@ likelihood and classify:
    hand-written joint log-density. This is the DEFAULT.** Do NOT fragment
    a coupled model into separate `nuts_block`s, and do NOT contort it to
    fit a built-in block.
-4. A standalone `nuts_block` is the **LOW-priority** fallback: a
-   genuinely scalar parameter, a post-NCR funnel branch, or deliberate
-   isolation.
+4. A **SCALAR** parameter broken out into its own block takes
+   `univariate_slice_sampling_block` -- see codegen_priors.md Sec.2b.1.
+5. A standalone `nuts_block` is the **LOW-priority** fallback and only
+   for a MULTI-dimensional group: a post-NCR funnel branch, or
+   deliberate isolation.
 5. **Structural gap (`codegen_priors.md Sec.2c` Exception 4):** if -- judged
    at generation time -- no block fits AND NUTS is structurally
    inapplicable (e.g. a bespoke tree ensemble, a novel trans-dimensional
@@ -243,7 +247,8 @@ them):
 (b) is mandatory and is NOT a reason to fragment a coupled model into
 modular blocks -- it is the same prior / Jacobian content you would need
 either way. A standalone `nuts_block` is fine only for a genuinely
-separable / scalar parameter (the low-priority fallback).
+separable MULTI-dimensional group (the low-priority fallback); a separable
+SCALAR takes `univariate_slice_sampling_block`.
 
 Document in the header comment:
 

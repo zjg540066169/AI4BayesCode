@@ -45,7 +45,10 @@
  *  Works for any latent-Gaussian-with-arbitrary-likelihood model, not
  *  just GPs. Reference use cases:
  *    - GP regression / classification / Poisson regression (L from a
- *      kernel Cholesky refresher -- see examples/GPRegression.cpp)
+ *      kernel Cholesky refresher). For the ARCHITECTURE, follow
+ *      `codegen_cpp.md` Sec.4a's two GP rows, not an example file: a
+ *      GAUSSIAN likelihood should marginalise f out entirely (no ESS at
+ *      all), and a non-Gaussian one should use the WHITENED form.
  *    - CAR / ICAR / GMRF spatial models (L from graph Laplacian)
  *    - Intrinsic GMRF temporal smoothing (L from random-walk penalty)
  *    - Any latent Gaussian model in the Rue-Held 2005 book
@@ -55,6 +58,45 @@
  *  user's wrapper (Tier A) is responsible for refreshing L when
  *  covariance hyperparameters change (via a deterministic refresher in
  *  shared_data).
+ *
+ *  READ THIS BEFORE SAMPLING ANY PARAMETER THAT ENTERS L
+ *  -----------------------------------------------------
+ *  Refreshing L is NOT the whole obligation, and getting only half of it
+ *  produces a chain that looks healthy and is wrong.
+ *
+ *  This block owns p(f | .) for the purpose of moving f: the elliptical
+ *  rotation draws its proposal from the Gaussian prior N(0, L L'), and the
+ *  slice accepts on `log_lik` alone. That is correct FOR f. It means the
+ *  prior density log N(f; 0, L L') appears in NO block's log-density.
+ *
+ *  So if theta is a covariance hyperparameter -- anything L depends on --
+ *  then theta's OWN block must carry that term itself:
+ *
+ *      CENTRED (this block samples f directly, L = chol(K(theta))):
+ *          log p(theta | f, .)  =  log p(theta)
+ *                                  - 0.5 * log|K(theta)|
+ *                                  - 0.5 * f' K(theta)^-1 f
+ *          The last two terms are p(f | theta). Omit them and theta is
+ *          sampled from its PRIOR: the posterior will match the prior in
+ *          BOTH mean and variance, on any dataset, while f, the fit and
+ *          every R-hat look fine.
+ *
+ *      WHITENED (this block samples z with L_chol_key = an IDENTITY L,
+ *      and `log_lik` recovers f = chol(K(theta)) * z):
+ *          log p(theta | z, .)  =  log p(theta) + log p(y | f = L(theta) z)
+ *          Here p(z) is free of theta, so the LIKELIHOOD is what theta's
+ *          block needs -- and it needs the SAME f-recovery the block's
+ *          log_lik does.
+ *
+ *  A hyperparameter block whose log-density reads neither f/z nor y is the
+ *  signature of this defect. An observation-noise parameter is not a
+ *  counter-example: it enters through the likelihood, so its block reads y
+ *  and f and is usually written correctly -- which is exactly why the
+ *  covariance hyperparameters next to it can stay broken unnoticed.
+ *
+ *  Cheapest way to catch it: compare the hyperparameter's posterior mean
+ *  and variance against its analytic PRIOR moments. If they agree, the
+ *  parameter is not seeing the data.
  *
  *  SHARED_DATA CONVENTION FOR L
  *  ----------------------------

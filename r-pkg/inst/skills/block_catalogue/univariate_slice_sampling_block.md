@@ -18,8 +18,11 @@ Three reasons, in order of how often they bite:
   1. **No step size to freeze.** NUTS must keep its step size frozen after
      warmup (Check #20). A scalar block usually sits in a Gibbs sweep
      whose siblings keep moving its conditional, and a frozen step cannot
-     follow that. Measured on a truncated-DP mixture: per-component 1-D
-     NUTS froze 15% of sweeps (rank R-hat 1.0866), this block 0% (1.0018).
+     follow that. Nearest measurement (truncated-DP mixture): a
+     per-component `joint_nuts_block` froze 15% of sweeps (rank R-hat
+     1.0866), the slice-backed `cluster_atom_block` 0% (1.0018) -- a
+     per-component arm rather than a scalar one, so it evidences the
+     frozen-step-size mechanism, not a scalar-vs-scalar benchmark.
   2. **It cannot lock up.** Shrinkage is guaranteed to accept in finite
      iterations, so there is no rejection-stall state (cf. the lock-up at
      `nuts_block.hpp:242`).

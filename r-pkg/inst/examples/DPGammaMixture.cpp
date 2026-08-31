@@ -51,7 +51,7 @@
 //      child(0) z            categorical_gibbs_block   (exact, closed form)
 //      child(1) atoms        cluster_atom_block        (shape, rate) per k
 //      child(2) w            stick_breaking_block      Beta(1 + n_k, alpha + tail)
-//      child(3) alpha        nuts_block on the Antoniak (k, n) marginal
+//      child(3) alpha        univariate_slice_sampling_block on the Antoniak (k, n) marginal
 //
 //  Component labels are exchangeable, so summarise label-INVARIANT functionals
 //  (the fitted density on a grid, the number of occupied components) rather
@@ -113,6 +113,7 @@
 #include "AI4BayesCode/bnp_utils.hpp"
 #include "AI4BayesCode/kernel_control_mixin.hpp"
 #include "AI4BayesCode/nuts_block.hpp"
+#include "AI4BayesCode/univariate_slice_sampling_block.hpp"
 #include "AI4BayesCode/stick_breaking_block.hpp"
 
 using AI4BayesCode::block_context;
@@ -125,6 +126,8 @@ using AI4BayesCode::joint_constraint;
 using AI4BayesCode::joint_nuts_sub_param;
 using AI4BayesCode::nuts_block;
 using AI4BayesCode::nuts_block_config;
+using AI4BayesCode::univariate_slice_sampling_block;
+using AI4BayesCode::univariate_slice_sampling_block_config;
 using AI4BayesCode::stick_breaking_block;
 using AI4BayesCode::stick_breaking_block_config;
 namespace constraints = AI4BayesCode::constraints;
@@ -169,7 +172,7 @@ double atom_log_density(const arma::vec& th, std::size_t k,
 }
 
 /// log p(alpha | k, n), the Antoniak (1974) (k, n) marginal on the NATURAL
-/// scale -- prior-agnostic NUTS update, matching the other DP examples.
+/// scale -- prior-agnostic slice update, matching the other DP examples.
 double alpha_natural_log_density(const arma::vec& alpha_nat,
                                  const block_context& ctx,
                                  arma::vec* grad_nat) {
@@ -214,9 +217,7 @@ public:
           rng_(rng_seed == 0 ? std::random_device{}()
                              : static_cast<std::mt19937_64::result_type>(rng_seed)),
           predict_rng_(rng_seed == 0 ? std::random_device{}()
-                                     : static_cast<std::mt19937_64::result_type>(rng_seed) + 7919u),
-          readapt_rng_(rng_seed == 0 ? std::random_device{}()
-                                     : static_cast<std::mt19937_64::result_type>(rng_seed) + 104729u) {
+                                     : static_cast<std::mt19937_64::result_type>(rng_seed) + 7919u) {
         if (y.n_elem < 2)      ai4b::stop("DPGammaMixture: need at least 2 observations");
         if (!y.is_finite())    ai4b::stop("DPGammaMixture: y must be finite");
         if (y.min() <= 0.0)    ai4b::stop("DPGammaMixture: Gamma data must be strictly positive");
@@ -330,20 +331,19 @@ public:
 
         // ---- child(3) alpha ------------------------------------------------
         {
-            nuts_block_config cfg;
+            univariate_slice_sampling_block_config cfg;
             cfg.name        = "alpha";
             cfg.initial_unc = arma::vec{0.0};
             cfg.constrain   = constraints::positive::constrain;
             cfg.unconstrain = constraints::positive::unconstrain;
-            cfg.log_density_grad =
-                [](const arma::vec& t_unc, const block_context& ctx,
-                   arma::vec* grad) -> double {
-                    return constraints::positive::wrap(t_unc, grad,
+            cfg.log_density =
+                [](const arma::vec& t_unc, const block_context& ctx) -> double {
+                    return constraints::positive::wrap(t_unc, nullptr,
                         [&](const arma::vec& t_nat, arma::vec* g_nat) {
                             return alpha_natural_log_density(t_nat, ctx, g_nat);
                         });
                 };
-            impl_->add_child(std::make_unique<nuts_block>(std::move(cfg)));
+            impl_->add_child(std::make_unique<univariate_slice_sampling_block>(std::move(cfg)));
         }
 
         if (keep_history) impl_->set_keep_history(true);
@@ -370,7 +370,7 @@ public:
 
 private:
     std::unique_ptr<composite_block> impl_;
-    std::mt19937_64 rng_, predict_rng_, readapt_rng_;
+    std::mt19937_64 rng_, predict_rng_;
     std::size_t N_ = 0, K_ = 0;
 };
 
@@ -427,7 +427,6 @@ RCPP_MODULE(DPGammaMixture) {
         .method("get_history", &DPGammaMixture::get_history)
         .method("get_dag",     &DPGammaMixture::get_dag)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(DPGammaMixture)
-        AI4BAYESCODE_BIND_READAPT_NUTS(DPGammaMixture)
         ;
 }
 #endif
@@ -450,7 +449,6 @@ PYBIND11_MODULE(DPGammaMixture, m) {
         .def("get_history", &DPGammaMixture::get_history)
         .def("get_dag",     &DPGammaMixture::get_dag)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(DPGammaMixture)
-        AI4BAYESCODE_PYBIND_READAPT_NUTS(DPGammaMixture)
         ;
 }
 #endif

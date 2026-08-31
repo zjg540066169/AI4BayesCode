@@ -1078,7 +1078,7 @@ Modular (codegen default):
 - `examples/DirichletSimplex.cpp` -- simplex block (Multinomial y_rep)
 - `examples/DirichletSparse.cpp` -- simplex + positive (Multinomial y_rep)
 - `examples/DirichletHierarchical.cpp` -- 3-block hierarchical (Dirichlet y_rep)
-- `examples/BartNoise.cpp` -- Gaussian BART (CRAN BART R package backfitting) + NUTS on sigma (Gaussian y_rep)
+- `examples/BartNoise.cpp` -- Gaussian BART (CRAN BART R package backfitting) + slice on sigma (Gaussian y_rep)
 - `examples/GBartPoisson.cpp` -- genBART Poisson regression via RJMCMC
   (Linero 2022).
 - `examples/GBartLogistic.cpp` -- genBART Bernoulli classification via

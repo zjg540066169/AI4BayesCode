@@ -100,7 +100,6 @@
 #include "AI4BayesCode/block_sampler.hpp"
 #include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
-#include "AI4BayesCode/nuts_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
@@ -119,8 +118,6 @@
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
-using AI4BayesCode::nuts_block;
-using AI4BayesCode::nuts_block_config;
 using AI4BayesCode::bart_block;
 using AI4BayesCode::bart_block_config;
 
@@ -153,10 +150,6 @@ public:
                    ? std::mt19937_64{std::random_device{}()}
                    : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
                                      ^ 0x9E3779B97F4A7C15ULL}),
-          readapt_rng_(rng_seed == 0
-                   ? std::mt19937_64{std::random_device{}()}
-                   : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
-                                     ^ 0xBF58476D1CE4E5B9ULL}),
           impl_(std::make_unique<composite_block>("VCBart")),
           p_(static_cast<int>(X.n_cols)),
           Z_(Z),
@@ -374,24 +367,6 @@ public:
         return h;
     }
 
-    // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
-    // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
-    // C++ default args so both arities are also exposed as separate
-    // bindings below; from C++, this forwarder keeps pre-existing
-    // readapt_NUTS(n, reset, mtd) call sites working.
-    void readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept) {
-        if (n < 0) ai4b::stop("readapt_NUTS: n must be non-negative");
-        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_,
-                                max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth),
-                                target_accept);
-    }
-
-    /// 3-arg backward-compat overload; target_accept defaults to -1.0
-    /// (sentinel = leave the block's target unchanged).
-    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
-        readapt_NUTS(n, reset, max_tree_depth, -1.0);
-    }
-
     // shared_data key helpers (also used by the refresher closures).
     static std::string beta_key(int j) { return "beta_" + std::to_string(j); }
     static std::string wr_key(int j)   { return "wr_"   + std::to_string(j); }
@@ -400,7 +375,6 @@ public:
 private:
     std::mt19937_64 rng_;
     std::mt19937_64 predict_rng_;
-    std::mt19937_64 readapt_rng_;
     std::unique_ptr<composite_block> impl_;
     int  p_;
     arma::mat Z_;
@@ -441,7 +415,6 @@ RCPP_MODULE(VCBart_module) {
                 "X = as.vector(X_new)) (flattened column-major).")
         .method("get_dag",      &VCBart::get_dag,     "Predict DAG as edge list.")
         .method("get_history",  &VCBart::get_history, "History as named matrices.")
-        AI4BAYESCODE_BIND_READAPT_NUTS(VCBart)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(VCBart);
 }
 #endif
@@ -474,10 +447,6 @@ PYBIND11_MODULE(VCBart, m) {
         .def("predict_at",   &VCBart::predict_at, pybind11::arg("new_data"))
         .def("get_dag",      &VCBart::get_dag)
         .def("get_history",  &VCBart::get_history)
-        .def("readapt_NUTS", (void (VCBart::*)(int, bool, int, double)) &VCBart::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false,
-             pybind11::arg("max_tree_depth") = -1,
-             pybind11::arg("target_accept") = -1.0)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(VCBart);
 }
 #endif

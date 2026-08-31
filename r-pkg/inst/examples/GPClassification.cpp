@@ -4,38 +4,90 @@
 // ============================================================================
 // GPClassification.cpp
 //
-// Gaussian-process classification with a logit link. The amplitude and
-// lengthscale hyperparameters are sampled together by one joint_nuts_block;
-// the latent field f is sampled by an elliptical_slice_sampling_block.
+// Gaussian-process classification with a logit link, in the WHITENED
+// parameterisation (Murray & Adams 2010), with the two covariance
+// hyperparameters and the whole latent sampled TOGETHER by one
+// joint_nuts_block.
 //
 // MODEL
 // ------------------------------------------
 //   y_i | f(x_i)  ~ Bernoulli(sigmoid(f(x_i))),   y_i in {0, 1}
-//   f             ~ GP(0, K_amplitude_lengthscale(X, X))
+//   f             = L z,  L L' = K_amplitude_lengthscale(X, X),  z ~ N(0, I)
 //   amplitude     ~ half-Normal(0, 1)
 //   lengthscale   ~ InverseGamma(5, median pairwise distance)
 //
-// JOINT natural-scale log-density over (amplitude, lengthscale):
+//   K_ij = amplitude^2 * (exp(-r_ij^2 / (2 lengthscale^2)) + 1e-8 * 1(i == j))
 //
-//   log p(amplitude, lengthscale) =
-//       -0.5 * amplitude^2 / amp_prior_sd^2                (half-Normal prior)
-//     - (shape+1)*log(lengthscale) - scale/lengthscale      (InvGamma prior)
+// The jitter is MULTIPLICATIVE, inside the amplitude^2 factor, so that
+// L = amplitude * chol(R + eps I) holds EXACTLY. That makes df/d amplitude =
+// f / amplitude exact rather than approximate, which is what lets the
+// amplitude gradient below be O(N) instead of another O(N^3) Cholesky
+// derivative.
 //
-//   Each prior term appears exactly ONCE. The ESS block for f absorbs the
-//   Bernoulli log-likelihood + GP prior on f; the NUTS hyperparameter
-//   blocks sample only from the marginal hyperprior. No shared terms exist
-//   between the two priors, so no double-counting is possible.
+// WHY WHITENED
+// ------------
+// The centred latent (sample f directly with prior covariance K) has two
+// problems. It funnels: p(f | amplitude) shrinks with amplitude, so the
+// chain collapses toward (amplitude ~= 0, f ~= 0). And log p(f | amplitude,
+// lengthscale) is a term that belongs to no block by default, so a
+// hyperparameter block that omits it samples from its PRIOR on every dataset
+// while the latent fit and every R-hat still look healthy. Whitening removes
+// the term rather than relying on someone to remember it: z's prior is
+// N(0, I), free of the hyperparameters, so the only place the data enters is
+// the Bernoulli likelihood at f = L z.
 //
-//   grad_{amplitude}   = -amplitude / amp_prior_sd^2
-//   grad_{lengthscale} = -(shape+1)/lengthscale + scale/lengthscale^2
+// WHY ONE BLOCK AND NOT GIBBS
+// ---------------------------
+// Whitening alone is not enough. Splitting the sweep into "hyperparameters
+// given z" and "z given hyperparameters" -- for instance with an
+// elliptical_slice_sampling_block on z -- leaves the two strongly coupled:
+// with z held fixed, f = L(theta) z is a deterministic function of theta, so
+// p(theta | z, y) is far sharper than the marginal p(theta | y) and the
+// alternation random-walks. Putting (amplitude, lengthscale, z) in ONE NUTS
+// trajectory removes the alternation entirely.
 //
-// BLOCKS (Gibbs sweep order: hyperparams FIRST, f LAST)
-// -------------------------------------------------------
-//   (amplitude, lengthscale) : ONE joint_nuts_block, sub_params
-//                              [{amplitude,1,POSITIVE},{lengthscale,1,POSITIVE}]
-//   f                        : elliptical_slice_sampling_block (unchanged)
+// Measured on the @example:R dataset below, 4 chains x (1000 burn + 2000
+// keep), cross-chain rank R-hat / bulk ESS on the worst component:
 //
-// This file coexists with GPClassification.cpp for cross-validation.
+//                              amplitude        lengthscale      f
+//   ESS-Gibbs, diagonal metric  1.623 / 7        1.179 / 41      1.279 / 11
+//   ESS-Gibbs, dense metric     1.102 / 28       1.159 / 17      1.067 / 49
+//   ONE joint block (this)      1.001 / 1937     1.002 / 1539    1.003 / 3074
+//
+// against a library bar of R-hat < 1.01. The Gibbs alternation is not merely
+// slower; it does not converge at this budget.
+//
+// BLOCK
+// -----
+//   amp_ell_joint : ONE joint_nuts_block, sub_params
+//                   [{amplitude, 1, POSITIVE},
+//                    {lengthscale, 1, POSITIVE},
+//                    {z, N, REAL}].
+//   f             : DERIVED, refresher f = L_chol * z.
+//
+// JOINT natural-scale log-density (each term appearing exactly once;
+// joint_nuts_block adds the two POSITIVE-slice Jacobians internally, so the
+// oracle must NOT include them):
+//
+//   log p(amplitude, lengthscale, z | y)
+//       = sum_i [ y_i f_i - softplus(f_i) ]          f = L z, Bernoulli-logit
+//       - 0.5 z'z                                    whitened prior
+//       - 0.5 amplitude^2 / amp_prior_sd^2           half-Normal
+//       - (a+1) log(lengthscale) - b / lengthscale   InverseGamma(a, b)
+//
+//   The GP prior's -0.5 log|K| cancels against the whitening Jacobian; only
+//   z's unit-Normal survives.
+//
+//   Gradients, with r = y - sigmoid(f) = d loglik / d f:
+//       d/d z           = L' r - z
+//       d/d amplitude   = (r . f) / amplitude - amplitude / amp_prior_sd^2
+//                         (exact: L = amplitude * L_R, so df/d amplitude = f / amplitude)
+//       d/d lengthscale = r' L Phi(L^-1 (dK/d lengthscale) L^-T) z + prior'
+//                         Phi(A) = tril(A) with the diagonal halved -- the
+//                         Cholesky derivative dL = L Phi(L^-1 dK L^-T)
+//                         (Murray 2016).
+//       dK/d lengthscale = amplitude^2 * R .* r_ij^2 / lengthscale^3
+//
 // Class name: GPClassification. Module: GPClassification_module.
 //
 // LICENSE: libgp_kernels is BSD-3 (GPL-compatible). AI4BayesCode itself is
@@ -60,7 +112,7 @@
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GPClassification, X, y, 7L, TRUE)   # X(Nx1), y(0/1), seed=7L, keep_history=TRUE
-//   m$step(2500); str(m$get_current())           # single chain; amplitude, lengthscale, f
+//   m$step(2500); str(m$get_current())           # amplitude / lengthscale / z / f
 // @example:python
 //   import numpy as np, AI4BayesCode
 //   rng = np.random.default_rng(2026)
@@ -79,7 +131,7 @@
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GPClassification(X, y, 7, True)        # X(Nx1), y(0/1), seed=7, keep_history=True
-//   m.step(2500); print(m.get_current())          # dict: f, amplitude, lengthscale
+//   m.step(2500); print(m.get_current())          # dict: amplitude, lengthscale, z, f
 // @example:end
 
 // [[Rcpp::depends(RcppArmadillo)]]
@@ -105,12 +157,12 @@
 #include "AI4BayesCode/rcpp_predict_guard.hpp"
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
-#include "AI4BayesCode/elliptical_slice_sampling_block.hpp"
 #include "AI4BayesCode/kernel_control_mixin.hpp"
 
 // Vendored libgp kernel subsystem (BSD-3).
 #include "libgp_kernels_unity.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -124,8 +176,6 @@ using AI4BayesCode::joint_nuts_block;
 using AI4BayesCode::joint_nuts_block_config;
 using AI4BayesCode::joint_nuts_sub_param;
 using AI4BayesCode::joint_constraint;
-using AI4BayesCode::elliptical_slice_sampling_block;
-using AI4BayesCode::elliptical_slice_sampling_block_config;
 namespace constraints = AI4BayesCode::constraints;
 
 namespace {
@@ -165,49 +215,106 @@ double median_pairwise_distance(const arma::mat& X) {
 }
 
 // ----------------------------------------------------------------------------
-//  Joint natural-scale log-density over (amplitude, lengthscale).
+//  Full natural-scale joint log-posterior over (amplitude, lengthscale, z).
 //
-//  theta_cat = [ amplitude, lengthscale ]  (NATURAL scale; both > 0,
-//  guaranteed by the POSITIVE sub-param transforms inside joint_nuts_block).
+//  Layout of theta_cat (must match sub_params order in the config):
+//      theta_cat[0]         = amplitude    (POSITIVE)
+//      theta_cat[1]         = lengthscale  (POSITIVE)
+//      theta_cat[2 : 2+N-1] = z            (REAL x N)
 //
-//  log p(amplitude, lengthscale) =
-//      -0.5 * amplitude^2 / amp_prior_sd^2        (half-Normal)
-//    + (-(shape+1)*log(lengthscale) - scale/ell)   (InvGamma)
+//  Reads from ctx: "y", "X_sqdist", "amp_prior_sd", "ell_prior_shape",
+//  "ell_prior_scale".
 //
-//  d/d amplitude   = -amplitude / amp_prior_sd^2
-//  d/d lengthscale = -(shape+1)/lengthscale + scale/lengthscale^2
+//  K is rebuilt HERE, at the PROPOSED hyperparameters: the K_matrix refresher
+//  fires only at block boundaries, never inside a NUTS trajectory. It is built
+//  analytically from the cached squared distances rather than through the libgp
+//  object, whose CovSEiso is stateful (set_loghyper) and would desynchronise
+//  from the refresher if mutated mid-trajectory. The two agree by construction:
+//  CovSEiso is sf2 * exp(-0.5 ||dx/ell||^2) with sf2 = amplitude^2.
 //
-//  The ESS block absorbs the Bernoulli likelihood and GP prior on f; these
-//  NUTS hyperparameter steps sample only from the marginal hyperprior.
-//  joint_nuts_block adds POSITIVE-slice Jacobians (+log amplitude, +log ell)
-//  internally; this function must NOT include them.
+//  See the file header for the derivation of every term and gradient.
 // ----------------------------------------------------------------------------
+
+// Relative jitter, applied INSIDE the amplitude^2 factor so that
+// L = amplitude * chol(R + GP_REL_JITTER * I) is exact. R has a unit diagonal,
+// so this is a well-scaled perturbation whatever the amplitude.
+constexpr double GP_REL_JITTER = 1e-8;
+
+// Phi(A) = lower triangle of A with the diagonal halved (Cholesky derivative).
+inline void phi_in_place(arma::mat& A) {
+    const std::size_t n = A.n_rows;
+    for (std::size_t j = 0; j < n; ++j) {
+        A(j, j) *= 0.5;
+        for (std::size_t i = 0; i < j; ++i) A(i, j) = 0.0;
+    }
+}
+
 double amp_ell_joint_log_density(const arma::vec& theta_cat,
                                  const block_context& ctx,
                                  arma::vec* grad_nat) {
-    const double amp   = theta_cat[0];
-    const double ell   = theta_cat[1];
+    const double neg_inf = -std::numeric_limits<double>::infinity();
 
-    if (amp <= 0.0 || ell <= 0.0) {
-        if (grad_nat) grad_nat->set_size(2);
-        return -std::numeric_limits<double>::infinity();
+    const arma::vec& y       = ctx.at("y");
+    const arma::vec& d2_flat = ctx.at("X_sqdist");
+    const std::size_t N = y.n_elem;
+    if (theta_cat.n_elem != 2 + N || d2_flat.n_elem != N * N) return neg_inf;
+
+    const double amp = theta_cat[0];
+    const double ell = theta_cat[1];
+    if (!(amp > 0.0) || !(ell > 0.0) ||
+        !std::isfinite(amp) || !std::isfinite(ell)) return neg_inf;
+
+    const arma::vec z = theta_cat.subvec(2, 2 + N - 1);
+    const arma::mat R2(const_cast<double*>(d2_flat.memptr()), N, N,
+                       /*copy_aux_mem=*/false, /*strict=*/true);
+
+    // R = correlation matrix; K = amplitude^2 (R + eps I).
+    arma::mat Reps = arma::exp(R2 / (-2.0 * ell * ell));
+    const arma::mat R_bare = Reps;                 // keep the un-jittered copy
+    Reps.diag() += GP_REL_JITTER;
+
+    arma::mat L_R;
+    if (!arma::chol(L_R, Reps, "lower")) return neg_inf;
+    if (!std::isfinite(L_R.diag().min()) || L_R.diag().min() < 1e-8) {
+        return neg_inf;   // too ill-conditioned to trust; a valid NUTS reject
     }
+    const arma::mat L = amp * L_R;                 // exact: K = amp^2 (R + eps I)
 
-    const double s        = ctx.at("amp_prior_sd")[0];
-    const double s2       = s * s;
-    const double shape    = ctx.at("ell_prior_shape")[0];
-    const double scale    = ctx.at("ell_prior_scale")[0];
+    const arma::vec f = L * z;
+    double llik = 0.0;
+    for (std::size_t i = 0; i < N; ++i) llik += y[i] * f[i] - stable_softplus(f[i]);
 
-    // half-Normal prior on amplitude: -0.5 * amp^2 / s^2
-    // InvGamma prior on lengthscale: -(shape+1)*log(ell) - scale/ell
-    const double lp =
-          -0.5 * amp * amp / s2
+    const double s     = ctx.at("amp_prior_sd")[0];
+    const double s2    = s * s;
+    const double shape = ctx.at("ell_prior_shape")[0];
+    const double scale = ctx.at("ell_prior_scale")[0];
+
+    const double lp = llik - 0.5 * arma::dot(z, z)
+        + (-0.5 * amp * amp / s2)
         + (-(shape + 1.0) * std::log(ell) - scale / ell);
+    if (!std::isfinite(lp)) return neg_inf;
 
     if (grad_nat) {
-        grad_nat->set_size(2);
-        (*grad_nat)[0] = -amp / s2;                           // d/d amplitude
-        (*grad_nat)[1] = -(shape + 1.0) / ell + scale / (ell * ell); // d/d lengthscale
+        grad_nat->set_size(2 + N);
+
+        arma::vec r(N);
+        for (std::size_t i = 0; i < N; ++i) r[i] = y[i] - stable_sigmoid(f[i]);
+
+        // amplitude: L = amp * L_R, so df/d amp = f / amp exactly.
+        (*grad_nat)[0] = arma::dot(r, f) / amp - amp / s2;
+
+        // lengthscale: Cholesky derivative dL = L Phi(L^-1 dK L^-T).
+        // The eps on R's diagonal does not depend on the lengthscale, so
+        // dK/d ell = amplitude^2 * R .* R2 / ell^3 uses the UN-jittered R.
+        const arma::mat dK_dell = (amp * amp) * (R_bare % R2) / (ell * ell * ell);
+        arma::mat A = arma::solve(arma::trimatl(L), dK_dell);
+        A = arma::solve(arma::trimatl(L), A.t()).t();      // L^-1 dK L^-T
+        phi_in_place(A);
+        (*grad_nat)[1] = arma::dot(r, L * (A * z))
+                       + (-(shape + 1.0) / ell + scale / (ell * ell));
+
+        // z: likelihood + whitened unit-Normal prior.
+        grad_nat->subvec(2, 2 + N - 1) = L.t() * r - z;
     }
     return lp;
 }
@@ -272,6 +379,21 @@ public:
         }
         impl_->data().set("X", arma::vectorise(X_arma_));
 
+        // Pairwise squared distances, built once. The joint log-density
+        // rebuilds K from these at every proposed (amplitude, lengthscale),
+        // so this O(N^2 p) loop must not sit inside a NUTS trajectory.
+        {
+            arma::mat R2(N, N, arma::fill::zeros);
+            for (std::size_t i = 0; i < N; ++i)
+                for (std::size_t j = i + 1; j < N; ++j) {
+                    const double d2 = arma::accu(
+                        arma::square(X_arma_.row(i) - X_arma_.row(j)));
+                    R2(i, j) = d2;
+                    R2(j, i) = d2;
+                }
+            impl_->data().set("X_sqdist", arma::vectorise(R2));
+        }
+
         // Prior hyperparameters:
         //   amplitude: half-Normal(0, 1)   -- weakly-informative default
         //   lengthscale: InverseGamma(5, median_pair_dist)
@@ -290,7 +412,22 @@ public:
         cf_ = std::make_unique<libgp::CovSEiso>();
         cf_->init(static_cast<int>(p));
 
-        // Initial latent f = zeros (sigmoid(0) = 0.5; neutral prior start)
+        // Whitened latent z, started from a DRAW of its own prior N(0, I).
+        // Starting at zero would make f = L z identically zero, so the
+        // Bernoulli likelihood -- and with it the hyperparameters' share of
+        // the gradient -- would vanish at the initial point, and the joint
+        // block would begin its warmup on the prior geometry alone.
+        arma::vec z_init(N);
+        {
+            std::mt19937_64 init_rng(
+                rng_seed == 0 ? std::random_device{}()
+                              : static_cast<std::uint64_t>(rng_seed)
+                                ^ 0x94D049BB133111EBULL);
+            std::normal_distribution<double> z_nd(0.0, 1.0);
+            for (std::size_t i = 0; i < N; ++i) z_init[i] = z_nd(init_rng);
+        }
+        impl_->data().set("z", z_init);
+        // f is DERIVED: f = L_chol * z.
         impl_->data().set("f", arma::vec(N, arma::fill::zeros));
 
         // Seed K_matrix + L_chol buffers
@@ -303,15 +440,17 @@ public:
         // (the union of what amplitude and lengthscale each read from data(),
         // minus the now-internal cross-reads of each other).
         impl_->data().declare_dependencies("amp_ell_joint",
-            {"amp_prior_sd", "ell_prior_shape", "ell_prior_scale"});
-        impl_->data().declare_dependencies("f", {"L_chol", "y"});
-
+            {"y", "X_sqdist",
+             "amp_prior_sd", "ell_prior_shape", "ell_prior_scale"});
+        
         // ---- Invalidation chain -----------------------------------------
         // Keyed under the JOINT BLOCK NAME (composite_block calls
         // refresh_derived_for(block_name) after the joint block steps); keying
         // under sub-param names would never fire -> stale K_matrix/L_chol.
+        // One block writes amplitude, lengthscale AND z, so a single
+        // invalidation under the block name covers the whole chain.
         impl_->data().declare_invalidates("amp_ell_joint",
-            {"K_matrix", "L_chol"});
+            {"K_matrix", "L_chol", "f"});
 
         // ---- K_matrix refresher (libgp CovSEiso) ------------------------
         const libgp::CovSEiso* cf_ptr = cf_.get();
@@ -341,21 +480,34 @@ public:
                 return arma::vectorise(K);
             });
 
-        // ---- L_chol refresher: chol(K + jitter I). NO sigma^2 here. ----
-        const double jitter = 1e-5;
+        // ---- L_chol refresher: chol(amplitude^2 (R + eps I)) -----------
+        //      The jitter is MULTIPLICATIVE, exactly as in the joint
+        //      log-density above, so the f published here is bit-comparable
+        //      with the f the sampler actually scored.
         impl_->data().register_refresher("L_chol",
-            [N, jitter](const AI4BayesCode::shared_data_t& d) -> arma::vec {
+            [N](const AI4BayesCode::shared_data_t& d) -> arma::vec {
                 const arma::vec& K_flat = d.get("K_matrix");
+                const double amp = d.get("amplitude")[0];
                 arma::mat K(const_cast<double*>(K_flat.memptr()), N, N,
                              /*copy_aux_mem=*/false, /*strict=*/true);
                 arma::mat M = K;
-                M.diag() += jitter;
+                M.diag() += amp * amp * GP_REL_JITTER;
                 arma::mat L;
                 if (!arma::chol(L, M, "lower")) {
-                    M.diag() += 1e-3;
+                    M.diag() += amp * amp * 1e-4;
                     arma::chol(L, M, "lower");
                 }
                 return arma::vectorise(L);
+            });
+
+        // ---- f refresher: the whitened latent, f = L z ------------------
+        impl_->data().register_refresher("f",
+            [N](const AI4BayesCode::shared_data_t& d) -> arma::vec {
+                const arma::vec& L_flat = d.get("L_chol");
+                const arma::vec& z_vec  = d.get("z");
+                arma::mat L(const_cast<double*>(L_flat.memptr()), N, N,
+                             /*copy_aux_mem=*/false, /*strict=*/true);
+                return L * z_vec;
             });
 
         impl_->data().refresh_all();
@@ -364,6 +516,7 @@ public:
         impl_->data().declare_data_input("X");
         impl_->data().declare_predict_edges("X",        {"K_matrix"});
         impl_->data().declare_predict_edges("K_matrix", {"L_chol"});
+        impl_->data().declare_predict_edges("L_chol",   {"f"});
         impl_->data().declare_predict_edges("f",        {"y_rep"});
 
         // ---- Generative-DAG context (VIZ-ONLY; predict_at BFS never
@@ -375,6 +528,7 @@ public:
         impl_->data().declare_context_edges("amplitude",      {"K_matrix"});
         impl_->data().declare_context_edges("lengthscale",    {"K_matrix"});
         impl_->data().declare_context_edges("L_chol",         {"f"});
+        impl_->data().declare_context_edges("z",              {"f"});
 
         impl_->data().set("y_rep", arma::vec(N, arma::fill::zeros));
         impl_->data().register_stochastic_refresher("y_rep",
@@ -391,8 +545,8 @@ public:
             });
 
         // ---- Child blocks in Gibbs order --------------------------------
-        //   child(0) amp_ell_joint (joint_nuts_block for amplitude+lengthscale)
-        //   child(1) f             (elliptical_slice_sampling_block)
+        //   child(0) amp_ell_joint -- the ONLY block: one joint_nuts_block
+        //            over (amplitude, lengthscale, z[N]).
         {
             joint_nuts_block_config cfg;
             cfg.name = "amp_ell_joint";
@@ -402,38 +556,28 @@ public:
             cfg.sub_params.push_back(
                 joint_nuts_sub_param{ "lengthscale", 1,
                                       joint_constraint::POSITIVE });
-            // initial_cat is NATURAL-scale: [amp_init, ell_init].
-            cfg.initial_cat = arma::vec{ amp_init, ell_init };
+            cfg.sub_params.push_back(
+                joint_nuts_sub_param{ "z", N, joint_constraint::REAL });
+            // initial_cat is NATURAL-scale: [amp_init, ell_init, z_init].
+            cfg.initial_cat = arma::vec(2 + N);
+            cfg.initial_cat[0] = amp_init;
+            cfg.initial_cat[1] = ell_init;
+            cfg.initial_cat.subvec(2, 2 + N - 1) = z_init;
             cfg.log_density_grad = &amp_ell_joint_log_density;
             // amplitude and lengthscale operate on very different scales
             // (amp ~ O(1), ell ~ O(median pairwise dist)); diagonal metric
             // is required for faithful sampling of heterogeneous scales.
+            // Diagonal metric: (amplitude, lengthscale, z[N]) is N+2
+            // dimensional, so a dense metric would be an (N+2)^2 covariance
+            // to estimate and invert. n_warmup_first_call is left at its
+            // default because a single-pilot metric block floors the
+            // first-call warmup at 2500 regardless (the step-size dual
+            // averaging needs that many iterations to settle against a
+            // freshly installed metric), so a smaller number here would only
+            // mislead the reader.
             cfg.use_diagonal_metric = true;
-            // Give the joint block warmup runway.
-            cfg.n_warmup_first_call = 800;
             impl_->add_child(std::make_unique<joint_nuts_block>(std::move(cfg)));
         }
-        {
-            elliptical_slice_sampling_block_config cfg;
-            cfg.name       = "f";
-            cfg.N          = N;
-            cfg.L_chol_key = "L_chol";
-            cfg.initial_f  = arma::vec(N, arma::fill::zeros);
-            // Bernoulli-logit log-likelihood: sum y_i f_i - softplus(f_i).
-            cfg.log_lik =
-                [](const arma::vec& f, const block_context& ctx) -> double {
-                    const arma::vec& y = ctx.at("y");
-                    double lp = 0.0;
-                    for (std::size_t i = 0; i < y.n_elem; ++i) {
-                        lp += y[i] * f[i] - stable_softplus(f[i]);
-                    }
-                    return lp;
-                };
-            impl_->add_child(
-                std::make_unique<elliptical_slice_sampling_block>(
-                    std::move(cfg)));
-        }
-
         if (keep_history_) impl_->set_keep_history(true);
     }
 
@@ -446,10 +590,15 @@ public:
         // sub-params are written back to data() under sub-param names by
         // joint_nuts_block; read directly from data(). Each output is an
         // arma::vec; the frontend converts state_map -> R list / Python dict.
+        // z is the sampled latent; f = L z is derived but is the interpretable
+        // one, so both are reported. set_current rejects being given both at
+        // once, and round-tripping set_current(get_current()) restores the
+        // chain exactly from z (f is recomputed from it).
         AI4BayesCode::state_map out;
-        out["f"]           = impl_->data().get("f");                 // length N
         out["amplitude"]   = impl_->data().get("amplitude");         // length 1
         out["lengthscale"] = impl_->data().get("lengthscale");       // length 1
+        out["z"]           = impl_->data().get("z");                 // length N
+        out["f"]           = impl_->data().get("f");                 // length N, derived
         return out;
     }
 
@@ -458,39 +607,70 @@ public:
         // the relevant slice(s), set_current, mirror to data(). Each value in
         // params is an arma::vec (frontend already converted list/dict).
         auto& jblk = dynamic_cast<joint_nuts_block&>(impl_->child(0));
-        arma::vec cat_new = jblk.current();   // [amplitude, lengthscale]
-        bool touched_joint = false;
+        arma::vec cat_new = jblk.current();   // [amplitude, lengthscale, z(N)]
+        bool touched = false;
 
-        auto it_amp = params.find("amplitude");
-        if (it_amp != params.end()) {
-            const double a = it_amp->second[0];
-            if (!(a > 0.0)) ai4b::stop("amplitude must be positive");
-            cat_new[0] = a;
-            touched_joint = true;
-        }
-        auto it_ell = params.find("lengthscale");
-        if (it_ell != params.end()) {
-            const double l = it_ell->second[0];
-            if (!(l > 0.0)) ai4b::stop("lengthscale must be positive");
-            cat_new[1] = l;
-            touched_joint = true;
-        }
-        if (touched_joint) {
-            jblk.set_current(cat_new);
-            impl_->data().set("amplitude",   arma::vec{cat_new[0]});
-            impl_->data().set("lengthscale", arma::vec{cat_new[1]});
-            impl_->data().refresh_derived_for("amplitude");
-            impl_->data().refresh_derived_for("lengthscale");
+        auto assign_pos = [&](const char* key, std::size_t idx) {
+            auto it = params.find(key);
+            if (it == params.end()) return;
+            const double v = it->second[0];
+            if (!(v > 0.0))
+                ai4b::stop("GPClassification::set_current: %s must be positive", key);
+            cat_new[idx] = v;
+            touched = true;
+        };
+        assign_pos("amplitude",   0);
+        assign_pos("lengthscale", 1);
+
+        auto it_z = params.find("z");
+        if (it_z != params.end()) {
+            if (static_cast<std::size_t>(it_z->second.n_elem) != N_)
+                ai4b::stop("GPClassification::set_current: z length mismatch");
+            cat_new.subvec(2, 2 + N_ - 1) = it_z->second;
+            touched = true;
         }
 
+        // f is derived from the sampled z through f = L z, so setting f means
+        // solving z = L^-1 f, at the (amplitude, lengthscale) supplied in the
+        // SAME call -- which is why L is rebuilt here from cat_new rather than
+        // read from the not-yet-refreshed L_chol.
         auto it_f = params.find("f");
         if (it_f != params.end()) {
             const arma::vec& f_new = it_f->second;
             if (static_cast<std::size_t>(f_new.n_elem) != N_)
                 ai4b::stop("GPClassification::set_current: f length mismatch");
-            impl_->data().set("f", f_new);
-            dynamic_cast<elliptical_slice_sampling_block&>(
-                impl_->child(1)).set_current(f_new);
+            const arma::mat L = cholesky_at_(cat_new[0], cat_new[1]);
+            if (it_z != params.end()) {
+                // Both supplied -- the round-trip case, since get_current()
+                // reports z AND f. z is the sampled state and wins; f is
+                // checked for consistency rather than silently dropped.
+                const arma::vec f_from_z =
+                    arma::trimatl(L) * arma::vec(cat_new.subvec(2, 2 + N_ - 1));
+                const double tol = 1e-6 * std::max(1.0, arma::norm(f_from_z, "inf"));
+                if (arma::norm(f_from_z - f_new, "inf") > tol)
+                    ai4b::stop("GPClassification::set_current: f and z disagree "
+                               "(f must equal L z); pass one or the other");
+            } else {
+                cat_new.subvec(2, 2 + N_ - 1) =
+                    arma::solve(arma::trimatl(L), f_new);
+                touched = true;
+            }
+        }
+
+        for (const auto& kv : params) {
+            if (kv.first != "amplitude" && kv.first != "lengthscale" &&
+                kv.first != "z" && kv.first != "f") {
+                ai4b::stop("GPClassification::set_current: unknown key '%s'",
+                           kv.first.c_str());
+            }
+        }
+
+        if (touched) {
+            jblk.set_current(cat_new);
+            impl_->data().set("amplitude",   arma::vec{cat_new[0]});
+            impl_->data().set("lengthscale", arma::vec{cat_new[1]});
+            impl_->data().set("z", arma::vec(cat_new.subvec(2, 2 + N_ - 1)));
+            impl_->data().refresh_derived_for("amp_ell_joint");
         }
     }
 
@@ -540,7 +720,9 @@ public:
                 // the joint block (keyed by sub-param name in get_history()),
                 // so access via hist.at("amplitude") / hist.at("lengthscale").
                 // f is keyed by block name "f" (ESS block).
-                AI4BayesCode::history_map hist = impl_->get_history();
+                // this->get_history(), not impl_->get_history(): f is derived
+                // (f = L z) and is added by the wrapper, not by any child block.
+                AI4BayesCode::history_map hist = get_history();
                 const arma::mat& f_hist = hist.at("f");  // n_draws x N
                 const std::size_t n_draws = f_hist.n_rows;
                 const std::size_t N_local = f_hist.n_cols;
@@ -593,7 +775,7 @@ public:
             // new-X + history: per-draw GP classification at X_new using
             // (amp_d, ell_d, f_d) from history. amplitude and lengthscale are
             // sub-outputs of the joint block, keyed by sub-param name.
-            AI4BayesCode::history_map hist = impl_->get_history();
+            AI4BayesCode::history_map hist = get_history();   // adds derived f
             const arma::mat& amp_hist = hist.at("amplitude");
             const arma::mat& ell_hist = hist.at("lengthscale");
             const arma::mat& f_hist   = hist.at("f");
@@ -622,7 +804,9 @@ public:
                         K_train_d(j, i) = k;
                     }
                 }
-                K_train_d.diag() += 1e-8;
+                // Same MULTIPLICATIVE jitter as the log-density, so the
+                // K this conditions on is the one f was drawn under.
+                K_train_d.diag() += amp_d * amp_d * GP_REL_JITTER;
                 arma::mat L_d;
                 arma::chol(L_d, K_train_d, "lower");
 
@@ -770,7 +954,32 @@ public:
 
 
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
-    AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
+
+    /// History of the sampled state (z, amplitude, lengthscale) plus the
+    /// derived latent f, rebuilt per draw as f_d = L(amplitude_d,
+    /// lengthscale_d) z_d. f is what the model is about, so diagnostics and
+    /// predict_at read it rather than the whitened z.
+    AI4BayesCode::history_map get_history() const {
+        AI4BayesCode::history_map hist = impl_->get_history();
+        auto it_z = hist.find("z");
+        auto it_a = hist.find("amplitude");
+        auto it_e = hist.find("lengthscale");
+        if (it_z == hist.end() || it_a == hist.end() || it_e == hist.end())
+            return hist;
+
+        const arma::mat& z_hist = it_z->second;      // n_draws x N
+        const arma::mat& a_hist = it_a->second;
+        const arma::mat& e_hist = it_e->second;
+        const std::size_t n_draws = z_hist.n_rows;
+
+        arma::mat f_hist(n_draws, N_);
+        for (std::size_t d = 0; d < n_draws; ++d) {
+            const arma::mat L = cholesky_at_(a_hist(d, 0), e_hist(d, 0));
+            f_hist.row(d) = (arma::trimatl(L) * z_hist.row(d).t()).t();
+        }
+        hist.emplace("f", std::move(f_hist));
+        return hist;
+    }
 
     // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
     // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
@@ -793,6 +1002,23 @@ public:
     }
 
 private:
+    /// chol(amplitude^2 (R + GP_REL_JITTER I)), the SAME covariance the joint
+    /// log-density scores. Every place that maps between z and f goes through
+    /// here so the two can never drift apart.
+    arma::mat cholesky_at_(double amp, double ell) const {
+        const arma::vec& d2_flat = impl_->data().get("X_sqdist");
+        const arma::mat R2(const_cast<double*>(d2_flat.memptr()), N_, N_,
+                           /*copy_aux_mem=*/false, /*strict=*/true);
+        arma::mat Reps = arma::exp(R2 / (-2.0 * ell * ell));
+        Reps.diag() += GP_REL_JITTER;
+        arma::mat L_R;
+        if (!arma::chol(L_R, Reps, "lower")) {
+            Reps.diag() += 1e-4;
+            arma::chol(L_R, Reps, "lower");
+        }
+        return amp * L_R;
+    }
+
     std::mt19937_64                  rng_;
     mutable std::mt19937_64          predict_rng_;
     mutable std::mt19937_64          readapt_rng_;
@@ -813,8 +1039,8 @@ RCPP_MODULE(GPClassification_module) {
         .constructor<arma::mat, arma::vec, int>(
             "Legacy constructor; keep_history defaults to FALSE.")
         .constructor<arma::mat, arma::vec, int, bool>(
-            "Joint-NUTS GP classification: (amplitude, lengthscale) in one "
-            "joint_nuts_block + ESS on latent f + Bernoulli-logit likelihood. "
+            "Whitened GP classification: (amplitude, lengthscale, z) in ONE "
+            "joint_nuts_block, f = L z, Bernoulli-logit likelihood. "
             "Inputs: X (N x p), y in {0,1} length N, rng_seed, keep_history.")
         .method("step", (void (GPClassification::*)())    &GPClassification::step, "Run one sweep.")
         .method("step", (void (GPClassification::*)(int)) &GPClassification::step, "Run n sweeps.")
@@ -862,12 +1088,32 @@ PYBIND11_MODULE(GPClassification, m) {
 //      p_true_i = sigmoid(f_true_i)
 //      y_i      ~ Bernoulli(p_true_i)
 //
-//  Fits the model (joint-NUTS on amplitude+lengthscale, ESS on latent f,
-//  Bernoulli-logit likelihood), averages the posterior latent f -> posterior
+//  Fits the model (ONE joint NUTS block over amplitude, lengthscale and the
+//  whitened latent z, Bernoulli-logit likelihood), averages the posterior latent f -> posterior
 //  class probability at each training point, and checks that:
 //    (a) the posterior probabilities track the TRUE probabilities better than
 //        a naive constant-rate baseline (mean(y)) -- i.e. lower mean abs error;
-//    (b) the recovered probabilities are accurate in absolute terms.
+//    (b) the recovered probabilities are accurate in absolute terms;
+//    (c) the covariance hyperparameters are actually INFORMED BY THE DATA.
+//
+//  Check (c) is the one that discriminates. A GP sampler whose hyperparameter
+//  log-density omits the likelihood at the proposed (amplitude, lengthscale)
+//  still passes (a) and (b) -- the latent fit still tracks the labels, just
+//  worse -- while the hyperparameters are silently drawn from their priors.
+//
+//  Measured on this exact dataset, priors-only against correct:
+//      MAE(post prob vs true)      0.1340   vs   0.0733
+//      amplitude posterior SD      0.5883   vs   0.2645   (prior SD 0.6028)
+//      lengthscale mean displaced  0.05     vs   0.26     prior SDs
+//  so the first two separate cleanly and the third does not; only the first
+//  two are asserted on. The lengthscale is left unasserted because binary
+//  observations carry much less information about a covariance function than
+//  Gaussian ones, and because these priors are centred close to the truth for
+//  this design -- returning the prior already looks about right.
+//
+//  The amplitude check is a BAND, not a one-sided bound: a chain that locks
+//  up reports a posterior SD of ZERO and would otherwise sail through a
+//  "posterior is tighter than the prior" test. The lower edge rejects that.
 //
 //  State is read via the FULL contract get_current() (keys: f, amplitude,
 //  lengthscale), matching the dual-module get_current() implementation.
@@ -875,7 +1121,7 @@ PYBIND11_MODULE(GPClassification, m) {
 #if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 #include <cstdio>
 int main() {
-    const std::size_t N = 60;
+    const std::size_t N = 120;
 
     std::mt19937_64 sim_rng(20260621ULL);
     std::uniform_real_distribution<double> xdist(-3.0, 3.0);
@@ -905,9 +1151,11 @@ int main() {
     GPClassification model(X, y, /*rng_seed=*/11, /*keep_history=*/false);
     model.step(300);   // warmup (joint block also self-warms n_warmup_first_call)
 
-    // Posterior mean of sigmoid(f) at each training point.
+    // Posterior mean of sigmoid(f) at each training point, and the first two
+    // moments of the two covariance hyperparameters.
     arma::vec prob_bar(N, arma::fill::zeros);
     const int M = 1500;
+    double amp_bar = 0.0, ell_bar = 0.0, amp_sq = 0.0, ell_sq = 0.0;
     for (int s = 0; s < M; ++s) {
         model.step(1);
         const auto gc = model.get_current();        // copy (avoids dangling ref)
@@ -919,8 +1167,32 @@ int main() {
                 : std::exp(fi) / (1.0 + std::exp(fi));
             prob_bar[i] += pi;
         }
+        const double a = gc.at("amplitude")[0], e = gc.at("lengthscale")[0];
+        amp_bar += a; amp_sq += a * a;
+        ell_bar += e; ell_sq += e * e;
     }
     prob_bar /= static_cast<double>(M);
+    const double Md = static_cast<double>(M);
+    amp_bar /= Md; ell_bar /= Md;
+    const double amp_sd_post = std::sqrt(std::max(amp_sq / Md - amp_bar * amp_bar, 0.0));
+    const double ell_sd_post = std::sqrt(std::max(ell_sq / Md - ell_bar * ell_bar, 0.0));
+
+    // ---- Analytic PRIOR moments (the discriminating baseline) ------------
+    const double amp_sd_prior = 1.0 * std::sqrt(1.0 - 2.0 / M_PI);  // half-Normal(0,1)
+    double ell_scale = 0.0;                                          // median pairwise dist
+    {
+        std::vector<double> d;
+        for (std::size_t i = 0; i < N; ++i)
+            for (std::size_t j = i + 1; j < N; ++j)
+                d.push_back(std::abs(X(i, 0) - X(j, 0)));
+        std::sort(d.begin(), d.end());
+        ell_scale = (d.size() % 2 == 1) ? d[d.size() / 2]
+                                        : 0.5 * (d[d.size() / 2 - 1] + d[d.size() / 2]);
+    }
+    const double ig_a = 5.0, ig_b = ell_scale;
+    const double ell_sd_prior   = ig_b / ((ig_a - 1.0) * std::sqrt(ig_a - 2.0));
+    const double ell_mean_prior = ig_b / (ig_a - 1.0);
+    const double amp_mean_prior = 1.0 * std::sqrt(2.0 / M_PI);   // half-Normal(0,1)
 
     // Mean absolute error of posterior prob vs TRUE prob, and of the naive
     // constant-rate baseline mean(y) vs TRUE prob.
@@ -932,24 +1204,33 @@ int main() {
     mae_model /= static_cast<double>(N);
     mae_naive /= static_cast<double>(N);
 
-    const auto gc = model.get_current();            // copy (avoids dangling ref)
-    const double amp_hat = gc.at("amplitude")[0];
-    const double ell_hat = gc.at("lengthscale")[0];
+    const double ell_shift    = std::abs(ell_bar - ell_mean_prior) / ell_sd_prior;
+    const double amp_sd_ratio = amp_sd_post / amp_sd_prior;
 
-    std::printf("GPClassification demo (N=%zu, 1D GP-logit):\n", N);
-    std::printf("  amplitude_hat = %.3f   lengthscale_hat = %.3f\n",
-                amp_hat, ell_hat);
+    std::printf("GPClassification demo (N=%zu, 1D GP-logit, whitened joint NUTS):\n", N);
     std::printf("  MAE(post prob vs true) = %.4f\n", mae_model);
     std::printf("  MAE(naive mean(y)=%.3f vs true) = %.4f\n", y_mean, mae_naive);
+    std::printf("  amplitude   post %.4f +- %.4f   prior %.4f +- %.4f  (SD ratio %.3f)\n",
+                amp_bar, amp_sd_post, amp_mean_prior, amp_sd_prior, amp_sd_ratio);
+    std::printf("  lengthscale post %.4f +- %.4f   prior %.4f +- %.4f"
+                "  (mean displaced %.2f prior SD)\n",
+                ell_bar, ell_sd_post, ell_mean_prior, ell_sd_prior, ell_shift);
 
-    // Pass: model recovers the latent class-probability surface better than the
-    // naive constant baseline AND is accurate in absolute terms.
-    const bool ok = (mae_model < mae_naive) && (mae_model < 0.20);
+    const bool recovers = (mae_model < mae_naive) && (mae_model < 0.11);
+    const bool amp_informed = amp_sd_ratio > 0.05 && amp_sd_ratio < 0.80;
+    const bool ok = recovers && amp_informed;
+
+    if (!recovers)
+        std::printf("  [FAIL] posterior probabilities did not recover the latent surface\n");
+    if (amp_sd_ratio >= 0.80)
+        std::printf("  [FAIL] amplitude posterior is as wide as its prior\n");
+    if (amp_sd_ratio <= 0.05)
+        std::printf("  [FAIL] amplitude chain barely moved\n");
+
     std::printf("%s\n", ok
-        ? "[demo PASS] GP-logit recovers latent class probabilities, "
-          "beats naive baseline"
-        : "[demo FAIL] posterior probabilities did not recover the latent "
-          "surface");
+        ? "[demo PASS] GP-logit recovers latent class probabilities; "
+          "hyperparameters informed by the data"
+        : "[demo FAIL] latent surface / hyperparameters not recovered");
     return ok ? 0 : 1;
 }
 #endif

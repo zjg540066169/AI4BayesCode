@@ -565,7 +565,7 @@ public:
                 std::make_unique<stick_breaking_block>(std::move(cfg)));
         }
 
-        // child(3) phi (NUTS on REAL)
+        // child(3) phi (univariate slice on REAL)
         {
             univariate_slice_sampling_block_config cfg;
             cfg.name        = "phi";
@@ -721,8 +721,6 @@ public:
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag(); }
     AI4BayesCode::history_map  get_history() const { return impl_->get_history(); }
 
-
-
 private:
     std::mt19937_64                  rng_;
     mutable std::mt19937_64          predict_rng_;
@@ -756,7 +754,7 @@ RCPP_MODULE(DPGaussianMixture_DerivedAlpha_module) {
             "kappa_0, a_lambda_0, b_lambda_0, seed, keep_history). "
             "DP mixture where alpha = exp(phi) is DERIVED from phi via "
             "register_refresher; phi has Normal(0, 1) prior and is "
-            "sampled by NUTS. Demonstrates the alpha-as-derived "
+            "sampled by slice. Demonstrates the alpha-as-derived "
             "composition pattern.")
         .method("step", (void (DPGaussianMixture_DerivedAlpha::*)())    &DPGaussianMixture_DerivedAlpha::step, "Run one sweep.")
         .method("step", (void (DPGaussianMixture_DerivedAlpha::*)(int)) &DPGaussianMixture_DerivedAlpha::step, "Run n sweeps.")

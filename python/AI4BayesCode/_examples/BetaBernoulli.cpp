@@ -195,6 +195,15 @@ public:
                 return y_rep;
             });
 
+        // p stays on a standalone nuts_block, which is the EXCEPTION under the
+        // scalar rule (codegen_priors.md Sec.2b.1): a scalar broken out on its
+        // own normally takes univariate_slice_sampling_block. It is kept here
+        // because this is the case the exception is written for -- the gradient
+        // is two divisions reusing alpha_post / beta_post already formed for the
+        // density, so it is nearly free, and the conditional does not move
+        // between sweeps (no Gibbs siblings; the data are fixed), so the frozen
+        // step size stays valid. It is also the example that checks against the
+        // ANALYTIC Beta posterior, which makes it the right place to keep NUTS.
         nuts_block_config cfg;
         cfg.name = "p";
 

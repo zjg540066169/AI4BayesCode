@@ -566,7 +566,7 @@ public:
         auto* bart_blk =
             dynamic_cast<bart_block*>(&impl_->child(0));
         auto* sg_blk =
-            dynamic_cast<nuts_block*>(&impl_->child(1));
+            dynamic_cast<univariate_slice_sampling_block*>(&impl_->child(1));
 
         // f_bart is read-only output; silently ignored on input so
         // that round-trip set_current(get_current()) is supported per
@@ -640,8 +640,6 @@ public:
         auto& bart_child = dynamic_cast<bart_block&>(impl_->child(0));
         return bart_child.get_tree_history();
     }
-
-
 
 private:
     std::mt19937_64                  rng_;

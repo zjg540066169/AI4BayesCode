@@ -1052,9 +1052,10 @@ the structured picker UI. Three firm rules:
    collect the continuous parameters not claimed by a specialized block
    into ONE `joint_nuts_block` -- you write the joint natural-scale
    log-density (likelihood + all priors + per-slice constraints) and the
-   block provides the NUTS machinery. A standalone `nuts_block` is the
-   low-priority fallback (genuinely scalar params / post-NCR branch /
-   deliberate isolation). Do NOT contort the model to fit a built-in
+   block provides the NUTS machinery. A SCALAR broken out on its own
+   takes `univariate_slice_sampling_block`; a standalone `nuts_block` is
+   the low-priority fallback for a MULTI-dimensional group (post-NCR
+   branch / deliberate isolation). Do NOT contort the model to fit a built-in
    block; if none fits AND NUTS is structurally inapplicable, `Sec.2b`
    Exception 4 permits a justified custom block.
 
@@ -1455,8 +1456,9 @@ run, and produce reasonable samples out of the box.
   MUST be sampled by the NUTS family -- `joint_nuts_block` is the
   DEFAULT (collect every continuous parameter not claimed by a
   specialized block into ONE joint block; `codegen_priors.md` Sec.2b),
-  with a standalone `nuts_block` as the low-priority fallback for a
-  genuinely scalar / deliberately isolated parameter -- regardless of
+  with `univariate_slice_sampling_block` for a scalar broken out on its
+  own, and a standalone `nuts_block` as the low-priority fallback for a
+  deliberately isolated MULTI-dimensional group -- regardless of
   whether a conjugate closed-form update is available. The ONLY Gibbs blocks you are allowed
   to instantiate are the `*_gibbs_block` types already shipped as header
   files in `include/AI4BayesCode/` -- see `skills/block_catalogue/index.md` for
