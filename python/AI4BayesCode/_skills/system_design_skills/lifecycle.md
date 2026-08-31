@@ -10,7 +10,10 @@ closed-form conjugate draws on the latent function values). **Every
 `gp_block` / `GPGaussian` path below is a WORKED HYPOTHETICAL** -- those
 files do not exist in the tree, they are what this walkthrough would
 create. (The shipped GP blocks are `celerite_gp_block` and the
-`elliptical_slice_sampling_block` route; see `examples/GPRegression.cpp`.)
+`elliptical_slice_sampling_block`; neither shipped GP example uses ESS
+any more -- `examples/GPRegression.cpp` marginalises f out and
+`examples/GPClassification.cpp` samples a whitened latent inside one
+`joint_nuts_block`.)
 
 ### Step 1 -- Tier C (kernel)
 

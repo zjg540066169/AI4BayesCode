@@ -71,5 +71,7 @@ Never gate the metric on dimension alone.
      diagonal metric has nothing to adapt to.
 - Joint-block dim < 5, all POSITIVE, no latent vector?
   -> `joint_nuts_block` with identity metric is fine
-     (this is what `GPRegression.cpp` and `GPClassification.cpp` do
-     for the 2-3 hyperparameters).
+     (this is what `GPRegression.cpp` does for its three
+     hyperparameters). Once a latent vector joins the block --
+     `GPClassification.cpp` carries `z[N]` alongside its two
+     hyperparameters -- switch to the diagonal metric.
