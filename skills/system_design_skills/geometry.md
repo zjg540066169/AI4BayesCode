@@ -18,7 +18,10 @@ correctness bug Layer 3 R3 usually cannot catch.
 AI4BayesCode supports these three target shapes:
 
 1. **Fixed-dimension absolutely continuous** targets. Sampled by
-   `nuts_block`, `joint_nuts_block`. The
+   `joint_nuts_block` (the default), `univariate_slice_sampling_block`
+   (any scalar sampled in its own block -- and it does not require
+   smoothness), or `nuts_block` (a multi-dim group kept out of the
+   joint block). The
    target has a smooth log-density w.r.t. Lebesgue measure on a
    fixed-dim $\mathbb{R}^d$ (after the constraint transforms).
 2. **Fixed-dimension discrete with known finite support**. Sampled
@@ -270,7 +273,9 @@ plain language, never by citing this file.
 
 **The default prior on every scale parameter sigma > 0 is the
 scale-invariant Jeffreys prior p(sigma) prop.to 1/sigma,** implemented via
-`nuts_block` + `constraints::positive::wrap` on log(sigma). On the
+`constraints::positive::wrap` on log(sigma) -- inside the
+`joint_nuts_block` if sigma is sampled with its partners, or a
+`univariate_slice_sampling_block` if sigma gets its own block. On the
 unconstrained eta=log(sigma) scale, Jeffreys + Jacobian exactly
 cancel, leaving the user's log-density to contain only the
 likelihood (with the likelihood's natural -N log(sigma) normalization

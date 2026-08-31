@@ -1041,7 +1041,9 @@ the structured picker UI. Three firm rules:
    support and pick a block type. See `codegen_priors.md Sec.2b` for the
    block selection priority (specialized / conjugate-Gibbs blocks by
    applicability -> `joint_nuts_block` = DEFAULT for continuous ->
-   `nuts_block` = LOW-priority single fallback -> slice -> `Sec.2b`
+   `univariate_slice_sampling_block` for any SCALAR broken out on its own
+   -> `nuts_block` only for a multi-dim group kept out of the joint block
+   -> `Sec.2b`
    Exception 4 custom code only for genuine structural gaps). If the
    model has any discrete latent, run through `codegen_priors.md Sec.3a`
    (Class 1-5 decision tree) FIRST. Reference block catalogue:

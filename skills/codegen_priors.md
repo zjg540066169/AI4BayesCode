@@ -6,8 +6,9 @@ description: |
   variance / scale prior discipline (Gelman 2006 + Jeffreys default),
   block selection priority (specialized / structural blocks by
   applicability FIRST -> joint_nuts_block DEFAULT for the rest ->
-  single nuts_block LOW -> gibbs avoided), the univariate slice sampler
-  NUTS fallback, Gibbs-block
+  single nuts_block LOW and only for multi-dim -> gibbs avoided), the
+  univariate slice sampler as the DEFAULT for any scalar sampled in its
+  own block, Gibbs-block
   Checks #15/#16/#17, and the discrete-variable decision tree
   (Class 1-5) that governs when *_gibbs_block / rjmcmc_block /
   hmm_block is appropriate. The entry-point skill `codegen.md`
@@ -219,6 +220,10 @@ that genuinely matches the structure ALWAYS outranks joint NUTS.
 
 **Phase 2 -- `joint_nuts_block` is the DEFAULT for everything left.** Every
 continuous parameter NOT claimed in Phase 1 goes into ONE `joint_nuts_block`.
+This is unchanged and is the common case. The only question Phase 2 raises is
+what to do with a parameter you deliberately break OUT of the joint block: if
+it is a SCALAR, it goes to `univariate_slice_sampling_block`, not to a
+standalone `nuts_block` (item 2a below).
 
 The numbered list below is a CATALOGUE of block types, NOT a priority
 rank -- do NOT read "item 1" as "try this first":
@@ -272,15 +277,29 @@ rank -- do NOT read "item 1" as "try this first":
    diagonal metric paths. See `examples/HSGPRegression.cpp` and
    `examples/HierarchicalLM_MultivariateRE.cpp` for POSITIVE-slice +
    dense-metric templates. Validator Check #11 (+ #24).
-2. **`nuts_block`** -- single-parameter NUTS. **LOW priority.** Most
-   continuous parameters belong in the joint block (item 1); reach for
-   a standalone `nuts_block` only for: a genuinely scalar continuous
-   parameter; a post-NCR funnel branch that cannot share the joint
-   metric; or a high-dim block with obvious conditional independence
-   the generator chooses to isolate. Always correct as a fallback (NUTS
-   on a Jacobian-wrapped log-density is never wrong-target), just slower
-   per ESS than joint when parameters are coupled. Validator Check #11
-   does not apply (single parameter).
+2. **`nuts_block`** -- standalone NUTS. **LOW priority, and for a SCALAR
+   parameter it is the wrong tool** -- a scalar broken out of the joint
+   block goes to `univariate_slice_sampling_block` (item 2a). What is
+   left for a standalone `nuts_block` is a MULTI-DIMENSIONAL group kept
+   out of the joint block: a post-NCR funnel branch that cannot share
+   the joint metric, or a high-dim block with obvious conditional
+   independence the generator chooses to isolate. Always correct as a
+   fallback (NUTS on a Jacobian-wrapped log-density is never
+   wrong-target), just slower per ESS than joint when parameters are
+   coupled. Validator Check #11 does not apply.
+
+2a. **`univariate_slice_sampling_block`** -- **the default for a SCALAR
+   parameter that is sampled in its own block.** Neal 2003 stepping-out
+   + shrinkage. Same authoring burden as NUTS minus the gradient: the
+   user writes one natural-scale log-density and nothing else, so
+   Check #12 does not apply. It has no step size, so it cannot be
+   frozen out of date -- which is the failure a scalar NUTS block is
+   prone to, because Check #20 requires the step size to stay frozen
+   after warmup while the scalar's conditional keeps moving with its
+   Gibbs siblings. Measured (Sec.2b.1): per-component 1-D NUTS froze
+   15% of sweeps at rank R-hat 1.0866; slice froze 0% at 1.0018.
+   `initial_unc` MUST be length 1 -- that is what makes "scalar" the
+   trigger. See Sec.2b.1.
 3. **`rjmcmc_block`** -- trans-dimensional. Class 4; only applicable
    when the parameter space dimension is itself a random variable
    (state space is not a fixed-dim manifold). See Sec.3a below and
@@ -558,27 +577,60 @@ backdoor for it. Custom code is gated by the full validator (compile +
 The block choice is fixed at generation time and is NEVER swapped at
 runtime -- a runtime try-fail-swap would waste a full MCMC run.
 
-### 2b.1 univariate_slice_sampling_block -- NUTS fallback for 1-D non-diff / black-box targets
+### 2b.1 univariate_slice_sampling_block -- the default for a SCALAR block
 
-**Prerequisite: NUTS (item 1 above) is NOT applicable** because ONE of:
+**Trigger: the parameter is a scalar AND you are giving it its own block.**
+That is the whole rule. `joint_nuts_block` remains the default for
+continuous parameters (Sec.2b Phase 2) and nothing about the joint path
+changes; this section is only about what a parameter becomes once it is
+broken out on its own.
 
-  (a) log p is non-differentiable (piecewise, floor/ceil, kink);
-  (b) log p is a black-box library call whose gradient would require
-      re-implementing that library with autodiff::var types (e.g.,
-      celerite marginal log-likelihood via
-      `celerite_marginal_likelihood.hpp`);
-  (c) gradient evaluation cost is prohibitively high relative to lp
-      eval (e.g., O(N^3) Cholesky per gradient with no shared
-      factorization).
+**Why slice rather than a standalone `nuts_block` for a scalar.**
 
-**Slice is NOT a default substitute for NUTS.** If lp is differentiable
-and the gradient is reasonable to write (hand-derived or via autodiff),
-ALWAYS prefer `nuts_block` -- NUTS mixes better on smooth continuous
-targets and is the library's first choice.
+  1. **Nothing to freeze.** NUTS adapts a step size and must then keep it
+     frozen (`n_warmup_per_step` must stay 0 -- Check #20, because
+     re-adapting each sweep silently biases the posterior). A scalar
+     block almost always sits in a Gibbs sweep whose siblings keep
+     moving its conditional -- a concentration parameter whose occupied
+     count flips, a noise scale conditioned on a redrawn tree ensemble
+     or latent field, an inclusion-dependent variance. A frozen step
+     size cannot follow that, and the block stalls. Slice re-brackets
+     from scratch every step (stepping-out), so a moving conditional
+     costs it nothing. Measured on a truncated-DP mixture (K = 10, 20
+     datasets, 20k+20k), fraction of sweeps in which the parameter did
+     not move AT ALL: per-component 1-D NUTS **15%** (median cross-chain
+     rank R-hat 1.0866), slice **0%** (1.0018).
+  2. **It cannot lock up.** Slice is guaranteed to accept within finite
+     shrinkage iterations -- the bracket converges onto the current
+     point -- so there is no rejection-stall state at all. Compare the
+     rejection lock-up documented at `nuts_block.hpp:242`.
+  3. **No gradient to get wrong.** The user writes one natural-scale
+     log-density returning a double. Check #12 (gradient verification)
+     does not apply, because there is no hand-derived gradient to
+     police -- and Check #12 exists precisely because gradients are the
+     easy thing to get wrong once the density is right.
 
-**AI-safety profile (identical to NUTS).** The user writes ONLY a
-natural-scale log-density lambda. No conditional-posterior derivation
-(unlike Gibbs). Library-level Check #15 parity test
+**When a scalar still belongs on `nuts_block`:** when its gradient shares
+most of its computation with the density, so the gradient is nearly free
+(e.g. a factorisation already formed for the log-density also yields the
+derivative). Then NUTS's per-step gradient costs little and its longer
+moves can pay. This is a narrow case -- state it explicitly when you use it.
+
+**Slice is also the remedy when a scalar NUTS block fails.** If a
+standalone `nuts_block` on a scalar shows near-zero movement or an R-hat
+far above its siblings', do not reach for a larger warmup or (never) for
+`n_warmup_per_step > 0`: swap the block to slice. See
+`joint_nuts_failure.md` Level 3.
+
+**Scope: strictly univariate.** `initial_unc` MUST have length 1; the
+block throws otherwise. A multi-dim parameter goes to `joint_nuts_block`,
+or to a standalone `nuts_block` if it is deliberately kept out of the
+joint block.
+
+**AI-safety profile (strictly safer than NUTS).** The user writes ONLY a
+natural-scale log-density lambda -- and unlike the NUTS lambda, it does
+not also have to produce a gradient, so Check #12 does not apply at all.
+No conditional-posterior derivation either (unlike Gibbs). Library-level Check #15 parity test
 (`tests_autodiff/block_tests/test_univariate_slice_sampling_block.cpp`)
 verifies 10k draws match analytical mean/variance on three fixtures
 (Normal / Gamma / Beta via real / positive / interval constraints).
@@ -588,14 +640,17 @@ multi-dim parameters use `nuts_block` / `joint_nuts_block` (or add a
 future `hyperrectangle_slice_sampling_block` / similar variant as a
 separate block).
 
-**Current reference use case:** `examples/GPTimeSeries.cpp` v0.5 --
-hyperparameters amp, tau, sigma on celerite-marginalized likelihood,
-trigger (b) (celerite is a black-box C++ library without exposed
-autodiff-through-Cholesky).
+**Current reference use case:** `examples/GPTimeSeries.cpp` -- amp, tau
+and sigma are three scalar blocks on the celerite-marginalized
+likelihood. It is also the case that celerite is a black-box C++ library
+with no autodiff-through-Cholesky, so a NUTS gradient there would mean
+re-implementing it; but under the rule above the scalars would take slice
+regardless.
 
-**JUSTIFICATION (Check #16):** Exception 1 from the table above --
-specialized sampler for 1-D continuous parameters whose log-density
-lacks an accessible gradient (violates NUTS prerequisite).
+**JUSTIFICATION (Check #16):** library-provided specialized sampler for a
+SCALAR continuous parameter -- the tuning-free default for a scalar block.
+(Do not cite "Exception 1" here: Exception 1 in the Sec.2b table is the
+DISCRETE-parameter exception, which is a different thing.)
 
 Canonical usage pattern:
 

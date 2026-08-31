@@ -122,9 +122,10 @@ impl_->data().declare_dependencies(
      without per-unit random effects), the DEFAULT is still ONE
      `joint_nuts_block` over the coupled continuous params -- do NOT split
      "to keep it simple" (coupled params mix ~10x slower when split and
-     freeze on funnels; `codegen_cpp.md` Sec.4a). Reserve modular only for
-     genuinely scalar params, post-NCR branches, or obvious conditional
-     independence.
+     freeze on funnels; `codegen_cpp.md` Sec.4a). Reserve modular for post-NCR
+     branches or obvious conditional independence -- and note that a
+     modular SCALAR is a `univariate_slice_sampling_block`, not a
+     `nuts_block`.
 
 ### Stan-style 3-phase warmup (SHIPPED 2026-06-03)
 
@@ -190,9 +191,11 @@ version:
   effect, hierarchical scales -- they FREEZE or bias if split), but joint is
   the default regardless of coupling level -- do NOT split continuous
   parameters into per-parameter blocks to "keep it simple".
-- single `nuts_block` is **LOW priority** -- only a genuinely scalar
-  continuous parameter, a post-NCR funnel branch, or obvious conditional
-  independence the generator chooses to isolate.
+- single `nuts_block` is **LOW priority**, and for a SCALAR it is the
+  wrong tool -- a scalar broken out on its own goes to
+  `univariate_slice_sampling_block`. What is left for a standalone
+  `nuts_block` is a MULTI-dimensional group: a post-NCR funnel branch, or
+  obvious conditional independence the generator chooses to isolate.
 
 ### Reference examples
 

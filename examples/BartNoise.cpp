@@ -20,14 +20,14 @@
 //                         identifiability issues under a non-informative
 //                         prior (a larger tree fit can be compensated
 //                         by a smaller sigma), so we use BART's
-//                         calibrated conjugate IG. Sampled via NUTS
+//                         calibrated conjugate IG. Sampled via slice
 //                         (same kernel as every other continuous block).
 //
 //  Block decomposition
 //  -------------------
 //      f_bart           : sampled by bart_block (one tree sweep per
 //                         composite step)
-//      sigma            : sampled by a positive nuts_block with the
+//      sigma            : sampled by a positive univariate_slice_sampling_block with the
 //                         standard Gaussian log-likelihood conditional
 //
 //  BACKEND-NEUTRAL DUAL MODULE
@@ -110,6 +110,7 @@
 #include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/nuts_block.hpp"
+#include "AI4BayesCode/univariate_slice_sampling_block.hpp"
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/rcpp_predict_guard.hpp"
 #include "AI4BayesCode/constraints.hpp"
@@ -130,6 +131,8 @@ using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
 using AI4BayesCode::nuts_block;
 using AI4BayesCode::nuts_block_config;
+using AI4BayesCode::univariate_slice_sampling_block;
+using AI4BayesCode::univariate_slice_sampling_block_config;
 using AI4BayesCode::bart_block;
 using AI4BayesCode::bart_block_config;
 
@@ -216,10 +219,6 @@ public:
                    ? std::mt19937_64{std::random_device{}()}
                    : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
                                      ^ 0x9E3779B97F4A7C15ULL}),
-          readapt_rng_(rng_seed == 0
-                   ? std::mt19937_64{std::random_device{}()}
-                   : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
-                                     ^ 0xBF58476D1CE4E5B9ULL}),
           impl_(std::make_unique<composite_block>("BartNoise")),
           keep_tree_(keep_tree),
           keep_history_(keep_history)
@@ -331,32 +330,29 @@ public:
             impl_->data().set("sigma_lambda", arma::vec{lambda});
         }
 
-        // ---- Add the sigma block (positive NUTS) ------------------------
+        // ---- Add the sigma block (positive slice) -----------------------
         // Use bart_model's OLS sigest as initial sigma for NUTS, not
         // the user-provided sigma_init (which is typically sd(y) and
         // includes signal).
         const double sigest_for_nuts =
             dynamic_cast<bart_block&>(impl_->child(0)).current_sigma();
-        nuts_block_config sg_cfg;
+        univariate_slice_sampling_block_config sg_cfg;
         sg_cfg.name        = "sigma";
         sg_cfg.initial_unc = arma::vec{std::log(sigest_for_nuts)};
         sg_cfg.constrain   = constraints::positive::constrain;
         sg_cfg.unconstrain = constraints::positive::unconstrain;
-        sg_cfg.log_density_grad =
-            [](const arma::vec& theta_unc, const block_context& ctx,
-               arma::vec* grad) {
+        sg_cfg.log_density =
+            [](const arma::vec& theta_unc, const block_context& ctx) {
                 return constraints::positive::wrap(
-                    theta_unc, grad,
+                    theta_unc, nullptr,
                     [&](const arma::vec& sigma_nat,
                         arma::vec* grad_nat) {
                         return sigma_natural_log_density(
                             sigma_nat, ctx, grad_nat);
                     });
             };
-        sg_cfg.nuts_settings.nuts_settings.max_tree_depth     = 6;
-        sg_cfg.nuts_settings.nuts_settings.target_accept_rate = 0.8;
         impl_->add_child(
-            std::make_unique<nuts_block>(std::move(sg_cfg)));
+            std::make_unique<univariate_slice_sampling_block>(std::move(sg_cfg)));
 
         // ---- Enable history recording if requested ----------------------
         // keep_tree (BART forest snapshots, expensive) and keep_history
@@ -467,8 +463,8 @@ public:
         }
 
         // ---- History mode ---------------------------------------------
-        auto& nuts_child = dynamic_cast<nuts_block&>(impl_->child(1));
-        AI4BayesCode::history_map sigma_list = nuts_child.get_history();
+        auto& sigma_child = dynamic_cast<univariate_slice_sampling_block&>(impl_->child(1));
+        AI4BayesCode::history_map sigma_list = sigma_child.get_history();
         const arma::mat& sigma_hist = sigma_list.at("sigma");
         const std::size_t n_draws = sigma_hist.n_rows;
 
@@ -645,29 +641,6 @@ public:
         return bart_child.get_tree_history();
     }
 
-    /// 7th method: re-tune NUTS metric (mass matrix + step size + dual
-    /// averaging) without advancing chain state. Available because the
-    /// composite contains NUTS-family children. See system_design.md Sec.13
-    /// NUTS-family + validator.md Sec.24.
-    // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
-    // 4-arg CORE + 3-arg backward-compat forwarder. Rcpp modules ignore
-    // C++ default args so both arities are also exposed as separate
-    // bindings below; from C++, this forwarder keeps pre-existing
-    // readapt_NUTS(n, reset, mtd) call sites working.
-    void readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept) {
-        if (n < 0) {
-            ai4b::stop("readapt_NUTS: n must be non-negative");
-        }
-        impl_->readapt_NUTS(static_cast<std::size_t>(n), reset, readapt_rng_,
-                                max_tree_depth < 0 ? std::size_t(0) : static_cast<std::size_t>(max_tree_depth),
-                                target_accept);
-    }
-
-    /// 3-arg backward-compat overload; target_accept defaults to -1.0
-    /// (sentinel = leave the block's target unchanged).
-    void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1) {
-        readapt_NUTS(n, reset, max_tree_depth, -1.0);
-    }
 
 
 private:
@@ -678,7 +651,6 @@ private:
     // are reproducible given a stable construction seed without stealing
     // entropy from the main MCMC RNG.
     mutable std::mt19937_64          predict_rng_;
-    mutable std::mt19937_64          readapt_rng_; // readapt_NUTS() advances it (7th method)
     std::unique_ptr<composite_block> impl_;
     std::size_t                      x_ncol_ = 0;
     bool                             keep_tree_    = false;
@@ -753,7 +725,6 @@ RCPP_MODULE(BartNoise_module) {
         .method("get_tree_history", &BartNoise::get_tree_history,
                 "Return per-draw serialized BART forests (one per stored "
                 "draw when keep_tree=TRUE; else the current forest).")
-        AI4BAYESCODE_BIND_READAPT_NUTS(BartNoise)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(BartNoise);
 }
 #endif
@@ -793,10 +764,6 @@ PYBIND11_MODULE(BartNoise, m) {
         .def("get_dag",         &BartNoise::get_dag)
         .def("get_history",     &BartNoise::get_history)
         .def("get_tree_history", &BartNoise::get_tree_history)
-        .def("readapt_NUTS", (void (BartNoise::*)(int, bool, int, double)) &BartNoise::readapt_NUTS,
-             pybind11::arg("n"), pybind11::arg("reset") = false,
-             pybind11::arg("max_tree_depth") = -1,
-             pybind11::arg("target_accept") = -1.0)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(BartNoise);
 }
 #endif

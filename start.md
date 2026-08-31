@@ -612,8 +612,11 @@ full list but the critical ones:
   applicability -- conjugate-Gibbs, `pg_logistic_block`, `bart_block`, `rjmcmc`,
   HMM, etc.; a genuine structural match ALWAYS outranks generic NUTS) ->
   **`joint_nuts_block` is the DEFAULT** for every continuous parameter left ->
-  standalone `nuts_block` is LOW-priority (single scalar only) -> slice is the last
-  resort. See `codegen_priors.md` Sec.2b (authoritative).
+  when a parameter is instead broken out into its OWN block and that parameter is
+  a SCALAR, use `univariate_slice_sampling_block`, not a standalone `nuts_block`
+  (no step size to freeze, no gradient to write) -> a standalone `nuts_block` is
+  then only for a multi-dimensional group kept out of the joint block. See
+  `codegen_priors.md` Sec.2b (authoritative).
 - **No Mermaid PNG render**: see Sec.3 above.
 - **`predict_at` is `const`**: never mutate MCMC state in
   `predict_at`. Use the mutable `predict_rng_` for any RNG advance.

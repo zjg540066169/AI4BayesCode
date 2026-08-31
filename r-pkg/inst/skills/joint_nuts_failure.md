@@ -541,15 +541,27 @@ Level 0: MARGINALIZE a conjugate Gaussian-linear latent in closed form --
 Level 1: NCR (funnel S1)  OR  QR-decorrelate / dense metric (ridge S2)  OR
          reparameterize (constraint boundary)
 Level 2: split into smaller joint groups via conditional independence
-Level 3: fall back to per-parameter nuts_block (correct, just slower per ESS)
+Level 3: fall back to per-parameter blocks -- each SCALAR goes to
+         univariate_slice_sampling_block, NOT to a per-parameter nuts_block
 Level 4: declare "needs a specialized algorithm" (HMM / GMRF / order_mcmc)
          or "needs problem reformulation"
 ```
 
-Always prefer the lowest level that resolves the pathology. Level 3 (per-param
-nuts_block) is always available as a correctness fallback -- it is slower but
-never wrong-target -- EXCEPT on funnels, where per-param NUTS itself freezes
-(Mode 1); there, Level 1 (NCR) is required, not optional.
+Always prefer the lowest level that resolves the pathology. Level 3 is always
+available as a correctness fallback -- slower per ESS, but never wrong-target.
+
+**Split to SCALARS means slice, not per-parameter NUTS.** Per-parameter NUTS
+is the configuration that froze 15% of sweeps (rank R-hat 1.0866) in the
+truncated-DP measurement, against 0% (1.0018) for slice: NUTS must keep its
+step size frozen after warmup (Check #20) and a scalar broken out of a joint
+block sits in a Gibbs sweep whose siblings keep moving its conditional. Slice
+re-brackets every step and has nothing to freeze. A multi-dimensional group
+that stays together at Level 3 is still a `nuts_block`.
+
+The funnel caveat is unchanged and is about the TARGET, not the kernel: on a
+funnel (Mode 1) the scale-latent geometry itself is pathological, so Level 1
+(NCR) is required, not optional -- swapping the kernel to slice does not
+reparameterise a funnel.
 
 ---
 

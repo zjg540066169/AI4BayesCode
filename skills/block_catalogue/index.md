@@ -72,15 +72,17 @@ can switch. (Full design: `block_design_skills/contrib.md`.)
 
 | Parameter kind | Block type | Constraint wrap |
 |---------------|-----------|----------------|
-| real scalar/vector | `nuts_block` | `constraints::real::wrap` |
-| strictly positive (sigma, tau) | `nuts_block` | `constraints::positive::wrap` |
+| real SCALAR, in its own block | `univariate_slice_sampling_block` | `constraints::real::wrap` |
+| real VECTOR | `joint_nuts_block` (default) or `nuts_block` | `constraints::real::wrap` |
+| strictly positive SCALAR (sigma, tau, alpha) | `univariate_slice_sampling_block` | `constraints::positive::wrap` |
+| strictly positive VECTOR | `joint_nuts_block` (default) or `nuts_block` | `constraints::positive::wrap` |
 | simplex, non-conjugate | `nuts_block` | `constraints::simplex::wrap` |
 | simplex, exact Dirichlet | `dirichlet_gibbs_block` | (none) |
 | **probability in (0,1), conjugate Beta** | **`beta_gibbs_block`** | **(none -- exact draw)** |
-| probability in (0,1), non-conjugate | `nuts_block` | `constraints::interval::wrap` |
-| lower-bounded (x > lo) | `nuts_block` | `constraints::lower_bounded::wrap` |
-| upper-bounded (x < up) | `nuts_block` | `constraints::upper_bounded::wrap` |
-| interval (lo < x < up) | `nuts_block` | `constraints::interval::wrap` |
+| probability in (0,1), non-conjugate, scalar | `univariate_slice_sampling_block` | `constraints::interval::wrap` |
+| lower-bounded scalar (x > lo) | `univariate_slice_sampling_block` | `constraints::lower_bounded::wrap` |
+| upper-bounded scalar (x < up) | `univariate_slice_sampling_block` | `constraints::upper_bounded::wrap` |
+| interval scalar (lo < x < up) | `univariate_slice_sampling_block` | `constraints::interval::wrap` |
 | ordered K-vector | `nuts_block` | `constraints::ordered::wrap` |
 | Cholesky of corr matrix | `nuts_block` | `constraints::cholesky_corr::wrap` |
 | unit vector (K-sphere) | `nuts_block` | `constraints::unit_vector::wrap` |
@@ -117,8 +119,11 @@ can switch. (Full design: `block_design_skills/contrib.md`.)
 
 WARNING **READ `skills/codegen_priors.md` Sec.2b "Block selection priority" first.**
 The default for continuous parameters is `joint_nuts_block` (it collects
-the continuous parameters NOT claimed by a specialized / structural block);
-single `nuts_block` is LOW priority. `beta_gibbs_block` is a LAST-RESORT
+the continuous parameters NOT claimed by a specialized / structural block).
+When a parameter is instead broken out into its OWN block and it is a
+SCALAR, use `univariate_slice_sampling_block` -- no step size to freeze,
+no gradient to write. A standalone `nuts_block` is then only for a
+MULTI-dimensional group kept out of the joint block. `beta_gibbs_block` is a LAST-RESORT
 option that must be justified by an Exception from Sec.2b. Misuse carries silent-correctness risk (wrong `params_fn`
 derivation -> wrong posterior that passes all MCMC diagnostics).
 
@@ -148,8 +153,8 @@ NUTS-wasteful efficiency profile):**
 Prefer `nuts_block` with `constraints::interval::wrap(0, 1)` when:
 - The conditional is NOT exactly Beta (e.g. p enters a logistic link,
   a nonlinear function, or has non-conjugate factors)
-- You're not sure the conditional is exactly Beta (when in doubt,
-  NUTS)
+- You're not sure the conditional is exactly Beta (when in doubt, slice
+  with `constraints::interval::wrap(0, 1)`)
 - The parameter is not scalar / not tight-posterior (NUTS is faster
   on vectors even in conjugate cases)
 

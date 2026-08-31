@@ -60,9 +60,18 @@ multiplicatively coupled. The correct fix is methodological:
    adaptation lands in the typical set.
 3. **Better init values** via OLS / method of moments in the wrapper
    constructor.
+4. **If `sigma` genuinely belongs in its own SCALAR block** -- it is not
+   funnel-coupled to a raw-effect partner, it just sits in a Gibbs sweep
+   whose siblings move its conditional -- then the block is the problem,
+   not its tuning: use `univariate_slice_sampling_block`. It has no step
+   size, so there is nothing to be frozen out of date, and nothing to
+   re-adapt.
 
-Use one or more of (1)-(3). Do NOT escape to `n_warmup_per_step > 0` --
+Use one or more of (1)-(4). Do NOT escape to `n_warmup_per_step > 0` --
 that produces silently wrong posteriors that pass L3 while failing sim1.
+(4) is the legitimate version of the escape (2) and (3) are chasing: the
+reason `n_warmup_per_step > 0` is tempting is that the step size is stale,
+and slice is the kernel that has no step size to go stale.
 
 The same reasoning applies to other blocks where the AI might be tempted
 to "patch up rejection by re-adapting": same answer applies (joint
