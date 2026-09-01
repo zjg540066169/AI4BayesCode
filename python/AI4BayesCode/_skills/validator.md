@@ -2203,8 +2203,7 @@ Failure at an earlier step means don't bother with the next one.
 `lm`, `glm`, `bnlearn` hill-climbing): an MLE is not a posterior and the two are not
 comparable. **Comparing against an existing implementation** (an R package, another
 sampler) is not forbidden but is strongly discouraged: its prior may differ from ours,
-in which case the comparison means nothing -- do it only if you have confirmed every
-prior matches.
+in which case the comparison means nothing.
 
 ### R1. Smoke test
 

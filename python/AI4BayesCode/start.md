@@ -606,8 +606,7 @@ full list but the critical ones:
   `lm`, `glm`, `bnlearn` hill-climbing): an MLE is not a posterior and the two are not
   comparable. **Comparing against an existing implementation** (an R package, another
   sampler) is not forbidden but is strongly discouraged: its prior may differ from ours,
-  in which case the comparison means nothing -- do it only if you have confirmed every
-  prior matches.
+  in which case the comparison means nothing.
 - **No hand-written Gibbs**: prefer existing blocks (`nuts_block`,
   `joint_nuts_block` -- handles real + per-slice POSITIVE/INTERVAL/
   ORDERED/SUM_TO_ZERO constraints -- `pg_logistic_block`, conjugate-Gibbs
