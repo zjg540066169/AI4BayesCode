@@ -602,6 +602,12 @@ commonly missed checks this skill set has caught:
 These apply at every phase; you may skim `codegen.md` Sec.12 for the
 full list but the critical ones:
 
+- **Never compare against a frequentist fit during validation** (`survival::survreg`,
+  `lm`, `glm`, `bnlearn` hill-climbing): an MLE is not a posterior and the two are not
+  comparable. **Comparing against an existing implementation** (an R package, another
+  sampler) is not forbidden but is strongly discouraged: its prior may differ from ours,
+  in which case the comparison means nothing -- do it only if you have confirmed every
+  prior matches.
 - **No hand-written Gibbs**: prefer existing blocks (`nuts_block`,
   `joint_nuts_block` -- handles real + per-slice POSITIVE/INTERVAL/
   ORDERED/SUM_TO_ZERO constraints -- `pg_logistic_block`, conjugate-Gibbs

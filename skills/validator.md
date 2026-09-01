@@ -2199,6 +2199,13 @@ All runtime checks share a single pair of chains, run with
 `model$get_history()`. Execute the sub-steps in order -- R1 -> R2 -> R3.
 Failure at an earlier step means don't bother with the next one.
 
+**Never compare against a frequentist fit during validation** (`survival::survreg`,
+`lm`, `glm`, `bnlearn` hill-climbing): an MLE is not a posterior and the two are not
+comparable. **Comparing against an existing implementation** (an R package, another
+sampler) is not forbidden but is strongly discouraged: its prior may differ from ours,
+in which case the comparison means nothing -- do it only if you have confirmed every
+prior matches.
+
 ### R1. Smoke test
 
 **Purpose:** catch immediate failures -- non-finite values, `predict_at`
