@@ -314,7 +314,12 @@ codegen.md Sec.3 confirmation table):
   log-variance, Beta mean-precision vs shape -- the convention is where a wrong
   log-density hides. `tunable?` = YES for hyperparameters the user may retune
   (prior hyperparameters / fixed constants exposed as ctor args), NO for
-  hard-coded.
+  hard-coded. **Every exposed argument carries a DEFAULT wherever a canonical
+  one exists** (the library block config's value, or the source paper's);
+  the minimal call is data + seed. An argument stays mandatory ONLY when it
+  is a modelling choice with no canonical default. Python: pybind11 arg
+  defaults. R: Rcpp ignores C++ defaults, so bind a SHORT constructor
+  (data + mandatory args + seed) alongside the full one.
 - Alternative parametrizations / model variants the paper offers.
 - Sampler notes. ASCII only.
 Dispatch it DIRECTLY and SILENTLY. FORCED -- there is NO other path,

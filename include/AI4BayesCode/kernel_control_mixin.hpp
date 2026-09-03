@@ -73,6 +73,38 @@ public:
 #ifdef AI4BAYESCODE_RCPP_MODULE
     // ---- R-layer forwarders (Rcpp-typed) -------------------------------
 
+    // ---- list-wrapping misuse guards --------------------------------
+    // The single most common R-side calling mistake is passing named
+    // arguments where ONE list is expected:
+    //     m$set_current(X = ..., y = ...)     instead of
+    //     m$set_current(list(X = ..., y = ...))
+    // Rcpp dispatches on arity, so the 2- and 3-argument calls land here
+    // and get an actionable message instead of Rcpp's
+    // "could not find valid method". Bound by
+    // AI4BAYESCODE_BIND_KERNEL_CONTROL, so every wrapper inherits them.
+    void set_current_misuse_(SEXP, SEXP) {
+        Rcpp::stop("set_current takes ONE list argument -- wrap the values: "
+                   "set_current(list(<name> = <value>, ...))");
+    }
+    void set_current_misuse3_(SEXP, SEXP, SEXP) {
+        Rcpp::stop("set_current takes ONE list argument -- wrap the values: "
+                   "set_current(list(<name> = <value>, ...))");
+    }
+    void predict_at_misuse_(SEXP, SEXP) {
+        Rcpp::stop("predict_at takes ONE list argument -- wrap the values: "
+                   "predict_at(list(<name> = <value>, ...))");
+    }
+
+    // ---- no-argument predict_at ---------------------------------------
+    // m$predict_at() is equivalent to m$predict_at(list()) -- the
+    // posterior-predictive at the training data. CRTP-forwards to the
+    // wrapper's own predict_at(state_map). Bound by
+    // AI4BAYESCODE_BIND_KERNEL_CONTROL.
+    AI4BayesCode::history_map predict_at_noarg_() const {
+        return static_cast<const Derived*>(this)->predict_at(
+            AI4BayesCode::state_map{});
+    }
+
     void freeze_names(const Rcpp::CharacterVector& names) {
         freeze_names_impl_(names, false);
     }
@@ -201,7 +233,23 @@ public:
     .method("get_frozen",                                                 \
             (Rcpp::CharacterVector (CLASSNAME::*)() const)                \
                 &CLASSNAME::get_frozen_names,                             \
-            "List currently-frozen block names (DFS pre-order)")
+            "List currently-frozen block names (DFS pre-order)")          \
+    .method("set_current",                                                \
+            (void (CLASSNAME::*)(SEXP, SEXP))                             \
+                &CLASSNAME::set_current_misuse_,                          \
+            "Misuse guard: wrap the values in ONE list()")                \
+    .method("set_current",                                                \
+            (void (CLASSNAME::*)(SEXP, SEXP, SEXP))                       \
+                &CLASSNAME::set_current_misuse3_,                         \
+            "Misuse guard: wrap the values in ONE list()")                \
+    .method("predict_at",                                                 \
+            (void (CLASSNAME::*)(SEXP, SEXP))                             \
+                &CLASSNAME::predict_at_misuse_,                           \
+            "Misuse guard: wrap the values in ONE list()")        \
+    .method("predict_at",                                                \
+            (AI4BayesCode::history_map (CLASSNAME::*)() const)            \
+                &CLASSNAME::predict_at_noarg_,                             \
+            "No-argument form: predict_at() == predict_at(list())")
 #endif // AI4BAYESCODE_RCPP_MODULE
 
 // ---- pybind11 module-binding macro --------------------------------------
