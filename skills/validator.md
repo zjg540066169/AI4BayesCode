@@ -2214,16 +2214,15 @@ refresher bodies (Semantic #6), AND that every DATA key accepted by
 slow models (BART, large data).
 
 **`set_current` checks -- MANDATORY, no skip. Any one failing is an R1 FAIL.**
-Pushing DATA inward is this interface's PRIMARY purpose: it is how an outer
-sampler supplies imputed covariates, a working response, or newly arrived
-observations (missing data / hierarchical working latents / online Bayes).
-"Data" is whatever the constructor takes as data, under whatever name the
-model uses -- `X` and `y` are only the commonest case. It is `D` and
-`cardinalities` for a Bayesian network, `k` for counts, `y` alone for a
-mixture, exposures plus covariates for an exposure-response model.
-Parameter injection is the secondary use. A wrapper whose `set_current`
-accepts only what `get_current()` reports cannot be composed at all -- the
-failure `codegen_cpp.md` Sec.7a forbids by name.
+set_current for stateful composition is the most important goal for
+AI4BayesCode. An incomplete or wrong interface is the most severe bug class
+for the generated samplers. Pushing DATA inward is this interface's PRIMARY
+purpose: it is how an outer sampler supplies imputed covariates, a working
+response, or newly arrived observations (missing data / hierarchical working
+latents / online Bayes). "Data" is whatever the constructor takes as data,
+under whatever name the model uses. A wrapper whose `set_current` accepts
+only what `get_current()` reports cannot be composed at all (see
+`codegen_cpp.md` Sec.7a).
 
 Emit all four.
 
@@ -2231,13 +2230,7 @@ Emit all four.
 drop the ones that are fixed hyperparameters, the RNG seed and the
 keep_history flag; everything left is data and MUST be accepted by
 `set_current(list(<key> = ...))` under the model's own name for it -- the
-constructor argument / shared_data key. Do NOT take the name from
-`predict_at`: that method accepts only the covariates a prediction is made
-AT, never the outcome, so `y` is a `set_current` data key with no
-`predict_at` counterpart. A model may claim it has no data keys ONLY if that
-list comes out empty. If the constructor takes an outcome, a design matrix,
-counts, exposures, an offset or an adjacency, it has data keys, and "no data
-keys" is a FAIL, not a skip.
+constructor argument / shared_data key.
 
 **(2) The value lands, and (3) it SURVIVES `step()`.** For each data key:
 

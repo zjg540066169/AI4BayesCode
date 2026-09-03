@@ -1955,21 +1955,6 @@ appears as a `set_current` key:
 - **Cross-check** `X.nrow` against `y.length` when both are in the
   same call.
 
-**Do NOT derive the writable surface from the readable surface.** This is the
-first thing to get right, and the round-trip rule below is subordinate to it.
-`get_current()` reports the sampler's PARAMETERS. `set_current`'s PRIMARY
-purpose is the other direction: letting an outer sampler push DATA inward --
-imputed covariates, a working response from a sibling block, newly arrived
-observations (missing data / hierarchical working latents / online Bayes).
-"Data" means whatever the constructor takes as data, under the model's own
-names; `X` and `y` in this section's title are just the commonest case.
-That is what this interface was designed for. Parameter injection is the
-SECONDARY use, for checkpoint restore and `run_chains` round-tripping. Those
-sets barely overlap. A quantity that is data -- a conditioning panel, an
-offset, a reference copy the kernel restores from each sweep -- never appears
-in `get_current()` at all, so if you enumerate `set_current`'s keys by reading
-off `get_current()`, it silently gets no setter and the block cannot compose.
-
 Before writing `set_current`, list separately:
   - what must flow OUT (parameters; `get_current` reports these), and
   - what must flow IN (data an outer loop refreshes: covariates, offsets,
