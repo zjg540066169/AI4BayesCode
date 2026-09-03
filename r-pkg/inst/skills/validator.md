@@ -2230,8 +2230,11 @@ Emit all four.
 **(1) Every data key HAS a setter.** Enumerate the constructor's arguments,
 drop the ones that are fixed hyperparameters, the RNG seed and the
 keep_history flag; everything left is data and MUST be accepted by
-`set_current(list(<key> = ...))` under the same name `get_current` /
-`predict_at` use for it. A model may claim it has no data keys ONLY if that
+`set_current(list(<key> = ...))` under the model's own name for it -- the
+constructor argument / shared_data key. Do NOT take the name from
+`predict_at`: that method accepts only the covariates a prediction is made
+AT, never the outcome, so `y` is a `set_current` data key with no
+`predict_at` counterpart. A model may claim it has no data keys ONLY if that
 list comes out empty. If the constructor takes an outcome, a design matrix,
 counts, exposures, an offset or an adjacency, it has data keys, and "no data
 keys" is a FAIL, not a skip.
