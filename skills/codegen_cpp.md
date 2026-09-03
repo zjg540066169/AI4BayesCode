@@ -1955,6 +1955,14 @@ appears as a `set_current` key:
 - **Cross-check** `X.nrow` against `y.length` when both are in the
   same call.
 
+`set_current`'s PRIMARY purpose is letting an outer sampler push DATA
+inward -- imputed covariates, a working response from a sibling block, newly
+arrived observations (missing data / hierarchical working latents / online
+Bayes). "Data" means whatever the constructor takes as data, under the
+model's own names; `X` and `y` in this section's title are just the commonest
+case. An incomplete or wrong interface is the most severe bug class for the
+generated samplers.
+
 Before writing `set_current`, list separately:
   - what must flow OUT (parameters; `get_current` reports these), and
   - what must flow IN (data an outer loop refreshes: covariates, offsets,
