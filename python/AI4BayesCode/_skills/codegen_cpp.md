@@ -2122,8 +2122,10 @@ if (X_new.n_elem / p_ != N_)
         "<REASON>. To change N, reconstruct the wrapper.");
 ```
 
-The validator (Check #19) accepts EITHER the dynamic-N canonical
-template OR the strict-N pattern with documented reason.
+The validator's R1 `set_current` checks (validator.md, Layer 3 -- four
+mandatory checks, any one failing is an R1 FAIL) accept EITHER the dynamic-N
+canonical template OR the strict-N pattern with documented reason. There is
+no numbered L2 check for this; the enforcement is R1.
 
 ---
 
