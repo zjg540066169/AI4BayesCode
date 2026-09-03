@@ -1711,6 +1711,13 @@ do not reinvent the step-size logic.
 
 ### 23. readapt_NUTS state-preservation + RNG separation
 
+RUNTIME NOTE: the behavioural half of this check -- calling `readapt_NUTS`
+and verifying chain state is unchanged, and that the method is bound iff a
+NUTS-family child exists -- is executed by R1's member-function conformance
+sweep, not here. What remains at L2 is the STATIC half: the separate RNG
+stream and the binding macros in the source. Never mark the behavioural half
+PASS from static reasoning.
+
 **Trigger:** Any wrapper whose composite CONTAINS at least one `nuts_block`
 or `joint_nuts_block` child. This is a property of the MODEL, not of the
 bindings, and the distinction is load-bearing.
@@ -1948,6 +1955,11 @@ defense against mode B.
 ---
 
 ### 26. Kernel-control conformance (freeze / unfreeze / get_frozen)
+
+RUNTIME NOTE: sub-checks (b), (c) and (d) below are runtime tests; they are
+executed by R1's member-function conformance sweep, not as L2 steps. What
+remains at L2 is (a), the static presence grep. Never mark (b)-(d) PASS from
+static reasoning.
 
 **Trigger:** EVERY wrapper. Kernel-control is a universal category per
 interface.md Sec.1 -- every user-facing wrapper class MUST expose
@@ -2207,11 +2219,41 @@ in which case the comparison means nothing.
 
 ### R1. Smoke test
 
-**Purpose:** catch immediate failures -- non-finite values, `predict_at`
-mutating state, exceptions during `step`, silent default-substitution inside
-refresher bodies (Semantic #6), AND that every DATA key accepted by
-`set_current` survives `step()`. Must stay cheap so it is affordable even for
-slow models (BART, large data).
+**Purpose:** call every built-in method of the wrapper once and catch
+immediate failures -- a missing or broken binding, non-finite values,
+`predict_at` mutating state, exceptions during `step`, silent
+default-substitution inside refresher bodies (Semantic #6), AND that every
+DATA key accepted by `set_current` survives `step()`. Must stay cheap so it
+is affordable even for slow models (BART, large data).
+
+**Member-function conformance sweep -- MANDATORY. Any one failing is an R1
+FAIL.** Every built-in method of the generated wrapper is checked HERE, at
+runtime, by actually calling it. "PASS (static)" -- concluding a method works
+from reading the source or the binding list without calling it -- is not a
+valid R1 result: binding, dispatch and state bugs only surface on a real call.
+
+1. Enumerate the bound methods from the module itself (R: `names(m)`), not
+   from documentation.
+2. Presence: the core six (`step`, `get_current`, `set_current`,
+   `predict_at`, `get_dag`, `get_history`) and the kernel-control trio
+   (`freeze`, `unfreeze`, `get_frozen`) must all be bound. `readapt_NUTS`
+   must be bound IF AND ONLY IF the composite has a NUTS-family child --
+   missing with one, or present without one, is a FAIL.
+3. Call every bound method at least once and check its invariants:
+   - `step()` and `step(n)`: run; every value in `get_current()` finite after.
+   - `get_current()`: returns; every entry finite.
+   - `get_history()` (keep_history mode): every key is a MATRIX; all keys
+     share the same row count; after `step(n)` that count grows by n.
+   - `set_current()`: the four checks below.
+   - `predict_at()`: the no-mutation and predict-DAG checks below.
+   - `get_dag()`: returns with gibbs_reads / gibbs_invalidates /
+     predict_edges / context_edges / data_inputs all present.
+   - `freeze` / `unfreeze` / `get_frozen`: freezing an unknown name errors;
+     freezing a blacklisted child errors; a frozen child's value is unchanged
+     by `step()`; no-argument `unfreeze()` clears; `get_frozen()` reflects
+     every transition.
+   - `readapt_NUTS` (when bound): the call returns and leaves chain state
+     unchanged (`get_current()` identical before and after).
 
 **`set_current` checks -- MANDATORY, no skip. Any one failing is an R1 FAIL.**
 set_current for stateful composition is the most important goal for
