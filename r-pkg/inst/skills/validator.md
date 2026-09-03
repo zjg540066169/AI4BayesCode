@@ -2214,20 +2214,27 @@ refresher bodies (Semantic #6), AND that every DATA key accepted by
 slow models (BART, large data).
 
 **`set_current` checks -- MANDATORY, no skip. Any one failing is an R1 FAIL.**
-`set_current(X, y)` is this interface's PRIMARY purpose: it is how an outer
-sampler pushes imputed covariates, a working response, or newly arrived data
-inward (missing data / hierarchical working latents / online Bayes).
+Pushing DATA inward is this interface's PRIMARY purpose: it is how an outer
+sampler supplies imputed covariates, a working response, or newly arrived
+observations (missing data / hierarchical working latents / online Bayes).
+"Data" is whatever the constructor takes as data, under whatever name the
+model uses -- `X` and `y` are only the commonest case. It is `D` and
+`cardinalities` for a Bayesian network, `k` for counts, `y` alone for a
+mixture, exposures plus covariates for an exposure-response model.
 Parameter injection is the secondary use. A wrapper whose `set_current`
 accepts only what `get_current()` reports cannot be composed at all -- the
 failure `codegen_cpp.md` Sec.7a forbids by name.
 
 Emit all four.
 
-**(1) Every data key HAS a setter.** For every `X` / `y` / covariate / offset
-/ exposure the constructor takes, `set_current(list(<key> = ...))` must be
-accepted. A model may claim it has no data keys ONLY if its constructor takes
-no data at all beyond fixed hyperparameters. If it takes `X` or `y`, it has
-data keys, and "no data keys" is a FAIL, not a skip.
+**(1) Every data key HAS a setter.** Enumerate the constructor's arguments,
+drop the ones that are fixed hyperparameters, the RNG seed and the
+keep_history flag; everything left is data and MUST be accepted by
+`set_current(list(<key> = ...))` under the same name `get_current` /
+`predict_at` use for it. A model may claim it has no data keys ONLY if that
+list comes out empty. If the constructor takes an outcome, a design matrix,
+counts, exposures, an offset or an adjacency, it has data keys, and "no data
+keys" is a FAIL, not a skip.
 
 **(2) The value lands, and (3) it SURVIVES `step()`.** For each data key:
 

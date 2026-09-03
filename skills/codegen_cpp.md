@@ -1961,6 +1961,8 @@ first thing to get right, and the round-trip rule below is subordinate to it.
 purpose is the other direction: letting an outer sampler push DATA inward --
 imputed covariates, a working response from a sibling block, newly arrived
 observations (missing data / hierarchical working latents / online Bayes).
+"Data" means whatever the constructor takes as data, under the model's own
+names; `X` and `y` in this section's title are just the commonest case.
 That is what this interface was designed for. Parameter injection is the
 SECONDARY use, for checkpoint restore and `run_chains` round-tripping. Those
 sets barely overlap. A quantity that is data -- a conditioning panel, an
