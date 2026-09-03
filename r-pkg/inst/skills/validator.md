@@ -2226,6 +2226,10 @@ default-substitution inside refresher bodies (Semantic #6), AND that every
 DATA key accepted by `set_current` survives `step()`. Must stay cheap so it
 is affordable even for slow models (BART, large data).
 
+**R1 is all-or-nothing.** Any check in this section that fails, fails R1
+outright. There are no warnings at R1, no partial passes, and no deferring a
+failure to R2/R3 -- fix the code and re-run R1.
+
 **Member-function conformance sweep -- MANDATORY. Any one failing is an R1
 FAIL.** Every built-in method of the generated wrapper is checked HERE, at
 runtime, by actually calling it. "PASS (static)" -- concluding a method works
