@@ -1957,8 +1957,12 @@ appears as a `set_current` key:
 
 **Do NOT derive the writable surface from the readable surface.** This is the
 first thing to get right, and the round-trip rule below is subordinate to it.
-`get_current()` reports the sampler's PARAMETERS. `set_current` must serve a
-second, independent purpose: letting an outer sampler push DATA inward. Those
+`get_current()` reports the sampler's PARAMETERS. `set_current`'s PRIMARY
+purpose is the other direction: letting an outer sampler push DATA inward --
+imputed covariates, a working response from a sibling block, newly arrived
+observations (missing data / hierarchical working latents / online Bayes).
+That is what this interface was designed for. Parameter injection is the
+SECONDARY use, for checkpoint restore and `run_chains` round-tripping. Those
 sets barely overlap. A quantity that is data -- a conditioning panel, an
 offset, a reference copy the kernel restores from each sweep -- never appears
 in `get_current()` at all, so if you enumerate `set_current`'s keys by reading
