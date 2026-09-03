@@ -211,8 +211,19 @@ class DPGammaMixture
     : public AI4BayesCode::kernel_control_mixin<DPGammaMixture> {
     friend class AI4BayesCode::kernel_control_mixin<DPGammaMixture>;
 public:
+    /// SHORT constructor -- data + seed. Hyperparameters take their
+    /// defaults: K_trunc 20. Use the full constructor to change them.
+    /// Rcpp ignores C++ default arguments, hence a separate ctor.
+    DPGammaMixture(const arma::vec& y,
+                   int  rng_seed,
+                   bool keep_history = false)
+        : DPGammaMixture(y, /*K_trunc=*/20, rng_seed, keep_history) {}
+
+    // rng_seed carries no C++ default: with one, DPGammaMixture(y, n) would
+    // be ambiguous between this ctor (n = K_trunc) and the short one above
+    // (n = rng_seed).
     DPGammaMixture(const arma::vec& y, int K_trunc,
-                   int rng_seed = 1, bool keep_history = false)
+                   int rng_seed, bool keep_history = false)
         : impl_(std::make_unique<composite_block>("DPGammaMixture")),
           rng_(rng_seed == 0 ? std::random_device{}()
                              : static_cast<std::mt19937_64::result_type>(rng_seed)),
@@ -346,6 +357,40 @@ public:
             impl_->add_child(std::make_unique<univariate_slice_sampling_block>(std::move(cfg)));
         }
 
+        // ---- Predict DAG + y_rep stochastic refresher --------------------
+        // y is an observed terminal, not a replaceable covariate, so there is
+        // no declare_data_input here. The refresher reads pi/shape/rate only.
+        impl_->data().declare_predict_edges("pi",    {"y_rep"});
+        impl_->data().declare_predict_edges("shape", {"y_rep"});
+        impl_->data().declare_predict_edges("rate",  {"y_rep"});
+
+        impl_->data().set("y_rep", arma::vec(N_, arma::fill::zeros));
+        impl_->data().register_stochastic_refresher("y_rep",
+            [N = N_, K = K_](const AI4BayesCode::shared_data_t& dat,
+                             std::mt19937_64& rng) -> arma::vec {
+                // Marginal posterior predictive: z_rep_i ~ Cat(pi),
+                // y_rep_i ~ Gamma(shape_{z_rep_i}, rate_{z_rep_i}).
+                const arma::vec& pi = dat.get("pi");
+                const arma::vec& sh = dat.get("shape");
+                const arma::vec& rt = dat.get("rate");
+                std::uniform_real_distribution<double> uniform(0.0, 1.0);
+                arma::vec out(N);
+                for (std::size_t i = 0; i < N; ++i) {
+                    const double u = uniform(rng);
+                    double cumul = 0.0;
+                    std::size_t z_i = K - 1;
+                    for (std::size_t k = 0; k < K; ++k) {
+                        cumul += pi[k];
+                        if (u < cumul) { z_i = k; break; }
+                    }
+                    // std::gamma_distribution is (shape, SCALE) = (shape, 1/rate).
+                    std::gamma_distribution<double> gd(sh[z_i], 1.0 / rt[z_i]);
+                    out[i] = gd(rng);
+                }
+                return out;
+            });
+
+        keep_history_ = keep_history;
         if (keep_history) impl_->set_keep_history(true);
     }
 
@@ -365,13 +410,155 @@ public:
         return out;
     }
 
+    /// Accepts any subset of (y, z, pi, shape, rate, alpha). y is the data
+    /// inflow an outer sampler uses to push a revised response inward
+    /// (imputation, a working response from a sibling block, newly arrived
+    /// observations); the remaining keys inject parameter state.
+    void set_current(const AI4BayesCode::state_map& params) {
+        for (const auto& kv : params) {
+            const std::string& k = kv.first;
+            if (k != "y" && k != "z" && k != "pi" && k != "shape" &&
+                k != "rate" && k != "alpha")
+                ai4b::stop("DPGammaMixture::set_current: unknown key '%s'. "
+                           "Valid: y, z, pi, shape, rate, alpha.", k.c_str());
+        }
+        if (params.count("y")) {
+            const arma::vec& y_new = params.at("y");
+            // STRICT-N: z has length N and the per-component sufficient
+            // statistics are sized for N observations, so N is fixed at
+            // construction. To change N, reconstruct the wrapper.
+            if (y_new.n_elem != N_)
+                ai4b::stop("set_current: DPGammaMixture fixes N at "
+                           "construction (z is length-N). Supplied y has %zu "
+                           "elements but requires N = %zu. To change N, "
+                           "reconstruct.",
+                           static_cast<std::size_t>(y_new.n_elem), N_);
+            if (!y_new.is_finite()) ai4b::stop("set_current: y must be finite");
+            if (y_new.min() <= 0.0)
+                ai4b::stop("set_current: Gamma data must be strictly positive");
+            impl_->data().set("y", y_new);
+        }
+        if (params.count("z")) {
+            const arma::vec& znew = params.at("z");
+            if (znew.n_elem != N_)
+                ai4b::stop("set_current: z length must equal N");
+            for (std::size_t i = 0; i < N_; ++i) {
+                const long lab = static_cast<long>(std::llround(znew[i]));
+                if (lab < 1 || static_cast<std::size_t>(lab) > K_)
+                    ai4b::stop("set_current: z[i] out of {1, ..., K_trunc}");
+            }
+            dynamic_cast<categorical_gibbs_block&>(impl_->child(0))
+                .set_current(znew);
+            impl_->data().set("z", znew);
+            impl_->data().refresh_derived_for("z");
+        }
+        if (params.count("pi")) {
+            const arma::vec& pinew = params.at("pi");
+            if (pinew.n_elem != K_)
+                ai4b::stop("set_current: pi length must equal K_trunc");
+            dynamic_cast<stick_breaking_block&>(impl_->child(2))
+                .set_current(pinew);
+            impl_->data().set("pi", pinew);
+        }
+        // shape and rate are the two sub-parameters of the single
+        // cluster_atom_block, whose state is one atom-major vector
+        // [shape_0, rate_0, shape_1, rate_1, ...]; setting either one alone
+        // rebuilds that vector from the other's current value.
+        if (params.count("shape") || params.count("rate")) {
+            arma::vec sh = impl_->data().get("shape");
+            arma::vec rt = impl_->data().get("rate");
+            if (params.count("shape")) sh = params.at("shape");
+            if (params.count("rate"))  rt = params.at("rate");
+            if (sh.n_elem != K_ || rt.n_elem != K_)
+                ai4b::stop("set_current: shape and rate must each have "
+                           "length K_trunc");
+            for (std::size_t k = 0; k < K_; ++k) {
+                if (!(sh[k] > 0.0)) ai4b::stop("set_current: shape must be > 0");
+                if (!(rt[k] > 0.0)) ai4b::stop("set_current: rate must be > 0");
+            }
+            arma::vec atoms(2u * K_);
+            for (std::size_t k = 0; k < K_; ++k) {
+                atoms[2 * k]     = sh[k];
+                atoms[2 * k + 1] = rt[k];
+            }
+            dynamic_cast<cluster_atom_block&>(impl_->child(1))
+                .set_current(atoms);
+            impl_->data().set("shape", sh);
+            impl_->data().set("rate",  rt);
+        }
+        if (params.count("alpha")) {
+            const double a_new = params.at("alpha")[0];
+            if (!(a_new > 0.0)) ai4b::stop("set_current: alpha must be > 0");
+            dynamic_cast<univariate_slice_sampling_block&>(impl_->child(3))
+                .set_current(arma::vec{a_new});
+            impl_->data().set("alpha", arma::vec{a_new});
+        }
+    }
+
+    /// Posterior-predictive y_rep at the training data. An EMPTY map is the
+    /// only supported argument: the mixture carries no covariates, so there
+    /// is no new design to predict at.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        if (!new_data.empty())
+            ai4b::stop("DPGammaMixture: predict_at takes an empty list/map -- "
+                       "the model has no covariates. Pass list() to draw "
+                       "y_rep at the training y.");
+
+        AI4BayesCode::history_map out;
+
+        if (!keep_history_) {
+            // No-history mode: one posterior-predictive draw, emitted as a
+            // 1 x N row so both modes share get_history()'s shape.
+            block_context replaced;
+            block_context result = impl_->predict_at(replaced, predict_rng_);
+            for (const auto& kv : result) {
+                const arma::vec& v = kv.second;
+                arma::mat m(1, v.n_elem);
+                for (std::size_t j = 0; j < v.n_elem; ++j) m(0, j) = v[j];
+                out.emplace(kv.first, std::move(m));
+            }
+            return out;
+        }
+
+        // History mode: draw y_rep per retained posterior draw. shape and
+        // rate are sub-outputs of the "cluster_params" block; pi is its own.
+        AI4BayesCode::history_map hist = impl_->get_history();
+        const arma::mat& pi_hist = hist.at("pi");     // n_draws x K
+        const arma::mat& sh_hist = hist.at("shape");  // n_draws x K
+        const arma::mat& rt_hist = hist.at("rate");   // n_draws x K
+        const std::size_t n_draws = pi_hist.n_rows;
+
+        arma::mat yrep_mat(n_draws, N_);
+        std::uniform_real_distribution<double> unif(0.0, 1.0);
+        for (std::size_t draw = 0; draw < n_draws; ++draw) {
+            for (std::size_t i = 0; i < N_; ++i) {
+                const double u = unif(predict_rng_);
+                double cumul = 0.0;
+                std::size_t z_i = K_ - 1;
+                for (std::size_t k = 0; k < K_; ++k) {
+                    cumul += pi_hist(draw, k);
+                    if (u < cumul) { z_i = k; break; }
+                }
+                // std::gamma_distribution is (shape, SCALE) = (shape, 1/rate).
+                std::gamma_distribution<double> gd(
+                    sh_hist(draw, z_i), 1.0 / rt_hist(draw, z_i));
+                yrep_mat(draw, i) = gd(predict_rng_);
+            }
+        }
+        out.emplace("y_rep", std::move(yrep_mat));
+        return out;
+    }
+
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
     AI4BayesCode::dag_info    get_dag()     const { return impl_->get_dag(); }
 
 private:
     std::unique_ptr<composite_block> impl_;
-    std::mt19937_64 rng_, predict_rng_;
+    std::mt19937_64 rng_;
+    mutable std::mt19937_64 predict_rng_;   // predict_at() const advances it
     std::size_t N_ = 0, K_ = 0;
+    bool keep_history_ = false;
 };
 
 // ============================================================================
@@ -421,9 +608,15 @@ int main() {
 #include "AI4BayesCode/rcpp_wrap.hpp"
 RCPP_MODULE(DPGammaMixture) {
     Rcpp::class_<DPGammaMixture>("DPGammaMixture")
+        .constructor<arma::vec, int>(
+            "Minimal: data + seed. Hyperparameters default (K_trunc 20).")
+        .constructor<arma::vec, int, bool>(
+            "Minimal + keep_history.")
         .constructor<arma::vec, int, int, bool>()
         .method("step",        &DPGammaMixture::step)
         .method("get_current", &DPGammaMixture::get_current)
+        .method("set_current", &DPGammaMixture::set_current)
+        .method("predict_at",  &DPGammaMixture::predict_at)
         .method("get_history", &DPGammaMixture::get_history)
         .method("get_dag",     &DPGammaMixture::get_dag)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(DPGammaMixture)
@@ -441,11 +634,13 @@ PYBIND11_MODULE(DPGammaMixture, m) {
     pybind11::class_<DPGammaMixture>(m, "DPGammaMixture")
         .def(pybind11::init<arma::vec, int, int, bool>(),
              pybind11::arg("y"),
-             pybind11::arg("K_trunc"),
+             pybind11::arg("K_trunc") = 20,
              pybind11::arg("rng_seed")     = 1,
              pybind11::arg("keep_history") = false)
         .def("step",        &DPGammaMixture::step)
         .def("get_current", &DPGammaMixture::get_current)
+        .def("set_current", &DPGammaMixture::set_current, pybind11::arg("params"))
+        .def("predict_at",  &DPGammaMixture::predict_at, pybind11::arg("new_data"))
         .def("get_history", &DPGammaMixture::get_history)
         .def("get_dag",     &DPGammaMixture::get_dag)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(DPGammaMixture)

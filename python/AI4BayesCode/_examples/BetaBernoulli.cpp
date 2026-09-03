@@ -137,6 +137,14 @@ double p_log_density(const arma::vec& p_nat,
 class BetaBernoulli : public AI4BayesCode::kernel_control_mixin<BetaBernoulli> {
     friend class AI4BayesCode::kernel_control_mixin<BetaBernoulli>;
 public:
+    /// SHORT constructor -- data + seed. Hyperparameters take their
+    /// defaults: Beta(1, 1) prior (uniform on (0,1)). Use the full constructor to change them.
+    /// Rcpp ignores C++ default arguments, hence a separate ctor.
+    BetaBernoulli(const arma::vec& y,
+                  int  rng_seed,
+                  bool keep_history = false)
+        : BetaBernoulli(y, /*a=*/1.0, /*b=*/1.0, rng_seed, keep_history) {}
+
     BetaBernoulli(const arma::vec& y, double a, double b, int rng_seed,
                   bool keep_history = false)
         : rng_(rng_seed == 0
@@ -348,6 +356,10 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(BetaBernoulli_module) {
     Rcpp::class_<BetaBernoulli>("BetaBernoulli")
+        .constructor<arma::vec, int>(
+            "Minimal: data + seed. Hyperparameters default (Beta(1, 1) prior (uniform on (0,1))).")
+        .constructor<arma::vec, int, bool>(
+            "Minimal + keep_history.")
         .constructor<arma::vec, double, double, int>(
             "Legacy constructor; keep_history defaults to FALSE.")
         .constructor<arma::vec, double, double, int, bool>(

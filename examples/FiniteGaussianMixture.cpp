@@ -216,6 +216,14 @@ public:
     /// RECOMMENDED constructor: data-driven weakly-informative
     /// Normal-Gamma hypers from y; symmetric Dirichlet alpha_dir = 1
     /// (uniform-on-simplex default). Delegates to the explicit ctor.
+    /// SHORT constructor -- data + seed. Hyperparameters take their
+    /// defaults: K = 5 components. Use the full constructor to change them.
+    /// Rcpp ignores C++ default arguments, hence a separate ctor.
+    FiniteGaussianMixture(const arma::mat& y,
+                          int  rng_seed,
+                          bool keep_history = false)
+        : FiniteGaussianMixture(y, /*K=*/5, rng_seed, keep_history) {}
+
     FiniteGaussianMixture(const arma::mat& y,
                           int K,
                           int rng_seed,
@@ -618,6 +626,8 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(FiniteGaussianMixture_module) {
     Rcpp::class_<FiniteGaussianMixture>("FiniteGaussianMixture")
+        .constructor<arma::mat, int>(
+            "Minimal: data + seed. Hyperparameters default (K = 5 components).")
         .constructor<arma::mat, int, int>(
             "DEFAULT (data-driven) ctor; keep_history=FALSE. "
             "FiniteGaussianMixture(y, K, seed).")
@@ -666,7 +676,7 @@ PYBIND11_MODULE(FiniteGaussianMixture, m) {
         // DEFAULT (data-driven) ctor: (y, K, seed, keep_history).
         .def(pybind11::init<arma::mat, int, int, bool>(),
              pybind11::arg("y"),
-             pybind11::arg("K"),
+             pybind11::arg("K") = 5,
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
         // Advanced explicit-hyper ctor:

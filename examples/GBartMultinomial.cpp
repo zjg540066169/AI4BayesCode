@@ -202,6 +202,16 @@ const char* const kTreeSep = "\n===GBARTCLASS===\n";
 class GBartMultinomial : public AI4BayesCode::kernel_control_mixin<GBartMultinomial> {
     friend class AI4BayesCode::kernel_control_mixin<GBartMultinomial>;
 public:
+    /// SHORT constructor -- data + seed. Tuning knobs take their
+    /// standard defaults: ntrees 50 (C is data: the number of classes). Use the full constructor to
+    /// retune. Rcpp ignores C++ default arguments, hence a separate ctor.
+    GBartMultinomial(const arma::mat& X,
+                     const arma::vec& y,
+                     int  C,
+                     int  rng_seed,
+                     bool keep_history = false)
+        : GBartMultinomial(X, y, C, /*ntrees=*/50, rng_seed, /*keep_tree=*/false, keep_history) {}
+
     GBartMultinomial(const arma::mat& X,
                      const arma::vec& y,
                      int    C,
@@ -727,6 +737,8 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(GBartMultinomial_module) {
     Rcpp::class_<GBartMultinomial>("GBartMultinomial")
+        .constructor<arma::mat, arma::vec, int, int>(
+            "Minimal: data + seed. Tuning knobs take standard defaults (ntrees 50 (C is data: the number of classes)).")
         .constructor<arma::mat, arma::vec, int, int, int>(
             "Short ctor: X (N x p), y in {0..C-1}, C, ntrees, seed; "
             "keep_tree and keep_history default FALSE.")

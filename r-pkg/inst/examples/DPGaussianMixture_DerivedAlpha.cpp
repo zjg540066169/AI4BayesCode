@@ -310,6 +310,15 @@ public:
     /// RECOMMENDED constructor: data-driven weakly-informative
     /// Normal-Gamma hypers from y. Delegates to the explicit ctor
     /// (that path is unchanged).
+    /// SHORT constructor -- data + seed. Hyperparameters take their
+    /// defaults: K_trunc 20. Use the full constructor to change them.
+    /// Rcpp ignores C++ default arguments, hence a separate ctor.
+    DPGaussianMixture_DerivedAlpha(const arma::mat& y,
+                                   int  rng_seed,
+                                   bool keep_history = false)
+        : DPGaussianMixture_DerivedAlpha(y, /*K_trunc=*/20, rng_seed,
+                                         keep_history) {}
+
     DPGaussianMixture_DerivedAlpha(const arma::mat& y,
                                    int K_trunc,
                                    int rng_seed,
@@ -735,6 +744,8 @@ private:
 RCPP_MODULE(DPGaussianMixture_DerivedAlpha_module) {
     Rcpp::class_<DPGaussianMixture_DerivedAlpha>(
         "DPGaussianMixture_DerivedAlpha")
+        .constructor<arma::mat, int>(
+            "Minimal: y + seed. K_trunc defaults to 20.")
         .constructor<arma::mat, int, int>(
             "DEFAULT (data-driven) ctor; keep_history=FALSE. "
             "DPGaussianMixture_DerivedAlpha(y, K_trunc, seed).")
@@ -781,7 +792,7 @@ PYBIND11_MODULE(DPGaussianMixture_DerivedAlpha, m) {
         // register_refresher.
         .def(pybind11::init<arma::mat, int, int, bool>(),
              pybind11::arg("y"),
-             pybind11::arg("K_trunc"),
+             pybind11::arg("K_trunc") = 20,
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
         // Advanced explicit-hyper ctor.

@@ -65,7 +65,7 @@
 //   X  <- matrix(runif(N * p, 0.5, 1.5), N, p)             # predictors (bounded away from 0)
 //   b0 <- sin(3 * Z); b1 <- Z^2; b2 <- -Z                  # true coefficient functions of Z
 //   y  <- b0 + b1 * X[, 1] + b2 * X[, 2] + rnorm(N, 0, 0.3)
-//   m  <- new(VCBart, X, matrix(Z, N, 1), y, 50L, 2.0, 2.0, 0.95, 3.0, 100L, 1L)
+//   m  <- new(VCBart, X, matrix(Z, N, 1), y, 1L)   # every tuning knob defaulted
 //   m$step(1500L); cur <- m$get_current()                 # $beta_0..$beta_2, $mu, $sigma
 //   cor(cur$beta_0, sin(3 * Z)); cor(cur$beta_1, Z^2)      # recover the coefficient functions
 // @example:python
@@ -76,7 +76,7 @@
 //   b0 = np.sin(3 * Z); b1 = Z**2; b2 = -Z
 //   y  = b0 + b1 * X[:, 0] + b2 * X[:, 1] + rng.normal(0, 0.3, size=N)
 //   Mod = AI4BayesCode.example("VCBart")
-//   m = Mod.VCBart(X, Z.reshape(-1, 1), y, 50, 2.0, 2.0, 0.95, 3.0, 100, 1)
+//   m = Mod.VCBart(X, Z.reshape(-1, 1), y, rng_seed=1)   # every tuning knob defaulted
 //   m.step(1500); cur = m.get_current()
 //   print(np.corrcoef(cur["beta_1"], Z**2)[0, 1])         # recovers beta_1(Z) = Z^2
 // @example:end
@@ -132,6 +132,17 @@ namespace constraints = AI4BayesCode::constraints;
 class VCBart : public AI4BayesCode::kernel_control_mixin<VCBart> {
     friend class AI4BayesCode::kernel_control_mixin<VCBart>;
 public:
+    /// SHORT constructor -- data + seed. Tuning knobs take their
+    /// standard defaults: ntrees 50, k 2, power 2, base 0.95, nu 3, numcut 100 (CGM 2010). Use the full constructor to
+    /// retune. Rcpp ignores C++ default arguments, hence a separate ctor.
+    VCBart(const arma::mat& X,
+           const arma::mat& Z,
+           const arma::vec& y,
+           int  rng_seed,
+           bool keep_history = false)
+        : VCBart(X, Z, y, /*ntrees=*/50, /*k=*/2.0, /*power=*/2.0, /*base=*/0.95,
+                 /*nu=*/3.0, /*numcut=*/100, rng_seed, keep_history) {}
+
     VCBart(const arma::mat& X,      // N x p predictors
            const arma::mat& Z,      // N x q effect modifiers
            const arma::vec& y,      // length N response
@@ -332,15 +343,31 @@ public:
 
     // Predict at new data. Pass list(Z = as.vector(Z_new), X = as.vector(X_new))
     // (flattened column-major). Returns the predicted mean mu at the new points.
-    AI4BayesCode::state_map predict_at(const AI4BayesCode::state_map& new_data) {
+    /// const and returning history_map per the core-six contract
+    /// (interface.md): predict_at never mutates MCMC state, and its outputs
+    /// are matrices so the stateful and history modes share one shape.
+    /// An EMPTY map predicts at the training data.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
+        for (const auto& kv : new_data)
+            if (kv.first != "Z" && kv.first != "X")
+                ai4b::stop("VCBart::predict_at: unknown key '%s'", kv.first.c_str());
         auto it_z = new_data.find("Z");
         auto it_x = new_data.find("X");
-        if (it_z == new_data.end() || it_x == new_data.end())
-            ai4b::stop("VCBart::predict_at: needs both 'Z' and 'X' (flattened "
-                       "column-major new-data matrices).");
-        const std::size_t n_new = it_z->second.n_elem / static_cast<std::size_t>(z_ncol_);
-        arma::mat Z_new = arma::reshape(it_z->second, n_new, z_ncol_);
-        arma::mat X_new = arma::reshape(it_x->second, n_new, x_ncol_);
+        if ((it_z == new_data.end()) != (it_x == new_data.end()))
+            ai4b::stop("VCBart::predict_at: supply BOTH 'Z' and 'X', or neither "
+                       "(neither = predict at the training data).");
+
+        arma::mat Z_new, X_new;
+        if (it_z == new_data.end()) {                 // training-data predictive
+            Z_new = Z_;
+            X_new.set_size(Z_.n_rows, static_cast<arma::uword>(x_ncol_));
+            for (int j = 0; j < x_ncol_; ++j) X_new.col(j) = (*xcols_)[j];
+        } else {
+            const std::size_t n_in = it_z->second.n_elem / static_cast<std::size_t>(z_ncol_);
+            Z_new = arma::reshape(it_z->second, n_in, z_ncol_);
+            X_new = arma::reshape(it_x->second, n_in, x_ncol_);
+        }
+        const std::size_t n_new = Z_new.n_rows;
 
         arma::vec mu_new(n_new, arma::fill::zeros);
         for (int j = 0; j <= p_; ++j) {
@@ -351,8 +378,10 @@ public:
                 mu_new[i] += xij * beta_j[i];
             }
         }
-        AI4BayesCode::state_map out;
-        out["mu"] = mu_new;
+        AI4BayesCode::history_map out;
+        arma::mat mu_mat(1, n_new);
+        for (std::size_t i = 0; i < n_new; ++i) mu_mat(0, i) = mu_new[i];
+        out.emplace("mu", std::move(mu_mat));
         return out;
     }
 
@@ -391,6 +420,10 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(VCBart_module) {
     Rcpp::class_<VCBart>("VCBart")
+        .constructor<arma::mat, arma::mat, arma::vec, int>(
+            "Minimal: data + seed. Tuning knobs take standard defaults (ntrees 50, k 2, power 2, base 0.95, nu 3, numcut 100 (CGM 2010)).")
+        .constructor<arma::mat, arma::mat, arma::vec, int, bool>(
+            "Minimal + keep_history.")
         .constructor<arma::mat, arma::mat, arma::vec,
                      int, double, double, double, double, int, int>(
             "Short constructor; keep_history defaults FALSE.")

@@ -95,12 +95,12 @@
 //   y <- as.numeric(X %*% beta_true + rnorm(N, 0, sigma_true)); y <- y - mean(y)  # center y
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(SpikeSlabRJMCMC, X, y, 1.0, 1.0, seed, TRUE),
+//       function(seed) new(SpikeSlabRJMCMC, X, y, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m <- new(SpikeSlabRJMCMC, X, y, 1.0, 1.0, 7L, TRUE)  # X (N x p), y, a_pi=1, b_pi=1 (Beta prior on pi), seed=7, keep_history=TRUE
+//   m <- new(SpikeSlabRJMCMC, X, y, 7L, TRUE)  # X (N x p), y, seed, keep_history; Beta(1,1) on pi
 //   m$step(2500); str(m$get_current())
 // @example:python
 //   import numpy as np, AI4BayesCode
@@ -111,12 +111,12 @@
 //   Mod = AI4BayesCode.example("SpikeSlabRJMCMC")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
-//       lambda seed: Mod.SpikeSlabRJMCMC(X, y, 1.0, 1.0, seed, True),
+//       lambda seed: Mod.SpikeSlabRJMCMC(X, y, rng_seed=seed, keep_history=True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m = Mod.SpikeSlabRJMCMC(X, y, 1.0, 1.0, 7, True)  # (X, y, a_pi=1, b_pi=1, seed=7, keep_history=True)
+//   m = Mod.SpikeSlabRJMCMC(X, y, rng_seed=7, keep_history=True)  # Beta(1,1) on pi
 //   m.step(2500); print(m.get_current())              # gamma ~ {0,3,6} active, sigma ~ 1
 // @example:end
 // [[Rcpp::depends(RcppArmadillo)]]
@@ -448,6 +448,15 @@ double spike_slab_continuous_update(std::mt19937_64& rng,
 class SpikeSlabRJMCMC : public AI4BayesCode::kernel_control_mixin<SpikeSlabRJMCMC> {
     friend class AI4BayesCode::kernel_control_mixin<SpikeSlabRJMCMC>;
 public:
+    /// SHORT constructor -- data + seed. Hyperparameters take their
+    /// defaults: Beta(1, 1) inclusion prior. Use the full constructor to change them.
+    /// Rcpp ignores C++ default arguments, hence a separate ctor.
+    SpikeSlabRJMCMC(const arma::mat& X,
+                    const arma::vec& y,
+                    int  rng_seed,
+                    bool keep_history = false)
+        : SpikeSlabRJMCMC(X, y, /*a_pi_prior=*/1.0, /*b_pi_prior=*/1.0, rng_seed, keep_history) {}
+
     SpikeSlabRJMCMC(const arma::mat& X,
                     const arma::vec& y,
                     double           a_pi_prior,
@@ -1019,6 +1028,10 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(SpikeSlabRJMCMC_module) {
     Rcpp::class_<SpikeSlabRJMCMC>("SpikeSlabRJMCMC")
+        .constructor<arma::mat, arma::vec, int>(
+            "Minimal: data + seed. Hyperparameters default (Beta(1, 1) inclusion prior).")
+        .constructor<arma::mat, arma::vec, int, bool>(
+            "Minimal + keep_history.")
         .constructor<arma::mat, arma::vec,
                      double, double,
                      int>(

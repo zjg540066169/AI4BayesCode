@@ -328,6 +328,14 @@ public:
     /// Normal-Gamma hyperparameters computed from y (converges robustly;
     /// no hyperparameter tuning needed). Delegates to the explicit
     /// constructor below -- behaviour of that path is unchanged.
+    /// SHORT constructor -- data + seed. Hyperparameters take their
+    /// defaults: K_trunc 20. Use the full constructor to change them.
+    /// Rcpp ignores C++ default arguments, hence a separate ctor.
+    DPGaussianMixture(const arma::mat& y,
+                      int  rng_seed,
+                      bool keep_history = false)
+        : DPGaussianMixture(y, /*K_trunc=*/20, rng_seed, keep_history) {}
+
     DPGaussianMixture(const arma::mat& y,
                       int K_trunc,
                       int rng_seed,
@@ -850,6 +858,8 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(DPGaussianMixture_module) {
     Rcpp::class_<DPGaussianMixture>("DPGaussianMixture")
+        .constructor<arma::mat, int>(
+            "Minimal: data + seed. Hyperparameters default (K_trunc 20).")
         .constructor<arma::mat, int, int>(
             "DEFAULT (data-driven) constructor; keep_history = FALSE. "
             "DPGaussianMixture(y, K_trunc, seed).")
@@ -899,7 +909,7 @@ PYBIND11_MODULE(DPGaussianMixture, m) {
         // DEFAULT data-driven constructor: (y N x d, K_trunc, seed, keep_history).
         .def(pybind11::init<arma::mat, int, int, bool>(),
              pybind11::arg("y"),
-             pybind11::arg("K_trunc"),
+             pybind11::arg("K_trunc") = 20,
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)
         // Advanced explicit-hyperparameter constructor.

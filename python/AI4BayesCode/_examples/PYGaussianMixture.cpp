@@ -384,6 +384,14 @@ public:
     /// RECOMMENDED constructor: data-driven weakly-informative
     /// Normal-Gamma hypers from y; `discount` (PY model param) stays
     /// explicit. Delegates to the explicit ctor (unchanged path).
+    /// SHORT constructor -- data + seed. Hyperparameters take their
+    /// defaults: K_trunc 20, discount 0 (reduces to a DP). Use the full constructor to change them.
+    /// Rcpp ignores C++ default arguments, hence a separate ctor.
+    PYGaussianMixture(const arma::mat& y,
+                      int  rng_seed,
+                      bool keep_history = false)
+        : PYGaussianMixture(y, /*K_trunc=*/20, /*discount=*/0.0, rng_seed, keep_history) {}
+
     PYGaussianMixture(const arma::mat& y,
                       int K_trunc,
                       double discount,
@@ -841,6 +849,10 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(PYGaussianMixture_module) {
     Rcpp::class_<PYGaussianMixture>("PYGaussianMixture")
+        .constructor<arma::mat, int>(
+            "Minimal: data + seed. Hyperparameters default (K_trunc 20, discount 0 (reduces to a DP)).")
+        .constructor<arma::mat, int, bool>(
+            "Minimal + keep_history.")
         .constructor<arma::mat, int, double, int>(
             "DEFAULT (data-driven) ctor; keep_history=FALSE. "
             "PYGaussianMixture(y, K_trunc, discount, seed).")
@@ -885,7 +897,7 @@ PYBIND11_MODULE(PYGaussianMixture, m) {
         // from y; discount in [0,1) explicit. Mirrors the @example:python.
         .def(pybind11::init<arma::mat, int, double, int, bool>(),
              pybind11::arg("y"),
-             pybind11::arg("K_trunc"),
+             pybind11::arg("K_trunc") = 20,
              pybind11::arg("discount") = 0.0,
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false)

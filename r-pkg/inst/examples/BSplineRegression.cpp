@@ -416,7 +416,10 @@ public:
     //   predict_at(list(Bsp=...))  -> at a NEW precomputed basis
     //       (Bsp = vectorise(Bsp_new), N_new*K_s column-major;
     //        Q3=A: the spline basis is evaluated R-side at new x).
-    AI4BayesCode::state_map predict_at(
+    // Returns history_map (matrices) per the core-six contract in
+    // interface.md: predict_at's outputs share get_history()'s shape,
+    // so a scalar draw is an n x 1 column.
+    AI4BayesCode::history_map predict_at(
         const AI4BayesCode::state_map& new_data) const {
         block_context replaced;
         auto it = new_data.find("Bsp");
@@ -441,8 +444,8 @@ public:
             }
         }
         block_context r = impl_->predict_at(replaced, predict_rng_);
-        AI4BayesCode::state_map out;
-        for (const auto& kv : r) out[kv.first] = kv.second;
+        AI4BayesCode::history_map out;
+        for (const auto& kv : r) out[kv.first] = arma::mat(kv.second);
         return out;
     }
 

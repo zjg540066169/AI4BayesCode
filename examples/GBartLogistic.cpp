@@ -72,7 +72,7 @@
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m <- new(GBartLogistic, X, y, 50L, 42L)     # X, y, ntrees=50, seed=42 (single chain)
+//   m <- new(GBartLogistic, X, y, 42L)          # X, y, seed (ntrees 50) -- single chain
 //   m$step(2000L); str(m$get_current())         # $r linear predictor, $p fitted prob
 // @example:python
 //   import numpy as np, AI4BayesCode
@@ -88,7 +88,7 @@
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m = Mod.GBartLogistic(X, y, 50, 42, False, False)       # X, y, ntrees=50, seed=42
+//   m = Mod.GBartLogistic(X, y, rng_seed=42)                # X, y, seed (ntrees 50)
 //   m.step(2000); print(m.get_current())                   # 'r' linear predictor, 'p' fitted prob
 // @example:end
 
@@ -149,6 +149,15 @@ inline double safe_sigmoid(double x) {
 class GBartLogistic : public AI4BayesCode::kernel_control_mixin<GBartLogistic> {
     friend class AI4BayesCode::kernel_control_mixin<GBartLogistic>;
 public:
+    /// SHORT constructor -- data + seed. Tuning knobs take their
+    /// standard defaults: ntrees 50. Use the full constructor to
+    /// retune. Rcpp ignores C++ default arguments, hence a separate ctor.
+    GBartLogistic(const arma::mat& X,
+                  const arma::vec& y,
+                  int  rng_seed,
+                  bool keep_history = false)
+        : GBartLogistic(X, y, /*ntrees=*/50, rng_seed, /*keep_tree=*/false, keep_history) {}
+
     GBartLogistic(const arma::mat& X,
                   const arma::vec& y,
                   int  ntrees,
@@ -476,6 +485,8 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(GBartLogistic_module) {
     Rcpp::class_<GBartLogistic>("GBartLogistic")
+        .constructor<arma::mat, arma::vec, int>(
+            "Minimal: data + seed. Tuning knobs take standard defaults (ntrees 50).")
         .constructor<arma::mat, arma::vec, int, int>(
             "Short ctor: X, y, ntrees, seed; keep_tree and keep_history "
             "default FALSE.")

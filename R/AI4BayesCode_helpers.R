@@ -610,6 +610,24 @@ ai4bayescode_perf_hint <- function(wall_sec,
     invisible(NULL)
 }
 
+# Flags a history key whose RAW rank-Rhat exceeds `hi` while its
+# order-statistic rank-Rhat is already converged -- the signature of
+# label switching rather than of a mixing failure. Kept identical to
+# the package tree's copy in r-pkg/R/helpers.R.
+.ai4b_label_switch_scan <- function(hist, hi = 1.05, converged = 1.05) {
+    if (!requireNamespace("posterior", quietly = TRUE)) return(list())
+    out <- list()
+    rh <- function(m) suppressWarnings(max(apply(m, 2L, posterior::rhat), na.rm = TRUE))
+    for (nm in names(hist)) {
+        x <- hist[[nm]]
+        if (is.null(dim(x)) || ncol(x) < 2L || nrow(x) < 8L) next
+        raw <- rh(x); ord <- rh(t(apply(x, 1L, sort)))
+        if (is.finite(raw) && is.finite(ord) && raw > hi && ord < converged)
+            out[[nm]] <- list(raw = raw, ordered = ord)
+    }
+    out
+}
+
 
 # ----------------------------------------------------------------------------
 # ai4bayescode_diagnose() -- model-independent posterior diagnostics + plot.

@@ -58,17 +58,18 @@
 //   S_obs <- S_obs / rowSums(S_obs)
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(DirichletHierarchical, S_obs, 0.5, 1.0, seed, TRUE),
+//       function(seed) new(DirichletHierarchical, S_obs, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(DirichletHierarchical,
 //            S_obs,   # K x P matrix of observed simplexes
-//            0.5,     # beta_a : Beta hyperprior shape on theta/(theta+P)
-//            1.0,     # beta_b : Beta hyperprior shape on theta/(theta+P)
 //            7L,      # rng_seed (0 = random)
 //            TRUE)    # keep_history
+//   # beta_a and beta_b (the Beta hyperprior shapes on theta/(theta+P))
+//   # default to 0.5 and 1.0; pass them to the full constructor to retune:
+//   #   new(DirichletHierarchical, S_obs, 0.5, 1.0, 7L, TRUE)
 //   m$step(2500); str(m$get_current())
 // @example:python
 //   import numpy as np, AI4BayesCode
@@ -83,12 +84,12 @@
 //   Mod = AI4BayesCode.example("DirichletHierarchical")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
-//       lambda seed: Mod.DirichletHierarchical(S_obs, 0.5, 1.0, seed, True),
+//       lambda seed: Mod.DirichletHierarchical(S_obs, rng_seed=seed, keep_history=True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m = Mod.DirichletHierarchical(S_obs, 0.5, 1.0, 7, True)  # (S_obs, beta_a, beta_b, seed, keep_history)
+//   m = Mod.DirichletHierarchical(S_obs, rng_seed=7, keep_history=True)  # beta_a 0.5, beta_b 1
 //   m.step(2500); print(m.get_current())
 // @example:end
 
@@ -253,6 +254,14 @@ double s_kappa_theta_joint_log_density(const arma::vec& x,
 class DirichletHierarchical : public AI4BayesCode::kernel_control_mixin<DirichletHierarchical> {
     friend class AI4BayesCode::kernel_control_mixin<DirichletHierarchical>;
 public:
+    /// SHORT constructor -- data + seed. Hyperparameters take their
+    /// defaults: beta_a 0.5, beta_b 1.0. Use the full constructor to change them.
+    /// Rcpp ignores C++ default arguments, hence a separate ctor.
+    DirichletHierarchical(const arma::mat& S_obs,
+                          int  rng_seed,
+                          bool keep_history = false)
+        : DirichletHierarchical(S_obs, /*beta_a=*/0.5, /*beta_b=*/1.0, rng_seed, keep_history) {}
+
     DirichletHierarchical(const arma::mat& S_obs,  // K x P matrix of data
                                double beta_a,
                                double beta_b,
@@ -541,6 +550,10 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(DirichletHierarchical_module) {
     Rcpp::class_<DirichletHierarchical>("DirichletHierarchical")
+        .constructor<arma::mat, int>(
+            "Minimal: data + seed. Hyperparameters default (beta_a 0.5, beta_b 1.0).")
+        .constructor<arma::mat, int, bool>(
+            "Minimal + keep_history.")
         .constructor<arma::mat, double, double, int>(
             "Legacy constructor; keep_history defaults to FALSE.")
         .constructor<arma::mat, double, double, int, bool>(

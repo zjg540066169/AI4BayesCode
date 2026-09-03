@@ -321,6 +321,15 @@ double joint_log_density(const arma::vec& theta_cat,
 class HSGPRegression : public AI4BayesCode::kernel_control_mixin<HSGPRegression> {
     friend class AI4BayesCode::kernel_control_mixin<HSGPRegression>;
 public:
+    /// SHORT constructor -- data + seed. Hyperparameters take their
+    /// defaults: M = 30 basis functions (brms-style default). Use the full constructor to change them.
+    /// Rcpp ignores C++ default arguments, hence a separate ctor.
+    HSGPRegression(const arma::vec& y,
+                   const arma::vec& x,
+                   int  rng_seed,
+                   bool keep_history = false)
+        : HSGPRegression(y, x, /*M=*/30, rng_seed, keep_history) {}
+
     HSGPRegression(const arma::vec& y,
                    const arma::vec& x,
                    int M,
@@ -566,7 +575,10 @@ public:
     //   predict_at(list(phi=...))     -> at a NEW precomputed
     //       spectral basis (phi = vectorise(Phi_new), N_new*M
     //       column-major; Q3=A: basis evaluated R-side at new x).
-    AI4BayesCode::state_map predict_at(
+    // Returns history_map (matrices) per the core-six contract in
+    // interface.md: predict_at's outputs share get_history()'s shape,
+    // so a scalar draw is an n x 1 column.
+    AI4BayesCode::history_map predict_at(
         const AI4BayesCode::state_map& new_data) const {
         block_context replaced;
         auto it = new_data.find("phi");
@@ -590,8 +602,8 @@ public:
             }
         }
         block_context r = impl_->predict_at(replaced, predict_rng_);
-        AI4BayesCode::state_map out;
-        for (const auto& kv : r) out[kv.first] = kv.second;
+        AI4BayesCode::history_map out;
+        for (const auto& kv : r) out[kv.first] = arma::mat(kv.second);
         return out;
     }
 
@@ -638,6 +650,10 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(HSGPRegression_module) {
     Rcpp::class_<HSGPRegression>("HSGPRegression")
+        .constructor<arma::vec, arma::vec, int>(
+            "Minimal: data + seed. Hyperparameters default (M = 30 basis functions (brms-style default)).")
+        .constructor<arma::vec, arma::vec, int, bool>(
+            "Minimal + keep_history.")
         .constructor<arma::vec, arma::vec, int, int, bool>(
             "1-D Hilbert-space GP regression (canonical reduced-rank GP).\n"
             "Args: y (N), x (N), M (basis count, e.g. 25), seed, keep_history.")
@@ -660,7 +676,7 @@ PYBIND11_MODULE(HSGPRegression, m) {
     AI4BayesCode::register_ai4bayescode_types(m);
     pybind11::class_<HSGPRegression>(m, "HSGPRegression")
         .def(pybind11::init<arma::vec, arma::vec, int, int, bool>(),
-             pybind11::arg("y"), pybind11::arg("x"), pybind11::arg("M"),
+             pybind11::arg("y"), pybind11::arg("x"), pybind11::arg("M") = 30,
              pybind11::arg("rng_seed") = 1,
              pybind11::arg("keep_history") = false,
              "1-D HSGP regression (reduced-rank GP).")

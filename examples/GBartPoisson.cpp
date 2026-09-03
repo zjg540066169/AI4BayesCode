@@ -141,6 +141,15 @@ using AI4BayesCode::genbart_block_config;
 class GBartPoisson : public AI4BayesCode::kernel_control_mixin<GBartPoisson> {
     friend class AI4BayesCode::kernel_control_mixin<GBartPoisson>;
 public:
+    /// SHORT constructor -- data + seed. Tuning knobs take their
+    /// standard defaults: ntrees 50. Use the full constructor to
+    /// retune. Rcpp ignores C++ default arguments, hence a separate ctor.
+    GBartPoisson(const arma::mat& X,
+                 const arma::vec& y,
+                 int  rng_seed,
+                 bool keep_history = false)
+        : GBartPoisson(X, y, /*ntrees=*/50, rng_seed, /*keep_tree=*/false, keep_history) {}
+
     GBartPoisson(const arma::mat& X,
                  const arma::vec& y,
                  int  ntrees,
@@ -502,6 +511,8 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(GBartPoisson_module) {
     Rcpp::class_<GBartPoisson>("GBartPoisson")
+        .constructor<arma::mat, arma::vec, int>(
+            "Minimal: data + seed. Tuning knobs take standard defaults (ntrees 50).")
         // Short constructor: defaults keep_tree=FALSE, keep_history=FALSE.
         .constructor<arma::mat, arma::vec, int, int>(
             "Short ctor: X (N x p), y (non-negative counts), ntrees, seed. "

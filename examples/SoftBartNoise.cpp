@@ -68,12 +68,12 @@
 //   y <- f + rnorm(N, 0, 0.5)                      # sigma_true = 0.5
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(SoftBartNoise, X, y, 50L, 2.0, 10.0, FALSE, seed, 3.0, FALSE, TRUE),
+//       function(seed) new(SoftBartNoise, X, y, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m <- new(SoftBartNoise, X, y, 50L, 2.0, 10.0, FALSE, 42L)
+//   m <- new(SoftBartNoise, X, y, 42L)   # ntrees 50, k 2, tau_rate 10, dart off, nu 3
 //   #          X,  y, ntrees, k, tau_rate, dart, seed
 //   m$step(2000); str(m$get_current())             # $f_softbart, $sigma
 // @example:python
@@ -85,12 +85,12 @@
 //   Mod = AI4BayesCode.example("SoftBartNoise")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
-//       lambda seed: Mod.SoftBartNoise(X, y, 50, 2.0, 10.0, False, seed, keep_history=True),
+//       lambda seed: Mod.SoftBartNoise(X, y, rng_seed=seed, keep_history=True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m = Mod.SoftBartNoise(X, y, 50, 2.0, 10.0, False, 42)  # X,y,ntrees,k,tau_rate,dart,seed
+//   m = Mod.SoftBartNoise(X, y, rng_seed=42)   # every tuning knob defaulted
 //   m.step(2000); print(m.get_current())            # f_softbart, sigma
 // @example:end
 // ============================================================================
@@ -189,6 +189,16 @@ double sigma_natural_log_density(const arma::vec& sigma_nat,
 class SoftBartNoise : public AI4BayesCode::kernel_control_mixin<SoftBartNoise> {
     friend class AI4BayesCode::kernel_control_mixin<SoftBartNoise>;
 public:
+    /// SHORT constructor -- data + seed. Tuning knobs take their
+    /// standard defaults: ntrees 50, k 2.0, tau_rate 10.0, dart off, nu 3.0 (SoftBart defaults). Use the full constructor to
+    /// retune. Rcpp ignores C++ default arguments, hence a separate ctor.
+    SoftBartNoise(const arma::mat& X,
+                  const arma::vec& y,
+                  int  rng_seed,
+                  bool keep_history = false)
+        : SoftBartNoise(X, y, /*ntrees=*/50, /*k=*/2.0, /*tau_rate=*/10.0, /*dart=*/false,
+                        rng_seed, /*nu=*/3.0, /*keep_tree=*/false, keep_history) {}
+
     SoftBartNoise(const arma::mat& X,
                   const arma::vec& y,
                   int    ntrees,
@@ -624,6 +634,10 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(SoftBartNoise_module) {
     Rcpp::class_<SoftBartNoise>("SoftBartNoise")
+        .constructor<arma::mat, arma::vec, int>(
+            "Minimal: data + seed. Tuning knobs take standard defaults (ntrees 50, k 2.0, tau_rate 10.0, dart off, nu 3.0 (SoftBart defaults)).")
+        .constructor<arma::mat, arma::vec, int, bool>(
+            "Minimal + keep_history.")
         // Short constructor: nu=3, keep_tree=FALSE, keep_history=FALSE.
         .constructor<arma::mat, arma::vec,
                      int, double, double, bool, int>(

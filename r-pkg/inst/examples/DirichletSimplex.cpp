@@ -158,6 +158,14 @@ double dirichlet_joint_log_density(const arma::vec& theta_cat,
 class DirichletSimplex : public AI4BayesCode::kernel_control_mixin<DirichletSimplex> {
     friend class AI4BayesCode::kernel_control_mixin<DirichletSimplex>;
 public:
+    /// SHORT constructor -- data + seed. Hyperparameters take their
+    /// defaults: alpha = 1 for every cell (uniform Dirichlet). Use the full constructor to change them.
+    /// Rcpp ignores C++ default arguments, hence a separate ctor.
+    DirichletSimplex(const arma::vec& y_counts,
+                     int  rng_seed,
+                     bool keep_history = false)
+        : DirichletSimplex(y_counts, arma::vec(y_counts.n_elem, arma::fill::ones), rng_seed, keep_history) {}
+
     DirichletSimplex(const arma::vec& y_counts,
                        const arma::vec& alpha,
                        int    rng_seed,
@@ -356,6 +364,8 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(DirichletSimplex_module) {
     Rcpp::class_<DirichletSimplex>("DirichletSimplex")
+        .constructor<arma::vec, int>(
+            "Minimal: data + seed. Hyperparameters default (alpha = 1 for every cell (uniform Dirichlet)).")
         .constructor<arma::vec, arma::vec, int>(
             "Legacy constructor; keep_history defaults to FALSE.")
         .constructor<arma::vec, arma::vec, int, bool>(
@@ -386,6 +396,14 @@ PYBIND11_MODULE(DirichletSimplex, m) {
              pybind11::arg("keep_history") = false,
              "Joint-NUTS Dirichlet(alpha) prior on the simplex with multinomial "
              "likelihood. Uses joint_nuts_block on stick-breaking unconstraining.")
+        // alpha's default length follows the data, so it cannot be a static
+        // pybind11 default; this overload supplies the uniform Dirichlet.
+        .def(pybind11::init<arma::vec, int, bool>(),
+             pybind11::arg("y_counts"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("keep_history") = false,
+             "Minimal: counts + seed. alpha = 1 for every cell (uniform "
+             "Dirichlet).")
         .def("step", (void (DirichletSimplex::*)())    &DirichletSimplex::step, "Run one sweep.")
         .def("step", (void (DirichletSimplex::*)(int)) &DirichletSimplex::step,        pybind11::arg("n_steps"))
         .def("get_current",  &DirichletSimplex::get_current)

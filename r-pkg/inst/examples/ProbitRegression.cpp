@@ -61,12 +61,12 @@
 //   y <- as.numeric(runif(N) < pnorm(eta))   # y ~ Bernoulli(Phi(X beta))
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(ProbitRegression, X, y, 10, seed, TRUE),
+//       function(seed) new(ProbitRegression, X, y, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m <- new(ProbitRegression, X, y, 10, 7L, TRUE)  # X, y, prior_sd, seed, keep_history
+//   m <- new(ProbitRegression, X, y, 7L, TRUE)   # X, y, seed, keep_history (prior_sd 10)
 //   m$step(2500); str(m$get_current())
 // @example:python
 //   import numpy as np, AI4BayesCode
@@ -78,12 +78,12 @@
 //   Mod = AI4BayesCode.example("ProbitRegression")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
-//       lambda seed: Mod.ProbitRegression(X, y, 10, seed, True),
+//       lambda seed: Mod.ProbitRegression(X, y, rng_seed=seed, keep_history=True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m = Mod.ProbitRegression(X, y, 10, 7, True)  # X, y, prior_sd, seed, keep_history
+//   m = Mod.ProbitRegression(X, y, rng_seed=7, keep_history=True)   # prior_sd 10
 //   m.step(2500); print(m.get_current())
 // @example:end
 
@@ -193,6 +193,15 @@ double beta_log_density(const arma::vec& beta,
 class ProbitRegression : public AI4BayesCode::kernel_control_mixin<ProbitRegression> {
     friend class AI4BayesCode::kernel_control_mixin<ProbitRegression>;
 public:
+    /// SHORT constructor -- data + seed. Hyperparameters take their
+    /// defaults: prior_sd 10.0 (weakly informative). Use the full constructor to change them.
+    /// Rcpp ignores C++ default arguments, hence a separate ctor.
+    ProbitRegression(const arma::mat& X,
+                     const arma::vec& y,
+                     int  rng_seed,
+                     bool keep_history = false)
+        : ProbitRegression(X, y, /*prior_sd=*/10.0, rng_seed, keep_history) {}
+
     ProbitRegression(const arma::mat& X,
                      const arma::vec& y,
                      double prior_sd,
@@ -544,6 +553,10 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(ProbitRegression_module) {
     Rcpp::class_<ProbitRegression>("ProbitRegression")
+        .constructor<arma::mat, arma::vec, int>(
+            "Minimal: data + seed. Hyperparameters default (prior_sd 10.0 (weakly informative)).")
+        .constructor<arma::mat, arma::vec, int, bool>(
+            "Minimal + keep_history.")
         .constructor<arma::mat, arma::vec, double, int, bool>(
             "Construct ProbitRegression(X, y, prior_sd, seed, keep_history). "
             "X is N x p, y is length N (0/1). beta ~ N(0, prior_sd^2 I). "

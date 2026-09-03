@@ -199,6 +199,21 @@ double sigma_natural_log_density(const arma::vec& sigma_nat,
 class BartNoise : public AI4BayesCode::kernel_control_mixin<BartNoise> {
     friend class AI4BayesCode::kernel_control_mixin<BartNoise>;
 public:
+    /// SHORT constructor -- data + seed. Every tuning knob takes the
+    /// standard BART default (Chipman-George-McCulloch 2010 / the BART R
+    /// package): ntrees 200, k 2.0, power 2.0, base 0.95, nu 3.0,
+    /// numcut 100, dart/aug off. Use the full constructor below to retune.
+    /// Rcpp ignores C++ default arguments, so this exists as its own
+    /// constructor rather than as defaults on the full one.
+    BartNoise(const arma::mat& X,
+              const arma::vec& y,
+              int  rng_seed,
+              bool keep_history = false)
+        : BartNoise(X, y, /*ntrees=*/200, /*k=*/2.0, /*power=*/2.0,
+                    /*base=*/0.95, /*nu=*/3.0, /*numcut=*/100,
+                    /*dart=*/false, /*aug=*/false, rng_seed,
+                    /*keep_tree=*/false, keep_history) {}
+
     BartNoise(const arma::mat& X,
               const arma::vec& y,
               int    ntrees,
@@ -662,6 +677,15 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(BartNoise_module) {
     Rcpp::class_<BartNoise>("BartNoise")
+        // MINIMAL constructor: X, y, seed. All BART tuning knobs take their
+        // standard defaults (ntrees 200, k 2, power 2, base 0.95, nu 3,
+        // numcut 100, dart/aug off).
+        .constructor<arma::mat, arma::vec, int>(
+            "Minimal: X (N x p), y (length N), seed. All BART tuning knobs "
+            "take the standard CGM 2010 defaults.")
+        .constructor<arma::mat, arma::vec, int, bool>(
+            "Minimal + keep_history. All BART tuning knobs take the standard "
+            "CGM 2010 defaults.")
         // Short constructor: defaults keep_tree=FALSE, keep_history=FALSE.
         .constructor<arma::mat, arma::vec,
                      int, double, double, double, double,

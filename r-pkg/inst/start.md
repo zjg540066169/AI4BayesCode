@@ -314,12 +314,8 @@ codegen.md Sec.3 confirmation table):
   log-variance, Beta mean-precision vs shape -- the convention is where a wrong
   log-density hides. `tunable?` = YES for hyperparameters the user may retune
   (prior hyperparameters / fixed constants exposed as ctor args), NO for
-  hard-coded. **Every exposed argument carries a DEFAULT wherever a canonical
-  one exists** (the library block config's value, or the source paper's);
-  the minimal call is data + seed. An argument stays mandatory ONLY when it
-  is a modelling choice with no canonical default. Python: pybind11 arg
-  defaults. R: Rcpp ignores C++ defaults, so bind a SHORT constructor
-  (data + mandatory args + seed) alongside the full one.
+  hard-coded. Every YES argument must carry a default -- see the
+  DEFAULT-EVERYTHING-BUT-DATA rule in the hard-rules list.
 - Alternative parametrizations / model variants the paper offers.
 - Sampler notes. ASCII only.
 Dispatch it DIRECTLY and SILENTLY. FORCED -- there is NO other path,
@@ -612,6 +608,22 @@ full list but the critical ones:
   comparable. **Comparing against an existing implementation** (an R package, another
   sampler) is not forbidden but is strongly discouraged: its prior may differ from ours,
   in which case the comparison means nothing.
+- **DEFAULT EVERYTHING BUT DATA.** Every constructor argument that is not
+  data carries a default -- every prior hyperparameter, every tuning knob --
+  and the minimal call is data + seed. The default is the value
+  pre-generation validation settled on: whatever the confirmed spec fixes
+  that hyperparameter to, falling back to the library block config or the
+  source paper. Give a default even when it was elicited from the user; the
+  point is that they need not retype it. A user cannot be expected
+  to know what a tree-depth penalty, a cutpoint count or a candidate-set size
+  should be, and a positional list of numbers they do not understand is also a
+  list they can silently transpose. An argument stays mandatory ONLY when it
+  is a modelling choice with no canonical default -- the model would be a
+  DIFFERENT model under a different value, and guessing would silently pick
+  one for the user -- or when the user explicitly asked for no default. Python: pybind11 arg defaults. R: Rcpp ignores C++ default
+  arguments, so bind a SHORT constructor (data + any mandatory choice + seed
+  [+ keep_history]) that delegates to the full one; never remove an existing
+  arity, only add shorter ones.
 - **No hand-written Gibbs**: prefer existing blocks (`nuts_block`,
   `joint_nuts_block` -- handles real + per-slice POSITIVE/INTERVAL/
   ORDERED/SUM_TO_ZERO constraints -- `pg_logistic_block`, conjugate-Gibbs
