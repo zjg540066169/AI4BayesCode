@@ -89,7 +89,7 @@
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m  <- new(GBartMultinomial, X, as.numeric(y), 3L, 50L, 42L, FALSE, TRUE)
-//   #          X,    y,         C,  ntrees, seed, keep_tree, keep_history
+//   #          X,    y,  n_classes, ntrees, seed, keep_tree, keep_history
 //   m$step(2000); str(m$get_current())            # $r, $probs, $log_phi
 // @example:python
 //   import numpy as np, AI4BayesCode
@@ -107,7 +107,7 @@
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m = Mod.GBartMultinomial(X, y, 3, 50, 42, False, True)  # X,y,C,ntrees,seed,keep_tree,keep_history
+//   m = Mod.GBartMultinomial(X, y, n_classes=3, rng_seed=42, keep_history=True)
 //   m.step(2000); print(m.get_current())            # r, probs, log_phi
 // @example:end
 // ============================================================================
@@ -204,7 +204,7 @@ class GBartMultinomial : public AI4BayesCode::kernel_control_mixin<GBartMultinom
 public:
     GBartMultinomial(const arma::mat& X,
                      const arma::vec& y,
-                     int    C,
+                     int    n_classes,
                      int    ntrees = 50,
                      int    rng_seed = 1,
                      bool   keep_tree    = false,
@@ -217,13 +217,13 @@ public:
                    : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)
                                      ^ 0x9E3779B97F4A7C15ULL}),
           impl_(std::make_unique<composite_block>("GBartMultinomial")),
-          C_(static_cast<std::size_t>(C)),
+          C_(static_cast<std::size_t>(n_classes)),
           keep_tree_(keep_tree),
           keep_history_(keep_history)
     {
-        if (C < 2) {
-            ai4b::stop("GBartMultinomial: C must be >= 2 "
-                       "(for C = 2 you may prefer GBartLogistic).");
+        if (n_classes < 2) {
+            ai4b::stop("GBartMultinomial: n_classes must be >= 2 "
+                       "(for n_classes = 2 you may prefer GBartLogistic).");
         }
         if (X.n_rows != y.n_elem) {
             ai4b::stop("GBartMultinomial: X and y must have matching "
@@ -231,11 +231,11 @@ public:
         }
         for (std::size_t i = 0; i < y.n_elem; ++i) {
             const double yi = y[i];
-            if (!(yi >= 0.0) || !(yi <= static_cast<double>(C - 1))
+            if (!(yi >= 0.0) || !(yi <= static_cast<double>(n_classes - 1))
                 || yi != std::floor(yi))
             {
                 ai4b::stop("GBartMultinomial: y[%d] = %g; must be "
-                           "integer in {0, ..., %d}", (int)i, yi, C - 1);
+                           "integer in {0, ..., %d}", (int)i, yi, n_classes - 1);
             }
         }
         if (ntrees <= 0) {
@@ -728,12 +728,12 @@ private:
 RCPP_MODULE(GBartMultinomial_module) {
     Rcpp::class_<GBartMultinomial>("GBartMultinomial")
         .constructor<arma::mat, arma::vec, int, int, int>(
-            "Short ctor: X (N x p), y in {0..C-1}, C, ntrees, seed; "
+            "Short ctor: X (N x p), y in {0..n_classes-1}, n_classes, ntrees, seed; "
             "keep_tree and keep_history default FALSE.")
         .constructor<arma::mat, arma::vec, int, int, int, bool>(
             "Ctor with keep_tree only (EXPENSIVE; for predict_history).")
         .constructor<arma::mat, arma::vec, int, int, int, bool, bool>(
-            "Full ctor: X (N x p), y in {0..C-1}, C (>= 2), ntrees, "
+            "Full ctor: X (N x p), y in {0..n_classes-1}, n_classes (>= 2), ntrees, "
             "seed, keep_tree (forest snapshots; EXPENSIVE; default "
             "FALSE), keep_history (numeric buffers; cheap; default "
             "FALSE).")
@@ -782,7 +782,7 @@ PYBIND11_MODULE(GBartMultinomial, m) {
         .def(pybind11::init<arma::mat, arma::vec, int, int, int, bool, bool>(),
              pybind11::arg("X"),
              pybind11::arg("y"),
-             pybind11::arg("C"),
+             pybind11::arg("n_classes"),
              pybind11::arg("ntrees")       = 50,
              pybind11::arg("rng_seed")     = 1,
              pybind11::arg("keep_tree")    = false,

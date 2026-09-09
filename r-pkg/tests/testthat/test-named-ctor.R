@@ -132,3 +132,24 @@ test_that("every bundled example defaults everything except its data", {
     }
     expect_identical(offenders, character(0))
 })
+
+test_that("no constructor parameter is swallowed by methods::new's own formal", {
+    # new(Class, ...) matches its OWN `Class` formal before forwarding, so a
+    # parameter whose name is a prefix of "Class" never reaches the object and
+    # the call fails complaining about class definitions.
+    dir <- ai4bayescode_examples_path()
+    skip_if(!nzchar(dir) || !dir.exists(dir), "bundled examples not found")
+    files <- list.files(dir, pattern = "\\.cpp$", full.names = TRUE)
+    skip_if(!length(files), "bundled examples not found")
+    offenders <- character(0)
+    for (f in files) {
+        src <- paste(readLines(f, warn = FALSE), collapse = "\n")
+        for (cn in AI4BayesCode:::.ai4b_exposed_class_names(src))
+            for (s in AI4BayesCode:::.ai4b_ctor_signatures(f, cn)) {
+                bad <- s$names[startsWith("Class", s$names)]
+                if (length(bad))
+                    offenders <- c(offenders, sprintf("%s::%s", cn, paste(bad, collapse = ",")))
+            }
+    }
+    expect_identical(offenders, character(0))
+})

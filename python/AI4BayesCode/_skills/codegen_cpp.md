@@ -2807,6 +2807,15 @@ PYBIND11_MODULE(<ClassName>, m) {
     AI4BayesCode::register_ai4bayescode_types(m);  // one-time DagInfo/AdaptationInfo bindings
 
     pybind11::class_<ClassName>(m, "<ClassName>")
+NAMING CONSTRAINT ON CONSTRUCTOR PARAMETERS. R reaches a module constructor
+through `methods::new(Class, ...)`, whose own first formal is named `Class`.
+R's argument matching runs there FIRST, so a constructor parameter whose name
+is a prefix of `Class` is bound to that formal instead of being forwarded, and
+the call dies with a message about class definitions that names neither the
+parameter nor the model. Never give a constructor parameter a name that is a
+prefix of `Class`; spell the concept out instead. The same name must then be
+used for the pybind11 arg label, so both frontends publish one name.
+
         // Every `= default` here MIRRORS the default already written in the
         // C++ constructor signature; it is never the only place one lives.
         // The C++ signature is the single source both frontends read -- R
