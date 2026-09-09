@@ -407,6 +407,12 @@ public:
     // the same seed. Does NOT modify MCMC state in any mode.
     AI4BayesCode::history_map
     predict_at(const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         // Validate keys.
         const bool has_X = new_data.find("X") != new_data.end();
         for (const auto& kv : new_data) {
@@ -434,7 +440,7 @@ public:
 
         auto& bart_child = dynamic_cast<bart_block&>(impl_->child(0));
 
-        if (!keep_history_) {
+        if (!use_history) {
             // ---- Stateful mode ------------------------------------------
             block_context replaced;
             arma::vec f_pred;           // only set if has_X

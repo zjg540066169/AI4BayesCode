@@ -35,7 +35,9 @@
 
 #include "composite_block.hpp"
 
+#include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 // Rcpp / pybind11 are optional. When neither is defined, the mixin still
@@ -68,6 +70,58 @@ namespace AI4BayesCode {
  */
 template <typename Derived>
 class kernel_control_mixin {
+public:
+    // ---- predicting at the LAST draw only -------------------------------
+    //
+    // With keep_history = TRUE a wrapper's predict_at walks every retained
+    // draw, which is what a posterior predictive needs and is also the
+    // expensive thing to do when all the caller wanted was one prediction.
+    // This flag lets them ask for the single-draw path -- the one predict_at
+    // already takes when keep_history is FALSE -- WITHOUT giving up the
+    // retained history.
+    //
+    // It is deliberately NOT a parameter of predict_at: the core-six
+    // signature stays exactly as interface.md defines it, so every sampler
+    // already generated keeps compiling and behaving identically.
+    //
+    // A wrapper reads this in its predict_at as
+    //     const bool use_history = keep_history_ && !predict_last_draw_only();
+    // and branches on use_history instead of on keep_history_.
+    bool predict_last_draw_only() const noexcept {
+        return predict_last_draw_only_;
+    }
+
+protected:
+    // Sets the flag for one predict_at call and clears it on the way out, so
+    // an exception thrown mid-prediction cannot leave it stuck on.
+    struct last_draw_scope_ {
+        bool* flag;
+        explicit last_draw_scope_(bool* f) : flag(f) { *flag = true; }
+        ~last_draw_scope_() { *flag = false; }
+        last_draw_scope_(const last_draw_scope_&) = delete;
+        last_draw_scope_& operator=(const last_draw_scope_&) = delete;
+    };
+
+    // A wrapper generated before this existed ignores the flag and hands back
+    // its whole history. Returning that silently would answer a different
+    // question from the one asked, so say so instead.
+    static AI4BayesCode::history_map check_single_draw_(
+            AI4BayesCode::history_map out) {
+        for (const auto& kv : out) {
+            if (kv.second.n_rows > 1) {
+                throw std::runtime_error(
+                    "predict_at_last(): this sampler does not implement the "
+                    "single-draw prediction path, so it cannot honour the "
+                    "request -- it returned its whole retained history. "
+                    "Regenerate the sampler, or call predict_at() and take "
+                    "the last row yourself.");
+            }
+        }
+        return out;
+    }
+
+    mutable bool predict_last_draw_only_ = false;
+
 public:
 
 #ifdef AI4BAYESCODE_RCPP_MODULE
@@ -103,6 +157,35 @@ public:
     AI4BayesCode::history_map predict_at_noarg_() const {
         return static_cast<const Derived*>(this)->predict_at(
             AI4BayesCode::state_map{});
+    }
+
+    // ---- predict_at_last: the single-draw path, history retained --------
+    // A wrapper may expose its R entry point as predict_at_r(List) when it
+    // has to reshape a matrix argument before predicting; forwarding through
+    // predict_at(state_map) instead would skip that reshaping and silently
+    // predict at the wrong design. Pick whichever entry point the wrapper
+    // actually has.
+    template <typename T, typename = void>
+    struct has_predict_at_r_ : std::false_type {};
+    template <typename T>
+    struct has_predict_at_r_<T, std::void_t<decltype(
+        std::declval<const T&>().predict_at_r(std::declval<Rcpp::List>()))>>
+        : std::true_type {};
+
+    AI4BayesCode::history_map predict_at_last_(Rcpp::List new_data) const {
+        last_draw_scope_ guard(&predict_last_draw_only_);
+        if constexpr (has_predict_at_r_<Derived>::value) {
+            return check_single_draw_(
+                static_cast<const Derived*>(this)->predict_at_r(new_data));
+        } else {
+            return check_single_draw_(
+                static_cast<const Derived*>(this)->predict_at(
+                    Rcpp::as<AI4BayesCode::state_map>(SEXP(new_data))));
+        }
+    }
+
+    AI4BayesCode::history_map predict_at_last_noarg_() const {
+        return predict_at_last_(Rcpp::List::create());
     }
 
     void freeze_names(const Rcpp::CharacterVector& names) {
@@ -159,6 +242,15 @@ public:
 
 #ifdef AI4BAYESCODE_PYBIND_MODULE
     // ---- Python-layer forwarders --------------------------------------
+
+    // Python has no predict_at_r reshaping wrapper -- pybind11's caster takes
+    // the mapping straight to state_map -- so this forwards to predict_at.
+    AI4BayesCode::history_map py_predict_at_last(
+            const AI4BayesCode::state_map& new_data) const {
+        last_draw_scope_ guard(&predict_last_draw_only_);
+        return check_single_draw_(
+            static_cast<const Derived*>(this)->predict_at(new_data));
+    }
 
     void py_freeze(const std::vector<std::string>& names, bool quiet) {
         auto self = static_cast<Derived*>(this);
@@ -249,7 +341,18 @@ public:
     .method("predict_at",                                                \
             (AI4BayesCode::history_map (CLASSNAME::*)() const)            \
                 &CLASSNAME::predict_at_noarg_,                             \
-            "No-argument form: predict_at() == predict_at(list())")
+            "No-argument form: predict_at() == predict_at(list())") \
+    .method("predict_at_last",                                           \
+            (AI4BayesCode::history_map (CLASSNAME::*)(Rcpp::List) const)  \
+                &CLASSNAME::predict_at_last_,                             \
+            "Predict at the LAST draw only, keeping the retained history " \
+            "untouched. Same result predict_at() gives with "             \
+            "keep_history = FALSE.")                                       \
+    .method("predict_at_last",                                           \
+            (AI4BayesCode::history_map (CLASSNAME::*)() const)            \
+                &CLASSNAME::predict_at_last_noarg_,                        \
+            "No-argument form: predict_at_last() == "                     \
+            "predict_at_last(list())")
 #endif // AI4BAYESCODE_RCPP_MODULE
 
 // ---- pybind11 module-binding macro --------------------------------------
@@ -274,6 +377,11 @@ public:
 
 #ifdef AI4BAYESCODE_PYBIND_MODULE
 #define AI4BAYESCODE_PYBIND_KERNEL_CONTROL(CLASSNAME)                     \
+    .def("predict_at_last",                                               \
+         &CLASSNAME::py_predict_at_last,                                   \
+         pybind11::arg("new_data") = AI4BayesCode::state_map{},            \
+         "Predict at the LAST draw only, keeping the retained history "    \
+         "untouched. Same result predict_at gives with keep_history=False.")\
     .def("freeze",                                                        \
          &CLASSNAME::py_freeze,                                           \
          pybind11::arg("names"),                                          \

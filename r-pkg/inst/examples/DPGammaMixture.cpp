@@ -489,6 +489,12 @@ public:
     /// is no new design to predict at.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         if (!new_data.empty())
             ai4b::stop("DPGammaMixture: predict_at takes an empty list/map -- "
                        "the model has no covariates. Pass list() to draw "
@@ -496,7 +502,7 @@ public:
 
         AI4BayesCode::history_map out;
 
-        if (!keep_history_) {
+        if (!use_history) {
             // No-history mode: one posterior-predictive draw, emitted as a
             // 1 x N row so both modes share get_history()'s shape.
             block_context replaced;

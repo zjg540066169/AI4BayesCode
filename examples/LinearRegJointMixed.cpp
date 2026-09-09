@@ -398,6 +398,12 @@ public:
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
 
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         // Parse optional X input once.
         bool has_X = false;
         arma::vec x_flat;
@@ -412,7 +418,7 @@ public:
 
         AI4BayesCode::history_map out;
 
-        if (!keep_history_) {
+        if (!use_history) {
             block_context replaced;
             if (has_X) replaced["X"] = x_flat;
             block_context result = impl_->predict_at(replaced, predict_rng_);

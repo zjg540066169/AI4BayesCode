@@ -275,6 +275,7 @@ public:
     // Uses predict_rng_ for reproducible posterior-predictive sampling.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
+
         // ---- Parse optional X (vectorised N_new*p, column-major) ----------
         for (const auto& kv : new_data) {
             if (kv.first != "X")

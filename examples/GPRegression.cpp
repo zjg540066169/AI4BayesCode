@@ -632,6 +632,12 @@ public:
     //              predictive over all draws).
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         // ---- Parse optional X (vectorised N_new*p, column-major) ----------
         for (const auto& kv : new_data) {
             if (kv.first != "X")
@@ -664,7 +670,7 @@ public:
         AI4BayesCode::history_map out;
         arma::mat mu_mat, sd_mat, f_star_mat, yrep_mat;
 
-        if (keep_history_) {
+        if (use_history) {
             AI4BayesCode::history_map hist = impl_->get_history();
             const arma::mat& amp_hist   = hist.at("amplitude");
             const arma::mat& ell_hist   = hist.at("lengthscale");

@@ -897,6 +897,12 @@ public:
 
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         // Backend-neutral I/O. Supports:
         //   predict_at({})              -> posterior-predictive y_rep
         //   predict_at({"X" = X_new})   -> y_rep at new covariates
@@ -932,7 +938,7 @@ public:
 
         AI4BayesCode::history_map out;
 
-        if (!keep_history_) {
+        if (!use_history) {
             // ---- Stateful mode: single predict at current draw ------------
             block_context replaced;
             if (has_X) replaced["X"] = x_flat;
@@ -956,7 +962,7 @@ public:
         // sampled history directly and compute y_rep manually per draw.
         AI4BayesCode::history_map hist = impl_->get_history();
         if (!hist.count("beta") || !hist.count("sigma")) {
-            ai4b::stop("SpikeSlabRJMCMC::predict_at: keep_history_ requires "
+            ai4b::stop("SpikeSlabRJMCMC::predict_at: use_history requires "
                        "beta and sigma history, but get_history() lacks them. "
                        "Did you forget to construct with keep_history = TRUE?");
         }

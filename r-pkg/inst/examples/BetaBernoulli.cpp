@@ -262,12 +262,18 @@ public:
     // Empty input map. Non-history mode -> 1xN matrix; history mode ->
     // n_draws x N matrix.
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         if (!new_data.empty())
             throw std::runtime_error("BetaBernoulli has no covariate inputs.");
 
         AI4BayesCode::history_map out;
 
-        if (!keep_history_) {
+        if (!use_history) {
             block_context replaced;
             block_context result = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : result) {

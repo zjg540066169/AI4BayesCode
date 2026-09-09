@@ -381,6 +381,12 @@ public:
     // the same seed. Does NOT modify MCMC state in any mode.
     AI4BayesCode::history_map
     predict_at(const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         const bool has_X = new_data.find("X") != new_data.end();
         for (const auto& kv : new_data) {
             if (kv.first != "X") {
@@ -394,7 +400,7 @@ public:
 
         // ---- Empty map: posterior-predictive at training X -------------
         if (!has_X) {
-            if (keep_history_) {
+            if (use_history) {
                 // History mode: per-draw r/rate/y_rep from r_hist using
                 // the Poisson likelihood (documented shadow loop -- genBART
                 // history does not flow through composite predict_at).
@@ -436,7 +442,7 @@ public:
         }
 
         // ---- Keyed branch: X-override (test-set prediction) ------------
-        if (keep_history_) {
+        if (use_history) {
             ai4b::stop("GBartPoisson::predict_at: new-X prediction in "
                        "history mode is not yet implemented. Use empty map "
                        "or construct with keep_history=FALSE.");

@@ -269,13 +269,19 @@ public:
     // only z is replayed.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         if (!new_data.empty())
             ai4b::stop("HMMGaussian2State: predict_at takes an empty map/list "
                        "(no covariate inputs).");
 
         AI4BayesCode::history_map out;
 
-        if (!keep_history_) {
+        if (!use_history) {
             block_context replaced;
             block_context result = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : result) {
@@ -293,7 +299,7 @@ public:
         AI4BayesCode::history_map hist = impl_->get_history();
         auto it_z = hist.find("z");
         if (it_z == hist.end()) {
-            ai4b::stop("HMMGaussian2State::predict_at: keep_history_ requires "
+            ai4b::stop("HMMGaussian2State::predict_at: use_history requires "
                        "z history but get_history() lacks it.");
         }
         const arma::mat& z_hist  = it_z->second;       // n_draws x T

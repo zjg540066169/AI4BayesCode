@@ -392,6 +392,12 @@ public:
     // (length N_new * p); reshaped here back into an N_new x p matrix.
     AI4BayesCode::history_map
     predict_at(const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         const bool has_X = new_data.find("X") != new_data.end();
         for (const auto& kv : new_data) {
             if (kv.first != "X") {
@@ -405,7 +411,7 @@ public:
 
         if (!has_X) {
             // ---- Training-X posterior predictive ------------------------
-            if (keep_history_) {
+            if (use_history) {
                 // History mode at training X: per-draw y_rep_d from r_d.
                 AI4BayesCode::history_map hist = impl_->get_history();
                 const arma::mat& r_hist = hist.at("r");   // n_draws x N
@@ -443,7 +449,7 @@ public:
         }
 
         // ---- New-X prediction -------------------------------------------
-        if (keep_history_) {
+        if (use_history) {
             ai4b::stop("GBartHeteroscedastic::predict_at: new-X prediction in "
                        "history mode (keep_history=TRUE) is not yet "
                        "implemented. Either (a) empty map for training-X "

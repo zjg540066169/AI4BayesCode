@@ -318,6 +318,12 @@ public:
     //   * keep_history = TRUE:  loops over ALL posterior draws of beta --
     //     refreshed key returned as n_draws x N matrix (posterior predictive).
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         // Parse optional X once (shared by both modes).
         bool has_X = false;
         arma::vec x_flat;
@@ -332,7 +338,7 @@ public:
 
         AI4BayesCode::history_map out;
 
-        if (!keep_history_) {
+        if (!use_history) {
             // ---- Stateful mode: single predict at current draw ------------
             block_context replaced;
             if (has_X) replaced["X"] = x_flat;
@@ -353,7 +359,7 @@ public:
         auto it_b = hist.find("beta");
         if (it_b == hist.end()) {
             throw std::runtime_error(
-                "LogisticRegression::predict_at: keep_history_ requires "
+                "LogisticRegression::predict_at: use_history requires "
                 "beta history but get_history() lacks it. Did you "
                 "construct with keep_history = TRUE?");
         }

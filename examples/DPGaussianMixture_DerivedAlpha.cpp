@@ -662,6 +662,12 @@ public:
     // i*d_+j -- reshape to N_ x d_ downstream). In history mode y_rep is
     // n_draws x N_*d_.
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         if (!new_data.empty())
             ai4b::stop(
                 "DPGaussianMixture_DerivedAlpha: predict_at(new_data) "
@@ -670,7 +676,7 @@ public:
 
         AI4BayesCode::history_map out;
 
-        if (!keep_history_) {
+        if (!use_history) {
             block_context replaced;
             block_context result = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : result) {

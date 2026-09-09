@@ -425,6 +425,12 @@ public:
     //     posterior predictive).
     AI4BayesCode::history_map predict_at(
         const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         // Parse X input once (shared across both modes).
         bool has_X = false;
         arma::vec x_flat;
@@ -440,7 +446,7 @@ public:
 
         AI4BayesCode::history_map out;
 
-        if (!keep_history_) {
+        if (!use_history) {
             block_context replaced;
             if (has_X) replaced["X"] = x_flat;
             block_context result = impl_->predict_at(replaced, predict_rng_);
@@ -458,7 +464,7 @@ public:
         auto it_b = hist.find("beta");
         if (it_b == hist.end()) {
             throw std::runtime_error(
-                "ProbitRegression::predict_at: keep_history_ requires beta "
+                "ProbitRegression::predict_at: use_history requires beta "
                 "history, but get_history() lacks it. Did you forget to "
                 "construct with keep_history = TRUE?");
         }

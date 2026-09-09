@@ -467,11 +467,17 @@ public:
     // mode). Empty map -> posterior predictive y_rep at training t.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         AI4BayesCode::history_map out;
         auto it_t = new_data.find("t");
         const bool has_t = it_t != new_data.end() && it_t->second.n_elem > 0;
         if (!has_t) {
-            if (keep_history_) {
+            if (use_history) {
                 // History mode at training t: per-draw y_rep_d = y + sigma_d * N(0,1).
                 AI4BayesCode::history_map hist = impl_->get_history();
                 const arma::mat& sigma_hist = hist.at("sigma");  // n_draws x 1
@@ -502,7 +508,7 @@ public:
         // t arrives as a flat (vectorised) arma::vec under key "t".
         const arma::vec& t_new_in = it_t->second;
 
-        if (keep_history_) {
+        if (use_history) {
             // new-t + history: per-draw celerite solver re-build with
             // (amp_d, tau_d, sigma_d) from history, then predict_mean_var
             // at t_new and sample y_rep.

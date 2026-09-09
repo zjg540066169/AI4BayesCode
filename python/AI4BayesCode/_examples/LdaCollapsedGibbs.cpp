@@ -471,6 +471,12 @@ public:
     //                        replicate per stored draw).
     //   - no-history mode  : y_rep is 1 x N (one replicate at the current draw).
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         if (!new_data.empty()) {
             ai4b::stop(
                 "LdaCollapsedGibbs::predict_at: new_data is not "
@@ -481,7 +487,7 @@ public:
         }
         AI4BayesCode::history_map out;
 
-        if (keep_history_) {
+        if (use_history) {
             // History mode: theta and phi are sub-outputs of "lda" block.
             // Manual-compute y_rep per draw.
             AI4BayesCode::history_map hist = impl_->get_history();

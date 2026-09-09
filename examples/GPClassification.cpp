@@ -692,6 +692,12 @@ public:
     //              predictive over all draws).
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         // ---- Parse optional X (vectorised N_new*p, column-major) ----------
         bool has_X = false;
         arma::vec x_flat;
@@ -714,7 +720,7 @@ public:
         AI4BayesCode::history_map out;
 
         if (!has_X) {
-            if (keep_history_) {
+            if (use_history) {
                 // History mode at training X: per-draw Bernoulli y_rep from
                 // sigmoid(f_d). amplitude and lengthscale are sub-outputs of
                 // the joint block (keyed by sub-param name in get_history()),
@@ -771,7 +777,7 @@ public:
             X_new_rows[i] = row;
         }
 
-        if (keep_history_) {
+        if (use_history) {
             // new-X + history: per-draw GP classification at X_new using
             // (amp_d, ell_d, f_d) from history. amplitude and lengthscale are
             // sub-outputs of the joint block, keyed by sub-param name.

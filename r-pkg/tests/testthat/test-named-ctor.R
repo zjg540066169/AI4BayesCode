@@ -153,3 +153,47 @@ test_that("no constructor parameter is swallowed by methods::new's own formal", 
     }
     expect_identical(offenders, character(0))
 })
+
+test_that("every mixin-based example branches on use_history, not keep_history_", {
+    # predict_at_last() is bound by kernel_control_mixin for every wrapper, but
+    # it can only do anything if the wrapper's predict_at consults the flag.
+    # A wrapper that walks its history unconditionally would silently return
+    # the whole history instead (the mixin catches that at run time, but the
+    # source-level rule is what keeps generated code correct).
+    dir <- ai4bayescode_examples_path()
+    skip_if(!nzchar(dir) || !dir.exists(dir), "bundled examples not found")
+    files <- list.files(dir, pattern = "\\.cpp$", full.names = TRUE)
+    skip_if(!length(files), "bundled examples not found")
+
+    # The body of predict_at, by brace matching -- a fixed-width slice runs
+    # past the end of the function and picks up the constructor's own
+    # keep_history_.
+    predict_at_body <- function(src) {
+        m <- regexpr("history_map[ \t\n]+predict_at[ \t\n]*\\(", src, perl = TRUE)
+        if (m < 0) return("")
+        ch <- strsplit(substring(src, m), "")[[1]]
+        open_at <- which(ch == "{")[1L]
+        if (is.na(open_at)) return("")
+        depth <- 0L
+        for (k in seq(open_at, length(ch))) {
+            if (ch[k] == "{") depth <- depth + 1L
+            else if (ch[k] == "}") {
+                depth <- depth - 1L
+                if (depth == 0L) return(paste(ch[open_at:k], collapse = ""))
+            }
+        }
+        ""
+    }
+
+    offenders <- character(0)
+    for (f in files) {
+        src <- paste(readLines(f, warn = FALSE), collapse = "\n")
+        if (!grepl("kernel_control_mixin", src, fixed = TRUE)) next   # ARDLasso
+        body <- predict_at_body(src)
+        if (!nzchar(body)) next
+        if (!grepl("keep_history_", body, fixed = TRUE)) next         # no history branch
+        if (!grepl("use_history", body, fixed = TRUE))
+            offenders <- c(offenders, basename(f))
+    }
+    expect_identical(offenders, character(0))
+})

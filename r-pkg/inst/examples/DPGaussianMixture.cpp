@@ -769,6 +769,12 @@ public:
 
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         if (!new_data.empty())
             ai4b::stop(
                 "DPGaussianMixture: predict_at(new_data) does NOT support "
@@ -777,7 +783,7 @@ public:
 
         AI4BayesCode::history_map out;
 
-        if (!keep_history_) {
+        if (!use_history) {
             // No-history mode: one posterior-predictive draw. y_rep arrives as
             // a flat N*d vec (row-major over observations); emit it as a 1 x
             // (N*d) arma::mat row, mirroring the other dual examples.

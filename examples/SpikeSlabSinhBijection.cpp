@@ -362,6 +362,12 @@ public:
     // method surface. The model logic / sampler is untouched.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
+        // A predict_at_last() call asks for the single-draw path even
+        // though the history is being retained; branch on this, not on
+        // keep_history_ directly.
+        const bool use_history =
+            keep_history_ && !this->predict_last_draw_only();
+
         // ---- Parse optional x (length N_new) ------------------------------
         bool has_x = false;
         arma::vec x_use;
@@ -382,7 +388,7 @@ public:
         AI4BayesCode::history_map out;
         std::normal_distribution<double> norm01(0.0, 1.0);
 
-        if (!keep_history_) {
+        if (!use_history) {
             // Single predict at the current draw.
             const double b = impl_->data().get("beta")[0];
             arma::mat yrep_mat(1, N_pred);

@@ -2823,6 +2823,20 @@ PYBIND11_MODULE(<ClassName>, m) {
     AI4BayesCode::register_ai4bayescode_types(m);  // one-time DagInfo/AdaptationInfo bindings
 
     pybind11::class_<ClassName>(m, "<ClassName>")
+PREDICTING AT THE LAST DRAW ONLY. A wrapper whose predict_at walks the
+retained history must branch on `use_history`, not on `keep_history_`:
+
+    const bool use_history = keep_history_ && !this->predict_last_draw_only();
+
+`predict_last_draw_only()` comes from kernel_control_mixin and is true only
+for the duration of a `predict_at_last(...)` call, which the mixin binds in
+both frontends. That call gives the caller the single-draw path -- the one
+predict_at already takes when keep_history is FALSE -- WITHOUT giving up the
+retained history, which is what someone wants when they kept the history for
+diagnostics but need one prediction rather than one per draw. Do NOT add a
+parameter to predict_at for this: the core-six signature stays exactly as
+interface.md defines it.
+
 NAMING CONSTRAINT ON CONSTRUCTOR PARAMETERS. R reaches a module constructor
 through `methods::new(Class, ...)`, whose own first formal is named `Class`.
 R's argument matching runs there FIRST, so a constructor parameter whose name
