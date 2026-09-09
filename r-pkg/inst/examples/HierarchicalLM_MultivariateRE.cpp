@@ -545,9 +545,11 @@ public:
 
         // Predict DAG: X,beta -> mu_fixed ; z_flat,tau,R_chol -> u ;
         // mu_fixed,Z,group_idx,u,tau,R_chol,sigma -> y_rep.
-        impl_->data().declare_data_input("X");
-        impl_->data().declare_data_input("Z");
-        impl_->data().declare_data_input("group_idx");
+        // X, Z and group_idx are indexed by the same observations: y_rep
+        // combines the fixed-effect row of X with the random-effect row of Z
+        // for that row's group. With only X supplied, mu_fixed is still
+        // predictable and y_rep is not.
+        impl_->data().declare_data_input_group({"X", "Z", "group_idx"});
         impl_->data().declare_predict_edges("X",         {"mu_fixed"});
         impl_->data().declare_predict_edges("beta",      {"mu_fixed"});
         impl_->data().declare_predict_edges("z_flat",    {"u"});

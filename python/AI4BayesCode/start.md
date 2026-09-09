@@ -595,6 +595,17 @@ commonly missed checks this skill set has caught:
   `impl_->predict_at(replaced, predict_rng_)` -- NOT hard-reject
   non-empty `new_data` with `ai4b::stop`. The hard-reject pattern
   compiles + R-hat-passes but silently breaks predictions.
+- **Prediction goes as far as the graph allows, and stops.** `predict_at`
+  recomputes exactly the nodes whose predict-DAG parents are all available,
+  and returns those; a node it cannot reach is absent from the result, not an
+  error. Data inputs indexed by the SAME observations must be declared with
+  `declare_data_input_group`, because a member the caller left out keeps its
+  training value and no longer lines up -- everything downstream of it is then
+  NOT predictable, and that unpredictability is TRANSITIVE. Group only what is
+  genuinely co-indexed: an input that is not indexed by observation stays
+  valid when the observations are replaced. Never hand-write an
+  all-or-nothing data guard in `predict_at`; it overrides the graph and
+  refuses predictions the model can actually make.
 
 ---
 

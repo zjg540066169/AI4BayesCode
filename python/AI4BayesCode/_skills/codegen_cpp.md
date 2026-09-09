@@ -1380,9 +1380,25 @@ impl_->data().declare_predict_edges("v2",        {"y_rep"});
 //  "Z", never "Z_flat" / "Z_mat_flat". These strings are what the user
 //  types into predict_at(), so an internal detail like flattening must
 //  not appear in them.
-impl_->data().declare_data_input("X");
-impl_->data().declare_data_input("Z");
-impl_->data().declare_data_input("v2");
+// Data inputs indexed by the SAME observations are declared as ONE GROUP.
+// A prediction at new data has to replace all of them together: the ones
+// left out keep their training values, which no longer line up with the
+// replaced ones, so every node downstream of a withheld member is NOT
+// PREDICTABLE for that call and is simply absent from predict_at's result.
+// Everything reachable WITHOUT it is still computed -- prediction goes as
+// far as the graph allows and stops there.
+//
+// Group ONLY what is genuinely co-indexed. An input that is not indexed by
+// observation -- an initial condition, a knot grid, a hyperparameter vector
+// -- stays valid when the observations are replaced and must NOT be grouped,
+// or predictions that legitimately reuse it are blocked.
+//
+// Do NOT hand-write an all-or-nothing guard in predict_at ("supply BOTH X
+// and Z, or neither"). That overrides the graph and refuses predictions the
+// model can actually make: in this example the exposure-response surface is
+// a function of X alone, so it is predictable at new X whether or not Z came
+// with it. Declare the group and let the DAG decide.
+impl_->data().declare_data_input_group({"X", "Z", "v2"});
 
 // === Deterministic refresher for the intermediate theta. ===
 impl_->data().register_refresher(

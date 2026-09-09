@@ -288,6 +288,69 @@ public:
         return data_input_keys_;
     }
 
+    /**
+     * Declare that these data inputs are indexed by the SAME observations, so
+     * a prediction at new data has to replace all of them together.
+     *
+     * WHY THIS CANNOT BE INFERRED. Whether a data input that the caller left
+     * out is still usable depends on what it is indexed by, and the graph does
+     * not carry that. An initial condition shared by every time point stays
+     * valid when the time grid is replaced; a covariate matrix indexed by
+     * observation does NOT stay valid when the observations are replaced, even
+     * though both look like "a data input feeding a node that also has a
+     * replaced parent". Only the model knows which it has, so the model says
+     * so here.
+     *
+     * WHAT IT CHANGES. Replacing a strict subset of a group leaves the other
+     * members at their training values, which no longer line up with the
+     * replaced ones. Those members, and every node downstream of them, are
+     * then NOT PREDICTABLE for that call: predict_at skips them and they are
+     * absent from its result, rather than being computed from a mixture of
+     * new and training data. Everything reachable WITHOUT them is still
+     * computed -- prediction goes as far as the graph allows and stops.
+     *
+     * Declaring no group (the default) preserves the previous behaviour
+     * exactly, so a model that does not declare one is unaffected.
+     */
+    void declare_data_input_group(std::vector<std::string> keys) {
+        for (const auto& k : keys) data_input_keys_.insert(k);
+        data_input_groups_.push_back(std::move(keys));
+    }
+
+    /// Read-only access to the declared co-indexed data-input groups.
+    const std::vector<std::vector<std::string>>&
+    data_input_groups() const noexcept { return data_input_groups_; }
+
+    /**
+     * The keys that are NOT PREDICTABLE for a call that replaced `replaced`:
+     * every co-indexed data input the caller left out, plus everything
+     * downstream of one in the predict DAG.
+     *
+     * A group none of whose members were replaced contributes nothing -- the
+     * whole group is at its training values and is mutually consistent, which
+     * is what predict_at with no replacements means.
+     */
+    std::unordered_set<std::string> predict_withheld_cone(
+            const std::unordered_set<std::string>& replaced) const {
+        std::unordered_set<std::string> cone;
+        std::vector<std::string> queue;
+        for (const auto& grp : data_input_groups_) {
+            bool any_replaced = false;
+            for (const auto& k : grp) if (replaced.count(k)) { any_replaced = true; break; }
+            if (!any_replaced) continue;
+            for (const auto& k : grp)
+                if (!replaced.count(k) && cone.insert(k).second) queue.push_back(k);
+        }
+        while (!queue.empty()) {
+            const std::string node = queue.back(); queue.pop_back();
+            auto it = predict_edges_.find(node);
+            if (it == predict_edges_.end()) continue;
+            for (const auto& child : it->second)
+                if (cone.insert(child).second) queue.push_back(child);
+        }
+        return cone;
+    }
+
     /// Check whether a key has a registered refresher (i.e. it is derived).
     bool has_refresher(const std::string& key) const {
         return refreshers_.find(key) != refreshers_.end();
@@ -429,7 +492,9 @@ public:
      * @return  Ordered list of deterministic downstream nodes to refresh.
      */
     std::vector<std::string> predict_downstream_of(
-            const std::unordered_set<std::string>& changed) const {
+            const std::unordered_set<std::string>& changed,
+            const std::unordered_set<std::string>& not_predictable =
+                std::unordered_set<std::string>()) const {
         // Build reverse map: child → set of parents
         std::unordered_map<std::string, std::vector<std::string>> parents;
         for (const auto& kv : predict_edges_) {
@@ -443,6 +508,10 @@ public:
         // Non-data-input = a model parameter or derived quantity, whose
         // current value at the current MCMC state is what we want.
         auto is_nondata_param = [&](const std::string& k) {
+            // A key in the not-predictable cone holds a training value that no
+            // longer lines up with the replaced inputs, so it is NOT a usable
+            // parent no matter what is sitting in values_.
+            if (not_predictable.count(k)) return false;
             return values_.count(k) && !data_input_keys_.count(k);
         };
 
@@ -481,6 +550,10 @@ public:
                 if (reachable.count(node)) continue;  // already processed
                 // Stochastic nodes are handled in Pass 2; exclude here.
                 if (stochastic_refreshers_.count(node)) continue;
+                // Downstream of a co-indexed input the caller withheld: not
+                // predictable for this call, and never a parent for anything
+                // further down either.
+                if (not_predictable.count(node)) continue;
 
                 bool any_parent_changed = false;
                 bool all_parents_avail  = true;
@@ -537,7 +610,9 @@ public:
      * @return  Keys of stochastic refreshers to sample (unordered).
      */
     std::vector<std::string> predict_stochastic_sampleable(
-            const std::unordered_set<std::string>& changed_after_pass1) const {
+            const std::unordered_set<std::string>& changed_after_pass1,
+            const std::unordered_set<std::string>& not_predictable =
+                std::unordered_set<std::string>()) const {
         std::unordered_map<std::string, std::vector<std::string>> parents;
         for (const auto& kv : predict_edges_) {
             for (const auto& child : kv.second) {
@@ -574,12 +649,16 @@ public:
         std::vector<std::string> result;
         for (const auto& kv : stochastic_refreshers_) {
             const std::string& key = kv.first;
+            // Downstream of a co-indexed input the caller withheld: sampling it
+            // would draw from a mixture of new and training data.
+            if (not_predictable.count(key)) continue;
             auto pit = parents.find(key);
             bool all_avail = true;
             if (pit != parents.end()) {
                 for (const auto& p : pit->second) {
-                    bool p_avail = changed_after_pass1.count(p) ||
-                                   values_.count(p);
+                    bool p_avail = !not_predictable.count(p) &&
+                                   (changed_after_pass1.count(p) ||
+                                    values_.count(p));
                     if (!p_avail) { all_avail = false; break; }
                 }
             }
@@ -690,6 +769,9 @@ private:
     std::unordered_map<std::string, stochastic_refresher_fn>
         stochastic_refreshers_;
     std::unordered_set<std::string> data_input_keys_;
+    // Data inputs sharing one observation index; see
+    // declare_data_input_group().
+    std::vector<std::vector<std::string>> data_input_groups_;
     std::unordered_map<std::string, std::vector<std::string>> predict_edges_;
     // VIZ-ONLY. Never read by predict_downstream_of /
     // predict_stochastic_sampleable. See declare_context_edges().

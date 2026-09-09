@@ -378,8 +378,11 @@ public:
             "ncr_joint", {"mu_fixed", "u"});
 
         // Predict DAG (edges keyed by sub-param name or derived node name).
-        impl_->data().declare_data_input("X");
-        impl_->data().declare_data_input("g_idx");
+        // X and g_idx are indexed by the same observations: y_rep needs the
+        // group each ROW belongs to, so a prediction at new X needs the new
+        // g_idx too. With only X supplied, mu_fixed is still predictable and
+        // y_rep is not.
+        impl_->data().declare_data_input_group({"X", "g_idx"});
         impl_->data().declare_predict_edges("X",        {"mu_fixed"});
         impl_->data().declare_predict_edges("alpha",    {"mu_fixed"});
         impl_->data().declare_predict_edges("beta",     {"mu_fixed"});

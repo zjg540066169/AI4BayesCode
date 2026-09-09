@@ -841,9 +841,18 @@ public:
             changed.insert(kv.first);
         }
 
+        // A co-indexed data input the caller left out makes itself and its
+        // whole downstream cone not predictable for this call (see
+        // shared_data_t::declare_data_input_group). Prediction still goes as
+        // far as the rest of the graph allows; the cone is simply absent from
+        // the result instead of being computed from a mixture of new and
+        // training data.
+        const std::unordered_set<std::string> not_predictable =
+            scratch.predict_withheld_cone(replaced_set);
+
         // 3. Pass 1: deterministic propagation.
         std::vector<std::string> det_refreshed =
-            scratch.predict_downstream_of(changed);
+            scratch.predict_downstream_of(changed, not_predictable);
         for (const auto& dk : det_refreshed) {
             if (scratch.has_refresher(dk)) {
                 scratch.refresh_key(dk);
@@ -869,7 +878,7 @@ public:
 
         // 4. Pass 2: stochastic sampling (posterior predictive / y_rep).
         std::vector<std::string> stoch_sampled =
-            scratch.predict_stochastic_sampleable(changed);
+            scratch.predict_stochastic_sampleable(changed, not_predictable);
         for (const auto& sk : stoch_sampled) {
             scratch.run_stochastic_refresher(sk, rng);
         }

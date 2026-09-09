@@ -281,8 +281,11 @@ public:
         // Inv-Chi^2 -- there is NO separate sigma block (see the ensemble loop).
 
         // ---- predict DAG (generative direction) ------------------------------
-        impl_->data().declare_data_input("X");
-        impl_->data().declare_data_input("Z");
+        // X and Z are indexed by the same observations: mu combines
+        // beta_j(Z_i) with X_ij, so a prediction at new X needs the new Z
+        // too. Replacing one alone leaves everything downstream of the
+        // other not predictable.
+        impl_->data().declare_data_input_group({"X", "Z"});
         for (int j = 0; j < J; ++j) {
             impl_->data().declare_predict_edges("Z", {beta_key(j)});
             impl_->data().declare_predict_edges(beta_key(j), {"mu"});
