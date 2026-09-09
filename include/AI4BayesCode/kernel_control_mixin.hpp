@@ -102,23 +102,24 @@ protected:
         last_draw_scope_& operator=(const last_draw_scope_&) = delete;
     };
 
-    // A wrapper generated before this existed ignores the flag and hands back
-    // its whole history. Returning that silently would answer a different
-    // question from the one asked, so say so instead.
-    static AI4BayesCode::history_map check_single_draw_(
-            AI4BayesCode::history_map out) {
-        for (const auto& kv : out) {
-            if (kv.second.n_rows > 1) {
-                throw std::runtime_error(
-                    "predict_at_last(): this sampler does not implement the "
-                    "single-draw prediction path, so it cannot honour the "
-                    "request -- it returned its whole retained history. "
-                    "Regenerate the sampler, or call predict_at() and take "
-                    "the last row yourself.");
-            }
-        }
-        return out;
-    }
+    // NOTE ON WRAPPERS THAT DO NOT READ THE FLAG. An earlier version of this
+    // file tried to detect them by rejecting any result with more than one
+    // row, on the theory that rows are posterior draws. Rows are not draws:
+    // a survival curve is one row per query time, a vector converted with
+    // arma::mat(vec) is N x 1, and a variational block returns one row per
+    // q-sample. That guard therefore refused six of the shipped samplers --
+    // including with keep_history = FALSE, where there is no history to have
+    // returned -- and its verdict depended on how many query points the
+    // caller passed. A wrapper's result shape cannot distinguish "n draws"
+    // from "n query points", so nothing is inferred from it.
+    //
+    // A wrapper that does not branch on this flag simply predicts the way it
+    // always does, and predict_at_last is then the same call as predict_at.
+    // That is correct for every wrapper with no history branch to skip. A
+    // wrapper that DOES walk its history and does not read the flag would
+    // hand back that history; the source-level rule in codegen_cpp.md, and
+    // the test that enforces it over the bundled examples, are what keep that
+    // from happening.
 
     mutable bool predict_last_draw_only_ = false;
 
@@ -175,12 +176,10 @@ public:
     AI4BayesCode::history_map predict_at_last_(Rcpp::List new_data) const {
         last_draw_scope_ guard(&predict_last_draw_only_);
         if constexpr (has_predict_at_r_<Derived>::value) {
-            return check_single_draw_(
-                static_cast<const Derived*>(this)->predict_at_r(new_data));
+            return static_cast<const Derived*>(this)->predict_at_r(new_data);
         } else {
-            return check_single_draw_(
-                static_cast<const Derived*>(this)->predict_at(
-                    Rcpp::as<AI4BayesCode::state_map>(SEXP(new_data))));
+            return static_cast<const Derived*>(this)->predict_at(
+                Rcpp::as<AI4BayesCode::state_map>(SEXP(new_data)));
         }
     }
 
@@ -248,8 +247,7 @@ public:
     AI4BayesCode::history_map py_predict_at_last(
             const AI4BayesCode::state_map& new_data) const {
         last_draw_scope_ guard(&predict_last_draw_only_);
-        return check_single_draw_(
-            static_cast<const Derived*>(this)->predict_at(new_data));
+        return static_cast<const Derived*>(this)->predict_at(new_data);
     }
 
     void py_freeze(const std::vector<std::string>& names, bool quiet) {

@@ -431,10 +431,24 @@ public:
      *   declare_predict_edges("sigma2", {"f"});
      *   declare_predict_edges("f",      {"Y"});
      *   declare_predict_edges("v2",     {"Y"});
+     *
+     * Calling this MORE THAN ONCE for the same `from` ADDS to that node's
+     * children rather than replacing them, and duplicates are ignored. It
+     * used to overwrite, which silently discarded edges wherever a source
+     * was declared in a loop (one edge per varying-coefficient forest) or in
+     * two separate statements (a scale feeding both a random effect and the
+     * likelihood): only the last call survived, so the graph predict_at
+     * walked -- and the one get_dag drew -- was missing parents the model
+     * plainly had.
      */
     void declare_predict_edges(const std::string& from,
                                std::vector<std::string> to) {
-        predict_edges_[from] = std::move(to);
+        auto& dst = predict_edges_[from];
+        for (auto& child : to) {
+            if (std::find(dst.begin(), dst.end(), child) == dst.end()) {
+                dst.push_back(std::move(child));
+            }
+        }
     }
 
     /**

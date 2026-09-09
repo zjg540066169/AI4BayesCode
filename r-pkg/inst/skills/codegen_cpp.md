@@ -1394,11 +1394,14 @@ impl_->data().declare_predict_edges("v2",        {"y_rep"});
 // or predictions that legitimately reuse it are blocked.
 //
 // When predict_at forwards to impl_->predict_at, do NOT hand-write an
-// all-or-nothing guard on top of it ("supply BOTH X and Z, or neither").
-// That overrides the graph and refuses predictions the model can actually
-// make: in this example the exposure-response surface is a function of X
-// alone, so it is predictable at new X whether or not Z came with it.
-// Declare the group and let the DAG decide.
+// all-or-nothing guard on top of it. Whether a given call can produce
+// anything is a property of the declared graph, and the graph already
+// answers it: a wrapper that refuses the call outright also refuses the
+// cases where some outputs ARE reachable. Declare the group and let the DAG
+// decide. How much is reachable depends on the model -- an output whose
+// ancestors are all replaced or all training-side is computed, one that
+// mixes the two is not -- so do not promise a particular outcome in a
+// comment; the edges are what determine it.
 //
 // A wrapper whose predict_at does NOT forward -- because its outputs are
 // forests or kernels that must be RE-EVALUATED at the new data rather than

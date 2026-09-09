@@ -210,6 +210,7 @@ run: build
 	@echo
 	@echo "=== Running test_predict_dag_depth test_predict_withheld_cone ==="
 	./test_predict_dag_depth
+	./test_predict_withheld_cone
 	@echo
 	@echo "=== Running test_wiring_guards ==="
 	./test_wiring_guards

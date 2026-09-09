@@ -229,6 +229,47 @@ int main() {
               "the ungrouped inputs are unaffected");
     }
 
+    // ---- 7. Repeated declare_predict_edges MERGES ------------------------
+    // It used to overwrite, so a source declared in a loop (one edge per
+    // varying-coefficient forest) or in two statements (a scale feeding both
+    // a random effect and the likelihood) kept only its LAST children, and
+    // predict_at walked a graph missing parents the model plainly had.
+    {
+        std::printf("\nCase 7: declaring the same source twice keeps BOTH edges\n");
+        AI4BayesCode::shared_data_t d;
+        for (const char* k : {"tau", "z_flat", "R_chol"}) d.set(k, arma::vec{1.0});
+        derived(d, "u", "z_flat");
+        derived(d, "y_rep_det", "u");
+        d.declare_predict_edges("tau",    {"u"});
+        d.declare_predict_edges("R_chol", {"u"});
+        d.declare_predict_edges("z_flat", {"u"});
+        d.declare_predict_edges("tau",    {"y_rep_det"});     // second call
+        d.declare_predict_edges("R_chol", {"y_rep_det"});     // second call
+        const auto& e = d.predict_edges();
+        auto kids = [&](const std::string& k) {
+            auto it = e.find(k);
+            return it == e.end() ? std::vector<std::string>{} : it->second;
+        };
+        check(has(kids("tau"), "u") && has(kids("tau"), "y_rep_det"),
+              "tau keeps BOTH children across two declarations");
+        check(has(kids("R_chol"), "u") && has(kids("R_chol"), "y_rep_det"),
+              "R_chol keeps both as well");
+        // and a source declared once per item in a loop keeps every item
+        AI4BayesCode::shared_data_t d2;
+        d2.set("Z", arma::vec{1.0});
+        for (int j = 0; j < 3; ++j) {
+            derived(d2, "beta_" + std::to_string(j), "Z");
+            d2.declare_predict_edges("Z", {"beta_" + std::to_string(j)});
+        }
+        const auto& e2 = d2.predict_edges();
+        const auto zk = e2.at("Z");
+        check(zk.size() == 3 && has(zk, "beta_0") && has(zk, "beta_1")
+              && has(zk, "beta_2"),
+              "a loop over p forests declares p edges, not just the last");
+        d2.declare_predict_edges("Z", {"beta_1"});
+        check(e2.at("Z").size() == 3, "re-declaring an existing edge is a no-op");
+    }
+
     std::printf("\n=== SUMMARY: %d passed, %d failed ===\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
