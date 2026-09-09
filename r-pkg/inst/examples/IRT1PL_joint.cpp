@@ -290,11 +290,11 @@ double joint_theta_zb_sigma_log_density(const arma::vec& theta_cat,
 class IRT1PL_joint : public AI4BayesCode::kernel_control_mixin<IRT1PL_joint> {
     friend class AI4BayesCode::kernel_control_mixin<IRT1PL_joint>;
 public:
-    IRT1PL_joint(const arma::mat& Y_input,
+    IRT1PL_joint(const arma::mat& Y,
                    const arma::vec& theta_init,
                    const arma::vec& b_init,
-                   double sigma_b_init,
-                   int rng_seed,
+                   double sigma_b_init = 1.0,
+                   int rng_seed = 1,
                    bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
@@ -310,8 +310,8 @@ public:
           impl_(std::make_unique<composite_block>("IRT1PL_joint")),
           keep_history_(keep_history)
     {
-        const std::size_t N = Y_input.n_rows;
-        const std::size_t J = Y_input.n_cols;
+        const std::size_t N = Y.n_rows;
+        const std::size_t J = Y.n_cols;
 
         if (N < 1) throw std::runtime_error("Y must have at least 1 row");
         if (J < 1) throw std::runtime_error("Y must have at least 1 column");
@@ -328,7 +328,7 @@ public:
         std::size_t n_obs = 0;
         for (std::size_t j = 0; j < J; ++j) {
             for (std::size_t i = 0; i < N; ++i) {
-                const double y = Y_input(i, j);
+                const double y = Y(i, j);
                 if (std::isnan(y)) continue;
                 if (y != 0.0 && y != 1.0)
                     throw std::runtime_error("Y must contain only 0, 1, or NA");

@@ -157,14 +157,14 @@ public:
     OrderMCMCBN(const arma::mat& data,            // N x n, integer-valued
                 const arma::vec& cardinalities,   // length n, r_i per variable
                 const std::string& structure_prior, // "uniform" | "fk_eq2" -- see below
-                double bdeu_alpha,
-                int max_parents,
-                int candidate_top_C,
-                int family_cache_F,
-                double gamma_prune_nats,
-                double prob_adjacent_swap,
-                const arma::vec& initial_order,    // EMPTY = random; else 1-based
-                int rng_seed,
+                double bdeu_alpha = 1.0,
+                int max_parents = 5,
+                int candidate_top_C = 20,
+                int family_cache_F = 4000,
+                double gamma_prune_nats = 10.0,
+                double prob_adjacent_swap = 0.5,
+                const arma::vec& initial_order = arma::vec(),    // EMPTY = random; else 1-based
+                int rng_seed = 1,
                 bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}

@@ -307,21 +307,9 @@ public:
         return (std::isfinite(b) && b > 0.0) ? b : 1.0;
     }
 
-    /// RECOMMENDED constructor: data-driven weakly-informative
-    /// Normal-Gamma hypers from y. Delegates to the explicit ctor
-    /// (that path is unchanged).
-    /// SHORT constructor -- data + seed. Hyperparameters take their
-    /// defaults: K_trunc 20. Use the full constructor to change them.
-    /// Rcpp ignores C++ default arguments, hence a separate ctor.
     DPGaussianMixture_DerivedAlpha(const arma::mat& y,
-                                   int  rng_seed,
-                                   bool keep_history = false)
-        : DPGaussianMixture_DerivedAlpha(y, /*K_trunc=*/20, rng_seed,
-                                         keep_history) {}
-
-    DPGaussianMixture_DerivedAlpha(const arma::mat& y,
-                                   int K_trunc,
-                                   int rng_seed,
+                                   int K_trunc = 20,
+                                   int rng_seed = 1,
                                    bool keep_history = false)
         : DPGaussianMixture_DerivedAlpha(y, K_trunc,
                                          dd_mu0_(y), 0.01, 2.0,
@@ -334,7 +322,7 @@ public:
                                     double kappa_0,
                                     double a_lambda_0,
                                     double b_lambda_0,
-                                    int rng_seed,
+                                    int rng_seed = 1,
                                     bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
@@ -744,8 +732,6 @@ private:
 RCPP_MODULE(DPGaussianMixture_DerivedAlpha_module) {
     Rcpp::class_<DPGaussianMixture_DerivedAlpha>(
         "DPGaussianMixture_DerivedAlpha")
-        .constructor<arma::mat, int>(
-            "Minimal: y + seed. K_trunc defaults to 20.")
         .constructor<arma::mat, int, int>(
             "DEFAULT (data-driven) ctor; keep_history=FALSE. "
             "DPGaussianMixture_DerivedAlpha(y, K_trunc, seed).")

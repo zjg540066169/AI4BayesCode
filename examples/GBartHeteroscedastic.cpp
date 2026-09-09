@@ -59,12 +59,12 @@
 //   y  <- m + sqrt(0.5 * m) * rnorm(N)               # y~N(m, phi*m), phi=0.5
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(GBartHeteroscedastic, X, y, seed, TRUE),
+//       function(seed) new(GBartHeteroscedastic, X, y, rng_seed = seed, keep_history = TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   mod <- new(GBartHeteroscedastic, X, y, 42L)   # ntrees 50, phi_init 1.0
+//   mod <- new(GBartHeteroscedastic, X, y, rng_seed = 42L)   # ntrees 50, phi_init 1.0
 //   #          X,  y, ntrees, phi_init, seed, keep_tree
 //   mod$step(2000); str(mod$get_current())           # $r, $mean, $phi
 // @example:python
@@ -134,21 +134,11 @@ using AI4BayesCode::genbart_block_config;
 class GBartHeteroscedastic : public AI4BayesCode::kernel_control_mixin<GBartHeteroscedastic> {
     friend class AI4BayesCode::kernel_control_mixin<GBartHeteroscedastic>;
 public:
-    /// SHORT constructor -- data + seed. Tuning knobs take their
-    /// standard defaults: ntrees 50, phi_init 1.0. Use the full constructor to
-    /// retune. Rcpp ignores C++ default arguments, hence a separate ctor.
     GBartHeteroscedastic(const arma::mat& X,
                          const arma::vec& y,
-                         int  rng_seed,
-                         bool keep_history = false)
-        : GBartHeteroscedastic(X, y, /*ntrees=*/50, /*phi_init=*/1.0, rng_seed,
-                                 /*keep_tree=*/false, keep_history) {}
-
-    GBartHeteroscedastic(const arma::mat& X,
-                         const arma::vec& y,
-                         int    ntrees,
-                         double phi_init,
-                         int    rng_seed,
+                         int    ntrees = 50,
+                         double phi_init = 1.0,
+                         int    rng_seed = 1,
                          bool   keep_tree    = false,
                          bool   keep_history = false)
         : rng_(rng_seed == 0
@@ -533,10 +523,6 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(GBartHeteroscedastic_module) {
     Rcpp::class_<GBartHeteroscedastic>("GBartHeteroscedastic")
-        .constructor<arma::mat, arma::vec, int>(
-            "Minimal: data + seed. Tuning knobs take standard defaults (ntrees 50, phi_init 1.0).")
-        .constructor<arma::mat, arma::vec, int, bool>(
-            "Minimal + keep_history.")
         // Short ctor: defaults keep_tree=FALSE, keep_history=FALSE.
         .constructor<arma::mat, arma::vec, int, double, int>(
             "Short ctor: X (N x p matrix), y (length N), ntrees, phi_init "

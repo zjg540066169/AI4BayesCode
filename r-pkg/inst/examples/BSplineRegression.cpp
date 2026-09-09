@@ -235,7 +235,7 @@ class BSplineRegression : public AI4BayesCode::kernel_control_mixin<BSplineRegre
 public:
     BSplineRegression(const arma::vec& y,
                       const arma::mat& Bsp,
-                      int rng_seed,
+                      int rng_seed = 1,
                       bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}

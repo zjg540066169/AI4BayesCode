@@ -571,11 +571,14 @@ Format (every line is a `//` comment; `doc()` strips the `// ` prefix):
 //   ai4bayescode_source("<ClassName>.cpp")   # compile+load; RELATIVE path ONLY
 //   # ---- Everyday use: parallel chains + diagnosis ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(<ClassName>, <ctor args>, as.integer(seed), TRUE),
+//       function(seed) new(<ClassName>, <data args>,
+//                          rng_seed = as.integer(seed), keep_history = TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   ai4bayescode_diagnose(run$histories[[1]])
 //   # ---- Advanced: stateful single-chain control ----
-//   m <- new(<ClassName>, <ctor args>, 7L, TRUE)   # comment what each arg is
+//   # NAME every non-data argument. Only data is passed positionally; anything
+//   # left out takes its C++ default.
+//   m <- new(<ClassName>, <data args>, rng_seed = 7L, keep_history = TRUE)
 //   m$step(2000); str(m$get_current())
 // @example:python
 //   import numpy as np, AI4BayesCode
@@ -584,11 +587,12 @@ Format (every line is a `//` comment; `doc()` strips the `// ` prefix):
 //   Mod = AI4BayesCode.source("<ClassName>.cpp")   # RELATIVE path ONLY
 //   # ---- Everyday use: parallel chains + diagnosis ----
 //   chains = AI4BayesCode.run_chains(
-//       lambda seed: Mod.<ClassName>(<ctor args>, rng_seed=int(seed), keep_history=True),
+//       lambda seed: Mod.<ClassName>(<data args>, rng_seed=int(seed), keep_history=True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000)
 //   AI4BayesCode.diagnose(chains[0]["hist"])
 //   # ---- Advanced: stateful single-chain control ----
-//   m = Mod.<ClassName>(<ctor args>, 7, True); m.step(2000); print(m.get_current())
+//   m = Mod.<ClassName>(<data args>, rng_seed=7, keep_history=True)
+//   m.step(2000); print(m.get_current())
 // @example:end
 ```
 
@@ -2803,6 +2807,11 @@ PYBIND11_MODULE(<ClassName>, m) {
     AI4BayesCode::register_ai4bayescode_types(m);  // one-time DagInfo/AdaptationInfo bindings
 
     pybind11::class_<ClassName>(m, "<ClassName>")
+        // Every `= default` here MIRRORS the default already written in the
+        // C++ constructor signature; it is never the only place one lives.
+        // The C++ signature is the single source both frontends read -- R
+        // recovers defaults by parsing it, so a default that exists only in
+        // this binding is optional in Python and mandatory in R.
         .def(pybind11::init<...args...>(),
              pybind11::arg("arg1"), pybind11::arg("arg2") = default_val, ...,
              "<docstring>")

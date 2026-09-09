@@ -96,7 +96,7 @@
 
 class ARDLasso {
 public:
-    ARDLasso(const arma::mat& X, const arma::vec& Y, int rng_seed,
+    ARDLasso(const arma::mat& X, const arma::vec& Y, int rng_seed = 1,
              bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}

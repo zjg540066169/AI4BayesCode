@@ -49,7 +49,10 @@
     if (dplc("\\bbool\\b")) return("logical (TRUE/FALSE)")
     if (dplc("\\bint\\b|size_t|uint")) return("integer (e.g. 1L)")
     if (dplc("double|float")) return("numeric")
-    if (dplc("std::string|CharacterVector|String")) return("character")
+    # Rcpp reports a bound constructor's types demangled from typeid, where
+    # std::string appears as basic_string<...> (libc++ and libstdc++ spell the
+    # namespace differently), so match the template name too.
+    if (dplc("std::string|basic_string|CharacterVector|String")) return("character")
     trimws(type)
 }
 

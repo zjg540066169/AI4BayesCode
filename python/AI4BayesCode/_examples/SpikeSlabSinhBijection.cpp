@@ -170,7 +170,7 @@ public:
                            double sigma,
                            double slab_sd,
                            double pi_inclusion,
-                           int    rng_seed,
+                           int    rng_seed = 1,
                            bool   keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}

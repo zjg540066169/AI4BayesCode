@@ -292,7 +292,7 @@ public:
     ODE_SIR(double S0, double I0, double R0,
                   const arma::vec& t_obs,
                   const arma::vec& I_obs,
-                  int rng_seed,
+                  int rng_seed = 1,
                   bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}

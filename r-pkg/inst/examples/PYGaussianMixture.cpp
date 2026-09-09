@@ -381,21 +381,10 @@ public:
         return (std::isfinite(b) && b > 0.0) ? b : 1.0;
     }
 
-    /// RECOMMENDED constructor: data-driven weakly-informative
-    /// Normal-Gamma hypers from y; `discount` (PY model param) stays
-    /// explicit. Delegates to the explicit ctor (unchanged path).
-    /// SHORT constructor -- data + seed. Hyperparameters take their
-    /// defaults: K_trunc 20, discount 0 (reduces to a DP). Use the full constructor to change them.
-    /// Rcpp ignores C++ default arguments, hence a separate ctor.
     PYGaussianMixture(const arma::mat& y,
-                      int  rng_seed,
-                      bool keep_history = false)
-        : PYGaussianMixture(y, /*K_trunc=*/20, /*discount=*/0.0, rng_seed, keep_history) {}
-
-    PYGaussianMixture(const arma::mat& y,
-                      int K_trunc,
-                      double discount,
-                      int rng_seed,
+                      int K_trunc = 20,
+                      double discount = 0.0,
+                      int rng_seed = 1,
                       bool keep_history = false)
         : PYGaussianMixture(y, K_trunc, discount,
                             dd_mu0_(y), 0.01, 2.0, dd_blambda_(y),
@@ -410,7 +399,7 @@ public:
                       double b_lambda_0,
                       double a_alpha,
                       double b_alpha,
-                      int rng_seed,
+                      int rng_seed = 1,
                       bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
@@ -849,10 +838,6 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(PYGaussianMixture_module) {
     Rcpp::class_<PYGaussianMixture>("PYGaussianMixture")
-        .constructor<arma::mat, int>(
-            "Minimal: data + seed. Hyperparameters default (K_trunc 20, discount 0 (reduces to a DP)).")
-        .constructor<arma::mat, int, bool>(
-            "Minimal + keep_history.")
         .constructor<arma::mat, int, double, int>(
             "DEFAULT (data-driven) ctor; keep_history=FALSE. "
             "PYGaussianMixture(y, K_trunc, discount, seed).")

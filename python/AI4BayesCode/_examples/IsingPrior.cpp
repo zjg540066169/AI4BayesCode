@@ -120,7 +120,7 @@ class IsingPrior : public AI4BayesCode::kernel_control_mixin<IsingPrior> {
 public:
     IsingPrior(int L_x, int L_y, int Q, double beta,
                 bool periodic, bool eight_nn,
-                int rng_seed,
+                int rng_seed = 1,
                 bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}

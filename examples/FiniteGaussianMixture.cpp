@@ -213,20 +213,9 @@ public:
         return (std::isfinite(b) && b > 0.0) ? b : 1.0;
     }
 
-    /// RECOMMENDED constructor: data-driven weakly-informative
-    /// Normal-Gamma hypers from y; symmetric Dirichlet alpha_dir = 1
-    /// (uniform-on-simplex default). Delegates to the explicit ctor.
-    /// SHORT constructor -- data + seed. Hyperparameters take their
-    /// defaults: K = 5 components. Use the full constructor to change them.
-    /// Rcpp ignores C++ default arguments, hence a separate ctor.
     FiniteGaussianMixture(const arma::mat& y,
-                          int  rng_seed,
-                          bool keep_history = false)
-        : FiniteGaussianMixture(y, /*K=*/5, rng_seed, keep_history) {}
-
-    FiniteGaussianMixture(const arma::mat& y,
-                          int K,
-                          int rng_seed,
+                          int K = 5,
+                          int rng_seed = 1,
                           bool keep_history = false)
         : FiniteGaussianMixture(y, K,
                                 dd_mu0_(y), 0.01, 2.0, dd_blambda_(y),
@@ -239,7 +228,7 @@ public:
                           double a_lambda_0,
                           double b_lambda_0,
                           double alpha_dir,
-                          int rng_seed,
+                          int rng_seed = 1,
                           bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
@@ -626,8 +615,6 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(FiniteGaussianMixture_module) {
     Rcpp::class_<FiniteGaussianMixture>("FiniteGaussianMixture")
-        .constructor<arma::mat, int>(
-            "Minimal: data + seed. Hyperparameters default (K = 5 components).")
         .constructor<arma::mat, int, int>(
             "DEFAULT (data-driven) ctor; keep_history=FALSE. "
             "FiniteGaussianMixture(y, K, seed).")

@@ -67,12 +67,12 @@
 //   y <- as.numeric(runif(N) < 1 / (1 + exp(-eta)))     # y ~ Bernoulli(sigmoid(eta))
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(GBartLogistic, X, y, 50L, seed, FALSE, TRUE),
+//       function(seed) new(GBartLogistic, X, y, rng_seed = seed, keep_history = TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m <- new(GBartLogistic, X, y, 42L)          # X, y, seed (ntrees 50) -- single chain
+//   m <- new(GBartLogistic, X, y, rng_seed = 42L)   # ntrees 50 -- single chain
 //   m$step(2000L); str(m$get_current())         # $r linear predictor, $p fitted prob
 // @example:python
 //   import numpy as np, AI4BayesCode
@@ -149,19 +149,10 @@ inline double safe_sigmoid(double x) {
 class GBartLogistic : public AI4BayesCode::kernel_control_mixin<GBartLogistic> {
     friend class AI4BayesCode::kernel_control_mixin<GBartLogistic>;
 public:
-    /// SHORT constructor -- data + seed. Tuning knobs take their
-    /// standard defaults: ntrees 50. Use the full constructor to
-    /// retune. Rcpp ignores C++ default arguments, hence a separate ctor.
     GBartLogistic(const arma::mat& X,
                   const arma::vec& y,
-                  int  rng_seed,
-                  bool keep_history = false)
-        : GBartLogistic(X, y, /*ntrees=*/50, rng_seed, /*keep_tree=*/false, keep_history) {}
-
-    GBartLogistic(const arma::mat& X,
-                  const arma::vec& y,
-                  int  ntrees,
-                  int  rng_seed,
+                  int  ntrees = 50,
+                  int  rng_seed = 1,
                   bool keep_tree    = false,
                   bool keep_history = false)
         : rng_(rng_seed == 0
@@ -485,8 +476,6 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(GBartLogistic_module) {
     Rcpp::class_<GBartLogistic>("GBartLogistic")
-        .constructor<arma::mat, arma::vec, int>(
-            "Minimal: data + seed. Tuning knobs take standard defaults (ntrees 50).")
         .constructor<arma::mat, arma::vec, int, int>(
             "Short ctor: X, y, ntrees, seed; keep_tree and keep_history "
             "default FALSE.")

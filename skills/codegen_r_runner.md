@@ -270,7 +270,7 @@ dg$plot      # trace + autocorrelation + density (prints; needs 'bayesplot')
 
 ## Initialize with full history (keep_history = FALSE keeps only the
 ## last draw).
-model <- new(<ClassName>, <data_args>, seed = 1, keep_history = TRUE)
+model <- new(<ClassName>, <data_args>, rng_seed = 1L, keep_history = TRUE)
 
 model$step(10)         ## run 10 iterations
 model$get_history()    ## 10 posterior draws (all params)

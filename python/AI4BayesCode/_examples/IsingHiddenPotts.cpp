@@ -143,7 +143,7 @@ class IsingHiddenPotts : public AI4BayesCode::kernel_control_mixin<IsingHiddenPo
 public:
     IsingHiddenPotts(int L, double beta, double delta,
                      double mu0, double mu1, double sigma,
-                     int data_seed, int rng_seed, int init_label,
+                     int data_seed, int rng_seed = 1, int init_label = 0,
                      bool keep_history = false)
         : rng_(static_cast<std::uint64_t>(rng_seed)),
           impl_(std::make_unique<composite_block>("IsingHiddenPotts")),
@@ -318,8 +318,8 @@ PYBIND11_MODULE(IsingHiddenPotts, m) {
              pybind11::arg("mu1"),
              pybind11::arg("sigma"),
              pybind11::arg("data_seed"),
-             pybind11::arg("rng_seed"),
-             pybind11::arg("init_label"),
+             pybind11::arg("rng_seed") = 1,
+             pybind11::arg("init_label") = 0,
              pybind11::arg("keep_history") = false)
         .def("step", (void (IsingHiddenPotts::*)())    &IsingHiddenPotts::step, "Run one sweep.")
         .def("step", (void (IsingHiddenPotts::*)(int)) &IsingHiddenPotts::step, pybind11::arg("n_steps"))

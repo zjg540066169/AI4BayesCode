@@ -68,12 +68,12 @@
 //   y <- f + rnorm(N, 0, 0.5)                      # sigma_true = 0.5
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(SoftBartNoise, X, y, seed, TRUE),
+//       function(seed) new(SoftBartNoise, X, y, rng_seed = seed, keep_history = TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m <- new(SoftBartNoise, X, y, 42L)   # ntrees 50, k 2, tau_rate 10, dart off, nu 3
+//   m <- new(SoftBartNoise, X, y, rng_seed = 42L)   # every tuning knob defaulted
 //   #          X,  y, ntrees, k, tau_rate, dart, seed
 //   m$step(2000); str(m$get_current())             # $f_softbart, $sigma
 // @example:python
@@ -189,23 +189,13 @@ double sigma_natural_log_density(const arma::vec& sigma_nat,
 class SoftBartNoise : public AI4BayesCode::kernel_control_mixin<SoftBartNoise> {
     friend class AI4BayesCode::kernel_control_mixin<SoftBartNoise>;
 public:
-    /// SHORT constructor -- data + seed. Tuning knobs take their
-    /// standard defaults: ntrees 50, k 2.0, tau_rate 10.0, dart off, nu 3.0 (SoftBart defaults). Use the full constructor to
-    /// retune. Rcpp ignores C++ default arguments, hence a separate ctor.
     SoftBartNoise(const arma::mat& X,
                   const arma::vec& y,
-                  int  rng_seed,
-                  bool keep_history = false)
-        : SoftBartNoise(X, y, /*ntrees=*/50, /*k=*/2.0, /*tau_rate=*/10.0, /*dart=*/false,
-                        rng_seed, /*nu=*/3.0, /*keep_tree=*/false, keep_history) {}
-
-    SoftBartNoise(const arma::mat& X,
-                  const arma::vec& y,
-                  int    ntrees,
-                  double k,
-                  double tau_rate,
-                  bool   dart,
-                  int    rng_seed,
+                  int    ntrees = 50,
+                  double k = 2.0,
+                  double tau_rate = 10.0,
+                  bool   dart = false,
+                  int    rng_seed = 1,
                   double nu           = 3.0,
                   bool   keep_tree    = false,
                   bool   keep_history = false)
@@ -634,10 +624,6 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(SoftBartNoise_module) {
     Rcpp::class_<SoftBartNoise>("SoftBartNoise")
-        .constructor<arma::mat, arma::vec, int>(
-            "Minimal: data + seed. Tuning knobs take standard defaults (ntrees 50, k 2.0, tau_rate 10.0, dart off, nu 3.0 (SoftBart defaults)).")
-        .constructor<arma::mat, arma::vec, int, bool>(
-            "Minimal + keep_history.")
         // Short constructor: nu=3, keep_tree=FALSE, keep_history=FALSE.
         .constructor<arma::mat, arma::vec,
                      int, double, double, bool, int>(

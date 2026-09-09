@@ -159,7 +159,7 @@ class DirichletSparse : public AI4BayesCode::kernel_control_mixin<DirichletSpars
     friend class AI4BayesCode::kernel_control_mixin<DirichletSparse>;
 public:
     DirichletSparse(const arma::vec& y_counts,
-                         int    rng_seed,
+                         int    rng_seed = 1,
                          bool   keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}

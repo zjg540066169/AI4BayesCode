@@ -321,19 +321,10 @@ double joint_log_density(const arma::vec& theta_cat,
 class HSGPRegression : public AI4BayesCode::kernel_control_mixin<HSGPRegression> {
     friend class AI4BayesCode::kernel_control_mixin<HSGPRegression>;
 public:
-    /// SHORT constructor -- data + seed. Hyperparameters take their
-    /// defaults: M = 30 basis functions (brms-style default). Use the full constructor to change them.
-    /// Rcpp ignores C++ default arguments, hence a separate ctor.
     HSGPRegression(const arma::vec& y,
                    const arma::vec& x,
-                   int  rng_seed,
-                   bool keep_history = false)
-        : HSGPRegression(y, x, /*M=*/30, rng_seed, keep_history) {}
-
-    HSGPRegression(const arma::vec& y,
-                   const arma::vec& x,
-                   int M,
-                   int rng_seed,
+                   int M = 30,
+                   int rng_seed = 1,
                    bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
@@ -650,10 +641,6 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(HSGPRegression_module) {
     Rcpp::class_<HSGPRegression>("HSGPRegression")
-        .constructor<arma::vec, arma::vec, int>(
-            "Minimal: data + seed. Hyperparameters default (M = 30 basis functions (brms-style default)).")
-        .constructor<arma::vec, arma::vec, int, bool>(
-            "Minimal + keep_history.")
         .constructor<arma::vec, arma::vec, int, int, bool>(
             "1-D Hilbert-space GP regression (canonical reduced-rank GP).\n"
             "Args: y (N), x (N), M (basis count, e.g. 25), seed, keep_history.")

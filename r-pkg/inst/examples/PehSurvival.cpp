@@ -109,7 +109,7 @@ class PehSurvival : public AI4BayesCode::kernel_control_mixin<PehSurvival> {
     friend class AI4BayesCode::kernel_control_mixin<PehSurvival>;
 public:
     PehSurvival(const arma::vec& t, const arma::vec& delta, const arma::vec& edges,
-                double a0, double b0, int rng_seed, bool keep_history = false)
+                double a0 = 0.01, double b0 = 0.01, int rng_seed = 1, bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
                    : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)}),

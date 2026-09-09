@@ -302,7 +302,7 @@ public:
                          int N_nodes,
                          const arma::vec& edges_i_1based,    // 1-based edge endpoints
                          const arma::vec& edges_j_1based,    // (numeric; see above)
-                         int rng_seed,
+                         int rng_seed = 1,
                          bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}

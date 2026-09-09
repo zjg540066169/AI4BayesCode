@@ -211,19 +211,8 @@ class DPGammaMixture
     : public AI4BayesCode::kernel_control_mixin<DPGammaMixture> {
     friend class AI4BayesCode::kernel_control_mixin<DPGammaMixture>;
 public:
-    /// SHORT constructor -- data + seed. Hyperparameters take their
-    /// defaults: K_trunc 20. Use the full constructor to change them.
-    /// Rcpp ignores C++ default arguments, hence a separate ctor.
-    DPGammaMixture(const arma::vec& y,
-                   int  rng_seed,
-                   bool keep_history = false)
-        : DPGammaMixture(y, /*K_trunc=*/20, rng_seed, keep_history) {}
-
-    // rng_seed carries no C++ default: with one, DPGammaMixture(y, n) would
-    // be ambiguous between this ctor (n = K_trunc) and the short one above
-    // (n = rng_seed).
-    DPGammaMixture(const arma::vec& y, int K_trunc,
-                   int rng_seed, bool keep_history = false)
+    DPGammaMixture(const arma::vec& y, int K_trunc = 20,
+                   int rng_seed = 1, bool keep_history = false)
         : impl_(std::make_unique<composite_block>("DPGammaMixture")),
           rng_(rng_seed == 0 ? std::random_device{}()
                              : static_cast<std::mt19937_64::result_type>(rng_seed)),
@@ -608,10 +597,6 @@ int main() {
 #include "AI4BayesCode/rcpp_wrap.hpp"
 RCPP_MODULE(DPGammaMixture) {
     Rcpp::class_<DPGammaMixture>("DPGammaMixture")
-        .constructor<arma::vec, int>(
-            "Minimal: data + seed. Hyperparameters default (K_trunc 20).")
-        .constructor<arma::vec, int, bool>(
-            "Minimal + keep_history.")
         .constructor<arma::vec, int, int, bool>()
         .method("step",        &DPGammaMixture::step)
         .method("get_current", &DPGammaMixture::get_current)

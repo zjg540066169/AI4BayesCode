@@ -180,6 +180,11 @@ ai4bayescode_source <- function(code,
 
     # Register class -> source for ai4bayescode_doc(), and hint the user.
     cls <- tryCatch(.ai4b_doc_register(cpp_file), error = function(e) character(0))
+    # Give every exposed class a name-matching constructor, so that
+    # new(<Class>, y = y, rng_seed = 7L) means what it reads as and every
+    # argument carrying a C++ default may simply be omitted. Best-effort:
+    # a class whose signature cannot be recovered keeps stock Rcpp behaviour.
+    tryCatch(.ai4b_install_named_ctors(cpp_file, env), error = function(e) character(0))
     if (!quiet && length(cls)) {
         for (nm in cls)
             message(sprintf("\u2713 Loaded '%s' -- run  ai4bayescode_doc(%s)  for usage.",

@@ -620,10 +620,16 @@ full list but the critical ones:
   list they can silently transpose. An argument stays mandatory ONLY when it
   is a modelling choice with no canonical default -- the model would be a
   DIFFERENT model under a different value, and guessing would silently pick
-  one for the user -- or when the user explicitly asked for no default. Python: pybind11 arg defaults. R: Rcpp ignores C++ default
-  arguments, so bind a SHORT constructor (data + any mandatory choice + seed
-  [+ keep_history]) that delegates to the full one; never remove an existing
-  arity, only add shorter ones.
+  one for the user -- or when the user explicitly asked for no default.
+  Write every default ONCE, in the C++ constructor signature: that is the
+  single source both frontends read. pybind11 mirrors it as an arg default;
+  R recovers it through the named-argument constructor, which parses the
+  signature and fills in whatever the caller omitted. Do NOT add a short
+  delegating constructor to work around Rcpp -- Rcpp dispatches on ARITY
+  ALONE, so a second constructor sharing an arity shadows the first, and a
+  short one turns a named call into a positional one at a DIFFERENT
+  parameter. A default that lives only in the pybind11 binding is a bug: it
+  makes the argument optional in Python and mandatory in R.
 - **No hand-written Gibbs**: prefer existing blocks (`nuts_block`,
   `joint_nuts_block` -- handles real + per-slice POSITIVE/INTERVAL/
   ORDERED/SUM_TO_ZERO constraints -- `pg_logistic_block`, conjugate-Gibbs

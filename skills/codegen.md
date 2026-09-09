@@ -1179,7 +1179,7 @@ Write a minimal smoke-test runner file at
 folder when the repo layout doesn't have tests_autodiff). The smoke
 test does:
 
-- `model <- new(<ClassName>, ..., seed = 42L, keep_history = FALSE)`
+- `model <- new(<ClassName>, ..., rng_seed = 42L, keep_history = FALSE)`
 - `model$step(10L)`
 - `d <- model$get_current()` -- verify it returns a list with the
   expected keys, all values finite (no NaN, no Inf)

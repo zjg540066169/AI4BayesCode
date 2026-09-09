@@ -412,10 +412,10 @@ double R_chol_log_density(const arma::vec& L_nat,
 class HierarchicalLM_MultivariateRE : public AI4BayesCode::kernel_control_mixin<HierarchicalLM_MultivariateRE> {
     friend class AI4BayesCode::kernel_control_mixin<HierarchicalLM_MultivariateRE>;
 public:
-    HierarchicalLM_MultivariateRE(const arma::vec& y_obs,
-                                  const arma::mat& X_fixed,
-                                  const arma::vec& group_idx_1indexed,
-                                  int rng_seed,
+    HierarchicalLM_MultivariateRE(const arma::vec& y,
+                                  const arma::mat& X,
+                                  const arma::vec& group,
+                                  int rng_seed = 1,
                                   bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
@@ -431,38 +431,38 @@ public:
           impl_(std::make_unique<composite_block>("HierarchicalLM_MultivariateRE")),
           keep_history_(keep_history)
     {
-        if (y_obs.n_elem < 2) ai4b::stop("N must be >= 2");
-        if (X_fixed.n_rows != y_obs.n_elem)
+        if (y.n_elem < 2) ai4b::stop("N must be >= 2");
+        if (X.n_rows != y.n_elem)
             ai4b::stop("X rows must equal y length");
-        if (X_fixed.n_cols < static_cast<arma::uword>(D))
+        if (X.n_cols < static_cast<arma::uword>(D))
             ai4b::stop("X must have at least d=%d columns", (int)D);
-        if (group_idx_1indexed.n_elem != y_obs.n_elem)
+        if (group.n_elem != y.n_elem)
             ai4b::stop("group_idx length must equal y length");
 
-        N_ = y_obs.n_elem;
-        p_ = X_fixed.n_cols;
+        N_ = y.n_elem;
+        p_ = X.n_cols;
         d_ = D;
 
         // group_idx arrives as a numeric vector (1-indexed integer labels
         // stored as doubles, so the SAME arma::vec caster serves both the R
         // and Python backends). Round to the nearest integer per entry.
         long J_raw = 0;
-        for (arma::uword i = 0; i < group_idx_1indexed.n_elem; ++i) {
-            const long g = std::llround(group_idx_1indexed[i]);
+        for (arma::uword i = 0; i < group.n_elem; ++i) {
+            const long g = std::llround(group[i]);
             if (g < 1) ai4b::stop("group_idx must be 1-indexed");
             if (g > J_raw) J_raw = g;
         }
         J_ = static_cast<std::size_t>(J_raw);
 
         // Install fixed data + dimension metadata the joint lambda needs.
-        impl_->data().set("y", y_obs);
-        impl_->data().set("X", arma::vectorise(X_fixed));
-        arma::mat Z_fixed = X_fixed.cols(0, D - 1);
+        impl_->data().set("y", y);
+        impl_->data().set("X", arma::vectorise(X));
+        arma::mat Z_fixed = X.cols(0, D - 1);
         impl_->data().set("Z", arma::vectorise(Z_fixed));
         arma::vec group_idx_dbl(N_);
         for (std::size_t i = 0; i < N_; ++i)
             group_idx_dbl[i] = static_cast<double>(
-                std::llround(group_idx_1indexed[i]));
+                std::llround(group[i]));
         impl_->data().set("group_idx", group_idx_dbl);
         impl_->data().set("beta_dim", arma::vec{static_cast<double>(p_)});
         impl_->data().set("J_dim",    arma::vec{static_cast<double>(J_)});
@@ -470,7 +470,7 @@ public:
         // Initial values
         arma::vec beta_init;
         if (N_ > p_)
-            beta_init = arma::solve(X_fixed, y_obs);
+            beta_init = arma::solve(X, y);
         else
             beta_init = arma::vec(p_, arma::fill::zeros);
         impl_->data().set("beta", beta_init);
@@ -480,7 +480,7 @@ public:
         arma::mat L_init = arma::eye<arma::mat>(d_, d_);
         impl_->data().set("R_chol", arma::vectorise(L_init));
 
-        arma::vec r_init = y_obs - X_fixed * beta_init;
+        arma::vec r_init = y - X * beta_init;
         const double sigma_init = std::max(arma::stddev(r_init), 1e-2);
         impl_->data().set("sigma", arma::vec{sigma_init});
         impl_->data().set("y_rep", arma::vec(N_, arma::fill::zeros));

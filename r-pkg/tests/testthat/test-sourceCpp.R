@@ -24,7 +24,7 @@ test_that("compiled GaussianLocationScale can step + return finite results", {
 
     set.seed(1)
     y <- rnorm(50, mean = 2, sd = 1.0)
-    m <- new(GaussianLocationScale, y, seed = 1L, keep_history = FALSE)
+    m <- new(GaussianLocationScale, y, rng_seed = 1L, keep_history = FALSE)
     expect_silent(m$step(10L))
 
     cur <- m$get_current()

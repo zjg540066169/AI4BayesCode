@@ -124,11 +124,11 @@ class HMMGaussian2State : public AI4BayesCode::kernel_control_mixin<HMMGaussian2
     friend class AI4BayesCode::kernel_control_mixin<HMMGaussian2State>;
 public:
     HMMGaussian2State(const arma::vec& y,
-                      const arma::vec& A_flat_row_major,  // length 4 (2x2)
-                      const arma::vec& pi_init,           // length 2
+                      const arma::vec& A,  // length 4 (2x2)
+                      const arma::vec& pi,           // length 2
                       const arma::vec& mu,                // length 2
                       double sigma,
-                      int rng_seed,
+                      int rng_seed = 1,
                       bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
@@ -141,24 +141,24 @@ public:
           keep_history_(keep_history)
     {
         if (y.n_elem < 2) ai4b::stop("y length must be >= 2");
-        if (A_flat_row_major.n_elem != 4)
+        if (A.n_elem != 4)
             ai4b::stop("A must be length 4 (row-major 2x2)");
-        if (pi_init.n_elem != 2) ai4b::stop("pi must be length 2");
+        if (pi.n_elem != 2) ai4b::stop("pi must be length 2");
         if (mu.n_elem != 2)      ai4b::stop("mu must be length 2");
         if (!(sigma > 0.0))      ai4b::stop("sigma must be > 0");
         // Validate row sums = 1 on A.
-        if (std::abs((A_flat_row_major[0] + A_flat_row_major[1]) - 1.0) > 1e-8 ||
-            std::abs((A_flat_row_major[2] + A_flat_row_major[3]) - 1.0) > 1e-8) {
+        if (std::abs((A[0] + A[1]) - 1.0) > 1e-8 ||
+            std::abs((A[2] + A[3]) - 1.0) > 1e-8) {
             ai4b::stop("A rows must sum to 1");
         }
-        if (std::abs((pi_init[0] + pi_init[1]) - 1.0) > 1e-8) {
+        if (std::abs((pi[0] + pi[1]) - 1.0) > 1e-8) {
             ai4b::stop("pi must sum to 1");
         }
         T_ = y.n_elem;
 
         impl_->data().set("y",  y);
-        impl_->data().set("A",  A_flat_row_major);
-        impl_->data().set("pi", pi_init);
+        impl_->data().set("A",  A);
+        impl_->data().set("pi", pi);
         impl_->data().set("mu", mu);
         impl_->data().set("sigma", arma::vec{sigma});
 

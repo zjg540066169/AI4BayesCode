@@ -122,19 +122,10 @@ using AI4BayesCode::pg_logistic_block_config;
 class LogisticRegression : public AI4BayesCode::kernel_control_mixin<LogisticRegression> {
     friend class AI4BayesCode::kernel_control_mixin<LogisticRegression>;
 public:
-    /// SHORT constructor -- data + seed. Hyperparameters take their
-    /// defaults: prior_sd 10.0 (weakly informative). Use the full constructor to change them.
-    /// Rcpp ignores C++ default arguments, hence a separate ctor.
     LogisticRegression(const arma::mat& X,
                        const arma::vec& y,
-                       int  rng_seed,
-                       bool keep_history = false)
-        : LogisticRegression(X, y, /*prior_sd=*/10.0, rng_seed, keep_history) {}
-
-    LogisticRegression(const arma::mat& X,
-                       const arma::vec& y,
-                       double           prior_sd,
-                       int              rng_seed,
+                       double           prior_sd = 10.0,
+                       int              rng_seed = 1,
                        bool             keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
@@ -422,8 +413,6 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(LogisticRegression_module) {
     Rcpp::class_<LogisticRegression>("LogisticRegression")
-        .constructor<arma::mat, arma::vec, int>(
-            "Minimal: data + seed. Hyperparameters default (prior_sd 10.0 (weakly informative)).")
         .constructor<arma::mat, arma::vec, double, int>(
             "Legacy constructor; keep_history defaults to FALSE.")
         .constructor<arma::mat, arma::vec, double, int, bool>(

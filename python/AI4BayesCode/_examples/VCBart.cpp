@@ -65,7 +65,7 @@
 //   X  <- matrix(runif(N * p, 0.5, 1.5), N, p)             # predictors (bounded away from 0)
 //   b0 <- sin(3 * Z); b1 <- Z^2; b2 <- -Z                  # true coefficient functions of Z
 //   y  <- b0 + b1 * X[, 1] + b2 * X[, 2] + rnorm(N, 0, 0.3)
-//   m  <- new(VCBart, X, matrix(Z, N, 1), y, 1L)   # every tuning knob defaulted
+//   m  <- new(VCBart, X, matrix(Z, N, 1), y, rng_seed = 1L)  # knobs defaulted
 //   m$step(1500L); cur <- m$get_current()                 # $beta_0..$beta_2, $mu, $sigma
 //   cor(cur$beta_0, sin(3 * Z)); cor(cur$beta_1, Z^2)      # recover the coefficient functions
 // @example:python
@@ -132,27 +132,16 @@ namespace constraints = AI4BayesCode::constraints;
 class VCBart : public AI4BayesCode::kernel_control_mixin<VCBart> {
     friend class AI4BayesCode::kernel_control_mixin<VCBart>;
 public:
-    /// SHORT constructor -- data + seed. Tuning knobs take their
-    /// standard defaults: ntrees 50, k 2, power 2, base 0.95, nu 3, numcut 100 (CGM 2010). Use the full constructor to
-    /// retune. Rcpp ignores C++ default arguments, hence a separate ctor.
-    VCBart(const arma::mat& X,
-           const arma::mat& Z,
-           const arma::vec& y,
-           int  rng_seed,
-           bool keep_history = false)
-        : VCBart(X, Z, y, /*ntrees=*/50, /*k=*/2.0, /*power=*/2.0, /*base=*/0.95,
-                 /*nu=*/3.0, /*numcut=*/100, rng_seed, keep_history) {}
-
     VCBart(const arma::mat& X,      // N x p predictors
            const arma::mat& Z,      // N x q effect modifiers
            const arma::vec& y,      // length N response
-           int    ntrees,
-           double k,
-           double power,
-           double base,
-           double nu,
-           int    numcut,
-           int    rng_seed,
+           int    ntrees = 50,
+           double k = 2.0,
+           double power = 2.0,
+           double base = 0.95,
+           double nu = 3.0,
+           int    numcut = 100,
+           int    rng_seed = 1,
            bool   keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
@@ -420,10 +409,6 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(VCBart_module) {
     Rcpp::class_<VCBart>("VCBart")
-        .constructor<arma::mat, arma::mat, arma::vec, int>(
-            "Minimal: data + seed. Tuning knobs take standard defaults (ntrees 50, k 2, power 2, base 0.95, nu 3, numcut 100 (CGM 2010)).")
-        .constructor<arma::mat, arma::mat, arma::vec, int, bool>(
-            "Minimal + keep_history.")
         .constructor<arma::mat, arma::mat, arma::vec,
                      int, double, double, double, double, int, int>(
             "Short constructor; keep_history defaults FALSE.")

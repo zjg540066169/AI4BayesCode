@@ -324,21 +324,9 @@ public:
         return (std::isfinite(b) && b > 0.0) ? b : 1.0;
     }
 
-    /// RECOMMENDED constructor: data-driven weakly-informative
-    /// Normal-Gamma hyperparameters computed from y (converges robustly;
-    /// no hyperparameter tuning needed). Delegates to the explicit
-    /// constructor below -- behaviour of that path is unchanged.
-    /// SHORT constructor -- data + seed. Hyperparameters take their
-    /// defaults: K_trunc 20. Use the full constructor to change them.
-    /// Rcpp ignores C++ default arguments, hence a separate ctor.
     DPGaussianMixture(const arma::mat& y,
-                      int  rng_seed,
-                      bool keep_history = false)
-        : DPGaussianMixture(y, /*K_trunc=*/20, rng_seed, keep_history) {}
-
-    DPGaussianMixture(const arma::mat& y,
-                      int K_trunc,
-                      int rng_seed,
+                      int K_trunc = 20,
+                      int rng_seed = 1,
                       bool keep_history = false)
         : DPGaussianMixture(y, K_trunc,
                             dd_mu0_(y),   // mu_0   = column means
@@ -356,7 +344,7 @@ public:
                       double b_lambda_0,
                       double a_alpha,
                       double b_alpha,
-                      int rng_seed,
+                      int rng_seed = 1,
                       bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
@@ -858,8 +846,6 @@ private:
 #ifdef AI4BAYESCODE_RCPP_MODULE
 RCPP_MODULE(DPGaussianMixture_module) {
     Rcpp::class_<DPGaussianMixture>("DPGaussianMixture")
-        .constructor<arma::mat, int>(
-            "Minimal: data + seed. Hyperparameters default (K_trunc 20).")
         .constructor<arma::mat, int, int>(
             "DEFAULT (data-driven) constructor; keep_history = FALSE. "
             "DPGaussianMixture(y, K_trunc, seed).")

@@ -135,21 +135,21 @@ using AI4BayesCode::structured_categorical_vi_block_config;
 //
 //  Constructor argument types are backend-neutral (arma + std::vector), so the
 //  SAME class definition serves both the RCPP_MODULE and PYBIND11_MODULE.
-//    - edges_mat        : arma::mat,   n_edges × 2, 1-based (u, v) integers
-//    - edge_strengths_in: arma::vec,   length n_edges
-//    - h_in             : arma::mat,   n_nodes × K external field
+//    - edges        : arma::mat,   n_edges × 2, 1-based (u, v) integers
+//    - edge_strengths: arma::vec,   length n_edges
+//    - h             : arma::mat,   n_nodes × K external field
 //    - clique_list      : std::vector<std::vector<int>>, 1-based node indices
 // ============================================================================
 class StructuredPottsVI : public AI4BayesCode::kernel_control_mixin<StructuredPottsVI> {
     friend class AI4BayesCode::kernel_control_mixin<StructuredPottsVI>;
 public:
     StructuredPottsVI(int n_nodes, int K,
-                       const arma::mat& edges_mat,
-                       const arma::vec& edge_strengths_in,
-                       const arma::mat& h_in,
+                       const arma::mat& edges,
+                       const arma::vec& edge_strengths,
+                       const arma::mat& h,
                        const std::vector<std::vector<int>>& clique_list,
                        bool exact_enumeration,
-                       int rng_seed,
+                       int rng_seed = 1,
                        bool keep_history = false)
         : rng_(rng_seed == 0
                 ? std::mt19937_64{std::random_device{}()}
@@ -167,16 +167,16 @@ public:
         if (K < 2)       ai4b::stop("K must be >= 2");
 
         // ---- Edges (1-based in R/Python -> 0-based internal) --------
-        if (edges_mat.n_cols != 2) ai4b::stop("edges must be a (n_edges × 2) matrix");
-        const std::size_t E = edges_mat.n_rows;
-        if (edge_strengths_in.n_elem != E)
+        if (edges.n_cols != 2) ai4b::stop("edges must be a (n_edges × 2) matrix");
+        const std::size_t E = edges.n_rows;
+        if (edge_strengths.n_elem != E)
             ai4b::stop("edge_strengths length must equal nrow(edges)");
         edges_.resize(E);
         edge_strengths_.resize(E);
         for (std::size_t e = 0; e < E; ++e) {
             // edges arrive as a double matrix (no integer caster); round to int.
-            const long ui = std::lround(edges_mat(e, 0)) - 1;
-            const long vi = std::lround(edges_mat(e, 1)) - 1;
+            const long ui = std::lround(edges(e, 0)) - 1;
+            const long vi = std::lround(edges(e, 1)) - 1;
             if (ui < 0 || vi < 0)
                 ai4b::stop("edge index out of range");
             const std::size_t u = static_cast<std::size_t>(ui);
@@ -184,13 +184,13 @@ public:
             if (u >= n_ || v >= n_)
                 ai4b::stop("edge index out of range");
             edges_[e] = {u, v};
-            edge_strengths_[e] = edge_strengths_in[e];
+            edge_strengths_[e] = edge_strengths[e];
         }
 
         // ---- External field h (n × K matrix) -----------------------
-        if (h_in.n_rows != n_ || h_in.n_cols != K_)
+        if (h.n_rows != n_ || h.n_cols != K_)
             ai4b::stop("h must be (n_nodes × K) matrix");
-        h_ = h_in;
+        h_ = h;
 
         // ---- Clique partition (list of integer vectors, 1-based) ---
         if (clique_list.empty())
@@ -558,11 +558,11 @@ int main() {
 
     // ---- 2. Build the SAME StructuredPottsVI class the frontends use ------
     // edges as (n_edges × 2) 1-based matrix; edge strengths; h; cliques.
-    arma::mat edges_mat(kEdges.size(), 2);
+    arma::mat edges(kEdges.size(), 2);
     arma::vec edge_strengths(kEdges.size());
     for (std::size_t e = 0; e < kEdges.size(); ++e) {
-        edges_mat(e, 0) = static_cast<double>(kEdges[e].u) + 1.0; // 1-based
-        edges_mat(e, 1) = static_cast<double>(kEdges[e].v) + 1.0;
+        edges(e, 0) = static_cast<double>(kEdges[e].u) + 1.0; // 1-based
+        edges(e, 1) = static_cast<double>(kEdges[e].v) + 1.0;
         edge_strengths[e] = kEdges[e].beta;
     }
     arma::mat h_mat(kN, kK);
@@ -574,7 +574,7 @@ int main() {
 
     StructuredPottsVI model(
         static_cast<int>(kN), static_cast<int>(kK),
-        edges_mat, edge_strengths, h_mat, cliques,
+        edges, edge_strengths, h_mat, cliques,
         /*exact_enumeration=*/true, /*rng_seed=*/7, /*keep_history=*/false);
 
     // ---- 3. Run VI to convergence (block self-terminates) -----------------

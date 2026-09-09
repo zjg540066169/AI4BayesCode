@@ -278,9 +278,9 @@ public:
                                                               // arma::ivec caster
                                                               // exists in pybind_casters)
                             int G,
-                            double sigma_init,
-                            double tau_init,
-                            int rng_seed,
+                            double sigma_init = 1.0,
+                            double tau_init = 1.0,
+                            int rng_seed = 1,
                             bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}

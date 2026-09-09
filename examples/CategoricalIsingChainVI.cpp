@@ -126,9 +126,9 @@ class CategoricalIsingChainVI : public AI4BayesCode::kernel_control_mixin<Catego
     friend class AI4BayesCode::kernel_control_mixin<CategoricalIsingChainVI>;
 public:
     CategoricalIsingChainVI(int n_nodes, int K, double beta,
-                              const arma::vec& h_input,
-                              bool exact_enumeration,
-                              int rng_seed,
+                              const arma::vec& h,
+                              bool exact_enumeration = true,
+                              int rng_seed = 1,
                               bool keep_history = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
@@ -149,9 +149,9 @@ public:
 
         // External field h: pad to length n with zeros, or truncate.
         h_.assign(n_, 0.0);
-        const std::size_t h_len = static_cast<std::size_t>(h_input.n_elem);
+        const std::size_t h_len = static_cast<std::size_t>(h.n_elem);
         for (std::size_t i = 0; i < std::min(n_, h_len); ++i) {
-            h_[i] = h_input[i];
+            h_[i] = h[i];
         }
 
         // Cardinalities: uniform K across all nodes.
