@@ -1393,11 +1393,18 @@ impl_->data().declare_predict_edges("v2",        {"y_rep"});
 // -- stays valid when the observations are replaced and must NOT be grouped,
 // or predictions that legitimately reuse it are blocked.
 //
-// Do NOT hand-write an all-or-nothing guard in predict_at ("supply BOTH X
-// and Z, or neither"). That overrides the graph and refuses predictions the
-// model can actually make: in this example the exposure-response surface is
-// a function of X alone, so it is predictable at new X whether or not Z came
-// with it. Declare the group and let the DAG decide.
+// When predict_at forwards to impl_->predict_at, do NOT hand-write an
+// all-or-nothing guard on top of it ("supply BOTH X and Z, or neither").
+// That overrides the graph and refuses predictions the model can actually
+// make: in this example the exposure-response surface is a function of X
+// alone, so it is predictable at new X whether or not Z came with it.
+// Declare the group and let the DAG decide.
+//
+// A wrapper whose predict_at does NOT forward -- because its outputs are
+// forests or kernels that must be RE-EVALUATED at the new data rather than
+// refreshed from shared_data -- is the exception: the graph never runs for
+// it, so it validates its own inputs, and declaring a group there would
+// assert a contract nothing enforces.
 impl_->data().declare_data_input_group({"X", "Z", "v2"});
 
 // === Deterministic refresher for the intermediate theta. ===

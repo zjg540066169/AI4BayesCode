@@ -603,9 +603,13 @@ commonly missed checks this skill set has caught:
   training value and no longer lines up -- everything downstream of it is then
   NOT predictable, and that unpredictability is TRANSITIVE. Group only what is
   genuinely co-indexed: an input that is not indexed by observation stays
-  valid when the observations are replaced. Never hand-write an
-  all-or-nothing data guard in `predict_at`; it overrides the graph and
-  refuses predictions the model can actually make.
+  valid when the observations are replaced. A `predict_at` that DOES route
+  through the composite must not hand-write a data guard on top of the graph
+  -- that overrides it and refuses predictions the model can actually make.
+  A wrapper that does NOT route through it, because its outputs have to be
+  re-evaluated rather than refreshed, owns its own validation instead; there
+  a guard is right, and when nothing at all is predictable an explicit
+  message beats an empty result.
 
 ---
 

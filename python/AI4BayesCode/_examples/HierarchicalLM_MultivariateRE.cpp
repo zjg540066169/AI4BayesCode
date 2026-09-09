@@ -545,11 +545,14 @@ public:
 
         // Predict DAG: X,beta -> mu_fixed ; z_flat,tau,R_chol -> u ;
         // mu_fixed,Z,group_idx,u,tau,R_chol,sigma -> y_rep.
-        // X, Z and group_idx are indexed by the same observations: y_rep
-        // combines the fixed-effect row of X with the random-effect row of Z
-        // for that row's group. With only X supplied, mu_fixed is still
-        // predictable and y_rep is not.
-        impl_->data().declare_data_input_group({"X", "Z", "group_idx"});
+        // NOT declare_data_input_group, even though these three ARE
+        // co-indexed: this wrapper's predict_at rejects every non-empty
+        // new_data, so the composite's DAG never sees a replacement and a
+        // group would assert a contract nothing enforces. See the note in
+        // HierarchicalLM_joint.
+        impl_->data().declare_data_input("X");
+        impl_->data().declare_data_input("Z");
+        impl_->data().declare_data_input("group_idx");
         impl_->data().declare_predict_edges("X",         {"mu_fixed"});
         impl_->data().declare_predict_edges("beta",      {"mu_fixed"});
         impl_->data().declare_predict_edges("z_flat",    {"u"});

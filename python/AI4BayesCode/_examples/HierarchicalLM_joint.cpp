@@ -378,11 +378,14 @@ public:
             "ncr_joint", {"mu_fixed", "u"});
 
         // Predict DAG (edges keyed by sub-param name or derived node name).
-        // X and g_idx are indexed by the same observations: y_rep needs the
-        // group each ROW belongs to, so a prediction at new X needs the new
-        // g_idx too. With only X supplied, mu_fixed is still predictable and
-        // y_rep is not.
-        impl_->data().declare_data_input_group({"X", "g_idx"});
+        // NOT declare_data_input_group, even though X and g_idx ARE
+        // co-indexed: this wrapper's predict_at rejects every non-empty
+        // new_data, so the composite's DAG never sees a replacement and a
+        // group would assert a contract nothing enforces. Making the group
+        // meaningful means first letting predict_at forward, which
+        // start.md's predict_at-forwarding rule already requires.
+        impl_->data().declare_data_input("X");
+        impl_->data().declare_data_input("g_idx");
         impl_->data().declare_predict_edges("X",        {"mu_fixed"});
         impl_->data().declare_predict_edges("alpha",    {"mu_fixed"});
         impl_->data().declare_predict_edges("beta",     {"mu_fixed"});

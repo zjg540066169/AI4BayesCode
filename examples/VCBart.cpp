@@ -281,11 +281,16 @@ public:
         // Inv-Chi^2 -- there is NO separate sigma block (see the ensemble loop).
 
         // ---- predict DAG (generative direction) ------------------------------
-        // X and Z are indexed by the same observations: mu combines
-        // beta_j(Z_i) with X_ij, so a prediction at new X needs the new Z
-        // too. Replacing one alone leaves everything downstream of the
-        // other not predictable.
-        impl_->data().declare_data_input_group({"X", "Z"});
+        // NOT declare_data_input_group: this wrapper's predict_at never
+        // routes through composite_block::predict_at, because the varying
+        // coefficients beta_j(Z) are BART forests that have to be RE-EVALUATED
+        // at the new Z rather than refreshed from shared_data. The co-indexing
+        // of X and Z is therefore enforced by predict_at's own check, which is
+        // also the more useful answer here: mu combines beta_j(Z_i) with X_ij,
+        // so with only one of the two supplied NOTHING is predictable, and an
+        // explicit message beats an empty result.
+        impl_->data().declare_data_input("X");
+        impl_->data().declare_data_input("Z");
         for (int j = 0; j < J; ++j) {
             impl_->data().declare_predict_edges("Z", {beta_key(j)});
             impl_->data().declare_predict_edges(beta_key(j), {"mu"});
