@@ -630,13 +630,20 @@ public:
     //              1-row matrices (single predict at the current draw);
     //              keep_history = TRUE returns n_draws-row matrices (posterior
     //              predictive over all draws).
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         // ---- Parse optional X (vectorised N_new*p, column-major) ----------
         for (const auto& kv : new_data) {
@@ -709,6 +716,12 @@ public:
     // while the SEXP still has it. See rcpp_predict_guard.hpp.
     AI4BayesCode::history_map predict_at_r(Rcpp::List new_data) const {
         return predict_at(ai4b::predict_input(new_data, "X", p_));
+    }
+
+    /// Same trailing switch as predict_at, for the R entry point.
+    AI4BayesCode::history_map predict_at_r(Rcpp::List new_data,
+                                           bool last_draw_only) const {
+        return predict_at(ai4b::predict_input(new_data, "X", p_), last_draw_only);
     }
 #endif
 
@@ -849,7 +862,15 @@ RCPP_MODULE(GPRegression_module) {
         .method("step", (void (GPRegression::*)(int)) &GPRegression::step, "Run n sweeps.")
         .method("get_current", &GPRegression::get_current)
         .method("set_current", &GPRegression::set_current)
-        .method("predict_at",  &GPRegression::predict_at_r)
+        .method("predict_at",
+                (AI4BayesCode::history_map (GPRegression::*)(Rcpp::List) const)
+                    &GPRegression::predict_at_r,
+                "Predict at new_data. Unchanged.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (GPRegression::*)(Rcpp::List, bool) const)
+                    &GPRegression::predict_at_r,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",     &GPRegression::get_dag)
         .method("get_history", &GPRegression::get_history)
         AI4BAYESCODE_BIND_READAPT_NUTS(GPRegression)
@@ -871,7 +892,11 @@ PYBIND11_MODULE(GPRegression, m) {
         .def("step", (void (GPRegression::*)(int)) &GPRegression::step,  pybind11::arg("n_steps"))
         .def("get_current",  &GPRegression::get_current)
         .def("set_current",  &GPRegression::set_current, pybind11::arg("params"))
-        .def("predict_at",   &GPRegression::predict_at,  pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (GPRegression::*)(const AI4BayesCode::state_map&, bool) const)
+                 &GPRegression::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",      &GPRegression::get_dag)
         .def("get_history",  &GPRegression::get_history)
         .def("readapt_NUTS", (void (GPRegression::*)(int, bool, int, double)) &GPRegression::readapt_NUTS,

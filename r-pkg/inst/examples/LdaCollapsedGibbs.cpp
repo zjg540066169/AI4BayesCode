@@ -470,12 +470,19 @@ public:
     //   - history mode    : y_rep is n_draws x N (one posterior-predictive
     //                        replicate per stored draw).
     //   - no-history mode  : y_rep is 1 x N (one replicate at the current draw).
-    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         if (!new_data.empty()) {
             ai4b::stop(
@@ -581,9 +588,16 @@ RCPP_MODULE(LdaCollapsedGibbs_module) {
                 "(w, doc). theta and phi are deterministic functions of "
                 "z and cannot be set directly. Unknown keys are "
                 "silently ignored.")
-        .method("predict_at",  &LdaCollapsedGibbs::predict_at,
+        .method("predict_at",
+                (AI4BayesCode::history_map (LdaCollapsedGibbs::*)(const AI4BayesCode::state_map&) const)
+                    &LdaCollapsedGibbs::predict_at,
                 "Posterior predictive y_rep at training tokens. Empty "
                 "list only.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (LdaCollapsedGibbs::*)(const AI4BayesCode::state_map&, bool) const)
+                    &LdaCollapsedGibbs::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",     &LdaCollapsedGibbs::get_dag)
         .method("get_history", &LdaCollapsedGibbs::get_history)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(LdaCollapsedGibbs);
@@ -617,7 +631,11 @@ PYBIND11_MODULE(LdaCollapsedGibbs, m) {
         .def("step", (void (LdaCollapsedGibbs::*)(int)) &LdaCollapsedGibbs::step, pybind11::arg("n_steps"))
         .def("get_current", &LdaCollapsedGibbs::get_current)
         .def("set_current", &LdaCollapsedGibbs::set_current, pybind11::arg("params"))
-        .def("predict_at",  &LdaCollapsedGibbs::predict_at, pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (LdaCollapsedGibbs::*)(const AI4BayesCode::state_map&, bool) const)
+                 &LdaCollapsedGibbs::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",     &LdaCollapsedGibbs::get_dag)
         .def("get_history", &LdaCollapsedGibbs::get_history)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(LdaCollapsedGibbs);

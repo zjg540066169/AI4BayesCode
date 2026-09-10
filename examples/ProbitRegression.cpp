@@ -423,13 +423,20 @@ public:
     //   * keep_history = TRUE:  loops over all posterior draws of beta --
     //     each refreshed key returned as an (n_draws x N) arma::mat (full
     //     posterior predictive).
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
     AI4BayesCode::history_map predict_at(
-        const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+            const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
+    AI4BayesCode::history_map predict_at(
+        const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         // Parse X input once (shared across both modes).
         bool has_X = false;
@@ -506,6 +513,12 @@ public:
     AI4BayesCode::history_map predict_at_r(Rcpp::List new_data) const {
         return predict_at(ai4b::predict_input(new_data, "X", p_));
     }
+
+    /// Same trailing switch as predict_at, for the R entry point.
+    AI4BayesCode::history_map predict_at_r(Rcpp::List new_data,
+                                           bool last_draw_only) const {
+        return predict_at(ai4b::predict_input(new_data, "X", p_), last_draw_only);
+    }
 #endif
 
 
@@ -558,7 +571,15 @@ RCPP_MODULE(ProbitRegression_module) {
         .method("step", (void (ProbitRegression::*)(int)) &ProbitRegression::step, "Run n sweeps.")
         .method("get_current", &ProbitRegression::get_current)
         .method("set_current", &ProbitRegression::set_current)
-        .method("predict_at",  &ProbitRegression::predict_at_r)
+        .method("predict_at",
+                (AI4BayesCode::history_map (ProbitRegression::*)(Rcpp::List) const)
+                    &ProbitRegression::predict_at_r,
+                "Predict at new_data. Unchanged.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (ProbitRegression::*)(Rcpp::List, bool) const)
+                    &ProbitRegression::predict_at_r,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",     &ProbitRegression::get_dag)
         .method("get_history", &ProbitRegression::get_history)
         AI4BAYESCODE_BIND_READAPT_NUTS(ProbitRegression)
@@ -584,8 +605,11 @@ PYBIND11_MODULE(ProbitRegression, m) {
         .def("get_current", &ProbitRegression::get_current)
         .def("set_current", &ProbitRegression::set_current,
              pybind11::arg("params"))
-        .def("predict_at",  &ProbitRegression::predict_at,
-             pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (ProbitRegression::*)(const AI4BayesCode::state_map&, bool) const)
+                 &ProbitRegression::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",     &ProbitRegression::get_dag)
         .def("get_history", &ProbitRegression::get_history)
         .def("readapt_NUTS", (void (ProbitRegression::*)(int, bool, int, double)) &ProbitRegression::readapt_NUTS,

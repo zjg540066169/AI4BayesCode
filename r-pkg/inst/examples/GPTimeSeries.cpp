@@ -465,13 +465,20 @@ public:
     // (a flat arma::vec of new time points). OUTPUT is a history_map; every
     // key is an arma::mat (1-row in stateful mode, n_draws-row in history
     // mode). Empty map -> posterior predictive y_rep at training t.
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         AI4BayesCode::history_map out;
         auto it_t = new_data.find("t");
@@ -626,7 +633,15 @@ RCPP_MODULE(GPTimeSeries_module) {
         .method("step", (void (GPTimeSeries::*)(int)) &GPTimeSeries::step, "Run n sweeps.")
         .method("get_current", &GPTimeSeries::get_current)
         .method("set_current", &GPTimeSeries::set_current)
-        .method("predict_at",  &GPTimeSeries::predict_at)
+        .method("predict_at",
+                (AI4BayesCode::history_map (GPTimeSeries::*)(const AI4BayesCode::state_map&) const)
+                    &GPTimeSeries::predict_at,
+                "Predict at new_data. Unchanged.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (GPTimeSeries::*)(const AI4BayesCode::state_map&, bool) const)
+                    &GPTimeSeries::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",     &GPTimeSeries::get_dag)
         .method("get_history", &GPTimeSeries::get_history)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(GPTimeSeries);
@@ -647,7 +662,11 @@ PYBIND11_MODULE(GPTimeSeries, m) {
         .def("step", (void (GPTimeSeries::*)(int)) &GPTimeSeries::step,  pybind11::arg("n_steps"))
         .def("get_current", &GPTimeSeries::get_current)
         .def("set_current", &GPTimeSeries::set_current, pybind11::arg("params"))
-        .def("predict_at",  &GPTimeSeries::predict_at,  pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (GPTimeSeries::*)(const AI4BayesCode::state_map&, bool) const)
+                 &GPTimeSeries::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",     &GPTimeSeries::get_dag)
         .def("get_history", &GPTimeSeries::get_history)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(GPTimeSeries);

@@ -487,13 +487,20 @@ public:
     /// Posterior-predictive y_rep at the training data. An EMPTY map is the
     /// only supported argument: the mixture carries no covariates, so there
     /// is no new design to predict at.
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         if (!new_data.empty())
             ai4b::stop("DPGammaMixture: predict_at takes an empty list/map -- "
@@ -607,7 +614,15 @@ RCPP_MODULE(DPGammaMixture) {
         .method("step",        &DPGammaMixture::step)
         .method("get_current", &DPGammaMixture::get_current)
         .method("set_current", &DPGammaMixture::set_current)
-        .method("predict_at",  &DPGammaMixture::predict_at)
+        .method("predict_at",
+                (AI4BayesCode::history_map (DPGammaMixture::*)(const AI4BayesCode::state_map&) const)
+                    &DPGammaMixture::predict_at,
+                "Predict at new_data. Unchanged.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (DPGammaMixture::*)(const AI4BayesCode::state_map&, bool) const)
+                    &DPGammaMixture::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_history", &DPGammaMixture::get_history)
         .method("get_dag",     &DPGammaMixture::get_dag)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(DPGammaMixture)
@@ -631,7 +646,11 @@ PYBIND11_MODULE(DPGammaMixture, m) {
         .def("step",        &DPGammaMixture::step)
         .def("get_current", &DPGammaMixture::get_current)
         .def("set_current", &DPGammaMixture::set_current, pybind11::arg("params"))
-        .def("predict_at",  &DPGammaMixture::predict_at, pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (DPGammaMixture::*)(const AI4BayesCode::state_map&, bool) const)
+                 &DPGammaMixture::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_history", &DPGammaMixture::get_history)
         .def("get_dag",     &DPGammaMixture::get_dag)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(DPGammaMixture)

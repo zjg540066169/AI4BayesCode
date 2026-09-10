@@ -895,13 +895,20 @@ public:
         }
     }
 
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         // Backend-neutral I/O. Supports:
         //   predict_at({})              -> posterior-predictive y_rep
@@ -1007,6 +1014,12 @@ public:
     AI4BayesCode::history_map predict_at_r(Rcpp::List new_data) const {
         return predict_at(ai4b::predict_input(new_data, "X", p_));
     }
+
+    /// Same trailing switch as predict_at, for the R entry point.
+    AI4BayesCode::history_map predict_at_r(Rcpp::List new_data,
+                                           bool last_draw_only) const {
+        return predict_at(ai4b::predict_input(new_data, "X", p_), last_draw_only);
+    }
 #endif
 
 
@@ -1046,7 +1059,15 @@ RCPP_MODULE(SpikeSlabRJMCMC_module) {
         .method("step", (void (SpikeSlabRJMCMC::*)(int)) &SpikeSlabRJMCMC::step, "Run n sweeps.")
         .method("get_current", &SpikeSlabRJMCMC::get_current)
         .method("set_current", &SpikeSlabRJMCMC::set_current)
-        .method("predict_at",  &SpikeSlabRJMCMC::predict_at_r)
+        .method("predict_at",
+                (AI4BayesCode::history_map (SpikeSlabRJMCMC::*)(Rcpp::List) const)
+                    &SpikeSlabRJMCMC::predict_at_r,
+                "Predict at new_data. Unchanged.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (SpikeSlabRJMCMC::*)(Rcpp::List, bool) const)
+                    &SpikeSlabRJMCMC::predict_at_r,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",     &SpikeSlabRJMCMC::get_dag)
         .method("get_history", &SpikeSlabRJMCMC::get_history)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(SpikeSlabRJMCMC);
@@ -1202,7 +1223,11 @@ PYBIND11_MODULE(SpikeSlabRJMCMC, m) {
         .def("step", (void (SpikeSlabRJMCMC::*)(int)) &SpikeSlabRJMCMC::step, pybind11::arg("n_steps"))
         .def("get_current",  &SpikeSlabRJMCMC::get_current)
         .def("set_current",  &SpikeSlabRJMCMC::set_current, pybind11::arg("params"))
-        .def("predict_at",   &SpikeSlabRJMCMC::predict_at,  pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (SpikeSlabRJMCMC::*)(const AI4BayesCode::state_map&, bool) const)
+                 &SpikeSlabRJMCMC::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",      &SpikeSlabRJMCMC::get_dag)
         .def("get_history",  &SpikeSlabRJMCMC::get_history)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(SpikeSlabRJMCMC);

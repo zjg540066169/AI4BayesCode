@@ -267,12 +267,19 @@ public:
 
     // Posterior-predictive: y_rep ~ Multinomial(sum(y_counts_train), theta).
     // Non-history -> 1 x K arma::mat; history -> n_draws x K arma::mat.
-    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         if (!new_data.empty()) {
             throw std::runtime_error(
@@ -373,7 +380,15 @@ RCPP_MODULE(DirichletSimplex_module) {
         .method("step", (void (DirichletSimplex::*)(int)) &DirichletSimplex::step, "Run n sweeps.")
         .method("get_current",  &DirichletSimplex::get_current)
         .method("set_current",  &DirichletSimplex::set_current)
-        .method("predict_at",   &DirichletSimplex::predict_at)
+        .method("predict_at",
+                (AI4BayesCode::history_map (DirichletSimplex::*)(const AI4BayesCode::state_map&) const)
+                    &DirichletSimplex::predict_at,
+                "Predict at new_data. Unchanged.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (DirichletSimplex::*)(const AI4BayesCode::state_map&, bool) const)
+                    &DirichletSimplex::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",      &DirichletSimplex::get_dag)
         .method("get_history",  &DirichletSimplex::get_history)
         AI4BAYESCODE_BIND_READAPT_NUTS(DirichletSimplex)
@@ -396,7 +411,11 @@ PYBIND11_MODULE(DirichletSimplex, m) {
         .def("step", (void (DirichletSimplex::*)(int)) &DirichletSimplex::step,        pybind11::arg("n_steps"))
         .def("get_current",  &DirichletSimplex::get_current)
         .def("set_current",  &DirichletSimplex::set_current, pybind11::arg("params"))
-        .def("predict_at",   &DirichletSimplex::predict_at,  pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (DirichletSimplex::*)(const AI4BayesCode::state_map&, bool) const)
+                 &DirichletSimplex::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",      &DirichletSimplex::get_dag)
         .def("get_history",  &DirichletSimplex::get_history)
         .def("readapt_NUTS", (void (DirichletSimplex::*)(int, bool, int, double)) &DirichletSimplex::readapt_NUTS,

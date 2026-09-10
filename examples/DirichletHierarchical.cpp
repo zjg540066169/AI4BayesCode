@@ -447,12 +447,19 @@ public:
     }
 
     // Posterior-predictive: y_rep ~ Dirichlet(kappa * s), one new simplex obs.
-    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         if (!new_data.empty()) {
             ai4b::stop("DirichletHierarchical has no covariate inputs. "
@@ -562,8 +569,15 @@ RCPP_MODULE(DirichletHierarchical_module) {
                 "Return current draw as a named list.")
         .method("set_current", &DirichletHierarchical::set_current,
                 "Overwrite s, kappa, or theta from a named list.")
-        .method("predict_at",  &DirichletHierarchical::predict_at,
+        .method("predict_at",
+                (AI4BayesCode::history_map (DirichletHierarchical::*)(const AI4BayesCode::state_map&) const)
+                    &DirichletHierarchical::predict_at,
                 "No covariate inputs; takes empty list, returns y_rep.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (DirichletHierarchical::*)(const AI4BayesCode::state_map&, bool) const)
+                    &DirichletHierarchical::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",     &DirichletHierarchical::get_dag,
                 "Return the predict DAG.")
         .method("get_history", &DirichletHierarchical::get_history,
@@ -588,7 +602,11 @@ PYBIND11_MODULE(DirichletHierarchical, m) {
         .def("step", (void (DirichletHierarchical::*)(int)) &DirichletHierarchical::step,    pybind11::arg("n_steps"))
         .def("get_current",  &DirichletHierarchical::get_current)
         .def("set_current",  &DirichletHierarchical::set_current, pybind11::arg("params"))
-        .def("predict_at",   &DirichletHierarchical::predict_at,  pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (DirichletHierarchical::*)(const AI4BayesCode::state_map&, bool) const)
+                 &DirichletHierarchical::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",      &DirichletHierarchical::get_dag)
         .def("get_history",  &DirichletHierarchical::get_history)
         .def("readapt_NUTS", (void (DirichletHierarchical::*)(int, bool, int, double)) &DirichletHierarchical::readapt_NUTS,

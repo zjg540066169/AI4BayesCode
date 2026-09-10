@@ -154,12 +154,11 @@ test_that("no constructor parameter is swallowed by methods::new's own formal", 
     expect_identical(offenders, character(0))
 })
 
-test_that("every mixin-based example branches on use_history, not keep_history_", {
-    # predict_at_last() is bound by kernel_control_mixin for every wrapper, but
-    # it can only do anything if the wrapper's predict_at consults the flag.
-    # A wrapper that walks its history unconditionally would silently return
-    # the whole history instead (the mixin catches that at run time, but the
-    # source-level rule is what keeps generated code correct).
+test_that("every example that walks history takes the last_draw_only switch", {
+    # predict_at(new_data, last_draw_only = TRUE) is what lets a caller who
+    # kept the history get ONE prediction out of it. It only works if the
+    # wrapper branches on use_history; one that walks its history
+    # unconditionally would return the whole history instead.
     dir <- ai4bayescode_examples_path()
     skip_if(!nzchar(dir) || !dir.exists(dir), "bundled examples not found")
     files <- list.files(dir, pattern = "\\.cpp$", full.names = TRUE)
@@ -192,7 +191,8 @@ test_that("every mixin-based example branches on use_history, not keep_history_"
         body <- predict_at_body(src)
         if (!nzchar(body)) next
         if (!grepl("keep_history_", body, fixed = TRUE)) next         # no history branch
-        if (!grepl("use_history", body, fixed = TRUE))
+        if (!grepl("use_history", body, fixed = TRUE) ||
+            !grepl("last_draw_only", body, fixed = TRUE))
             offenders <- c(offenders, basename(f))
     }
     expect_identical(offenders, character(0))

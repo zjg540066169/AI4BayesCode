@@ -468,12 +468,19 @@ public:
         }
     }
 
-    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         if (!new_data.empty()) {
             throw std::runtime_error(
@@ -582,7 +589,15 @@ RCPP_MODULE(ODE_SIR_module) {
         .method("step", (void (ODE_SIR::*)(int)) &ODE_SIR::step, "Run n sweeps.")
         .method("get_current",  &ODE_SIR::get_current)
         .method("set_current",  &ODE_SIR::set_current)
-        .method("predict_at",   &ODE_SIR::predict_at)
+        .method("predict_at",
+                (AI4BayesCode::history_map (ODE_SIR::*)(const AI4BayesCode::state_map&) const)
+                    &ODE_SIR::predict_at,
+                "Predict at new_data. Unchanged.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (ODE_SIR::*)(const AI4BayesCode::state_map&, bool) const)
+                    &ODE_SIR::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",      &ODE_SIR::get_dag)
         .method("get_history",  &ODE_SIR::get_history)
         AI4BAYESCODE_BIND_READAPT_NUTS(ODE_SIR)
@@ -611,7 +626,11 @@ PYBIND11_MODULE(ODE_SIR, m) {
         .def("step", (void (ODE_SIR::*)(int)) &ODE_SIR::step, pybind11::arg("n_steps"))
         .def("get_current",  &ODE_SIR::get_current)
         .def("set_current",  &ODE_SIR::set_current, pybind11::arg("params"))
-        .def("predict_at",   &ODE_SIR::predict_at, pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (ODE_SIR::*)(const AI4BayesCode::state_map&, bool) const)
+                 &ODE_SIR::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",      &ODE_SIR::get_dag)
         .def("get_history",  &ODE_SIR::get_history)
         .def("readapt_NUTS", (void (ODE_SIR::*)(int, bool, int, double)) &ODE_SIR::readapt_NUTS,

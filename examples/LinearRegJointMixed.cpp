@@ -397,12 +397,19 @@ public:
 
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
 
-    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         // Parse optional X input once.
         bool has_X = false;
@@ -465,6 +472,12 @@ public:
     AI4BayesCode::history_map predict_at_r(Rcpp::List new_data) const {
         return predict_at(ai4b::predict_input(new_data, "X", p_));
     }
+
+    /// Same trailing switch as predict_at, for the R entry point.
+    AI4BayesCode::history_map predict_at_r(Rcpp::List new_data,
+                                           bool last_draw_only) const {
+        return predict_at(ai4b::predict_input(new_data, "X", p_), last_draw_only);
+    }
 #endif
 
 
@@ -513,7 +526,15 @@ RCPP_MODULE(LinearRegJointMixed_module) {
         .method("get_current",  &LinearRegJointMixed::get_current)
         .method("set_current",  &LinearRegJointMixed::set_current)
         .method("get_history",  &LinearRegJointMixed::get_history)
-        .method("predict_at",   &LinearRegJointMixed::predict_at_r)
+        .method("predict_at",
+                (AI4BayesCode::history_map (LinearRegJointMixed::*)(Rcpp::List) const)
+                    &LinearRegJointMixed::predict_at_r,
+                "Predict at new_data. Unchanged.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (LinearRegJointMixed::*)(Rcpp::List, bool) const)
+                    &LinearRegJointMixed::predict_at_r,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",      &LinearRegJointMixed::get_dag)
         AI4BAYESCODE_BIND_READAPT_NUTS(LinearRegJointMixed)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(LinearRegJointMixed);
@@ -536,7 +557,11 @@ PYBIND11_MODULE(LinearRegJointMixed, m) {
         .def("step", (void (LinearRegJointMixed::*)(int)) &LinearRegJointMixed::step, pybind11::arg("n_steps"))
         .def("get_current", &LinearRegJointMixed::get_current)
         .def("set_current", &LinearRegJointMixed::set_current, pybind11::arg("params"))
-        .def("predict_at",  &LinearRegJointMixed::predict_at, pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (LinearRegJointMixed::*)(const AI4BayesCode::state_map&, bool) const)
+                 &LinearRegJointMixed::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",     &LinearRegJointMixed::get_dag)
         .def("get_history", &LinearRegJointMixed::get_history)
         .def("readapt_NUTS", (void (LinearRegJointMixed::*)(int, bool, int, double)) &LinearRegJointMixed::readapt_NUTS,

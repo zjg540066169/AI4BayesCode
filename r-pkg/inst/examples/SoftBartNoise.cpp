@@ -462,13 +462,20 @@ public:
     // (length N_new * p); reshaped here back into an N_new x p matrix.
     // Uses predict_rng_ (const-preserving, persistent, seeded at
     // construction). Does NOT modify MCMC state in any mode.
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
     AI4BayesCode::history_map
-    predict_at(const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+    predict_at(const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         // Validate keys.
         const bool has_X = new_data.find("X") != new_data.end();
@@ -590,6 +597,12 @@ public:
     AI4BayesCode::history_map predict_at_r(Rcpp::List new_data) const {
         return predict_at(ai4b::predict_input(new_data, "X", x_ncol_));
     }
+
+    /// Same trailing switch as predict_at, for the R entry point.
+    AI4BayesCode::history_map predict_at_r(Rcpp::List new_data,
+                                           bool last_draw_only) const {
+        return predict_at(ai4b::predict_input(new_data, "X", x_ncol_), last_draw_only);
+    }
 #endif
 
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
@@ -662,11 +675,18 @@ RCPP_MODULE(SoftBartNoise_module) {
         .method("set_tree",    &SoftBartNoise::set_tree,
                 "Restore the SoftBart forest from a serialized snapshot "
                 "string previously obtained from get_tree().")
-        .method("predict_at",  &SoftBartNoise::predict_at_r,
+        .method("predict_at",
+                (AI4BayesCode::history_map (SoftBartNoise::*)(Rcpp::List) const)
+                    &SoftBartNoise::predict_at_r,
                 "Predict at new data. Pass list(X = as.vector(X_new)) "
                 "(flattened column-major) or list(). Returns a named list "
                 "with $f_softbart and any derived quantities. Const, no "
                 "state mutation.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (SoftBartNoise::*)(Rcpp::List, bool) const)
+                    &SoftBartNoise::predict_at_r,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",     &SoftBartNoise::get_dag,
                 "Return the predict DAG as a named list of edges.")
         .method("get_history", &SoftBartNoise::get_history,
@@ -707,7 +727,11 @@ PYBIND11_MODULE(SoftBartNoise, m) {
         .def("get_tree",        &SoftBartNoise::get_tree)
         .def("set_current",     &SoftBartNoise::set_current, pybind11::arg("params"))
         .def("set_tree",        &SoftBartNoise::set_tree, pybind11::arg("tree_s"))
-        .def("predict_at",      &SoftBartNoise::predict_at, pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (SoftBartNoise::*)(const AI4BayesCode::state_map&, bool) const)
+                 &SoftBartNoise::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",         &SoftBartNoise::get_dag)
         .def("get_history",     &SoftBartNoise::get_history)
         .def("get_tree_history", &SoftBartNoise::get_tree_history)

@@ -2843,18 +2843,34 @@ PYBIND11_MODULE(<ClassName>, m) {
 
     pybind11::class_<ClassName>(m, "<ClassName>")
 PREDICTING AT THE LAST DRAW ONLY. A wrapper whose predict_at walks the
-retained history must branch on `use_history`, not on `keep_history_`:
+retained history takes a trailing switch, as an OVERLOAD so the existing
+one-argument call keeps its meaning:
 
-    const bool use_history = keep_history_ && !this->predict_last_draw_only();
+    history_map predict_at(const state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+    history_map predict_at(const state_map& new_data,
+                           bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
+        ...                                  // branch on use_history
+    }
 
-`predict_last_draw_only()` comes from kernel_control_mixin and is true only
-for the duration of a `predict_at_last(...)` call, which the mixin binds in
-both frontends. That call gives the caller the single-draw path -- the one
-predict_at already takes when keep_history is FALSE -- WITHOUT giving up the
-retained history, which is what someone wants when they kept the history for
-diagnostics but need one prediction rather than one per draw. Do NOT add a
-parameter to predict_at for this: the core-six signature stays exactly as
-interface.md defines it.
+Branch on `use_history`, never on `keep_history_` directly. `true` takes the
+single-draw path -- the one predict_at already takes when keep_history is
+false -- WITHOUT giving up the retained history, which is what someone wants
+who kept the history for diagnostics but needs one prediction rather than one
+per draw.
+
+An OVERLOAD, not a new method name: a caller writing `predict_at(x)` reaches
+every sampler, including ones generated before the switch existed, and only
+the two-argument form needs a newer one. A separate method would be absent on
+those samplers, so code written against it would not run at all.
+
+Bind BOTH arities. Rcpp dispatches a module method on ARITY ALONE, so each
+arity needs its own `.method("predict_at", ...)` with an explicit
+member-pointer cast to pick the overload; pybind11 binds the two-argument one
+with `pybind11::arg("last_draw_only") = false`. A wrapper that exposes its R
+entry point as `predict_at_r(Rcpp::List)` needs the same pair there.
 
 NAMING CONSTRAINT ON CONSTRUCTOR PARAMETERS. R reaches a module constructor
 through `methods::new(Class, ...)`, whose own first formal is named `Class`.

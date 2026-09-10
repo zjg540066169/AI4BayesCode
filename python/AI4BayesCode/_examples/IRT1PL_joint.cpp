@@ -548,13 +548,20 @@ public:
     // No covariate inputs; predict_at takes an empty map and returns
     // posterior-predictive y_rep as a 1 x (N*J) matrix (column-major
     // vectorisation of the N x J response matrix).
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         if (!new_data.empty()) {
             throw std::runtime_error(
@@ -652,7 +659,15 @@ RCPP_MODULE(IRT1PL_joint_module) {
         .method("get_current",     &IRT1PL_joint::get_current)
         .method("get_current_raw", &IRT1PL_joint::get_current_raw)
         .method("set_current",     &IRT1PL_joint::set_current)
-        .method("predict_at",      &IRT1PL_joint::predict_at)
+        .method("predict_at",
+                (AI4BayesCode::history_map (IRT1PL_joint::*)(const AI4BayesCode::state_map&) const)
+                    &IRT1PL_joint::predict_at,
+                "Predict at new_data. Unchanged.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (IRT1PL_joint::*)(const AI4BayesCode::state_map&, bool) const)
+                    &IRT1PL_joint::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",         &IRT1PL_joint::get_dag)
         .method("get_history",     &IRT1PL_joint::get_history)
         AI4BAYESCODE_BIND_READAPT_NUTS(IRT1PL_joint)
@@ -681,8 +696,11 @@ PYBIND11_MODULE(IRT1PL_joint, m) {
         .def("get_current_raw", &IRT1PL_joint::get_current_raw)
         .def("set_current",     &IRT1PL_joint::set_current,
              pybind11::arg("params"))
-        .def("predict_at",      &IRT1PL_joint::predict_at,
-             pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (IRT1PL_joint::*)(const AI4BayesCode::state_map&, bool) const)
+                 &IRT1PL_joint::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",         &IRT1PL_joint::get_dag)
         .def("get_history",     &IRT1PL_joint::get_history)
         .def("readapt_NUTS", (void (IRT1PL_joint::*)(int, bool, int, double)) &IRT1PL_joint::readapt_NUTS,

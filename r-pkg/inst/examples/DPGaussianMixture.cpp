@@ -767,13 +767,20 @@ public:
         }
     }
 
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         if (!new_data.empty())
             ai4b::stop(
@@ -885,8 +892,15 @@ RCPP_MODULE(DPGaussianMixture_module) {
         .method("get_current", &DPGaussianMixture::get_current)
         .method("set_current", &DPGaussianMixture::set_current,
                 "Overwrite z, pi, mu, lambda, alpha, or y from a named list.")
-        .method("predict_at",  &DPGaussianMixture::predict_at,
+        .method("predict_at",
+                (AI4BayesCode::history_map (DPGaussianMixture::*)(const AI4BayesCode::state_map&) const)
+                    &DPGaussianMixture::predict_at,
                 "Posterior predictive y_rep at training X. Empty list only.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (DPGaussianMixture::*)(const AI4BayesCode::state_map&, bool) const)
+                    &DPGaussianMixture::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",     &DPGaussianMixture::get_dag)
         .method("get_history", &DPGaussianMixture::get_history)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(DPGaussianMixture);
@@ -921,7 +935,11 @@ PYBIND11_MODULE(DPGaussianMixture, m) {
         .def("step", (void (DPGaussianMixture::*)(int)) &DPGaussianMixture::step, pybind11::arg("n_steps"))
         .def("get_current",  &DPGaussianMixture::get_current)
         .def("set_current",  &DPGaussianMixture::set_current, pybind11::arg("params"))
-        .def("predict_at",   &DPGaussianMixture::predict_at,  pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (DPGaussianMixture::*)(const AI4BayesCode::state_map&, bool) const)
+                 &DPGaussianMixture::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",      &DPGaussianMixture::get_dag)
         .def("get_history",  &DPGaussianMixture::get_history)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(DPGaussianMixture);

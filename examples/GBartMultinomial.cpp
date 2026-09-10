@@ -545,6 +545,12 @@ public:
     AI4BayesCode::history_map predict_at_r(Rcpp::List new_data) const {
         return predict_at(ai4b::predict_input(new_data, "X", x_ncol_));
     }
+
+    /// Same trailing switch as predict_at, for the R entry point.
+    AI4BayesCode::history_map predict_at_r(Rcpp::List new_data,
+                                           bool last_draw_only) const {
+        return predict_at(ai4b::predict_input(new_data, "X", x_ncol_), last_draw_only);
+    }
 #endif
 
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
@@ -565,13 +571,20 @@ public:
     //
     // Uses predict_rng_ (const-preserving, persistent, seeded at
     // construction). Does NOT modify MCMC state in any mode.
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
     AI4BayesCode::history_map
-    predict_at(const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+    predict_at(const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         const bool has_X = new_data.find("X") != new_data.end();
         for (const auto& kv : new_data) {
@@ -760,10 +773,17 @@ RCPP_MODULE(GBartMultinomial_module) {
                 "Overwrite y and/or X from a named list. Supported keys: "
                 "y, X (flattened column-major N x p). r/probs/log_phi are "
                 "read-only.")
-        .method("predict_at",  &GBartMultinomial::predict_at_r,
+        .method("predict_at",
+                (AI4BayesCode::history_map (GBartMultinomial::*)(Rcpp::List) const)
+                    &GBartMultinomial::predict_at_r,
                 "Predict at new data. Pass list(X = as.vector(X_new)) "
                 "(flattened column-major) or an empty list for posterior "
                 "predictive at training X. Const, no state mutation.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (GBartMultinomial::*)(Rcpp::List, bool) const)
+                    &GBartMultinomial::predict_at_r,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",     &GBartMultinomial::get_dag,
                 "Return the predict DAG as a named list of edges.")
         .method("get_history", &GBartMultinomial::get_history,
@@ -799,7 +819,11 @@ PYBIND11_MODULE(GBartMultinomial, m) {
         .def("get_tree",         &GBartMultinomial::get_tree)
         .def("set_tree",         &GBartMultinomial::set_tree, pybind11::arg("tree_s"))
         .def("set_current",      &GBartMultinomial::set_current, pybind11::arg("params"))
-        .def("predict_at",       &GBartMultinomial::predict_at, pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (GBartMultinomial::*)(const AI4BayesCode::state_map&, bool) const)
+                 &GBartMultinomial::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",          &GBartMultinomial::get_dag)
         .def("get_history",      &GBartMultinomial::get_history)
         .def("get_tree_history", &GBartMultinomial::get_tree_history)

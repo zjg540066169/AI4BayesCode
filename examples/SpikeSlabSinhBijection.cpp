@@ -360,13 +360,20 @@ public:
     // NOTE: the original R-only free function had no predict_at; this is a
     // minimal posterior-predictive added to give the dual class the standard
     // method surface. The model logic / sampler is untouched.
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         // ---- Parse optional x (length N_new) ------------------------------
         bool has_x = false;
@@ -449,7 +456,15 @@ RCPP_MODULE(SpikeSlabSinhBijection_module) {
         .method("step", (void (SpikeSlabSinhBijection::*)(int)) &SpikeSlabSinhBijection::step, "Run n sweeps.")
         .method("get_current",  &SpikeSlabSinhBijection::get_current)
         .method("set_current",  &SpikeSlabSinhBijection::set_current)
-        .method("predict_at",   &SpikeSlabSinhBijection::predict_at)
+        .method("predict_at",
+                (AI4BayesCode::history_map (SpikeSlabSinhBijection::*)(const AI4BayesCode::state_map&) const)
+                    &SpikeSlabSinhBijection::predict_at,
+                "Predict at new_data. Unchanged.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (SpikeSlabSinhBijection::*)(const AI4BayesCode::state_map&, bool) const)
+                    &SpikeSlabSinhBijection::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",      &SpikeSlabSinhBijection::get_dag)
         .method("get_history",  &SpikeSlabSinhBijection::get_history)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(SpikeSlabSinhBijection);
@@ -474,7 +489,11 @@ PYBIND11_MODULE(SpikeSlabSinhBijection, m) {
         .def("step", (void (SpikeSlabSinhBijection::*)(int)) &SpikeSlabSinhBijection::step, pybind11::arg("n_steps"))
         .def("get_current",  &SpikeSlabSinhBijection::get_current)
         .def("set_current",  &SpikeSlabSinhBijection::set_current, pybind11::arg("params"))
-        .def("predict_at",   &SpikeSlabSinhBijection::predict_at,  pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (SpikeSlabSinhBijection::*)(const AI4BayesCode::state_map&, bool) const)
+                 &SpikeSlabSinhBijection::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",      &SpikeSlabSinhBijection::get_dag)
         .def("get_history",  &SpikeSlabSinhBijection::get_history)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(SpikeSlabSinhBijection);

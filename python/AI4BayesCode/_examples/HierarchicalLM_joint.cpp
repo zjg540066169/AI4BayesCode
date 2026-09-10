@@ -579,13 +579,20 @@ public:
     // (empty here) and returns a history_map (map<string,arma::mat>). The
     // rcpp_wrap.hpp / pybind glue converts each matrix to an R matrix /
     // Python 2D array. Cf. GaussianLocationScale::predict_at.
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
     AI4BayesCode::history_map
-    predict_at(const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+    predict_at(const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         // X arrives vectorised column-major (N_new * p); g_idx is 0-based and
         // length N_new. Either may be supplied on its own -- with only X, the
@@ -746,7 +753,15 @@ RCPP_MODULE(HierarchicalLM_joint_module) {
                 "Overwrite any subset of {alpha, beta, z_u, tau, sigma}. "
                 "u is recomputed from (tau, z_u).")
         .method("get_history",  &HierarchicalLM_joint::get_history)
-        .method("predict_at",   &HierarchicalLM_joint::predict_at)
+        .method("predict_at",
+                (AI4BayesCode::history_map (HierarchicalLM_joint::*)(const AI4BayesCode::state_map&) const)
+                    &HierarchicalLM_joint::predict_at,
+                "Predict at new_data. Unchanged.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (HierarchicalLM_joint::*)(const AI4BayesCode::state_map&, bool) const)
+                    &HierarchicalLM_joint::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",      &HierarchicalLM_joint::get_dag)
         AI4BAYESCODE_BIND_READAPT_NUTS(HierarchicalLM_joint)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(HierarchicalLM_joint);
@@ -775,8 +790,11 @@ PYBIND11_MODULE(HierarchicalLM_joint, m) {
         .def("set_current",  &HierarchicalLM_joint::set_current,
              pybind11::arg("params"))
         .def("get_history",  &HierarchicalLM_joint::get_history)
-        .def("predict_at",   &HierarchicalLM_joint::predict_at,
-             pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (HierarchicalLM_joint::*)(const AI4BayesCode::state_map&, bool) const)
+                 &HierarchicalLM_joint::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",      &HierarchicalLM_joint::get_dag)
         .def("readapt_NUTS", (void (HierarchicalLM_joint::*)(int, bool, int, double)) &HierarchicalLM_joint::readapt_NUTS,
              pybind11::arg("n"), pybind11::arg("reset") = false,

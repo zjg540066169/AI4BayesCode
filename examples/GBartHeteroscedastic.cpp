@@ -369,6 +369,12 @@ public:
     AI4BayesCode::history_map predict_at_r(Rcpp::List new_data) const {
         return predict_at(ai4b::predict_input(new_data, "X", x_ncol_));
     }
+
+    /// Same trailing switch as predict_at, for the R entry point.
+    AI4BayesCode::history_map predict_at_r(Rcpp::List new_data,
+                                           bool last_draw_only) const {
+        return predict_at(ai4b::predict_input(new_data, "X", x_ncol_), last_draw_only);
+    }
 #endif
 
 
@@ -390,13 +396,20 @@ public:
     //
     // X is passed as a FLATTENED column-major vector under key "X"
     // (length N_new * p); reshaped here back into an N_new x p matrix.
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
     AI4BayesCode::history_map
-    predict_at(const AI4BayesCode::state_map& new_data) const {
-        // A predict_at_last() call asks for the single-draw path even
-        // though the history is being retained; branch on this, not on
-        // keep_history_ directly.
-        const bool use_history =
-            keep_history_ && !this->predict_last_draw_only();
+    predict_at(const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         const bool has_X = new_data.find("X") != new_data.end();
         for (const auto& kv : new_data) {
@@ -561,10 +574,17 @@ RCPP_MODULE(GBartHeteroscedastic_module) {
         .method("set_tree",    &GBartHeteroscedastic::set_tree,
                 "Restore the genBART forest from a serialized snapshot "
                 "string previously obtained from get_tree().")
-        .method("predict_at",  &GBartHeteroscedastic::predict_at_r,
+        .method("predict_at",
+                (AI4BayesCode::history_map (GBartHeteroscedastic::*)(Rcpp::List) const)
+                    &GBartHeteroscedastic::predict_at_r,
                 "Predict at new data. Pass list(X = as.vector(X_new)) "
                 "(flattened column-major) for new-X, or an empty list for "
                 "training-X posterior predictive. Const, no state mutation.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (GBartHeteroscedastic::*)(Rcpp::List, bool) const)
+                    &GBartHeteroscedastic::predict_at_r,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",     &GBartHeteroscedastic::get_dag,
                 "Return the predict DAG as a named list of edges.")
         .method("get_history", &GBartHeteroscedastic::get_history,
@@ -619,8 +639,11 @@ PYBIND11_MODULE(GBartHeteroscedastic, m) {
              pybind11::arg("params"))
         .def("set_tree",        &GBartHeteroscedastic::set_tree,
              pybind11::arg("tree_s"))
-        .def("predict_at",      &GBartHeteroscedastic::predict_at,
-             pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (GBartHeteroscedastic::*)(const AI4BayesCode::state_map&, bool) const)
+                 &GBartHeteroscedastic::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_dag",         &GBartHeteroscedastic::get_dag)
         .def("get_history",     &GBartHeteroscedastic::get_history)
         .def("get_tree_history", &GBartHeteroscedastic::get_tree_history)
