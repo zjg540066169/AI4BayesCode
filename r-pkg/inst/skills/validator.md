@@ -368,8 +368,30 @@ predictive.
 `predict_at(<subset>)` for every reasonable subset of
 `data_inputs` and compares the actual output keys to the keys
 predicted by the declared DAG (using the same BFS availability
-rule). Any extra key in the actual output -> silent substitution
-in the refresher -> fix the refresher body.
+rule). The comparison is TWO-SIDED, and each side is its own
+R1 failure:
+
+- **Extra key present** -> silent substitution in the refresher:
+  it filled a withheld input from training values. Fix the
+  refresher body.
+- **Predicted key MISSING, or the call THREW** -> the wrapper is
+  refusing a prediction its own declared DAG says it can make.
+  This is the commonest form: a guard that rejects the call
+  whenever some member of a co-indexed group is absent, reasoning
+  that co-indexed inputs must all be supplied. Co-indexing means
+  the WITHHELD member's values no longer line up; it does not mean
+  every output depends on it. Read the declared edges: any output
+  whose ancestors exclude the withheld member is predictable, and
+  refusing it is the bug. Delete the guard and return the
+  reachable subset. An error is correct ONLY when the DAG makes
+  NOTHING reachable for that subset -- then it must name the
+  missing input.
+
+This holds whether `predict_at` forwards to `impl_->predict_at`
+or computes its outputs directly: a wrapper that computes
+directly still has to implement the answer its declared graph
+gives, and is the case where this failure actually appears, since
+forwarding gets it right for free.
 
 **Fix template.** Drop the fallback; let the framework decide:
 
@@ -2258,6 +2280,41 @@ valid R1 result: binding, dispatch and state bugs only surface on a real call.
      every transition.
    - `readapt_NUTS` (when bound): the call returns and leaves chain state
      unchanged (`get_current()` identical before and after).
+
+**`predict_at` partial-newdata checks -- MANDATORY, no skip. Any one
+failing is an R1 FAIL.** Read the declared predict edges out of
+`m$get_dag()$predict_edges` and the replaceable inputs out of
+`$data_inputs`. For EVERY data input on its own, and for every strict
+subset of each co-indexed group, work out which outputs the DECLARED
+graph makes reachable, then call `predict_at` with that subset and
+compare. Do not skip a subset because it "obviously" needs the others --
+that assumption is the bug this check exists to catch.
+
+**(1) Reachable means returned.** If the graph makes at least one output
+reachable, the call MUST NOT throw and MUST return every reachable key.
+A wrapper that rejects the call because some co-indexed member is absent
+is refusing a prediction its own graph says it can make. Co-indexing says
+the WITHHELD member's values no longer line up with the replaced ones; it
+does NOT say every output depends on it. Any output whose declared
+ancestors exclude the withheld member is predictable. This is an R1 FAIL
+even when the guard's message sounds reasonable, and even when
+`predict_at` computes its outputs directly instead of forwarding to
+`impl_->predict_at` -- a wrapper that computes directly still owes the
+answer its declared graph gives.
+
+**(2) Unreachable means absent, not substituted.** No key outside the
+reachable set may appear. An extra key means a refresher filled a
+withheld input from training values -- a silently wrong posterior
+predictive, not a prediction.
+
+**(3) Nothing reachable is the ONLY case that may throw**, and the
+message must name the missing input.
+
+**(4) The result must be sized by the NEW data.** A refresher that
+CAPTURED the training N reads a replaced design with the old column
+stride and returns training-sized output. Check the returned matrices
+have `N_new` columns, with `N_new` deliberately DIFFERENT from the
+training N -- an equal-N smoke fixture passes this bug straight through.
 
 **`set_current` checks -- MANDATORY, no skip. Any one failing is an R1 FAIL.**
 set_current for stateful composition is the most important goal for

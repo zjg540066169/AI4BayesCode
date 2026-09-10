@@ -1393,21 +1393,30 @@ impl_->data().declare_predict_edges("v2",        {"y_rep"});
 // -- stays valid when the observations are replaced and must NOT be grouped,
 // or predictions that legitimately reuse it are blocked.
 //
-// When predict_at forwards to impl_->predict_at, do NOT hand-write an
-// all-or-nothing guard on top of it. Whether a given call can produce
-// anything is a property of the declared graph, and the graph already
-// answers it: a wrapper that refuses the call outright also refuses the
-// cases where some outputs ARE reachable. Declare the group and let the DAG
-// decide. How much is reachable depends on the model -- an output whose
-// ancestors are all replaced or all training-side is computed, one that
-// mixes the two is not -- so do not promise a particular outcome in a
-// comment; the edges are what determine it.
+// WHAT predict_at MUST DO WITH A PARTIAL CALL. Work out, from the predict
+// edges just declared, which outputs are still reachable when the caller
+// supplies only some of a group. Then:
 //
-// A wrapper whose predict_at does NOT forward -- because its outputs are
-// forests or kernels that must be RE-EVALUATED at the new data rather than
-// refreshed from shared_data -- is the exception: the graph never runs for
-// it, so it validates its own inputs, and declaring a group there would
-// assert a contract nothing enforces.
+//   * some outputs reachable -> compute THOSE and omit the rest. Never
+//     refuse the call. An output is reachable when every one of its declared
+//     ancestors is either replaced by the caller or is training-side and
+//     stays valid; it is not reachable when it mixes the two.
+//   * nothing reachable -> an explicit error naming what is missing is right,
+//     and better than an empty result.
+//
+// This holds whether predict_at forwards to impl_->predict_at or computes
+// its outputs directly. Forwarding gets the answer for free, because the
+// graph is what decides; a wrapper that computes directly -- because its
+// outputs are forests or kernels that must be RE-EVALUATED at the new data
+// rather than refreshed from shared_data -- has to implement the same answer
+// by hand, and it is still the DECLARED GRAPH that says what the answer is.
+//
+// The mistake to avoid is reasoning "these inputs are co-indexed, therefore
+// a prediction needs all of them". Co-indexing says the withheld member's
+// values no longer line up; it does NOT say every output depends on it. If
+// an output's declared ancestors do not include the withheld member, that
+// output is predictable and refusing it is a bug. Check the edges you just
+// wrote before writing any guard: a guard that contradicts them is wrong.
 impl_->data().declare_data_input_group({"X", "Z", "v2"});
 
 // === Deterministic refresher for the intermediate theta. ===
