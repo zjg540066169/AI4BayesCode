@@ -457,8 +457,24 @@ public:
         // Install fixed data + dimension metadata the joint lambda needs.
         impl_->data().set("y", y);
         impl_->data().set("X", arma::vectorise(X));
+        // Z (the random-effect design) is the first D columns of X, so it is
+        // DERIVED, not an independent input: a prediction at new X must use
+        // that X's own first D columns. Declaring it replaceable, as this
+        // model used to, let the two disagree.
         arma::mat Z_fixed = X.cols(0, D - 1);
         impl_->data().set("Z", arma::vectorise(Z_fixed));
+        impl_->data().register_refresher(
+            "Z", [pl = p_](const AI4BayesCode::shared_data_t& d) -> arma::vec {
+                const arma::vec& X_flat = d.get("X");
+                if (pl == 0 || X_flat.n_elem % pl != 0)
+                    ai4b::stop("HierarchicalLM_MultivariateRE: X length %zu "
+                               "is not a multiple of p = %zu",
+                               static_cast<std::size_t>(X_flat.n_elem), pl);
+                const std::size_t Nl = X_flat.n_elem / pl;
+                arma::mat Xm(const_cast<double*>(X_flat.memptr()),
+                             Nl, pl, false, true);
+                return arma::vectorise(Xm.cols(0, D - 1));
+            });
         arma::vec group_idx_dbl(N_);
         for (std::size_t i = 0; i < N_; ++i)
             group_idx_dbl[i] = static_cast<double>(
@@ -513,9 +529,17 @@ public:
             const std::size_t Nl = N_, pl = p_, Jl = J_;
             impl_->data().register_refresher(
                 "mu_fixed",
-                [Nl, pl](const AI4BayesCode::shared_data_t& d) -> arma::vec {
+                [pl](const AI4BayesCode::shared_data_t& d) -> arma::vec {
                     const arma::vec& X_flat = d.get("X");
                     const arma::vec& beta   = d.get("beta");
+                    // N is DERIVED from X, not captured: predict_at may
+                    // replace X with a different number of rows, and a
+                    // captured training N would read it with the old stride.
+                    if (pl == 0 || X_flat.n_elem % pl != 0)
+                        ai4b::stop("HierarchicalLM_MultivariateRE: X length "
+                                   "%zu is not a multiple of p = %zu",
+                                   static_cast<std::size_t>(X_flat.n_elem), pl);
+                    const std::size_t Nl = X_flat.n_elem / pl;
                     arma::mat X(const_cast<double*>(X_flat.memptr()),
                                 Nl, pl, false, true);
                     arma::vec mf(Nl);
@@ -545,14 +569,12 @@ public:
 
         // Predict DAG: X,beta -> mu_fixed ; z_flat,tau,R_chol -> u ;
         // mu_fixed,Z,group_idx,u,tau,R_chol,sigma -> y_rep.
-        // NOT declare_data_input_group, even though these three ARE
-        // co-indexed: this wrapper's predict_at rejects every non-empty
-        // new_data, so the composite's DAG never sees a replacement and a
-        // group would assert a contract nothing enforces. See the note in
-        // HierarchicalLM_joint.
-        impl_->data().declare_data_input("X");
-        impl_->data().declare_data_input("Z");
-        impl_->data().declare_data_input("group_idx");
+        // X, Z and group_idx index the SAME observations: y_rep combines
+        // the fixed-effect row of X with the random-effect row of Z for that
+        // row's group. Supplying only X therefore leaves y_rep not
+        // predictable, while mu_fixed = X*beta still is.
+        impl_->data().declare_data_input_group({"X", "group_idx"});
+        impl_->data().declare_predict_edges("X", {"Z"});
         impl_->data().declare_predict_edges("X",         {"mu_fixed"});
         impl_->data().declare_predict_edges("beta",      {"mu_fixed"});
         impl_->data().declare_predict_edges("z_flat",    {"u"});
@@ -755,16 +777,54 @@ public:
         const bool use_history =
             keep_history_ && !this->predict_last_draw_only();
 
-        if (!new_data.empty()) {
-            ai4b::stop("HierarchicalLM_MultivariateRE has no covariate "
-                       "inputs for predict_at (call with an empty map/list)");
+        // X and Z arrive vectorised column-major (N_new*p and N_new*D);
+        // group_idx is 1-BASED and length N_new. Any subset may be supplied
+        // -- with only X, the predict DAG computes mu_fixed and leaves y_rep
+        // out, because the group and random-effect row of each NEW
+        // observation are unknown.
+        block_context replaced;
+        for (const auto& kv : new_data) {
+            if (kv.first == "Z")
+                ai4b::stop("HierarchicalLM_MultivariateRE::predict_at: 'Z' is "
+                           "DERIVED from the first %zu columns of X, not an "
+                           "input -- supply X and Z follows.",
+                           static_cast<std::size_t>(D));
+            if (kv.first != "X" && kv.first != "group_idx")
+                ai4b::stop("HierarchicalLM_MultivariateRE::predict_at: unknown "
+                           "key '%s'. Valid: 'X', 'group_idx' (or empty for "
+                           "the training data).", kv.first.c_str());
         }
+        auto it_X = new_data.find("X");
+        auto it_g = new_data.find("group_idx");
+        std::size_t N_new = 0;
+        if (it_X != new_data.end()) {
+            if (p_ == 0 || it_X->second.n_elem % p_ != 0)
+                ai4b::stop("HierarchicalLM_MultivariateRE::predict_at: X must "
+                           "be vectorised N_new*p column-major (p = %zu)", p_);
+            N_new = it_X->second.n_elem / p_;
+            replaced["X"] = it_X->second;
+        }
+        if (it_g != new_data.end()) {
+            const arma::vec& g = it_g->second;
+            if (N_new != 0 && g.n_elem != N_new)
+                ai4b::stop("HierarchicalLM_MultivariateRE::predict_at: "
+                           "group_idx has %zu entries but the design has %zu "
+                           "rows", static_cast<std::size_t>(g.n_elem), N_new);
+            for (std::size_t i = 0; i < g.n_elem; ++i)
+                if (static_cast<long>(std::llround(g[i])) < 1)
+                    ai4b::stop("HierarchicalLM_MultivariateRE::predict_at: "
+                               "group_idx is 1-BASED; entry %zu is %g", i, g[i]);
+            replaced["group_idx"] = g;
+        }
+
         AI4BayesCode::history_map out;
 
         if (!use_history) {
-            block_context replaced;
             block_context result = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : result) {
+                // Z is an internal restatement of X's first D columns, not a
+                // prediction; the history path does not report it either.
+                if (kv.first == "Z") continue;
                 arma::mat m(1, kv.second.n_elem);
                 for (std::size_t j = 0; j < kv.second.n_elem; ++j)
                     m(0, j) = kv.second[j];
@@ -785,11 +845,24 @@ public:
         const arma::mat& log_sigma_hist = hist.at("log_sigma"); // n_draws x 1
         const std::size_t n_draws = beta_hist.n_rows;
 
-        const arma::vec& X_flat = impl_->data().get("X");
-        const arma::vec& Z_flat = impl_->data().get("Z");
-        const arma::vec& group  = impl_->data().get("group_idx");
-        const std::size_t N = N_;
+        // History mode replays the model by hand, so it honours the same rule
+        // the predict DAG applies in the single-draw path: y_rep needs BOTH
+        // the random-effect design Z and the group of each new row, so with
+        // only X supplied it is not predictable and only mu_fixed comes back.
+        const arma::vec X_flat = (it_X != new_data.end())
+            ? it_X->second : impl_->data().get("X");
+        // Z follows X: the first D columns of whichever X is in play.
+        const arma::vec Z_flat = (it_X != new_data.end())
+            ? arma::vectorise(arma::mat(const_cast<double*>(X_flat.memptr()),
+                                        X_flat.n_elem / p_, p_, false, true)
+                                  .cols(0, D - 1))
+            : impl_->data().get("Z");
+        const arma::vec group  = (it_g != new_data.end())
+            ? it_g->second : impl_->data().get("group_idx");
+        const bool predict_y_rep =
+            new_data.empty() || it_g != new_data.end();
         const std::size_t p = p_;
+        const std::size_t N = X_flat.n_elem / p;
         const std::size_t J = J_;
         const std::size_t D_local = D;
 
@@ -797,6 +870,20 @@ public:
                         N, p, false, true);
         arma::mat Z_mat(const_cast<double*>(Z_flat.memptr()),
                         N, D_local, false, true);
+
+        arma::mat mu_mat(n_draws, N);
+        {
+            arma::mat Xm(const_cast<double*>(X_flat.memptr()), N, p, false, true);
+            for (std::size_t d = 0; d < n_draws; ++d)
+                for (std::size_t i = 0; i < N; ++i) {
+                    double mu_i = 0.0;
+                    for (std::size_t k = 0; k < p; ++k)
+                        mu_i += Xm(i, k) * beta_hist(d, k);
+                    mu_mat(d, i) = mu_i;
+                }
+        }
+        out.emplace("mu_fixed", mu_mat);
+        if (!predict_y_rep) return out;    // y_rep needs the new Z and groups
 
         arma::mat yrep_mat(n_draws, N);
         std::normal_distribution<double> norm01(0.0, 1.0);

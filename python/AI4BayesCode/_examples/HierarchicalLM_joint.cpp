@@ -353,10 +353,18 @@ public:
                           arma::vec(N, arma::fill::value(alpha_init)));
         impl_->data().register_refresher(
             "mu_fixed",
-            [p, N](const AI4BayesCode::shared_data_t& d) -> arma::vec {
+            [p](const AI4BayesCode::shared_data_t& d) -> arma::vec {
                 const double alpha      = d.get("alpha")[0];
                 const arma::vec& beta   = d.get("beta");
                 const arma::vec& X_flat = d.get("X");
+                // N is DERIVED from X, not captured: predict_at may replace X
+                // with a different number of rows, and a captured training N
+                // would read the new matrix with the old column stride.
+                if (p == 0 || X_flat.n_elem % p != 0)
+                    ai4b::stop("HierarchicalLM_joint: X length %zu is not a "
+                               "multiple of p = %zu",
+                               static_cast<std::size_t>(X_flat.n_elem), p);
+                const std::size_t N = X_flat.n_elem / p;
                 arma::vec mf(N);
                 for (std::size_t n = 0; n < N; ++n) {
                     double xb = 0.0;
@@ -378,14 +386,12 @@ public:
             "ncr_joint", {"mu_fixed", "u"});
 
         // Predict DAG (edges keyed by sub-param name or derived node name).
-        // NOT declare_data_input_group, even though X and g_idx ARE
-        // co-indexed: this wrapper's predict_at rejects every non-empty
-        // new_data, so the composite's DAG never sees a replacement and a
-        // group would assert a contract nothing enforces. Making the group
-        // meaningful means first letting predict_at forward, which
-        // start.md's predict_at-forwarding rule already requires.
-        impl_->data().declare_data_input("X");
-        impl_->data().declare_data_input("g_idx");
+        // X and g_idx index the SAME observations: y_rep needs the group
+        // each row belongs to. Supplying only X therefore leaves y_rep not
+        // predictable, while mu_fixed = alpha + X*beta still is.
+        impl_->data().declare_data_input_group({"X", "g_idx"});
+        p_ = p;
+        G_ = static_cast<std::size_t>(G);
         impl_->data().declare_predict_edges("X",        {"mu_fixed"});
         impl_->data().declare_predict_edges("alpha",    {"mu_fixed"});
         impl_->data().declare_predict_edges("beta",     {"mu_fixed"});
@@ -402,14 +408,21 @@ public:
         impl_->data().set("y_rep", arma::vec(N, arma::fill::zeros));
         impl_->data().register_stochastic_refresher(
             "y_rep",
-            [N](const AI4BayesCode::shared_data_t& d,
-                std::mt19937_64& rng) {
+            [](const AI4BayesCode::shared_data_t& d,
+               std::mt19937_64& rng) {
                 const arma::vec& mf  = d.get("mu_fixed");   // alpha + X*beta
                 const arma::vec& u   = d.get("u");          // natural-scale u, length G
-                const arma::vec& gix = d.get("g_idx");      // 0-based, length N
+                const arma::vec& gix = d.get("g_idx");      // 0-based
                 const double tau     = d.get("tau")[0];
                 const double s       = d.get("sigma")[0];
                 const std::size_t G  = u.n_elem;
+                // Derived, not captured -- see the mu_fixed refresher.
+                const std::size_t N  = mf.n_elem;
+                if (gix.n_elem != N)
+                    ai4b::stop("HierarchicalLM_joint: g_idx has %zu entries "
+                               "but X has %zu rows -- they index the same "
+                               "observations and must be replaced together",
+                               static_cast<std::size_t>(gix.n_elem), N);
                 std::normal_distribution<double> norm(0.0, 1.0);
                 arma::vec y_rep(N);
                 for (std::size_t i = 0; i < N; ++i) {
@@ -574,15 +587,45 @@ public:
         const bool use_history =
             keep_history_ && !this->predict_last_draw_only();
 
-        if (!new_data.empty()) {
-            ai4b::stop("HierarchicalLM_joint::predict_at: does not accept "
-                       "replaced data inputs. Call with an empty map/list for "
-                       "posterior-predictive y_rep at training X / g_idx.");
+        // X arrives vectorised column-major (N_new * p); g_idx is 0-based and
+        // length N_new. Either may be supplied on its own -- with only X, the
+        // predict DAG computes mu_fixed and leaves y_rep out, because the
+        // group of each NEW row is unknown.
+        block_context replaced;
+        for (const auto& kv : new_data) {
+            if (kv.first != "X" && kv.first != "g_idx")
+                ai4b::stop("HierarchicalLM_joint::predict_at: unknown key "
+                           "'%s'. Valid: 'X', 'g_idx' (or empty for the "
+                           "training data).", kv.first.c_str());
         }
+        auto it_X = new_data.find("X");
+        auto it_g = new_data.find("g_idx");
+        std::size_t N_new = 0;
+        if (it_X != new_data.end()) {
+            if (p_ == 0 || it_X->second.n_elem % p_ != 0)
+                ai4b::stop("HierarchicalLM_joint::predict_at: X must be "
+                           "vectorised N_new*p column-major (p = %zu)", p_);
+            N_new = it_X->second.n_elem / p_;
+            replaced["X"] = it_X->second;
+        }
+        if (it_g != new_data.end()) {
+            const arma::vec& g = it_g->second;
+            if (N_new != 0 && g.n_elem != N_new)
+                ai4b::stop("HierarchicalLM_joint::predict_at: g_idx has %zu "
+                           "entries but X has %zu rows",
+                           static_cast<std::size_t>(g.n_elem), N_new);
+            for (std::size_t i = 0; i < g.n_elem; ++i) {
+                const long gi = static_cast<long>(std::llround(g[i]));
+                if (gi < 0 || static_cast<std::size_t>(gi) >= G_)
+                    ai4b::stop("HierarchicalLM_joint::predict_at: g_idx[%zu] "
+                               "= %g is outside {0, ..., G-1}", i, g[i]);
+            }
+            replaced["g_idx"] = g;
+        }
+
         AI4BayesCode::history_map out;
 
         if (!use_history) {
-            block_context replaced;
             block_context result = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : result) {
                 arma::mat m(1, kv.second.n_elem);
@@ -608,9 +651,30 @@ public:
         const std::size_t n_draws = alpha_hist.n_rows;
         const std::size_t p_dim   = beta_hist.n_cols;
 
-        const arma::vec& X_flat = impl_->data().get("X");
-        const arma::vec& g_idx  = impl_->data().get("g_idx");
-        const std::size_t N     = g_idx.n_elem;
+        // History mode replays the model by hand, so it has to honour the same
+        // rule the predict DAG applies in the single-draw path: with only X
+        // supplied the group of each new row is unknown, so y_rep is NOT
+        // predictable and only mu_fixed is returned.
+        const arma::vec X_flat = (it_X != new_data.end())
+            ? it_X->second : impl_->data().get("X");
+        const bool have_groups = (it_g != new_data.end())
+            || (it_X == new_data.end());
+        const arma::vec g_idx = (it_g != new_data.end())
+            ? it_g->second : impl_->data().get("g_idx");
+        const std::size_t N = X_flat.n_elem / p_dim;
+
+        arma::mat mu_mat(n_draws, N);
+        for (std::size_t d = 0; d < n_draws; ++d) {
+            const double alpha_d = alpha_hist(d, 0);
+            for (std::size_t i = 0; i < N; ++i) {
+                double xb = 0.0;
+                for (std::size_t j = 0; j < p_dim; ++j)
+                    xb += X_flat[i + j * N] * beta_hist(d, j);
+                mu_mat(d, i) = alpha_d + xb;
+            }
+        }
+        out.emplace("mu_fixed", mu_mat);
+        if (!have_groups) return out;      // y_rep needs the new rows' groups
 
         arma::mat yrep_mat(n_draws, N);
         std::normal_distribution<double> norm01(0.0, 1.0);
@@ -657,6 +721,9 @@ private:
     mutable std::mt19937_64          readapt_rng_;
     std::unique_ptr<composite_block> impl_;
     bool                             keep_history_ = false;
+    // predict_at validates a replaced X / g_idx against these.
+    std::size_t                      p_ = 0;
+    std::size_t                      G_ = 0;
 };
 
 #ifdef AI4BAYESCODE_RCPP_MODULE
