@@ -2281,6 +2281,43 @@ valid R1 result: binding, dispatch and state bugs only surface on a real call.
    - `readapt_NUTS` (when bound): the call returns and leaves chain state
      unchanged (`get_current()` identical before and after).
 
+**Named-constructor checks -- MANDATORY, no skip. Any one failing is an R1
+FAIL.** Rcpp dispatches a module constructor on ARITY ALONE and drops
+argument names, so a stock module class cannot be constructed by name at
+all. `ai4bayescode_source()` installs a name-matching constructor per class
+to fix that, which is why a generated sampler needs to do nothing for it --
+and exactly why nothing tells you when it is NOT in place. It fails the same
+way whether the signature could not be parsed, the class was declined, or the
+session is running an older build: the names are silently dropped and the
+call dies with Rcpp's "no valid constructor available for the argument list",
+naming neither the argument nor the model. Constructing by name is the
+primary way a user reaches a sampler with a dozen hyperparameters; assume it
+works and it will be the user who discovers it does not.
+
+Read the argument names out of `ai4bayescode_doc(<Class>)$constructor` and
+emit all four.
+
+**(1) Every argument named.** `new(<Class>, <arg> = <value>, ...)` with EVERY
+argument given by name, in an order DIFFERENT from the declaration, must
+construct. Reordering is the point: a call that happens to be in declaration
+order also passes under stock arity dispatch, so it proves nothing.
+
+**(2) Data only.** Supplying just the data arguments by name, omitting every
+argument that carries a default, must construct. This is the call the
+documented minimal usage rests on.
+
+**(3) A wrong name is an ERROR that names it.** An argument name that
+matches nothing must raise, and the message must say which name was not
+recognised and list the valid ones -- not be silently ignored, which is what
+stock dispatch does and is how a typo becomes a silently different prior.
+
+**(4) The named value LANDS.** Construct twice with the same `rng_seed` given
+BY NAME and once with a different one, step each, and compare a scalar of
+`get_current()`: equal for the equal seeds, different for the different one.
+A name that is dropped rather than matched still constructs -- positionally,
+onto some other argument -- so only checking that the call succeeds cannot
+tell the two apart.
+
 **`predict_at` partial-newdata checks -- MANDATORY, no skip. Any one
 failing is an R1 FAIL.** Read the declared predict edges out of
 `m$get_dag()$predict_edges` and the replaceable inputs out of
