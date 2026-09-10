@@ -2351,6 +2351,39 @@ A name that is dropped rather than matched still constructs -- positionally,
 onto some other argument -- so only checking that the call succeeds cannot
 tell the two apart.
 
+**`last_draw_only` checks -- MANDATORY whenever predict_at walks the
+retained history, no skip. Any one failing is an R1 FAIL.** With
+keep_history = TRUE, predict_at returns one row per retained draw; the
+trailing switch gives the caller the SINGLE-DRAW path -- the one predict_at
+already takes when keep_history is false -- without discarding the history.
+It is an OVERLOAD, so `predict_at(new_data)` keeps its meaning and reaches
+samplers generated before the switch existed.
+
+Skip this block ONLY if predict_at has no history branch at all, i.e.
+`keep_history_` never appears inside it. Then there is no second path to
+select and the switch would do nothing.
+
+**(1) The one-argument call is unchanged.** With keep_history = TRUE,
+`predict_at(<newdata>)` still returns one row per retained draw. If it
+returns a single row, the wrapper lost its history path.
+
+**(2) TRUE returns exactly one draw**, with the same column count, and
+`FALSE` is identical to the one-argument call. A wrapper that branches on
+`keep_history_` instead of on `use_history` ignores the switch and hands back
+the whole history -- the call SUCCEEDS, so only comparing the row counts
+catches it.
+
+**(3) The history and the MCMC state are untouched.** `get_history()` has the
+same number of rows afterwards and `get_current()` is unchanged: predict_at
+is const in both forms.
+
+**(4) Both arities are bound in BOTH frontends.** Rcpp dispatches a module
+METHOD on arity alone, exactly as it does a constructor, so each arity needs
+its own `.method("predict_at", ...)` with an explicit member-pointer cast;
+binding only one leaves the other call shape reporting no valid method. In
+Python the argument is also reachable by keyword. A wrapper whose R entry
+point is `predict_at_r(Rcpp::List)` needs the pair there too.
+
 **`predict_at` partial-newdata checks -- MANDATORY, no skip. Any one
 failing is an R1 FAIL.** Read the declared predict edges out of
 `m$get_dag()$predict_edges` and the replaceable inputs out of
