@@ -2281,6 +2281,39 @@ valid R1 result: binding, dispatch and state bugs only surface on a real call.
    - `readapt_NUTS` (when bound): the call returns and leaves chain state
      unchanged (`get_current()` identical before and after).
 
+**Constructor-default checks -- MANDATORY, no skip. Any one failing is an R1
+FAIL.** Read `ai4bayescode_doc(<Class>)$constructor` and classify every
+argument: DATA (whatever the model treats as observations -- the design, the
+response, censoring indicators, group indices, detection limits) versus
+everything else (prior hyperparameters, tuning knobs, the RNG seed, the
+keep_history flag).
+
+**(1) Only data may be required.** Every non-data argument MUST carry a
+default in the C++ SIGNATURE, so that `$constructor` reports one. A user
+cannot be expected to know what a tree-depth penalty, a cutpoint count or a
+candidate-set size should be, and a positional list of numbers they do not
+understand is also a list they can silently transpose. The default is the
+value pre-generation validation settled on, falling back to the library block
+config or the source paper. An argument stays required ONLY when it is a
+modelling choice with no canonical default -- the model would be a DIFFERENT
+model under a different value -- or when the user asked for none.
+
+**(2) The minimal call constructs.** Supplying ONLY the data arguments, by
+name, must succeed. If it raises "missing required argument(s)", that names
+the offenders and this check has failed.
+
+**(3) The default lives in the C++ signature, not only in a binding.** A
+`pybind11::arg("x") = v` whose C++ parameter has no `= v` makes the argument
+optional in Python and mandatory in R: the R side recovers defaults by
+parsing the signature. Compare the two lists and fail on any argument
+defaulted in one place only.
+
+**(4) No argument name may be a prefix of "Class".** R reaches a module
+constructor through `methods::new(Class, ...)`, whose own first formal is
+`Class`, and its matching runs first: such an argument is bound to that
+formal instead of being forwarded, and the call dies complaining about class
+definitions, naming neither the argument nor the model.
+
 **Named-constructor checks -- MANDATORY, no skip. Any one failing is an R1
 FAIL.** Rcpp dispatches a module constructor on ARITY ALONE and drops
 argument names, so a stock module class cannot be constructed by name at
