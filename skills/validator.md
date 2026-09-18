@@ -669,11 +669,13 @@ grep -nE 'predict_at[^{]*\{[^}]*keep_history_[^}]*for[^}]*draws' examples/*.cpp
 **Runtime detection (R1 smoke).** Layer 3 R1 cycles through
 `predict_at(<subset>)` for every smoke-fixture newdata combination
 and (i) requires the call to NOT throw on legitimate partial
-inputs, (ii) compares the actual output keys against the strict
-BFS rule (non-empty newdata: missing data_inputs are unavailable;
-no auto-substitution from training defaults). A wrapper that
-hard-rejects, or returns a key whose declared parent is unavailable,
-fails R1.
+inputs, (ii) compares the actual output keys, two-sided, against the
+library's own two-pass rule (deterministic refreshers: an unsupplied
+data input is unavailable and something upstream must have changed;
+stochastic refreshers: blocked only by the withheld cone of a partially
+replaced co-indexed group; see the partial-newdata checks). A wrapper
+that hard-rejects, returns a key the rule excludes, or omits one the
+rule includes, fails R1.
 
 **Concrete failure example** (one model, three regressions of the
 same wrapper). A meta-regression with a BART + spline mean:
@@ -2301,10 +2303,14 @@ with constant coefficients, and why. A term that is a constant (in t) times one 
 product of state components, a nonlinear function of the state, or a
 coefficient that depends on t is not.
 
-**(2) Solver matches classification.** Linear -> `grep -n "rk45" <file>`
-returns nothing inside the model's solve path and `ode::linear` appears.
-Nonlinear -> rk45 is correct and this check passes. A linear model calling
-rk45 FAILS regardless of how well its chains mix.
+**(2) Solver matches classification.** Linear -> the solve path calls
+`ode::linear` or `ode::linear_sens` and contains NO CALL to an integrator:
+`grep -nE "ode::rk45[a-z_]*\(" <file>` returns nothing. The type name
+`ode::rk45_sens_result` is NOT a hit: it is the return type of
+`ode::linear_sens` (shared so that `ode::sens_chain` consumes both), so a
+correct linear path names it. Nonlinear -> rk45 is correct and this check
+passes. A linear model calling rk45 FAILS regardless of how well its
+chains mix.
 
 **Constructor-default checks -- MANDATORY, no skip. Any one failing is an R1
 FAIL.** Read `ai4bayescode_doc(<Class>)$constructor` and classify every
@@ -2314,7 +2320,12 @@ everything else (prior hyperparameters, tuning knobs, the RNG seed, the
 keep_history flag).
 
 **(1) Only data may be required.** Every non-data argument MUST carry a
-default in the C++ SIGNATURE, so that `$constructor` reports one. A user
+default in the C++ SIGNATURE, so that `$constructor` reports one, and the
+default must be a LITERAL: a boolean, a plain number (a literal suffix or
+brace-init is fine) or a default-constructed armadillo container. R
+reconstructs only those; an expression, a named constant, a non-empty
+initialiser or a string is reported but treated as NO default, so the
+argument stays required in R while optional in Python. A user
 cannot be expected to know what a tree-depth penalty, a cutpoint count or a
 candidate-set size should be, and a positional list of numbers they do not
 understand is also a list they can silently transpose. The default is the
@@ -2369,12 +2380,22 @@ matches nothing must raise, and the message must say which name was not
 recognised and list the valid ones -- not be silently ignored, which is what
 stock dispatch does and is how a typo becomes a silently different prior.
 
-**(4) The named value LANDS.** Construct twice with the same `rng_seed` given
-BY NAME and once with a different one, step each, and compare a scalar of
-`get_current()`: equal for the equal seeds, different for the different one.
-A name that is dropped rather than matched still constructs -- positionally,
-onto some other argument -- so only checking that the call succeeds cannot
-tell the two apart.
+**(4) The named value LANDS.** Probe a named argument whose effect is
+observable, in the order construct -> step -> record, then construct again
+-> step -> record; never construct both before stepping either. With
+`rng_seed` given BY NAME: equal seeds must give equal `get_current()`
+scalars and a different seed a different one. The order matters because a
+kernel that draws from its own process-wide stream, seeded from `rng_seed`
+at construction, is reseeded by the SECOND construction, so interleaving
+the constructions before the steps compares two points of one stream. If
+the wrapper's sampled components draw from a stream that the constructor
+does not seed from `rng_seed` at all, the seed cannot land through the
+constructor under any order: then probe a different named argument -- one
+whose value can be read back through an accessor, `get_current()` or the
+documented configuration -- and say which one was used. A name that is
+dropped rather than matched still constructs -- positionally, onto some
+other argument -- so only checking that the call succeeds cannot tell the
+two apart.
 
 **`last_draw_only` checks -- MANDATORY whenever predict_at walks the
 retained history, no skip. Any one failing is an R1 FAIL.** With
@@ -2393,7 +2414,9 @@ select and the switch would do nothing.
 returns a single row, the wrapper lost its history path.
 
 **(2) TRUE returns exactly one draw**, with the same column count, and
-`FALSE` is identical to the one-argument call. A wrapper that branches on
+`FALSE` returns the same number of rows and columns as the one-argument
+call (compare dimensions, not values: both calls advance the prediction
+RNG, so any stochastic output differs between calls). A wrapper that branches on
 `keep_history_` instead of on `use_history` ignores the switch and hands back
 the whole history -- the call SUCCEEDS, so only comparing the row counts
 catches it.
@@ -2411,12 +2434,28 @@ point is `predict_at_r(Rcpp::List)` needs the pair there too.
 
 **`predict_at` partial-newdata checks -- MANDATORY, no skip. Any one
 failing is an R1 FAIL.** Read the declared predict edges out of
-`m$get_dag()$predict_edges` and the replaceable inputs out of
-`$data_inputs`. For EVERY data input on its own, and for every strict
-subset of each co-indexed group, work out which outputs the DECLARED
-graph makes reachable, then call `predict_at` with that subset and
-compare. Do not skip a subset because it "obviously" needs the others --
-that assumption is the bug this check exists to catch.
+`m$get_dag()$predict_edges`, the replaceable inputs out of `$data_inputs`
+and the co-indexed groups out of `$data_input_groups` (a list of character
+vectors; `dag.data_input_groups` in Python). For EVERY data input on its
+own, and for every strict subset of each co-indexed group, work out which
+outputs the DECLARED graph makes reachable by the library's own rule, then
+call `predict_at` with that subset and compare. The rule: first form the
+WITHHELD set -- every member of any group that has at least one replaced
+member and is not itself supplied -- and close it transitively over
+`predict_edges` (everything downstream of a withheld key is withheld). A
+remaining node is returned according to the pass its refresher runs in. A
+DETERMINISTIC node (`register_refresher`) is recomputed and returned iff
+at least one of its direct parents in `predict_edges` was supplied or
+recomputed in this call AND every direct parent is supplied, recomputed,
+or a non-data-input key -- a data input NOT supplied in this call is
+unavailable even when it belongs to no group, and a node whose parents
+are all parameters is never returned because nothing upstream changed. A
+STOCHASTIC node (`register_stochastic_refresher`) is sampled and returned
+iff neither it nor any direct parent is withheld: every declared parent
+holds a value, so an unsupplied ungrouped data input does not block it.
+Supplied inputs are never part of the result. `predict_dag_smoke` below
+encodes exactly this rule. Do not skip a subset because it "obviously"
+needs the others -- that assumption is the bug this check exists to catch.
 
 **(1) Reachable means returned.** If the graph makes at least one output
 reachable, the call MUST NOT throw and MUST return every reachable key.
@@ -2536,19 +2575,27 @@ if (all(c("predict_at", "freeze", "unfreeze") %in% names(model))) {
 
 # --- Predict-DAG consistency smoke (Semantic #6) -----------------------
 # Cycle through every reasonable subset of the declared data_input keys
-# and check that the output set of predict_at(<subset>) matches the
-# predict DAG: a stochastic refresher's output appears in the result IFF
-# every direct predict-DAG parent of that output is available -- either
-# in the supplied newdata, or as a non-data-input key with a value in
-# shared_data (training default). Output keys present despite a missing
-# data_input parent signal SILENT DEFAULT-SUBSTITUTION inside the
-# refresher (e.g., AI wrote `if (!has(v2)) v2 = mean(v2_train)` to make
-# y_rep always sampleable). This is forbidden by Semantic #6.
-predict_dag_smoke <- function(model, sample_newdata = list()) {
-    dag <- model$get_dag()
-    edges <- dag$predict_edges                  # list: src -> chr vec of dst
-    di    <- as.character(dag$data_inputs)      # data_input names
-    # Build parents map
+# and check that the output set of predict_at(<subset>) is exactly what
+# the library's own rule gives for the DECLARED graph (see the partial-
+# newdata checks): a withheld cone from the co-indexed groups, then a
+# deterministic pass (something upstream changed AND every parent
+# available; an unsupplied data input is unavailable) and a stochastic
+# pass (blocked only by the cone). A key returned although the rule says
+# it cannot be signals SILENT DEFAULT-SUBSTITUTION inside the refresher
+# or the wrapper (e.g. `if (!has(v2)) v2 = mean(v2_train)`); a key missing
+# although the rule says it is returned signals a wrapper that rejects or
+# truncates a legitimate partial newdata. Both are forbidden by Semantic #6.
+#
+# Which refreshers are STOCHASTIC is not in get_dag(); read it from the
+# generated source, one key per register_stochastic_refresher call:
+src <- paste(readLines("<file>"), collapse = "\n")          # the key may sit on the next line
+STOCHASTIC_KEYS <- unique(sub('register_stochastic_refresher\\(\\s*"([^"]+)"', "\\1",
+    regmatches(src, gregexpr('register_stochastic_refresher\\(\\s*"[^"]+"', src, perl = TRUE))[[1]]))
+predict_dag_smoke <- function(model, sample_newdata = list(), stochastic_keys = character(0)) {
+    dag    <- model$get_dag()
+    edges  <- dag$predict_edges                 # list: src -> chr vec of dst
+    di     <- as.character(dag$data_inputs)     # data_input names
+    groups <- dag$data_input_groups             # list of chr vecs (co-indexed)
     parents <- list()
     for (src in names(edges)) {
         for (dst in edges[[src]]) {
@@ -2557,42 +2604,55 @@ predict_dag_smoke <- function(model, sample_newdata = list()) {
     }
     refresher_keys <- intersect(names(parents),
                                 unique(unlist(edges, use.names = FALSE)))
-    # For each newdata subset (caller passes a list of newdata candidates),
-    # compute expected reachable keys and compare to actual predict_at output.
-    #
-    # AVAILABILITY RULE (Pass-2 + R1 strictness):
-    #   - newdata == list()  -> "use training defaults": every data_input is
-    #                          available (relaxed Pass-2).
-    #   - newdata != list()  -> "user has supplied a partial replacement":
-    #                          only data_inputs IN newdata are available;
-    #                          ALL other data_inputs are unavailable (their
-    #                          training defaults are NOT auto-substituted).
-    #
-    # The non-empty case enforces the contract that when the user replaces
-    # ANY size-affecting data_input (e.g., X), training defaults for sibling
-    # data_inputs (e.g., per-observation v_sq, group_idx, Z) cannot silently
-    # apply because their sizes are inconsistent with the supplied input.
-    # Under this rule, a downstream refresher whose declared data_input
-    # parent is missing from newdata MUST be skipped -- appearance in the
-    # output signals silent default-substitution.
+    descendants <- function(keys) {               # transitive closure over predict_edges
+        seen <- character(0); frontier <- keys
+        while (length(frontier)) {
+            nxt <- setdiff(unique(unlist(edges[intersect(frontier, names(edges))],
+                                         use.names = FALSE)), seen)
+            seen <- c(seen, nxt); frontier <- nxt
+        }
+        seen
+    }
     for (nd in sample_newdata) {
         nd_keys <- if (length(nd) == 0L) character(0) else names(nd)
-        is_empty_nd <- length(nd_keys) == 0L
-        is_available <- function(k) {
-            if (is_empty_nd) {
-                TRUE                              # empty newdata: defaults OK
-            } else {
-                (k %in% nd_keys) || !(k %in% di)  # strict: missing data_input == unavailable
+        # 1. the withheld cone: unsupplied members of any group that has a
+        #    replaced member, and everything downstream of them
+        withheld <- character(0)
+        for (g in groups) if (any(g %in% nd_keys)) withheld <- c(withheld, setdiff(g, nd_keys))
+        cone <- unique(c(withheld, descendants(withheld)))
+        # 2. deterministic pass, to a fixed point: recomputed iff >= 1 direct
+        #    parent supplied or recomputed AND every direct parent supplied,
+        #    recomputed, or a non-data-input key
+        det_keys <- setdiff(refresher_keys, stochastic_keys)
+        recomputed <- character(0)
+        repeat {
+            added <- FALSE
+            for (k in setdiff(det_keys, c(recomputed, cone))) {
+                ps <- parents[[k]]
+                changed <- ps %in% c(nd_keys, recomputed)
+                avail   <- changed | !(ps %in% di)
+                if (any(changed) && all(avail)) { recomputed <- c(recomputed, k); added <- TRUE }
             }
+            if (!added) break
         }
-        expected <- vapply(refresher_keys, function(k) {
-            ps <- parents[[k]]
-            length(ps) > 0L && all(vapply(ps, is_available, logical(1)))
-        }, logical(1))
+        # 3. stochastic pass: sampled iff neither the node nor any direct
+        #    parent is in the cone (a stored value is enough, including an
+        #    unsupplied ungrouped data input at its training value)
+        sampled <- Filter(function(k) !(k %in% cone) && !any(parents[[k]] %in% cone),
+                          intersect(refresher_keys, stochastic_keys))
+        expected <- refresher_keys %in% c(recomputed, sampled)   # supplied inputs are never returned
         names(expected) <- refresher_keys
 
-        # Run predict_at -- must NOT throw on legitimate partial newdata.
-        pp <- tryCatch(model$predict_at(nd),
+        # Run predict_at on the SINGLE-DRAW path (last_draw_only = TRUE): that
+        # path runs the composite's two passes, which is what the rule above
+        # describes. The history path is the wrapper's own per-draw replay and
+        # is covered by the last_draw_only checks, not here. A wrapper with no
+        # history path has no second arity (the mixin's stub answers "takes ONE
+        # list argument"); there the one-argument call IS the single-draw path.
+        # It must NOT throw on legitimate partial newdata.
+        single_draw <- function(nd) tryCatch(model$predict_at(nd, TRUE), error = function(e)
+            if (grepl("takes ONE list argument", conditionMessage(e))) model$predict_at(nd) else stop(e))
+        pp <- tryCatch(single_draw(nd),
                        error = function(e) {
                            stop(sprintf(paste0(
                                "[R1] predict_at(%s) threw an error: %s\n",
@@ -2618,14 +2678,15 @@ predict_dag_smoke <- function(model, sample_newdata = list()) {
         extra <- setdiff(actual, refresher_keys[expected])
         if (length(extra) > 0L) {
             stop(sprintf(paste0(
-                "[R1] predict_at(%s) returned key(s) [%s] despite at ",
-                "least one declared parent being unavailable -- this is ",
-                "the silent-default-substitution pattern (Semantic #6). ",
-                "The refresher body must not synthesise defaults ",
-                "for missing predict-DAG parents, the wrapper must not ",
-                "auto-pad sibling data_inputs from training, and the ",
-                "framework's BFS must skip the refresher when any parent ",
-                "is missing from the supplied newdata."),
+                "[R1] predict_at(%s) returned key(s) [%s] that the ",
+                "declared graph cannot produce for this newdata (a ",
+                "withheld or unavailable parent, or nothing upstream ",
+                "changed) -- this is the silent-default-substitution ",
+                "pattern (Semantic #6). The refresher body must not ",
+                "synthesise defaults for missing predict-DAG parents, the ",
+                "wrapper must not auto-pad sibling data_inputs from ",
+                "training, and it must not compute outputs the framework's ",
+                "own passes would skip."),
                 paste(nd_keys, collapse = ","),
                 paste(extra, collapse = ",")))
         }
@@ -2635,7 +2696,7 @@ predict_dag_smoke <- function(model, sample_newdata = list()) {
 # the generator emits a smoke-data fixture for. The wrapper's smoke-data
 # fixture should supply at least ONE non-empty newdata combination per
 # distinct data_input, sized to differ from training N where applicable.
-predict_dag_smoke(model, sample_newdata = SMOKE_NEWDATA)
+predict_dag_smoke(model, sample_newdata = SMOKE_NEWDATA, stochastic_keys = STOCHASTIC_KEYS)
 ```
 
 The wrapper-specific `SMOKE_NEWDATA` is a list of newdata candidates the
@@ -2731,7 +2792,7 @@ suppressPackageStartupMessages({
 # n_burnin / n_keep. The %dopar% call below uses exactly this.
 run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep,
                                   newdata = list()) {
-    m <- new(<ClassName>, <data_args>, as.integer(seed), TRUE)  # keep_history
+    m <- new(<ClassName>, <data_args>, rng_seed = as.integer(seed), keep_history = TRUE)
     t0 <- Sys.time()
     m$step(n_burnin)
     m$step(n_keep)

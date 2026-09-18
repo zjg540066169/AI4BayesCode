@@ -9,8 +9,14 @@ with ANALYTIC sensitivities. No step size, no tolerance, no integration error.
   ts[0] is t0 and row 0 equals y0, the same layout as `rk45()`.
 - `linear_sens(A, b, y0, ts, dA, db, dy0)` -- trajectory plus dy/dtheta.
   `dA[j]`, `db[j]`, `dy0[j]` are the derivatives of A, b, y0 with respect
-  to theta[j]. Returns `ode::rk45_sens_result`, so `ode::sens_chain(res,
-  dlp_dy)` contracts it into the gradient exactly as for rk45.
+  to theta[j]: `std::vector<arma::mat>`, `std::vector<arma::vec>`,
+  `std::vector<arma::vec>`, ALL of the same length p (one entry per
+  parameter, indexed as theta). A quantity that does not depend on
+  theta[j] contributes an explicit all-zero entry of the right shape (n x n
+  for dA[j], length n for db[j] and dy0[j]); a shorter or empty vector
+  throws std::invalid_argument. Returns `ode::rk45_sens_result`, so
+  `ode::sens_chain(res, dlp_dy)` contracts it into the gradient exactly as
+  for rk45.
 - `linear_overflows(A, b, y0, t_span)` -- predicts a non-finite result
   before it happens, from all of A, b, y0 and the horizon.
 

@@ -2176,12 +2176,14 @@ no numbered L2 check for this; the enforcement is R1.
 class <ClassName>
     : public AI4BayesCode::kernel_control_mixin<<ClassName>> {   // ALWAYS inherit mixin
 public:
-    <ClassName>(/* data + int rng_seed + bool keep_history = false */);
+    <ClassName>(/* data args (required), every hyperparameter with a LITERAL default, int rng_seed = 1, bool keep_history = false */);
     void                      step();                             // no-arg = 1 sweep; body is just `{ step(1); }`
     void                      step(int n_steps);                  // loops impl_->step(rng_) n_steps times
     AI4BayesCode::state_map   get_current() const;                // backend-neutral; Rcpp/pybind auto-convert
     void                      set_current(const AI4BayesCode::state_map& params);
-    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const;
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const;   // = predict_at(new_data, false)
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
+                                         bool last_draw_only) const;                     // the OVERLOAD pair (see PREDICTING AT THE LAST DRAW ONLY)
     AI4BayesCode::dag_info    get_dag() const;                    // = impl_->get_dag()
     AI4BayesCode::history_map get_history() const;                // = impl_->get_history()
     // CONDITIONAL kernel-control method -- emit ONLY if the composite contains any
@@ -2324,7 +2326,7 @@ Both are seeded ONCE in the constructor from the user-provided seed
 constant so the two streams are decoupled but reproducible):
 
 ```cpp
-<ClassName>(..., int rng_seed, bool keep_history = false)
+<ClassName>(..., int rng_seed = 1, bool keep_history = false)
     : rng_(rng_seed == 0
                ? std::mt19937_64{std::random_device{}()}
                : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)}),
@@ -2800,7 +2802,11 @@ RCPP_MODULE(<ClassName>_module) {
         .method("step", (void (ClassName::*)(int)) &ClassName::step)
         .method("get_current",  &ClassName::get_current)
         .method("set_current",  &ClassName::set_current)
-        .method("predict_at",   &ClassName::predict_at)
+        // predict_at is an OVERLOAD PAIR: Rcpp dispatches a method on ARITY
+        // alone, so bind EACH arity with an explicit member-pointer cast --
+        // one entry leaves the other call shape reporting no valid method.
+        .method("predict_at",   (AI4BayesCode::history_map (ClassName::*)(const AI4BayesCode::state_map&) const)       &ClassName::predict_at)
+        .method("predict_at",   (AI4BayesCode::history_map (ClassName::*)(const AI4BayesCode::state_map&, bool) const) &ClassName::predict_at)
         .method("get_dag",      &ClassName::get_dag)
         .method("get_history",  &ClassName::get_history)
         // CONDITIONAL, and the condition is a property of the MODEL, not of
@@ -2831,29 +2837,20 @@ RCPP_MODULE(<ClassName>_module) {
 
 Include `AI4BayesCode/rcpp_wrap.hpp` alongside the other AI4BayesCode headers.
 
-**`PYBIND11_MODULE` block (Python -- active when `AI4BAYESCODE_PYBIND_MODULE` is
-defined). Emit this too, always -- right after the RCPP block:**
-
-```cpp
-#ifdef AI4BAYESCODE_PYBIND_MODULE
-#include "AI4BayesCode/pybind_casters.hpp"
-
-PYBIND11_MODULE(<ClassName>, m) {
-    AI4BayesCode::register_ai4bayescode_types(m);  // one-time DagInfo/AdaptationInfo bindings
-
-    pybind11::class_<ClassName>(m, "<ClassName>")
 PREDICTING AT THE LAST DRAW ONLY. A wrapper whose predict_at walks the
 retained history takes a trailing switch, as an OVERLOAD so the existing
 one-argument call keeps its meaning:
 
-    history_map predict_at(const state_map& new_data) const {
-        return predict_at(new_data, /*last_draw_only=*/false);
-    }
-    history_map predict_at(const state_map& new_data,
-                           bool last_draw_only) const {
-        const bool use_history = keep_history_ && !last_draw_only;
-        ...                                  // branch on use_history
-    }
+```cpp
+history_map predict_at(const state_map& new_data) const {
+    return predict_at(new_data, /*last_draw_only=*/false);
+}
+history_map predict_at(const state_map& new_data,
+                       bool last_draw_only) const {
+    const bool use_history = keep_history_ && !last_draw_only;
+    ...                                  // branch on use_history
+}
+```
 
 Branch on `use_history`, never on `keep_history_` directly. `true` takes the
 single-draw path -- the one predict_at already takes when keep_history is
@@ -2881,11 +2878,26 @@ parameter nor the model. Never give a constructor parameter a name that is a
 prefix of `Class`; spell the concept out instead. The same name must then be
 used for the pybind11 arg label, so both frontends publish one name.
 
+**`PYBIND11_MODULE` block (Python -- active when `AI4BAYESCODE_PYBIND_MODULE` is
+defined). Emit this too, always -- right after the RCPP block:**
+
+```cpp
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+#include "AI4BayesCode/pybind_casters.hpp"
+
+PYBIND11_MODULE(<ClassName>, m) {
+    AI4BayesCode::register_ai4bayescode_types(m);  // one-time DagInfo/AdaptationInfo bindings
+
+    pybind11::class_<ClassName>(m, "<ClassName>")
         // Every `= default` here MIRRORS the default already written in the
         // C++ constructor signature; it is never the only place one lives.
         // The C++ signature is the single source both frontends read -- R
         // recovers defaults by parsing it, so a default that exists only in
-        // this binding is optional in Python and mandatory in R.
+        // this binding is optional in Python and mandatory in R. R can
+        // reconstruct only a LITERAL default (bool, plain number with an
+        // optional suffix or brace-init, default-constructed arma container);
+        // an expression, named constant, non-empty initialiser or string is
+        // treated as no default and the argument stays required in R.
         .def(pybind11::init<...args...>(),
              pybind11::arg("arg1"), pybind11::arg("arg2") = default_val, ...,
              "<docstring>")
@@ -2893,7 +2905,10 @@ used for the pybind11 arg label, so both frontends publish one name.
         .def("step", (void (ClassName::*)(int)) &ClassName::step, pybind11::arg("n_steps"))
         .def("get_current",  &ClassName::get_current)
         .def("set_current",  &ClassName::set_current, pybind11::arg("params"))
-        .def("predict_at",   &ClassName::predict_at, pybind11::arg("new_data"))
+        // predict_at: cast to the two-argument overload and default the switch,
+        // so predict_at(nd) and predict_at(nd, last_draw_only=True) both work.
+        .def("predict_at",   (AI4BayesCode::history_map (ClassName::*)(const AI4BayesCode::state_map&, bool) const) &ClassName::predict_at,
+             pybind11::arg("new_data"), pybind11::arg("last_draw_only") = false)
         .def("get_dag",      &ClassName::get_dag)
         .def("get_history",  &ClassName::get_history)
         // CONDITIONAL -- only emit if composite has NUTS-family child.
@@ -2904,8 +2919,9 @@ used for the pybind11 arg label, so both frontends publish one name.
              (void (ClassName::*)(int, bool, int, double)) &ClassName::readapt_NUTS,
              pybind11::arg("n"), pybind11::arg("reset") = false,
              pybind11::arg("max_tree_depth") = -1,
-             pybind11::arg("target_accept") = -1.0);
-    // ALWAYS -- kernel-control category (interface.md Sec.1).
+             pybind11::arg("target_accept") = -1.0)
+    // ALWAYS -- kernel-control category (interface.md Sec.1). No ';' before
+    // it: the macro CONTINUES the .def chain and terminates the statement.
     // The macro emits `.def("freeze", ...)`, `.def("unfreeze", ...)`,
     // `.def("get_frozen", ...)` bound to the mixin's forwarders.
     AI4BAYESCODE_PYBIND_KERNEL_CONTROL(ClassName);
@@ -2928,7 +2944,8 @@ Instead of a module block, emit a `main()` function at the end:
 ```cpp
 int main(int argc, char** argv) {
     arma::vec y = load_from_csv(argv[1]);  // user-defined
-    MyModel m(y, /*seed=*/42, /*keep_history=*/true);
+    MyModel m(y, /*every exposed hyperparameter, positionally, in Sec.8 order*/ 10.0,
+              /*rng_seed=*/42, /*keep_history=*/true);
 
     m.step(2000);  // warmup
     m.step(2000);  // keep

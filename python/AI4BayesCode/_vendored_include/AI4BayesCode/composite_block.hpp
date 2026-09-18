@@ -953,6 +953,7 @@ public:
         for (const auto& kv : preds)  out.predict_edges[kv.first]     = kv.second;
         for (const auto& kv : ctxs)   out.context_edges[kv.first]     = kv.second;
         out.data_inputs.assign(inputs.begin(), inputs.end());
+        out.data_input_groups = data_.data_input_groups();
         return out;
     }
 

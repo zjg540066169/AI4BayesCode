@@ -89,12 +89,17 @@ inline SEXP wrap(const AI4BayesCode::dag_info& d) {
     for (const auto& [k, v] : d.context_edges) {
         context_edges[k] = Rcpp::wrap(v);
     }
+    Rcpp::List data_input_groups(d.data_input_groups.size());
+    for (std::size_t i = 0; i < d.data_input_groups.size(); ++i) {
+        data_input_groups[i] = Rcpp::wrap(d.data_input_groups[i]);
+    }
     return Rcpp::List::create(
         Rcpp::Named("gibbs_reads")       = gibbs_reads,
         Rcpp::Named("gibbs_invalidates") = gibbs_invalidates,
         Rcpp::Named("predict_edges")     = predict_edges,
         Rcpp::Named("context_edges")     = context_edges,
-        Rcpp::Named("data_inputs")       = Rcpp::wrap(d.data_inputs)
+        Rcpp::Named("data_inputs")       = Rcpp::wrap(d.data_inputs),
+        Rcpp::Named("data_input_groups") = data_input_groups
     );
 }
 

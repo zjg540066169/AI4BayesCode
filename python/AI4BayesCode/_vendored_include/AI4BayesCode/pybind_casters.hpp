@@ -161,23 +161,25 @@ inline void register_ai4bayescode_types(py::module& m) {
         .def_readwrite("predict_edges", &dag_info::predict_edges)
         .def_readwrite("context_edges", &dag_info::context_edges)
         .def_readwrite("data_inputs", &dag_info::data_inputs)
+        .def_readwrite("data_input_groups", &dag_info::data_input_groups)
         .def("__getitem__", [](const dag_info& d, const std::string& k) -> py::object {
             if (k == "gibbs_reads")       return py::cast(d.gibbs_reads);
             if (k == "gibbs_invalidates") return py::cast(d.gibbs_invalidates);
             if (k == "predict_edges")     return py::cast(d.predict_edges);
             if (k == "context_edges")     return py::cast(d.context_edges);
             if (k == "data_inputs")       return py::cast(d.data_inputs);
+            if (k == "data_input_groups") return py::cast(d.data_input_groups);
             throw py::key_error("no such dag field: " + k);
         })
         .def("keys", [](const dag_info&) {
             return std::vector<std::string>{
                 "gibbs_reads", "gibbs_invalidates", "predict_edges",
-                "context_edges", "data_inputs"};
+                "context_edges", "data_inputs", "data_input_groups"};
         })
         .def("__contains__", [](const dag_info&, const std::string& k) {
             static const std::vector<std::string> keys{
                 "gibbs_reads", "gibbs_invalidates", "predict_edges",
-                "context_edges", "data_inputs"};
+                "context_edges", "data_inputs", "data_input_groups"};
             return std::find(keys.begin(), keys.end(), k) != keys.end();
         });
 

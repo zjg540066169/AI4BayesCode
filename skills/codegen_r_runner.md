@@ -155,7 +155,7 @@ documentation a first-time user reads):
 
    ```r
    run <- ai4bayescode_run_chains(
-       function(seed) new(<ClassName>, <data_args>, as.integer(seed), TRUE),
+       function(seed) new(<ClassName>, <data_args>, rng_seed = as.integer(seed), keep_history = TRUE),
        n_chains = 4L, n_burn = 4000L, n_keep = 4000L)
    ```
 
@@ -177,7 +177,7 @@ documentation a first-time user reads):
    ```r
    run <- ai4bayescode_run_chains(
        function(seed) {
-           m <- new(<ClassName>, <data_args>, as.integer(seed), TRUE)
+           m <- new(<ClassName>, <data_args>, rng_seed = as.integer(seed), keep_history = TRUE)
            m$freeze("sigma")   # only when the model pins a block
            m
        },
@@ -194,7 +194,7 @@ documentation a first-time user reads):
 
    ```r
    run <- ai4bayescode_run_chains(
-       function(seed) new(<ClassName>, <data_args>, as.integer(seed), TRUE),
+       function(seed) new(<ClassName>, <data_args>, rng_seed = as.integer(seed), keep_history = TRUE),
        n_chains = 4L, n_burn = 4000L, n_keep = 4000L)
    ai4bayescode_rhat_summary(run)   # convergence check across the chains
    dg <- ai4bayescode_diagnose(run$histories[[1]])
@@ -256,7 +256,7 @@ ai4bayescode_source("./<ClassName>/<ClassName>.cpp")
 # The model constructor is the inline function(seed) argument -- it builds
 # one fresh model per chain from the data simulated above.
 run <- ai4bayescode_run_chains(
-    function(seed) new(<ClassName>, <data_args>, as.integer(seed), TRUE),
+    function(seed) new(<ClassName>, <data_args>, rng_seed = as.integer(seed), keep_history = TRUE),
     n_chains = 4L, n_burn = 4000L, n_keep = 4000L)
 
 ai4bayescode_rhat_summary(run)   # convergence check across the chains
@@ -456,7 +456,7 @@ ai4bayescode_source("<folder>/<ClassName>.cpp")   # relative path; no AI4BayesCo
 #
 # RIGHT (data passed in; model-specific name):
 run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep, diagnosis = FALSE) {
-    model <- new(<ClassName>, <data_args>, as.integer(seed), TRUE)
+    model <- new(<ClassName>, <data_args>, rng_seed = as.integer(seed), keep_history = TRUE)
     # Kernel-control (freeze/unfreeze): must be re-issued per worker.
     # run_chain constructs a fresh model per chain (via foreach %dopar%);
     # freeze state does NOT auto-propagate from the outer scope. If you
@@ -754,7 +754,7 @@ message(sprintf("[timing] %.1fs across %d sweeps (%.3fs / sweep)",
 
 # ---- (Optional) Predict at new data ------------------------------------
 # pred <- c1 model-call equivalent at new X:
-# model <- new(<ClassName>, <data_args>, 42L, TRUE)
+# model <- new(<ClassName>, <data_args>, rng_seed = 42L, keep_history = TRUE)
 # model$step(n_burnin); model$step(n_keep)
 # pred <- model$predict_at(list(X = X_test))  # see wrapper's predict_at doc
 ```
@@ -802,7 +802,7 @@ return shape -- is identical):
 run_chain_<ClassName> <- function(<data_args>, seed, n_burnin, n_keep,
                                   readapt_every = 500L,
                                   readapt_n     = 50L) {
-    model <- new(<ClassName>, <data_args>, as.integer(seed), TRUE)
+    model <- new(<ClassName>, <data_args>, rng_seed = as.integer(seed), keep_history = TRUE)
     t0 <- Sys.time()
     # Periodic readapt schedule -- covers BOTH burn-in and keep, since the
     # conditional keeps shifting throughout sampling under Gibbs siblings.

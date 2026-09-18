@@ -464,7 +464,10 @@ rank -- do NOT read "item 1" as "try this first":
    `AI4BayesCode/ode_linear.hpp`. The wrapper builds `A(theta)`, `b(theta)`,
    `y0(theta)` and their derivatives `dA/dtheta_j`, `db/dtheta_j`,
    `dy0/dtheta_j` in closed form -- they are elementary for a linear system
-   -- and `linear_sens` returns the same `ode::rk45_sens_result` that
+   -- as three vectors of the SAME length p, one entry per parameter (a
+   quantity with no dependence on theta_j gets an explicit zero matrix or
+   vector of the right shape; a shorter or empty vector throws) -- and
+   `linear_sens` returns the same `ode::rk45_sens_result` that
    `ode::sens_chain(res, dlp_dy)` consumes, so the gradient contraction is
    identical to the rk45 path. A linear system MUST take this path; using
    rk45 on it is a validator failure. It is not a speed preference: on a
@@ -1040,8 +1043,12 @@ and store them in `shared_data_t` so the log-density lambda can read
 them from `ctx`:
 
 ```cpp
-// Constructor: pass hyperparameters
-MyModel(const arma::vec& y, double prior_mu_sd, double prior_sigma_sd, int seed)
+// Constructor: pass hyperparameters. Only data is required: every exposed
+// hyperparameter carries a LITERAL default in the C++ signature (the value
+// pre-generation validation settled on), and the seed is named rng_seed as
+// in the class shape (codegen_cpp.md Sec.8).
+MyModel(const arma::vec& y, double prior_mu_sd = 10.0, double prior_sigma_sd = 5.0,
+        int rng_seed = 1, bool keep_history = false)
 
 // Store in shared_data
 impl_->data().set("prior_mu_sd", arma::vec{prior_mu_sd});

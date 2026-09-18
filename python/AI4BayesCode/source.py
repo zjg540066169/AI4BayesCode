@@ -223,7 +223,7 @@ def _link_flags() -> list[str]:
 
 
 def _contributed_block_fingerprint(flags: Iterable[str]) -> str:
-    """Content fingerprint of every contributed-block directory on the -I path.
+    """Content fingerprint of every header tree on the -I path.
 
     The flags alone are not enough. Reinstalling a block -- install_block(force=
     True) fetching a new version, or editing a header under ./blocks_local/ --
@@ -233,17 +233,20 @@ def _contributed_block_fingerprint(flags: Iterable[str]) -> str:
     is exactly the silent-wrong-posterior failure the contrib design exists to
     prevent.
 
-    Fingerprints (path, size, mtime_ns) of every header under each -I'd block
-    directory. Cheap: a stat per file, no reading.
+    The core and vendored trees are covered for the same reason: reinstalling
+    the package (a new version, a changed core header) also leaves the -I path
+    and the example source byte-identical, and the cached binary built against
+    the OLD headers would be loaded -- a wrapper compiled before a field was
+    added to a core struct then reports the old layout.
+
+    Fingerprints (path, size, mtime_ns) of every header under each -I'd
+    directory. Cheap: a stat per file, no reading (a few tens of ms for the
+    vendored tree).
     """
     h = hashlib.sha256()
     roots = sorted({f[2:] for f in flags
                     if isinstance(f, str) and f.startswith("-I")})
     for root in roots:
-        # Only the contributed-block tiers; the core/vendored trees ship with
-        # the package and move only when the package itself is reinstalled.
-        if ("blocks_local" not in root) and ("blocks_download" not in root):
-            continue
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames.sort()
             for fn in sorted(filenames):

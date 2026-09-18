@@ -40,6 +40,7 @@
 #include <vector>
 
 #include "AI4BayesCode/shared_data.hpp"
+#include "AI4BayesCode/composite_block.hpp"
 
 static int g_pass = 0, g_fail = 0;
 static void check(bool ok, const std::string& what) {
@@ -268,6 +269,28 @@ int main() {
               "a loop over p forests declares p edges, not just the last");
         d2.declare_predict_edges("Z", {"beta_1"});
         check(e2.at("Z").size() == 3, "re-declaring an existing edge is a no-op");
+    }
+
+    // ------------------------------------------------------------------
+    // Case 8: the groups are part of get_dag(), so a frontend can compute the
+    // withheld cone from the same DAG it already reads (predict_edges,
+    // data_inputs) instead of guessing which inputs are co-indexed.
+    {
+        std::printf("\nCase 8: get_dag() carries data_input_groups\n");
+        AI4BayesCode::composite_block c;
+        auto& d = c.data();
+        for (const char* k : {"X", "Z", "W"}) d.set(k, arma::vec{1.0});
+        for (const char* k : {"X", "Z", "W"}) d.declare_data_input(k);
+        d.declare_data_input_group({"X", "Z"});
+        const AI4BayesCode::dag_info dag = c.get_dag();
+        check(dag.data_input_groups.size() == 1, "one declared group is reported");
+        check(dag.data_input_groups.size() == 1 && dag.data_input_groups[0].size() == 2
+              && has(dag.data_input_groups[0], "X") && has(dag.data_input_groups[0], "Z"),
+              "the group lists exactly its members");
+        check(dag.data_inputs.size() == 3, "data_inputs is unchanged by the group");
+        AI4BayesCode::composite_block c0;
+        c0.data().set("X", arma::vec{1.0});
+        check(c0.get_dag().data_input_groups.empty(), "no group declared -> empty, not absent");
     }
 
     std::printf("\n=== SUMMARY: %d passed, %d failed ===\n", g_pass, g_fail);

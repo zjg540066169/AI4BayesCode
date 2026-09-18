@@ -87,6 +87,7 @@
 //       seeds = (101, 202, 303, 404), n_burn=3000, n_keep=5000)
 //   print(ai.rhat_summary(run))                    # CROSS-chain R-hat / ESS
 //   summary, plot_fn = ai.diagnose(run[0]["hist"]); print(summary)
+// @example:end
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS

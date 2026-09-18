@@ -68,12 +68,18 @@ using history_map = std::unordered_map<std::string, arma::mat>;
  *   predict_edges[producer_key]    = keys produced downstream (generative)
  *   data_inputs                    = keys that represent replaceable
  *                                    data inputs at predict_at(list(key=x))
+ *   data_input_groups              = co-indexed groups of data inputs
+ *                                    (shared_data::declare_data_input_group):
+ *                                    replacing one member of a group
+ *                                    withholds the members not supplied,
+ *                                    and everything downstream of them
  */
 struct dag_info {
     std::unordered_map<std::string, std::vector<std::string>> gibbs_reads;
     std::unordered_map<std::string, std::vector<std::string>> gibbs_invalidates;
     std::unordered_map<std::string, std::vector<std::string>> predict_edges;
     std::vector<std::string> data_inputs;
+    std::vector<std::vector<std::string>> data_input_groups;
     // VIZ-ONLY prior / hyperprior parents. Rendered faded by ai4bayescode_plot_dag
     // as the generative context around the (solid) predict sub-DAG;
     // never traversed by predict_at. See shared_data::declare_context_edges.

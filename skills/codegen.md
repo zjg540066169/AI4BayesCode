@@ -418,7 +418,9 @@ full spec with priors, at Sec.3.)
      hardcoded in the `.cpp`.
    - **(b) Expose as constructor arguments** -- pass the hyperparameters
      into the class constructor so the user can tune them from R without
-     recompiling.
+     recompiling. Each exposed hyperparameter carries a LITERAL default in
+     the C++ signature (the value pre-generation validation settled on), so
+     only data is required (validator.md, Constructor-default checks).
    - **(c) Literature-informed hyperparameters** -- search the literature
      for domain-relevant effect sizes (or use LLM training knowledge if
      web search is unavailable) and translate them into informative
@@ -427,8 +429,9 @@ full spec with priors, at Sec.3.)
 
 3. **User did not specify a prior at all** -> Offer four choices:
    - **(a) Fixed value** -- treat the parameter as a known constant (not
-     sampled). Pass it as a constructor argument. Do NOT create a block
-     for it.
+     sampled). Pass it as a constructor argument, with the constant as a
+     literal default in the C++ signature unless it is a modelling choice
+     with no canonical default. Do NOT create a block for it.
    - **(b) Default weakly informative prior** -- pick from the table
      below, hardcoded.
    - **(c) Literature-informed prior** -- search the literature for
