@@ -115,6 +115,8 @@ can switch. (Full design: `block_design_skills/contrib.md`.)
 | **discrete categorical latents `z_i in {0..K_i-1}` (general n-variable mean-field VI)** | **`mean_field_categorical_vi_block`** (Bishop Sec.10.1 + RAABBVI) | **(none -- internal anchored softmax)** |
 | **discrete latents with user-specified CLIQUE partition (intra-clique joint, inter-clique factorised -- refines Block 4)** | **`structured_categorical_vi_block`** (Saul-Jordan 1996 + RAABBVI) | **(none -- per-clique anchored softmax)** |
 
+| **linear ODE state equation** `y' = A(theta) y + b(theta)`, A and b CONSTANT in t (b via the augmented matrix, A may be singular) | **`ode_linear.hpp`: `ode::linear` / `ode::linear_sens`** (exact matrix exponential; n = 2 closed form in w = s^2 t^2, else Pade-13; analytic sensitivities via Van Loan) | **(none -- exact; REQUIRED for a linear system, rk45 on it is a validator failure)** |
+| **nonlinear ODE state equation, or t-dependent coefficients** | **`ode_rk45.hpp`: `ode::rk45_sens_fd_inplace`** (RK4(5), forward sensitivities by FD of the RHS) | **(tolerance clamped at 1e-6 by the library; never the first choice for a linear system)** |
 ### When to use beta_gibbs_block vs NUTS for (0,1) parameters
 
 WARNING **READ `skills/codegen_priors.md` Sec.2b "Block selection priority" first.**
@@ -178,6 +180,7 @@ for its full configuration / discipline (do NOT read them all):
 - **`gmrf_precision_block`** -> `block_catalogue/gmrf_precision_block.md`
 - **`gmrf_gaussian_joint_block`** -> `block_catalogue/gmrf_gaussian_joint_block.md`
 - **`gmrf_whitened_ess_block`** -> `block_catalogue/gmrf_whitened_ess_block.md`
+- **`ode_linear.hpp`** -> `block_catalogue/ode_linear.md`
 - **`order_mcmc_block`** -> `block_catalogue/order_mcmc_block.md`
 - **`rjmcmc_block`** -> `block_catalogue/rjmcmc_block.md`
 - **`bart_block`** -> `block_catalogue/bart_block.md`

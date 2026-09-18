@@ -645,6 +645,12 @@ full list but the critical ones:
   short one turns a named call into a positional one at a DIFFERENT
   parameter. A default that lives only in the pybind11 binding is a bug: it
   makes the argument optional in Python and mandatory in R.
+- **A linear ODE is solved exactly, never integrated.** If the state equation
+  is `y' = A(theta) y + b(theta)` with A and b constant in t -- use `ode::linear` /
+  `ode::linear_sens` (`ode_linear.hpp`); `rk45` on such a system is a
+  validator failure. The integrator's step-size error is a noise source that
+  sits on the posterior and defeats NUTS, and in the stiff
+  region it is wrong outright. Decide linearity FIRST, before any solver.
 - **No hand-written Gibbs**: prefer existing blocks (`nuts_block`,
   `joint_nuts_block` -- handles real + per-slice POSITIVE/INTERVAL/
   ORDERED/SUM_TO_ZERO constraints -- `pg_logistic_block`, conjugate-Gibbs

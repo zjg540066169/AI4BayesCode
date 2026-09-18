@@ -2281,6 +2281,31 @@ valid R1 result: binding, dispatch and state bugs only surface on a real call.
    - `readapt_NUTS` (when bound): the call returns and leaves chain state
      unchanged (`get_current()` identical before and after).
 
+**Linear-ODE check -- MANDATORY for any model with an ODE state equation.
+Failing it is an R1 FAIL.** Write the right-hand side out and decide whether
+it is linear in the state with t-independent coefficients,
+`y' = A(theta) y + b(theta)`. If it is, the sampler MUST solve it with
+`ode::linear` / `ode::linear_sens` (`ode_linear.hpp`) and MUST NOT call any
+`ode::rk45*` function. This is not a preference: an integrator's step-size
+error is a noise source laid over the posterior and defeats NUTS
+adaptation; in the stiff
+region of parameter space rk45 at the library tolerance is also WRONG in
+the small component (1.8e-4 relative, measured). A closed form has no such
+term. The measured cost on a linear ODE model was 6x on benign parameters and
+~500x in the stiff region.
+
+Emit both.
+
+**(1) Classification.** State the RHS and say whether it is linear-in-state
+with constant coefficients, and why. A term that is a constant (in t) times one state component is linear; a
+product of state components, a nonlinear function of the state, or a
+coefficient that depends on t is not.
+
+**(2) Solver matches classification.** Linear -> `grep -n "rk45" <file>`
+returns nothing inside the model's solve path and `ode::linear` appears.
+Nonlinear -> rk45 is correct and this check passes. A linear model calling
+rk45 FAILS regardless of how well its chains mix.
+
 **Constructor-default checks -- MANDATORY, no skip. Any one failing is an R1
 FAIL.** Read `ai4bayescode_doc(<Class>)$constructor` and classify every
 argument: DATA (whatever the model treats as observations -- the design, the

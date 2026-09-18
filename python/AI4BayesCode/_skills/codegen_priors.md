@@ -451,7 +451,34 @@ rank -- do NOT read "item 1" as "try this first":
    ladder"** for the escalation order, and **"GP composition recipes"**
    for heteroscedastic / hierarchical / multi-output GP patterns.
 
-   ### ODE-model gradients: forward sensitivities by DEFAULT
+   ### ODE models: FIRST decide whether the system is linear
+
+   Before reaching for any integrator, write the right-hand side out and
+   check whether it is LINEAR IN THE STATE with coefficients that do not
+   depend on t:
+       y'(t) = A(theta) y(t) + b(theta)
+   Whether it holds is a property of the equations, not of the field the
+   model comes from: decide it from the RHS. When it holds, the solution is EXACT: `ode::linear(A, b, y0,
+   ts)` for the trajectory and `ode::linear_sens(A, b, y0, ts, dA, db, dy0)`
+   for the trajectory plus analytic sensitivities, both in
+   `AI4BayesCode/ode_linear.hpp`. The wrapper builds `A(theta)`, `b(theta)`,
+   `y0(theta)` and their derivatives `dA/dtheta_j`, `db/dtheta_j`,
+   `dy0/dtheta_j` in closed form -- they are elementary for a linear system
+   -- and `linear_sens` returns the same `ode::rk45_sens_result` that
+   `ode::sens_chain(res, dlp_dy)` consumes, so the gradient contraction is
+   identical to the rk45 path. A linear system MUST take this path; using
+   rk45 on it is a validator failure. It is not a speed preference: on a
+   linear ODE model the integrator's step-size noise sits on top of the
+   posterior and defeats NUTS adaptation, and in the stiff region of parameter
+   space -- which a chain visits constantly -- rk45 at the library tolerance
+   is not merely slower but WRONG in the small component. Measured on a
+   linear ODE model: 6x faster on benign parameters, ~500x in
+   the stiff region, with rk45's small-component error at 1.8e-4 relative.
+
+   Only when the RHS is genuinely nonlinear in y, or its coefficients depend
+   on t, does the integrator below apply.
+
+   ### Nonlinear ODE-model gradients: forward sensitivities by DEFAULT
 
    ODE likelihood on trajectory y(t; theta): DEFAULT gradient is ONE
    augmented solve `ode::rk45_sens_fd_inplace(f_ip, y0, ts, theta, ...)`
