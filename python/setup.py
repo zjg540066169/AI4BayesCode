@@ -18,7 +18,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="AI4BayesCode",
-    version="1.1.0",
+    version="1.1",
     description="Python helper for the AI4BayesCode MCMC library",
     long_description=(
         "Compile-on-demand pybind11 wrapper around user-written AI4BayesCode "
