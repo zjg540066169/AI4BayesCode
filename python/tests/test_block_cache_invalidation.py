@@ -88,10 +88,11 @@ def test_removing_a_file_from_the_bundle_moves_the_signature(block):
     assert _signature(text, flags, [], "clang-19") != before
 
 
-def test_core_include_dirs_are_not_fingerprinted(tmp_path, monkeypatch):
-    """Only the contributed-block tiers are walked. The core and vendored trees
-    ship with the package and move only when the package is reinstalled, so
-    stat-ing all of Eigen on every call would be pure cost."""
+def test_core_include_dirs_are_fingerprinted(tmp_path, monkeypatch):
+    """Every -I tree is walked, the core and vendored ones included. A package
+    reinstall leaves the -I paths and the source text byte-identical, so a core
+    header outside the key would let the cached binary built against the OLD
+    headers be loaded."""
     core = tmp_path / "vendored" / "eigen"
     core.mkdir(parents=True)
     (core / "Dense.hpp").write_text("// a\n")
@@ -101,7 +102,7 @@ def test_core_include_dirs_are_not_fingerprinted(tmp_path, monkeypatch):
     before = _contributed_block_fingerprint(flags)
     (core / "Dense.hpp").write_text("// b -- much longer content here\n")
     _bump_mtime(core / "Dense.hpp")
-    assert _contributed_block_fingerprint(flags) == before
+    assert _contributed_block_fingerprint(flags) != before
 
 
 def test_fingerprint_survives_a_vanished_directory(tmp_path, monkeypatch):
