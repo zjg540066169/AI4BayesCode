@@ -491,8 +491,9 @@ ai4bayescode_perf_hint <- function(wall_sec,
 #'   `run_chain_<Model>(diagnosis = TRUE)` runners call ONE function instead of
 #'   re-emitting it. PSIS-LOO is intentionally excluded (it needs a
 #'   model-specific pointwise log-likelihood).
-#' @param hist Named list of posterior draws: scalars as numeric vectors,
-#'   vector parameters as matrices (draws in rows).
+#' @param hist Named list of posterior draws (scalars as numeric vectors,
+#'   vector parameters as matrices, draws in rows), or a model object with a
+#'   `get_history()` method, whose history is then used.
 #' @param n_burn Integer; number of leading draws to drop from EVERY key before
 #'   summarising. `get_history()` includes burn-in, so pass the burn-in length
 #'   here; use `0` (default) when `hist` is already burn-in-stripped (no change
@@ -512,15 +513,21 @@ ai4bayescode_perf_hint <- function(wall_sec,
 #' hist <- list(mu = rnorm(2000), sigma = abs(rnorm(2000)))
 #' ai4bayescode_diagnose(hist)                 # all draws
 #' ai4bayescode_diagnose(hist, n_burn = 1000)  # drop the first 1000 draws first
+#' # or pass the model itself (same as m$get_history()):
+#' # ai4bayescode_diagnose(m, n_burn = 1000)
 #' }
 #' @export
 ai4bayescode_diagnose <- function(hist, n_burn = 0, plot = TRUE, order_components = FALSE) {
+    # A model object is accepted in place of its history.
+    if (!is.list(hist) &&
+        is.function(tryCatch(hist$get_history, error = function(e) NULL)))
+        hist <- hist$get_history()
     if (!requireNamespace("posterior", quietly = TRUE)) {
         stop("ai4bayescode_diagnose() needs the 'posterior' package. ",
              "Install it with install.packages('posterior').", call. = FALSE)
     }
     if (!is.list(hist) || is.null(names(hist)) || !all(nzchar(names(hist)))) {
-        stop("`hist` must be a named list of posterior draws ",
+        stop("`hist` must be a named list of posterior draws or a model with get_history() ",
              "(scalars as vectors, vector parameters as matrices).",
              call. = FALSE)
     }

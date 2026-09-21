@@ -117,9 +117,10 @@ def diagnose(hist, n_burn=0, plot=True, order_components=False, *, drop_burn=Non
 
     Parameters
     ----------
-    hist : dict[str, numpy.ndarray]
+    hist : dict[str, numpy.ndarray] or model
         Named posterior draws (a runner's ``out["hist"]`` or
-        ``model.get_history()``). Scalars are ``(n_draws,)``; vector
+        ``model.get_history()``), or the model itself, whose
+        ``get_history()`` is then used. Scalars are ``(n_draws,)``; vector
         parameters are ``(n_draws, dim)``.
     n_burn : int
         Number of leading draws to drop. ``get_history()`` includes
@@ -144,6 +145,8 @@ def diagnose(hist, n_burn=0, plot=True, order_components=False, *, drop_burn=Non
         list element; here it rides on the summary so that unpacking stays a
         two-tuple, which is what every generated runner does.
     """
+    if not isinstance(hist, dict) and callable(getattr(hist, "get_history", None)):
+        hist = hist.get_history()   # a model is accepted in place of its history
     if drop_burn is not None:      # accept rhat_summary's param name too
         n_burn = drop_burn
     # A negative n_burn slices from the END, so `[-1:]` keeps ONE draw, the

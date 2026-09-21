@@ -646,12 +646,16 @@ ai4bayescode_perf_hint <- function(wall_sec,
 # (that needs a model-specific pointwise log-likelihood).
 # ----------------------------------------------------------------------------
 ai4bayescode_diagnose <- function(hist, n_burn = 0, plot = TRUE, order_components = FALSE) {
+    # A model object is accepted in place of its history.
+    if (!is.list(hist) &&
+        is.function(tryCatch(hist$get_history, error = function(e) NULL)))
+        hist <- hist$get_history()
     if (!requireNamespace("posterior", quietly = TRUE)) {
         stop("ai4bayescode_diagnose() needs the 'posterior' package. ",
              "Install it with install.packages('posterior').", call. = FALSE)
     }
     if (!is.list(hist) || is.null(names(hist)) || !all(nzchar(names(hist)))) {
-        stop("`hist` must be a named list of posterior draws ",
+        stop("`hist` must be a named list of posterior draws or a model with get_history() ",
              "(scalars as vectors, vector parameters as matrices).",
              call. = FALSE)
     }
