@@ -8,8 +8,9 @@
 //  random effects (random intercept + random slope per group) under an
 //  LKJ(eta=2) prior on the correlation matrix of the random-effect vector.
 //
-//  PRIMARY SHOWCASE: constraints::cholesky_corr::wrap (no other shipped
-//  example exercises this constraint).
+//  PRIMARY SHOWCASE: the CHOLESKY_CORR sub-param of joint_nuts_block, which
+//  dispatches to constraints::cholesky_corr::wrap (no other shipped example
+//  exercises this constraint).
 //
 //  MODEL (d = 2 random-effect dimensions)
 //  --------------------------------------
@@ -27,51 +28,63 @@
 //  (a) NON-CENTERED on (tau, L, z): u_j = diag(tau) L z_j avoids the
 //      funnel geometry.
 //
-//  (b) JOINT NUTS on (beta, z, log_tau, log_sigma) via joint_nuts_block
-//      with dense-metric adaptation.
-//      Rationale: modular sampling of (tau) separately from (beta, z)
-//      causes SLOW MIXING because tau's Gibbs conditional shifts
-//      between sweeps (tau and z/beta are correlated through the mean
-//      structure). Joint NUTS with dense metric on all 4 continuous
-//      groups recovers good mixing; persistent (between-call) adaptation
-//      carries the tuning forward with n_warmup_per_step = 0.
+//  (b) ONE JOINT NUTS BLOCK on (beta, z, log_tau, log_sigma, L) via
+//      joint_nuts_block with dense-metric adaptation.
+//      Rationale: the data identify u_j = diag(tau) L z_j, the PRODUCT.
+//      Given z the conditional of L is tight, and given L the conditional
+//      of z is tight, so a Gibbs sweep that alternates an L block with a
+//      (beta, z, tau, sigma) block moves each of them a small accepted
+//      distance per sweep: measured on the @example:R data (4 chains x
+//      2000 kept), L's off-diagonal changed on 85% of sweeps with lag-1
+//      autocorrelation 0.94, rank R-hat 1.94, ESS 5.6, and z inherited
+//      the same slow mode (R-hat 1.74, ESS 6.1). The same coupling holds
+//      between tau and (beta, z). Joint NUTS with a dense metric over all
+//      five groups samples the coupled directions directly; persistent
+//      (between-call) adaptation carries the tuning forward with
+//      n_warmup_per_step = 0.
 //
-//  (c) tau and sigma are carried as log_tau / log_sigma inside the single
-//      REAL slice, with the half-Normal prior Jacobian and the
-//      Jeffreys cancellation written out in the log-density lambda. (A
-//      POSITIVE sub-param would do the transform for you; this file keeps
-//      the algebra visible because the Jacobian terms are the point of the
+//  (c) tau and sigma are carried as log_tau / log_sigma inside REAL
+//      slices, with the half-Normal prior Jacobian and the Jeffreys
+//      cancellation written out in the log-density lambda. (A POSITIVE
+//      sub-param would do the transform for you; this file keeps the
+//      algebra visible because the Jacobian terms are the point of the
 //      derivation below.)
 //
-//  (d) R_chol stays modular (constraints::cholesky_corr not supported
-//      in joint_nuts_block / _mixed). Its conditional given (beta, z,
-//      tau, sigma) is well-identified so modular sampling is fine.
+//  (d) L is a CHOLESKY_CORR sub-param of the joint block (natural width
+//      d*d, unconstrained width d*(d-1)/2). The block owns the
+//      partial-correlation transform and its log|J|; the oracle returns
+//      the natural-scale lp and d lp / d L, including the LKJ prior on the
+//      diagonal of L. This is the PRIMARY SHOWCASE for that constraint.
 //
-//  (e) Every block keeps n_warmup_per_step = 0.
+//  (e) n_warmup_per_step = 0.
 //      Ongoing per-step dual-averaging recomputes the step size against
 //      the kept draws, which both violates detailed balance AND can
 //      progressively collapse the step size, locking a chain into one
-//      neighborhood. (A prior version used 10/20 here; it FROZE the 1-D
-//      R_chol block at its warmup endpoint -> rank-R-hat = Inf. Persistent
-//      between-call adaptation handles the shifting sibling conditionals.)
+//      neighborhood. Persistent between-call adaptation carries the
+//      tuning forward.
 //
-//  BLOCK COMPOSITION (2 blocks, down from 5)
-//  -----------------------------------------
-//    1. joint (beta, z, log_tau, log_sigma) : joint_nuts_block
-//         dim = p + J*d + d + 1
+//  BLOCK COMPOSITION (1 block)
+//  ---------------------------
+//    1. joint (beta, z, log_tau, log_sigma, R_chol) : joint_nuts_block
+//         natural dim = p + J*d + d + 1 + d*d
+//         unconstrained dim = p + J*d + d + 1 + d*(d-1)/2
 //         DENSE METRIC adaptation (pilot 500 + adapt 1500 iters)
-//    2. R_chol                              : nuts_block cholesky_corr
 //
-//  UNCONSTRAINED-SCALE LOG-DENSITY MATH
-//  ------------------------------------
-//  Let theta_cat = [beta; z; log_tau; log_sigma].
+//  NATURAL-SCALE LOG-DENSITY MATH (what the oracle returns)
+//  ---------------------------------------------------------
+//  Let theta_cat = [beta; z; log_tau; log_sigma; L_flat] with L_flat the
+//  column-major d x d Cholesky factor (L_{0,0} = 1, L_{0,1} = 0).
 //  Natural-scale params: tau = exp(log_tau), sigma = exp(log_sigma).
 //
-//  Priors (natural scale + transform Jacobians on unconstrained scale):
+//  Priors (the REAL slices carry their own transform Jacobians; the
+//  CHOLESKY_CORR slice's log|J| is added by the block, NOT here):
 //    beta      : -||beta||^2 / (2 * 100)                 (Normal prior on natural; identity transform)
 //    z         : -||z||^2 / 2                             (N(0, I); identity)
 //    log_tau_k : -tau_k^2 / (2 * 2.5^2) + log_tau_k       (half-Normal + Jacobian)
 //    log_sigma : 0                                         (Jeffreys cancels Jacobian exactly)
+//    L         : sum_k (d - k + 2*eta - 2) log L_{kk}, k = 1..d, eta = 2
+//                (LKJ(eta) on the Cholesky factor; for d = 2 this is
+//                 3 log L_{0,0} + 2 log L_{1,1} = 2 log L_{1,1})
 //
 //  Likelihood on unconstrained scale (sigma = exp(log_sigma)):
 //    lik = -N * log_sigma - SSE / (2 * exp(2 * log_sigma))
@@ -84,11 +97,10 @@
 //    d / d z_{j,k}     : -z_{j,k} + sum_{i:g(i)=j} r_i * sum_m Z_{i,m} tau_m L_{m,k} / sigma^2
 //    d / d log_tau_l   : 1 - tau_l^2/6.25 + (tau_l/sigma^2) * sum_i r_i Z_{i,l} (Lz_{g(i)})_l
 //    d / d log_sigma   : -N + SSE / sigma^2
-//
-//
-//  R_chol block reads current (beta, z, tau, sigma) from ctx and uses
-//  the LKJ(eta=2) prior on L's diagonal: log p(L | eta) = sum_k (d - k +
-//  2*eta - 2) log L_{kk}. For d=2, eta=2: 3 log L_{0,0} + 2 log L_{1,1}.
+//    d / d L_{k,l}     : (d - k + 2*eta - 2) / L_{kk} [k = l]
+//                        + (tau_k/sigma^2) * sum_i r_i Z_{i,k} z_{l,g(i)}
+//                        (entries above the diagonal are ignored by the
+//                         block's chain rule)
 // ============================================================================
 
 // @example:R
@@ -161,9 +173,7 @@
 #include "AI4BayesCode/backend_neutral.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 #include "AI4BayesCode/composite_block.hpp"
-#include "AI4BayesCode/nuts_block.hpp"
 #include "AI4BayesCode/joint_nuts_block.hpp"
-#include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/rcpp_wrap.hpp"
 #include "AI4BayesCode/kernel_control_mixin.hpp"
 
@@ -177,12 +187,10 @@
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
-using AI4BayesCode::nuts_block;
-using AI4BayesCode::nuts_block_config;
 using AI4BayesCode::joint_nuts_block;
 using AI4BayesCode::joint_nuts_block_config;
 using AI4BayesCode::joint_nuts_sub_param;
-namespace constraints = AI4BayesCode::constraints;
+using AI4BayesCode::joint_constraint;
 
 namespace {
 
@@ -194,10 +202,13 @@ inline arma::mat L_view_from_flat(const arma::vec& L_flat, std::size_t d) {
 }
 
 // ============================================================================
-// Joint log-density on theta_cat = [beta; z_flat; log_tau; log_sigma]
-//   Length: p + J*d + d + 1
-//   All entries are on UNCONSTRAINED scale. tau = exp(log_tau), sigma =
-//   exp(log_sigma) are computed inside.
+// Joint log-density on theta_cat = [beta; z_flat; log_tau; log_sigma; L_flat]
+//   Length: p + J*d + d + 1 + d*d   (NATURAL scale, as the joint block
+//   presents it). beta / z / log_tau / log_sigma are REAL slices, so
+//   tau = exp(log_tau), sigma = exp(log_sigma) are computed inside with
+//   their Jacobians written out below. L_flat is the CHOLESKY_CORR slice:
+//   the block applies the partial-correlation transform and adds its
+//   log|J|; this oracle returns lp and d lp / d L on the natural scale.
 // ============================================================================
 double joint_log_density(const arma::vec& theta_cat,
                          const block_context& ctx,
@@ -206,7 +217,6 @@ double joint_log_density(const arma::vec& theta_cat,
     const arma::vec& X_flat = ctx.at("X");
     const arma::vec& Z_flat = ctx.at("Z");
     const arma::vec& group  = ctx.at("group_idx");
-    const arma::vec& L_flat = ctx.at("R_chol");
 
     const std::size_t N = y.n_elem;
     const std::size_t d = D;
@@ -219,11 +229,13 @@ double joint_log_density(const arma::vec& theta_cat,
     const std::size_t off_z       = p;
     const std::size_t off_log_tau = p + J * d;
     const std::size_t off_log_sig = p + J * d + d;
+    const std::size_t off_L       = p + J * d + d + 1;
 
     const arma::vec beta    = theta_cat.subvec(0,           p - 1);
     const arma::vec z_flat  = theta_cat.subvec(off_z,       off_z + J * d - 1);
     const arma::vec log_tau = theta_cat.subvec(off_log_tau, off_log_tau + d - 1);
     const double log_sigma  = theta_cat[off_log_sig];
+    const arma::vec L_flat  = theta_cat.subvec(off_L,       off_L + d * d - 1);
 
     arma::vec tau(d);
     for (std::size_t k = 0; k < d; ++k) tau[k] = std::exp(log_tau[k]);
@@ -235,7 +247,7 @@ double joint_log_density(const arma::vec& theta_cat,
     arma::mat Z(const_cast<double*>(Z_flat.memptr()), N, d, false, true);
     arma::mat L = L_view_from_flat(L_flat, d);
     arma::mat z_mat(const_cast<double*>(z_flat.memptr()), d, J, false, true);
-    arma::mat Lz = L * z_mat;                   // d × J
+    arma::mat Lz = L * z_mat;                   // d x J
     arma::mat u_mat = Lz;
     for (std::size_t k = 0; k < d; ++k) u_mat.row(k) *= tau[k];  // u = diag(tau) L z
 
@@ -277,6 +289,18 @@ double joint_log_density(const arma::vec& theta_cat,
     // Likelihood: -N * log_sigma - SSE/(2*sigma^2)
     lp -= static_cast<double>(N) * log_sigma;
     lp -= 0.5 * sse / sigma2;
+
+    // L: LKJ(eta = 2) on the Cholesky factor, log p(L | eta) =
+    // sum_k (d - k + 2*eta - 2) log L_{kk} with k = 1..d. The transform's
+    // own log|J| is the block's business (CHOLESKY_CORR slice), not this
+    // oracle's.
+    const double eta = 2.0;
+    for (std::size_t k = 0; k < d; ++k) {
+        const double weight = static_cast<double>(d) -
+                              (static_cast<double>(k) + 1.0) +
+                              2.0 * eta - 2.0;
+        lp += weight * std::log(L(k, k));
+    }
 
     if (grad_out) {
         grad_out->set_size(theta_cat.n_elem);
@@ -323,74 +347,17 @@ double joint_log_density(const arma::vec& theta_cat,
 
         // ---- d / d log_sigma = -N + SSE / sigma^2
         (*grad_out)[off_log_sig] = -static_cast<double>(N) + sse * inv_s2;
-    }
-    return lp;
-}
 
-// ============================================================================
-// R_chol block log-density (stays separate; cholesky_corr constraint)
-//   Reads beta, z, tau, sigma from shared_data (written by joint block)
-// ============================================================================
-double R_chol_log_density(const arma::vec& L_nat,
-                          const block_context& ctx,
-                          arma::vec* grad_nat) {
-    const arma::vec& y      = ctx.at("y");
-    const arma::vec& X_flat = ctx.at("X");
-    const arma::vec& Z_flat = ctx.at("Z");
-    const arma::vec& group  = ctx.at("group_idx");
-    const arma::vec& beta   = ctx.at("beta");
-    const arma::vec& z_flat = ctx.at("z_flat");
-    const arma::vec& tau    = ctx.at("tau");
-    const double sigma      = ctx.at("sigma")[0];
-
-    const std::size_t N = y.n_elem;
-    const std::size_t p = beta.n_elem;
-    const std::size_t d = D;
-    const std::size_t J = z_flat.n_elem / d;
-
-    arma::mat X(const_cast<double*>(X_flat.memptr()), N, p, false, true);
-    arma::mat Z(const_cast<double*>(Z_flat.memptr()), N, d, false, true);
-    arma::mat L = L_view_from_flat(L_nat, d);
-    arma::mat z_mat(const_cast<double*>(z_flat.memptr()), d, J, false, true);
-    arma::mat Lz = L * z_mat;
-    arma::mat u_mat = Lz;
-    for (std::size_t k = 0; k < d; ++k) u_mat.row(k) *= tau[k];
-
-    arma::vec mu(N);
-    for (std::size_t i = 0; i < N; ++i) {
-        double mu_i = 0.0;
-        for (std::size_t k = 0; k < p; ++k) mu_i += X(i, k) * beta[k];
-        const std::size_t g_i = static_cast<std::size_t>(
-            std::llround(group[i])) - 1u;
-        for (std::size_t k = 0; k < d; ++k) mu_i += Z(i, k) * u_mat(k, g_i);
-        mu[i] = mu_i;
-    }
-
-    const double eta = 2.0;
-    double lp = 0.0;
-    for (std::size_t k = 0; k < d; ++k) {
-        const double weight = static_cast<double>(d) -
-                              (static_cast<double>(k) + 1.0) +
-                              2.0 * eta - 2.0;
-        lp += weight * std::log(L(k, k));
-    }
-
-    const double inv_s2 = 1.0 / (sigma * sigma);
-    double sse = 0.0;
-    for (std::size_t i = 0; i < N; ++i) {
-        const double r = y[i] - mu[i];
-        sse += r * r;
-    }
-    lp -= 0.5 * sse * inv_s2;
-
-    if (grad_nat) {
-        grad_nat->set_size(d * d);
-        grad_nat->zeros();
+        // ---- d / d L_{k,l} (natural scale, column-major at off_L + l*d + k)
+        //   diagonal : (d - k + 2*eta - 2) / L_{kk}            (LKJ prior)
+        //   all k,l  : (tau_k / sigma^2) * sum_i r_i Z_{i,k} z_{l,g(i)}
+        // Entries above the diagonal receive a value too; the block's
+        // chain rule reads only the lower triangle.
         for (std::size_t k = 0; k < d; ++k) {
             const double weight = static_cast<double>(d) -
                                   (static_cast<double>(k) + 1.0) +
                                   2.0 * eta - 2.0;
-            (*grad_nat)[k * d + k] += weight / L(k, k);
+            (*grad_out)[off_L + k * d + k] += weight / L(k, k);
         }
         for (std::size_t i = 0; i < N; ++i) {
             const double r_i = y[i] - mu[i];
@@ -399,7 +366,7 @@ double R_chol_log_density(const arma::vec& L_nat,
             for (std::size_t k = 0; k < d; ++k) {
                 for (std::size_t l = 0; l < d; ++l) {
                     const double coef = Z(i, k) * tau[k] * z_mat(l, g_i);
-                    (*grad_nat)[l * d + k] += r_i * coef * inv_s2;
+                    (*grad_out)[off_L + l * d + k] += r_i * coef * inv_s2;
                 }
             }
         }
@@ -503,11 +470,7 @@ public:
 
         // Dependencies
         impl_->data().declare_dependencies(
-            "joint_block", {"y", "X", "Z", "group_idx", "beta_dim", "J_dim",
-                             "R_chol"});
-        impl_->data().declare_dependencies(
-            "R_chol", {"y", "X", "Z", "group_idx",
-                        "beta", "z_flat", "tau", "sigma"});
+            "joint_block", {"y", "X", "Z", "group_idx", "beta_dim", "J_dim"});
 
         // ---- Q7=A full predict-DAG reconstruction --------------------
         // Deterministic chain reconstructed as first-class nodes (so
@@ -639,7 +602,7 @@ public:
                 return y_rep_out;
             });
 
-        // -------- Joint block (beta, z, log_tau, log_sigma) with dense metric
+        // -------- Joint block (beta, z, log_tau, log_sigma, R_chol), dense metric
         {
             joint_nuts_block_config cfg;
             cfg.name = "joint_block";
@@ -647,16 +610,31 @@ public:
             cfg.sub_params.push_back({"z_flat",    J_ * d_});
             cfg.sub_params.push_back({"log_tau",   d_});
             cfg.sub_params.push_back({"log_sigma", 1});
-            // Concatenate initial values (log of positive for last two).
-            arma::vec init_cat(p_ + J_ * d_ + d_ + 1);
+            // R_chol: the d x d Cholesky factor of the RE correlation matrix
+            // (PRIMARY SHOWCASE for CHOLESKY_CORR). sub_param.dim is the
+            // NATURAL width d*d; the block samples the d*(d-1)/2
+            // unconstrained partial correlations and owns the transform.
+            {
+                joint_nuts_sub_param sp;
+                sp.name       = "R_chol";
+                sp.dim        = d_ * d_;
+                sp.constraint = joint_constraint::CHOLESKY_CORR;
+                cfg.sub_params.push_back(sp);
+            }
+            // Concatenate initial values on the NATURAL scale (log of the
+            // positive scalars for log_tau / log_sigma; L_init = I for R_chol).
+            const std::size_t off_L = p_ + J_ * d_ + d_ + 1;
+            arma::vec init_cat(off_L + d_ * d_);
             init_cat.subvec(0, p_ - 1) = beta_init;
             init_cat.subvec(p_, p_ + J_ * d_ - 1).zeros();       // z init = 0
             init_cat.subvec(p_ + J_ * d_, p_ + J_ * d_ + d_ - 1).zeros();   // log_tau init = 0 (tau = 1)
             init_cat[p_ + J_ * d_ + d_] = std::log(sigma_init);
+            init_cat.subvec(off_L, off_L + d_ * d_ - 1) = arma::vectorise(L_init);
             cfg.initial_cat = init_cat;
             cfg.log_density_grad = &joint_log_density;
 
-            // Dense metric essential for this joint's correlation structure.
+            // Dense metric: (tau, L, z) are coupled through u = diag(tau) L z
+            // and (beta, z) through the mean structure.
             cfg.use_dense_metric         = true;
             cfg.dense_metric_pilot_iters = 500;
             cfg.dense_metric_adapt_iters = 1500;
@@ -673,39 +651,13 @@ public:
             impl_->add_child(std::make_unique<joint_nuts_block>(std::move(cfg)));
         }
 
-        // -------- R_chol block (cholesky_corr -- PRIMARY SHOWCASE)
-        {
-            nuts_block_config cfg;
-            cfg.name        = "R_chol";
-            cfg.initial_unc = arma::vec(d_ * (d_ - 1) / 2, arma::fill::zeros);
-            cfg.constrain   = constraints::cholesky_corr::constrain;
-            cfg.unconstrain = constraints::cholesky_corr::unconstrain;
-            cfg.initial_step_size   = 0.05;
-            cfg.n_warmup_first_call = 500;
-            // n_warmup_per_step MUST stay 0. The prior
-            // value of 20 progressively shrank this 1-D correlation block's
-            // step size to ~0 by ~step 13, FREEZING R_chol at its warmup
-            // endpoint (sd=0, rank-R-hat=Inf between chains). Persistent
-            // dual-averaging from the first call's warmup is sufficient.
-            cfg.n_warmup_per_step   = 0;
-            cfg.log_density_grad =
-                [](const arma::vec& t_unc, const block_context& ctx,
-                   arma::vec* grad) {
-                    return constraints::cholesky_corr::wrap(t_unc, grad,
-                        [&](const arma::vec& t_nat, arma::vec* g_nat) {
-                            return R_chol_log_density(t_nat, ctx, g_nat);
-                        });
-                };
-            impl_->add_child(std::make_unique<nuts_block>(std::move(cfg)));
-        }
-
         if (keep_history_) impl_->set_keep_history(true);
 
         // After each step the joint block writes log_tau / log_sigma to
         // shared_data (sub-param keys). We also need tau = exp(log_tau) and
-        // sigma = exp(log_sigma) visible to the R_chol block and y_rep
-        // refresher under the "tau" / "sigma" keys. Register a post-step
-        // deterministic refresher that converts.
+        // sigma = exp(log_sigma) visible to the u / y_rep refreshers under
+        // the "tau" / "sigma" keys. Register a post-step deterministic
+        // refresher that converts.
         impl_->data().register_refresher(
             "tau",
             [](const AI4BayesCode::shared_data_t& d) {
@@ -721,11 +673,9 @@ public:
                 return arma::vec{std::exp(d.get("log_sigma")[0])};
             });
         // Order matters: tau before u (u reads tau); mu_fixed reads
-        // beta; u reads z_flat,tau,R_chol. Also refresh u after the
-        // R_chol block updates the Cholesky factor.
+        // beta; u reads z_flat,tau,R_chol -- all written by the one block.
         impl_->data().declare_invalidates(
             "joint_block", {"tau", "sigma", "mu_fixed", "u"});
-        impl_->data().declare_invalidates("R_chol", {"u"});
         // Prime initial tau / sigma from the initial log_tau / log_sigma.
         // The joint block's write-back on first step will populate these
         // keys; until then we keep the tau=1 / sigma=sigma_init defaults
@@ -841,14 +791,14 @@ public:
         }
 
         // History mode: joint_block sub-params are
-        //   beta (p), z_flat (D*J), log_tau (D), log_sigma (1).
-        // R_chol is a separate block. tau / sigma are NOT in history --
-        // they're refreshed from log_tau / log_sigma; rebuild per-draw.
+        //   beta (p), z_flat (D*J), log_tau (D), log_sigma (1), R_chol (D*D).
+        // tau / sigma are NOT in history -- they're refreshed from
+        // log_tau / log_sigma; rebuild per-draw.
         AI4BayesCode::history_map hist = impl_->get_history();
         const arma::mat& beta_hist      = hist.at("beta");      // n_draws x p
         const arma::mat& z_flat_hist    = hist.at("z_flat");    // n_draws x (D*J)
         const arma::mat& log_tau_hist   = hist.at("log_tau");   // n_draws x D
-        const arma::mat& R_chol_hist    = hist.at("R_chol");    // n_draws x (D*(D-1)/2)
+        const arma::mat& R_chol_hist    = hist.at("R_chol");    // n_draws x (D*D), natural Cholesky factor
         const arma::mat& log_sigma_hist = hist.at("log_sigma"); // n_draws x 1
         const std::size_t n_draws = beta_hist.n_rows;
 
@@ -968,13 +918,12 @@ RCPP_MODULE(HierarchicalLM_MultivariateRE_module) {
     Rcpp::class_<HierarchicalLM_MultivariateRE>("HierarchicalLM_MultivariateRE")
         .constructor<arma::vec, arma::mat, arma::vec, int, bool>(
             "Hierarchical linear model with multivariate (d=2) random "
-            "effects and LKJ(eta=2) correlation prior. Uses joint_nuts_block "
-            "with T11 DENSE METRIC on (beta, z, log_tau, log_sigma) — "
-            "manual log-transform for tau/sigma to keep the joint within "
-            "the real-only joint_nuts_block v0. R_chol stays modular "
-            "with cholesky_corr constraint. PRIMARY SHOWCASE for "
-            "constraints::cholesky_corr::wrap. group is a 1-indexed numeric "
-            "vector (integer labels stored as doubles).")
+            "effects and LKJ(eta=2) correlation prior. One joint_nuts_block "
+            "with a DENSE METRIC on (beta, z, log_tau, log_sigma, R_chol): "
+            "manual log-transform for tau/sigma with the Jacobians written "
+            "out, and R_chol as a CHOLESKY_CORR sub-param (PRIMARY SHOWCASE "
+            "for that constraint). group is a 1-indexed numeric vector "
+            "(integer labels stored as doubles).")
         .method("step", (void (HierarchicalLM_MultivariateRE::*)())    &HierarchicalLM_MultivariateRE::step, "Run one sweep.")
         .method("step", (void (HierarchicalLM_MultivariateRE::*)(int)) &HierarchicalLM_MultivariateRE::step, "Run n sweeps.")
         .method("get_current", &HierarchicalLM_MultivariateRE::get_current)
@@ -1036,8 +985,8 @@ PYBIND11_MODULE(HierarchicalLM_MultivariateRE, m) {
 //      y_i = X_i' beta + Z_i' u_{g(i)} + sigma * eps_i,
 //      u_j = diag(tau) . chol(R) . z_j,   z_j ~ N(0, I_2),
 //  with X_{i,0} = 1 (intercept) and Z_i = [X_{i,0}, X_{i,1}] (random
-//  intercept + random slope). Fits via joint-NUTS (beta, z, log_tau,
-//  log_sigma) + a modular cholesky_corr block on R, then checks:
+//  intercept + random slope). Fits via one joint-NUTS block on (beta, z,
+//  log_tau, log_sigma, R_chol), then checks:
 //    (1) posterior-mean fixed effects beta recover the truth, and
 //    (2) the model BEATS a naive pooled OLS-residual sigma (i.e. accounting
 //        for the random effects reduces residual scale toward sigma_true).

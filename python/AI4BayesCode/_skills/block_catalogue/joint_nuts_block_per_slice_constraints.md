@@ -87,5 +87,8 @@ impl_->add_child(std::make_unique<joint_nuts_block>(std::move(cfg)));
   REAL + POSITIVE per-slice constraints. (Linear mean coupling, no
   per-unit random effects -> dense_metric not required.)
 - `examples/HierarchicalLM_MultivariateRE.cpp` -- (beta, z_flat, log_tau,
-  log_sigma) joint with `cfg.use_dense_metric = true`. Canonical
-  HierLM-with-random-effects example.
+  log_sigma, R_chol) joint with `cfg.use_dense_metric = true`; R_chol is a
+  CHOLESKY_CORR slice (d*d natural, d*(d-1)/2 unconstrained). Canonical
+  HierLM-with-random-effects example. The random-effect scale, correlation
+  factor and raw effects enter the mean only through their product, so a
+  separate block for any one of them mixes slowly against the others.

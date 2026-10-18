@@ -275,8 +275,9 @@ rank -- do NOT read "item 1" as "try this first":
    `log_density_grad` / `initial_cat`); POSITIVE and all per-slice
    constraints are fully supported, alongside the dense / 3-phase /
    diagonal metric paths. See `examples/HSGPRegression.cpp` and
-   `examples/HierarchicalLM_MultivariateRE.cpp` for POSITIVE-slice +
-   dense-metric templates. Validator Check #11 (+ #24).
+   `examples/HierarchicalLM_MultivariateRE.cpp` for per-slice-constraint
+   (POSITIVE, CHOLESKY_CORR) + dense-metric templates. Validator Check #11
+   (+ #24).
 2. **`nuts_block`** -- standalone NUTS. **LOW priority, and for a SCALAR
    parameter it is the wrong tool** -- a scalar broken out of the joint
    block goes to `univariate_slice_sampling_block` (item 2a). What is
