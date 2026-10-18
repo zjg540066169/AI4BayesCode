@@ -313,7 +313,7 @@ inline void bprop(tree& x, xinfo& xi, pinfo& pi, tree::npv& goodbots, double& PB
   if(nxp==0) { //no parent, nx is the top and only node
     Pnogy=1.0;
   } else {
-    if(nxp->ntype() == 'n') { //if parent is a nog, number of nogs same at x and y
+    if(nxp->isnog()) { //if parent is a nog, number of nogs same at x and y (ntype() reports a root nog as 't')
       Pnogy = 1.0/nnogs;
     } else { //if parent is not a nog, y has one more nog.
       Pnogy = 1.0/(nnogs+1.0);
