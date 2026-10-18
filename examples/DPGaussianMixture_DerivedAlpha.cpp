@@ -93,7 +93,7 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(DPGaussianMixture_DerivedAlpha, y, 8L, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   print(ai4bayescode_rhat_summary(run, keys = c("phi", "pi", "stick_V", "mu", "lambda"), order_components = TRUE))  # label-invariant (sorted per draw)
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(DPGaussianMixture_DerivedAlpha, y, 8L, 7L)  # (y, K_trunc, seed)
@@ -114,7 +114,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DPGaussianMixture_DerivedAlpha(y, 8, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   print(AI4BayesCode.rhat_summary(chains, keys=["phi", "pi", "stick_V", "mu", "lambda"], order_components=True))  # label-invariant (sorted per draw)
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.DPGaussianMixture_DerivedAlpha(y, 8, 7)  # (y, K_trunc, seed)
@@ -152,6 +152,7 @@
 #include "AI4BayesCode/nuts_block.hpp"
 #include "AI4BayesCode/univariate_slice_sampling_block.hpp"
 #include "AI4BayesCode/stick_breaking_block.hpp"
+#include "AI4BayesCode/stick_label_swap_block.hpp"
 #include "AI4BayesCode/normal_gamma_cluster_gibbs_block.hpp"
 #include "AI4BayesCode/bnp_utils.hpp"
 #include "AI4BayesCode/kernel_control_mixin.hpp"
@@ -173,6 +174,8 @@ using AI4BayesCode::nuts_block_config;
 using AI4BayesCode::univariate_slice_sampling_block;
 using AI4BayesCode::univariate_slice_sampling_block_config;
 using AI4BayesCode::stick_breaking_block;
+using AI4BayesCode::stick_label_swap_block;
+using AI4BayesCode::stick_label_swap_block_config;
 using AI4BayesCode::stick_breaking_block_config;
 using AI4BayesCode::normal_gamma_cluster_gibbs_block;
 using AI4BayesCode::normal_gamma_cluster_gibbs_block_config;
@@ -426,6 +429,8 @@ public:
             {"cluster_counts"});
 
         impl_->data().declare_invalidates("z",   {"cluster_counts"});
+        impl_->data().declare_dependencies("label_swap", {"z", "mu", "lambda", "pi", "stick_V", "alpha"});
+        impl_->data().declare_invalidates("label_swap", {"cluster_counts"});
         impl_->data().declare_invalidates("phi", {"alpha"});
 
         // (No declare_data_input here -- y is an observed terminal,
@@ -573,6 +578,15 @@ public:
                     return phi_natural_log_density(t_unc, ctx, nullptr);
                 };
             impl_->add_child(std::make_unique<univariate_slice_sampling_block>(std::move(cfg)));
+        }
+        // ---- child(4) label_swap: relabel whole clusters so the slot weights mix
+        //      (stick_label_swap_block; does not change the posterior)
+        {
+            stick_label_swap_block_config cfg;
+            cfg.name      = "label_swap";
+            cfg.K_trunc   = K_;
+            cfg.atom_keys = {{"mu", d_}, {"lambda", d_}};
+            impl_->add_child(std::make_unique<stick_label_swap_block>(std::move(cfg)));
         }
 
         if (keep_history_) impl_->set_keep_history(true);

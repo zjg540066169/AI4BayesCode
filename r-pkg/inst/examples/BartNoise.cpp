@@ -64,12 +64,12 @@
 //   y <- f + rnorm(N, 0, 0.5)                             # y ~ N(f, sigma_true^2), sigma_true = 0.5
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(BartNoise, X, y, 50L, 2.0, 2.0, 0.95, 3.0, 100L, FALSE, FALSE, seed, FALSE, TRUE),
-//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//       function(seed) new(BartNoise, X, y, 200L, 2.0, 2.0, 0.95, 3.0, 100L, FALSE, FALSE, seed, FALSE, TRUE),
+//       n_chains = 4, n_burn = 1000, n_keep = 6000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m <- new(BartNoise, X, y, 50L, 2.0, 2.0, 0.95, 3.0, 100L, FALSE, FALSE, 42L)
+//   m <- new(BartNoise, X, y, 200L, 2.0, 2.0, 0.95, 3.0, 100L, FALSE, FALSE, 42L)
 //                                                          # ntrees=50,k=2,power=2,base=.95,nu=3,numcut=100,dart=F,aug=F,seed=42
 //   m$step(2000L); str(m$get_current())                  # $f_bart fitted mean, $sigma noise SD
 // @example:python
@@ -81,12 +81,12 @@
 //   Mod = AI4BayesCode.example("BartNoise")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
-//       lambda seed: Mod.BartNoise(X, y, 50, 2.0, 2.0, 0.95, 3.0, 100, False, False, seed, False, True),
-//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//       lambda seed: Mod.BartNoise(X, y, 200, 2.0, 2.0, 0.95, 3.0, 100, False, False, seed, False, True),
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=6000, n_jobs=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
-//   m = Mod.BartNoise(X, y, 50, 2.0, 2.0, 0.95, 3.0, 100, False, False, 42, False, False)
+//   m = Mod.BartNoise(X, y, 200, 2.0, 2.0, 0.95, 3.0, 100, False, False, 42, False, False)
 //   m.step(2000); print(m.get_current())                 # 'f_bart' fitted mean, 'sigma' noise SD
 // @example:end
 

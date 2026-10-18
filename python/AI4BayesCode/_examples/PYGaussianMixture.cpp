@@ -119,7 +119,7 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(PYGaussianMixture, y, 12L, 0.0, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
+//   print(ai4bayescode_rhat_summary(run, keys = c("alpha", "pi", "stick_V", "mu", "lambda"), order_components = TRUE))  # label-invariant (sorted per draw)
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(PYGaussianMixture, y, 12L, 0.0, 7L)  # (y, K_trunc, discount=0(DP), seed)
@@ -140,7 +140,7 @@
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.PYGaussianMixture(y, 12, 0.0, seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
-//   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
+//   print(AI4BayesCode.rhat_summary(chains, keys=["alpha", "pi", "stick_V", "mu", "lambda"], order_components=True))  # label-invariant (sorted per draw)
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.PYGaussianMixture(y, 12, 0.0, 7)   # (y, K_trunc, discount=0(DP), seed)
@@ -174,6 +174,7 @@
 #include "AI4BayesCode/nuts_block.hpp"
 #include "AI4BayesCode/univariate_slice_sampling_block.hpp"
 #include "AI4BayesCode/stick_breaking_block.hpp"
+#include "AI4BayesCode/stick_label_swap_block.hpp"
 #include "AI4BayesCode/normal_gamma_cluster_gibbs_block.hpp"
 #include "AI4BayesCode/bnp_utils.hpp"
 #include "AI4BayesCode/kernel_control_mixin.hpp"
@@ -195,6 +196,8 @@ using AI4BayesCode::nuts_block_config;
 using AI4BayesCode::univariate_slice_sampling_block;
 using AI4BayesCode::univariate_slice_sampling_block_config;
 using AI4BayesCode::stick_breaking_block;
+using AI4BayesCode::stick_label_swap_block;
+using AI4BayesCode::stick_label_swap_block_config;
 using AI4BayesCode::stick_breaking_block_config;
 using AI4BayesCode::normal_gamma_cluster_gibbs_block;
 using AI4BayesCode::normal_gamma_cluster_gibbs_block_config;
@@ -501,6 +504,8 @@ public:
         impl_->data().declare_dependencies("alpha",
             {"cluster_counts", "a_alpha", "b_alpha", "discount"});
         impl_->data().declare_invalidates("z", {"cluster_counts"});
+        impl_->data().declare_dependencies("label_swap", {"z", "mu", "lambda", "pi", "stick_V", "alpha", "discount"});
+        impl_->data().declare_invalidates("label_swap", {"cluster_counts"});
 
         // (No declare_data_input here -- y is an observed terminal,
         // not a replaceable covariate. The y_rep refresher reads
@@ -660,6 +665,16 @@ public:
                         });
                 };
             impl_->add_child(std::make_unique<univariate_slice_sampling_block>(std::move(cfg)));
+        }
+        // ---- child(4) label_swap: relabel whole clusters so the slot weights mix
+        //      (stick_label_swap_block; does not change the posterior)
+        {
+            stick_label_swap_block_config cfg;
+            cfg.name      = "label_swap";
+            cfg.K_trunc   = K_;
+            cfg.atom_keys = {{"mu", d_}, {"lambda", d_}};
+            cfg.discount  = impl_->data().get("discount")[0];
+            impl_->add_child(std::make_unique<stick_label_swap_block>(std::move(cfg)));
         }
 
         if (keep_history_) impl_->set_keep_history(true);
@@ -985,71 +1000,63 @@ int main() {
     const int n_warm = 1500;
     model.step(n_warm);
 
-    // sampling: accumulate posterior-mean of pi and mu over kept draws.
+    // sampling: inside EACH draw, match every true centre to its nearest
+    // active component (pi_k > weight_floor in that draw), then average over
+    // draws. Matching within a draw is label-invariant, so it stays valid
+    // while the label-swap moves move clusters between slots.
     // get_current() returns pi (length K), mu COLUMN-MAJOR (index j*K + k),
     // and alpha (length 1).
     const int M = 2000;
     const std::size_t Ksz = static_cast<std::size_t>(K_trunc);
-    arma::vec pi_bar(Ksz, arma::fill::zeros);
-    arma::mat mu_bar(Ksz, d, arma::fill::zeros);
+    const double weight_floor = 0.05;
     double alpha_bar = 0.0;
+    double dist_bar[3] = {0.0, 0.0, 0.0}, w_bar[3] = {0.0, 0.0, 0.0};
+    std::vector<int> n_active_count(Ksz + 1, 0);
     for (int s = 0; s < M; ++s) {
         model.step(1);
         const auto gc = model.get_current();
         const arma::vec& pi = gc.at("pi");
         const arma::vec& mu = gc.at("mu");   // column-major: index = j*K + k
-        for (std::size_t k = 0; k < Ksz; ++k) {
-            pi_bar[k] += pi[k];
-            for (std::size_t j = 0; j < d; ++j)
-                mu_bar(k, j) += mu[j * Ksz + k];
+        std::size_t na = 0;
+        for (std::size_t k = 0; k < Ksz; ++k) if (pi[k] > weight_floor) ++na;
+        ++n_active_count[na];
+        for (std::size_t c = 0; c < 3; ++c) {
+            double best = std::numeric_limits<double>::infinity(), wbest = 0.0;
+            for (std::size_t k = 0; k < Ksz; ++k) {
+                if (pi[k] <= weight_floor) continue;
+                double dist2 = 0.0;
+                for (std::size_t j = 0; j < d; ++j) {
+                    const double dv = mu[j * Ksz + k] - centres[c][j];
+                    dist2 += dv * dv;
+                }
+                if (dist2 < best) { best = dist2; wbest = pi[k]; }
+            }
+            dist_bar[c] += std::sqrt(best) / static_cast<double>(M);
+            w_bar[c]    += wbest / static_cast<double>(M);
         }
         alpha_bar += gc.at("alpha")[0];
     }
-    pi_bar    /= static_cast<double>(M);
-    mu_bar    /= static_cast<double>(M);
     alpha_bar /= static_cast<double>(M);
+    std::size_t n_active = 0;   // modal number of active components
+    for (std::size_t a = 0; a <= Ksz; ++a)
+        if (n_active_count[a] > n_active_count[n_active]) n_active = a;
 
-    // ---- recovery check (label-permutation tolerant) -------------------
-    // A component is "active" if its mean posterior weight exceeds a floor.
-    const double weight_floor = 0.05;
-    std::size_t n_active = 0;
-    for (std::size_t k = 0; k < Ksz; ++k)
-        if (pi_bar[k] > weight_floor) ++n_active;
-
-    // For each TRUE centre, find the nearest active fitted component and
-    // record (a) the distance and (b) that it carries meaningful weight.
     bool all_centres_matched = true;
     double worst_dist = 0.0;
     std::printf("PYGaussianMixture demo (PY discount=%.1f, K_trunc=%d, "
                 "N=%zu, d=%zu)\n", discount, K_trunc, N, d);
-    std::printf("  posterior-mean alpha = %.3f, n_active(pi>%.2f) = %zu "
+    std::printf("  posterior-mean alpha = %.3f, modal n_active(pi>%.2f) = %zu "
                 "(truth K=3)\n", alpha_bar, weight_floor, n_active);
     for (std::size_t c = 0; c < 3; ++c) {
-        double best = std::numeric_limits<double>::infinity();
-        std::size_t best_k = 0;
-        for (std::size_t k = 0; k < Ksz; ++k) {
-            if (pi_bar[k] <= weight_floor) continue;
-            double dist2 = 0.0;
-            for (std::size_t j = 0; j < d; ++j) {
-                const double dv = mu_bar(k, j) - centres[c][j];
-                dist2 += dv * dv;
-            }
-            const double dist = std::sqrt(dist2);
-            if (dist < best) { best = dist; best_k = k; }
-        }
+        const double best = dist_bar[c];
         if (best > worst_dist) worst_dist = best;
         const bool matched = std::isfinite(best) && best < 0.75;
         if (!matched) all_centres_matched = false;
-        std::printf("  true centre (%.1f, %.1f): nearest active comp %zu at "
-                    "(%.2f, %.2f), dist=%.3f, weight=%.3f  [%s]\n",
-                    centres[c][0], centres[c][1], best_k,
-                    std::isfinite(best) ? mu_bar(best_k, 0) : 0.0,
-                    std::isfinite(best) ? mu_bar(best_k, 1) : 0.0,
-                    best,
-                    std::isfinite(best) ? pi_bar[best_k] : 0.0,
+        std::printf("  true centre (%.1f, %.1f): mean distance to nearest active "
+                    "component = %.3f, weight=%.3f  [%s]\n",
+                    centres[c][0], centres[c][1], best, w_bar[c],
                     matched ? "OK" : "MISS");
     }
-
     // Pass criterion: all 3 true centres matched by a distinct, meaningful
     // component, modal active count is 3 (not over/under clustered), and the
     // worst centre-recovery distance is small relative to sd.

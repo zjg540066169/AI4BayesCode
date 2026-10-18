@@ -66,7 +66,7 @@
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(DPGammaMixture, y, 12L, as.integer(seed), TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
-//   print(ai4bayescode_rhat_summary(run))
+//   print(ai4bayescode_rhat_summary(run, keys = c("alpha", "pi", "stick_V", "shape", "rate"), order_components = TRUE))  # label-invariant (sorted per draw)
 //   ai4bayescode_diagnose(run$histories[[1]])
 // @example:python
 //   import numpy as np, AI4BayesCode
@@ -115,6 +115,7 @@
 #include "AI4BayesCode/nuts_block.hpp"
 #include "AI4BayesCode/univariate_slice_sampling_block.hpp"
 #include "AI4BayesCode/stick_breaking_block.hpp"
+#include "AI4BayesCode/stick_label_swap_block.hpp"
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::categorical_gibbs_block;
@@ -129,6 +130,8 @@ using AI4BayesCode::nuts_block_config;
 using AI4BayesCode::univariate_slice_sampling_block;
 using AI4BayesCode::univariate_slice_sampling_block_config;
 using AI4BayesCode::stick_breaking_block;
+using AI4BayesCode::stick_label_swap_block;
+using AI4BayesCode::stick_label_swap_block_config;
 using AI4BayesCode::stick_breaking_block_config;
 namespace constraints = AI4BayesCode::constraints;
 namespace bnp = AI4BayesCode::bnp;
@@ -269,6 +272,8 @@ public:
         impl_->data().declare_dependencies("pi",    {"cluster_counts", "alpha"});
         impl_->data().declare_dependencies("alpha", {"cluster_counts", "a_alpha", "b_alpha"});
         impl_->data().declare_invalidates("z", {"cluster_counts"});
+        impl_->data().declare_dependencies("label_swap", {"z", "shape", "rate", "pi", "stick_V", "alpha"});
+        impl_->data().declare_invalidates("label_swap", {"cluster_counts"});
 
         // ---- child(0) z : exact categorical draw --------------------------
         // Sampling note: z is a discrete cluster label, drawn exactly from its
@@ -344,6 +349,15 @@ public:
                         });
                 };
             impl_->add_child(std::make_unique<univariate_slice_sampling_block>(std::move(cfg)));
+        }
+        // ---- child(4) label_swap: relabel whole clusters so the slot weights mix
+        //      (stick_label_swap_block; does not change the posterior)
+        {
+            stick_label_swap_block_config cfg;
+            cfg.name      = "label_swap";
+            cfg.K_trunc   = K_;
+            cfg.atom_keys = {{"shape", 1}, {"rate", 1}};
+            impl_->add_child(std::make_unique<stick_label_swap_block>(std::move(cfg)));
         }
 
         // ---- Predict DAG + y_rep stochastic refresher --------------------

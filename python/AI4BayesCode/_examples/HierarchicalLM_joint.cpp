@@ -58,7 +58,7 @@
 // @example:R
 //   library(AI4BayesCode)
 //   ai4bayescode_example("HierarchicalLM_joint")
-//   set.seed(2024); G<-8L; p<-2L; per<-30L; N<-G*per                # balanced hierarchical LM
+//   set.seed(2024); G<-8L; p<-2L; per<-5L; N<-G*per                # balanced hierarchical LM
 //   g<-rep(1:G, each=per); u<-rnorm(G, 0, 1.2)                      # u_g ~ N(0, tau=1.2)
 //   X<-matrix(rnorm(N*p), N, p)                                     # design matrix N x p
 //   y<-1.5 + X %*% c(2.0,-1.0) + u[g] + rnorm(N, 0, 0.7)           # alpha=1.5,beta=(2,-1),sigma=0.7
@@ -74,7 +74,7 @@
 // @example:python
 //   import numpy as np, AI4BayesCode
 //   rng = np.random.default_rng(2024)
-//   G, p, per = 8, 2, 30; N = G * per                              # balanced hierarchical LM
+//   G, p, per = 8, 2, 5; N = G * per                              # balanced hierarchical LM
 //   g = np.repeat(np.arange(1, G + 1), per)                        # 1-based group index, length N
 //   u = rng.normal(0.0, 1.2, G)                                    # u_g ~ N(0, tau=1.2)
 //   X = rng.normal(0.0, 1.0, (N, p))                               # design matrix N x p
