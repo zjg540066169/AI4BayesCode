@@ -104,6 +104,7 @@ can switch. (Full design: `block_design_skills/contrib.md`.)
 | **tightly-coupled real parameters (shift-invariance, additive linear mean, fixed+random effect)** | **`joint_nuts_block`** | **(none -- identity; current scope is real only)** |
 | **hierarchical random effects** (`u_i ~ N(mu_u, tau)` with group-level `mu_u`, `tau`) -- Gaussian, binomial, Poisson, or any GLMM family | **`joint_nuts_block`** with NC reparameterization (read `skills/hierarchical_re.md` BEFORE coding) | **(positive constraints on `tau, sigma_y`; real on `mu_u, u_raw, beta`)** |
 | **truncated stick-breaking simplex (DP / PY / HDP weights)** | **`stick_breaking_block`** | **(none -- per-stick Beta gamma-trick)** |
+| **relabelling of whole clusters in a truncated stick-breaking mixture -- include it in EVERY composition that samples z, atoms and sticks, so the slot weights mix** | **`stick_label_swap_block`** | **(none -- Papaspiliopoulos-Roberts 2008 neighbour swap; Hastie-Liverani-Richardson 2015 weight-preserving swap, DP only)** |
 | **mixture-component atoms across K_trunc clusters, given explicit allocations z -- ANY per-component prior, ANY component density. THE DEFAULT: start here and leave only for an EXACT conjugate match below.** | **`cluster_atom_block`** | **Ishwaran & James (2001) step (a) per component, univariate slice; empty components fall back to the prior automatically. Do NOT fall back to one `joint_nuts_block` over all K components -- one frozen step size cannot track a target that flips prior-wide / data-narrow every sweep.** |
 | **the same, but the per-component prior is EXACTLY conjugate diagonal Normal-Gamma** (a Normal location with an independent half-Normal / half-Cauchy / log-Normal scale is NOT Normal-Gamma -- that takes the default above) | **`normal_gamma_cluster_gibbs_block`** | **(none -- per-cluster, per-dim conjugate)** |
 | **full-covariance Gaussian cluster (mu_k, Sigma_k) with conjugate NIW prior across K_trunc clusters** | **`niw_cluster_gibbs_block`** | **(none -- per-cluster Bartlett decomposition)** |
@@ -199,6 +200,7 @@ for its full configuration / discipline (do NOT read them all):
 - **`joint_nuts_block`** -> `block_catalogue/joint_nuts_block.md`
 - **`joint_nuts_block -- per-slice constraints`** -> `block_catalogue/joint_nuts_block_per_slice_constraints.md`
 - **`stick_breaking_block`** -> `block_catalogue/stick_breaking_block.md`
+- **`stick_label_swap_block`** -> `block_catalogue/stick_label_swap_block.md`
 - **`normal_gamma_cluster_gibbs_block`** -> `block_catalogue/normal_gamma_cluster_gibbs_block.md`
 - **`cluster_atom_block`** -> `block_catalogue/cluster_atom_block.md`
 - **`niw_cluster_gibbs_block`** -> `block_catalogue/niw_cluster_gibbs_block.md`

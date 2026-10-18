@@ -65,7 +65,7 @@
 //   y   <- ifelse(grp == 1, rgamma(n, 9, 3), rgamma(n, 40, 2))
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(DPGammaMixture, y, 12L, as.integer(seed), TRUE),
-//       n_chains = 4, n_burn = 1000, n_keep = 2000)
+//       n_chains = 4, n_burn = 1000, n_keep = 15000)
 //   print(ai4bayescode_rhat_summary(run, keys = c("alpha", "pi", "stick_V", "shape", "rate"), order_components = TRUE))  # label-invariant (sorted per draw)
 //   ai4bayescode_diagnose(run$histories[[1]])
 // @example:python
@@ -76,7 +76,7 @@
 //   Mod = AI4BayesCode.example("DPGammaMixture")
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DPGammaMixture(y, 12, rng_seed=int(seed), keep_history=True),
-//       seeds=[11, 22, 33, 44], n_burn=1000, n_keep=2000)
+//       seeds=[11, 22, 33, 44], n_burn=1000, n_keep=15000)
 //   AI4BayesCode.diagnose(chains[0]["hist"])
 // @example:end
 // ============================================================================
