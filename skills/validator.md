@@ -605,20 +605,22 @@ Sampling vs prediction discipline (codegen_cpp.md Sec.6c, Hard Rule #5):
 
 ### Acceptance test (machine-checkable, must pass before shipping)
 
-(A), (B) and (C) are static (L2). (D) constructs the model, so it runs in
-R1, next to the Confirmed-DAG checks on the predictable variables.
+(A), (B), (C) and (E) are static (L2). (D) constructs the model, so it runs
+in R1, next to the R1 predictable-variable check.
 
 **(A) Node-set equality.**
 1. Extract node set from the confirmed DAG in the spec (Sec.0.2): `U`.
 2. Extract from the `.cpp`'s `declare_predict_edges` / `declare_data_input`
    calls:
-   `G = keys(predict_edges)  U  values(predict_edges)  U  data_inputs`.
+   `G = keys/values(predict_edges)  U  keys/values(context_edges)  U  data_inputs`.
 3. Apply the permitted renames (`y -> y_rep`, snake_case
    conversions like `Z_mat -> Z_mat_flat`). Optional hyperparent
    nodes that the user explicitly marked as prior-only (e.g.
    `tau_smooth` feeding only an RW2 penalty inside the prior, not
    the generative chain) MAY be omitted; otherwise keep them.
-4. `G == U`. Symmetric difference must be empty.
+4. `U` is contained in `G`, and every node of `G` outside `U` appears
+   only in `context_edges` (a hyperparameter slot or a forest / kernel
+   node -- context-edge rules 1 and 4 below).
 
 **(B) Refresher presence per intermediate.**
 For every node `N  in  U \ {roots, terminals}` (i.e. every
@@ -634,6 +636,16 @@ the direct predict-DAG parents of `N` (read off
 `declare_predict_edges` with target `N`). Reading a transitive
 ancestor (a parent's parent) => `N` is doing its parent's job => the
 parent is inlined => bug.
+
+**(E) Every predictable variable is in the DAG.**
+From the model EQUATIONS of the confirmed spec -- not from the DAG -- list
+`PREDICTABLE`: every variable that depends, directly or through other
+equations, on a data input (a covariate or other replaceable input, not
+the observed response), plus the replicate of every observed variable
+(renames of (A).3). Each must be a node of `U`. A missing one is a FAIL
+that names it; the generator adds it to the DAG and to the code's predict
+graph. (A) cannot catch this: when the DAG and the code leave out the
+same variable, the two still agree.
 
 **(D) Replacement-roundtrip smoke test.**
 `composite_block::predict_at` accepts ONLY keys that are declared DATA
@@ -2567,32 +2579,14 @@ binding only one leaves the other call shape reporting no valid method. In
 Python the argument is also reachable by keyword. A wrapper whose R entry
 point is `predict_at_r(Rcpp::List)` needs the pair there too.
 
-**Confirmed-DAG checks -- MANDATORY, no skip. Any one failing is an R1
-FAIL.** A predictable variable gets lost in one of two places: the Phase-3
-DAG leaves it out, or the DAG has it and `predict_at` never returns it.
-The partial-newdata checks below test `predict_at` only against the
-model's OWN declared graph, so they catch neither. Write out, from the
-confirmed spec (never from the `.cpp`), with the renames of Check #6
-(A).3:
-- `CONFIRMED_NODES` -- the nodes of the confirmed DAG;
-- `PREDICTABLE` -- taken from the model EQUATIONS, not from the DAG: every
-  variable that depends, directly or through other equations, on a data
-  input (a covariate or other replaceable input, not the observed
-  response), plus the replicate of every observed variable.
-
-Then emit all three.
-
-**(1) The DAG has every predictable variable.** Every variable in
-`PREDICTABLE` is a node of the confirmed DAG. A missing one is a FAIL
-that names it; the generator adds it to the DAG and to the code's predict
-graph (Check #6).
-
-**(2) `predict_at` returns every predictable variable.** `SMOKE_NEWDATA`
-contains one entry that supplies every declared data input at its
-training value; that call returns every variable in `PREDICTABLE`.
-
-**(3) Nothing outside the DAG.** Every key returned by any `predict_at`
-call of the sweep below is a node of the confirmed DAG.
+**Predictable-variable check -- MANDATORY, no skip. Failing it is an R1
+FAIL.** The partial-newdata checks below test `predict_at` only against
+the model's OWN declared graph, so they cannot see a predictable variable
+the model never returns. `PREDICTABLE` is the list of Check #6 (E),
+written out from the confirmed spec (never from the `.cpp`).
+`SMOKE_NEWDATA` contains one entry that supplies every declared data
+input at its training value; that call must return every variable in
+`PREDICTABLE`. A missing one is a FAIL that names it.
 
 **`predict_at` partial-newdata checks -- MANDATORY, no skip. Any one
 failing is an R1 FAIL.** Read the declared predict edges out of
@@ -2735,27 +2729,16 @@ if (all(c("predict_at", "freeze", "unfreeze") %in% names(model))) {
     stopifnot(identical(s_before, s_after))
 }
 
-# --- Confirmed-DAG checks (Semantic #6) --------------------------------
-# CONFIRMED_NODES: the nodes of the DAG the user signed off in Phase 3;
-# PREDICTABLE: from the model equations, every variable that depends on a
-# data input, plus the replicate of every observed variable. Both after the
-# renames of Check #6 (A).3, written by the validator from the confirmed
-# spec, never read off the .cpp. FULL_NEWDATA: the SMOKE_NEWDATA entry that
-# supplies every data input at its training value.
+# --- Predictable-variable check (Semantic #6) --------------------------
+# PREDICTABLE: the list of Check #6 (E), written by the validator from the
+# confirmed spec, never read off the .cpp. FULL_NEWDATA: the SMOKE_NEWDATA
+# entry that supplies every data input at its training value.
 # Single-draw path; a wrapper with no history path has only the one-argument call.
 pa1 <- function(nd) tryCatch(model$predict_at(nd, TRUE), error = function(e)
     if (grepl("takes ONE list argument", conditionMessage(e))) model$predict_at(nd) else stop(e))
-miss <- setdiff(PREDICTABLE, CONFIRMED_NODES)                                 # (1)
-if (length(miss)) stop("[R1] the confirmed DAG misses predictable variable(s): ",
-                       paste(miss, collapse = ", "))
-miss <- setdiff(PREDICTABLE, names(pa1(FULL_NEWDATA)))                         # (2)
+miss <- setdiff(PREDICTABLE, names(pa1(FULL_NEWDATA)))
 if (length(miss)) stop("[R1] predict_at does not return predictable variable(s): ",
                        paste(miss, collapse = ", "))
-for (nd in SMOKE_NEWDATA) {                                                    # (3)
-    extra <- setdiff(setdiff(names(pa1(nd)), names(nd)), CONFIRMED_NODES)
-    if (length(extra)) stop("[R1] predict_at returns key(s) outside the confirmed DAG: ",
-                            paste(extra, collapse = ", "))
-}
 
 # --- Predict-DAG consistency smoke (Semantic #6) -----------------------
 # Cycle through every reasonable subset of the declared data_input keys
@@ -2904,8 +2887,8 @@ the validator builds in its R1 script from the `.cpp`'s DGP. Minimum coverage:
    bug: y_rep MUST be absent because v2 (per-observation variance, sized
    to N) cannot be defaulted from training when N changes.
 3. One entry that supplies every declared data input at its training
-   value (`FULL_NEWDATA`) -- the full prediction of the Confirmed-DAG
-   checks.
+   value (`FULL_NEWDATA`) -- the full prediction of the predictable-variable
+   check.
 
 ### R2. 2-chain MCMC convergence
 

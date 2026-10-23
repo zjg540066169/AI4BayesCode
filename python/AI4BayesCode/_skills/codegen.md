@@ -628,8 +628,10 @@ NOT "block B reads A during MCMC sampling". The two DAGs are
 distinct and confusing them is a common failure mode (see
 `system_design.md` Sec.4). Practical rules:
 
-- The edges drawn here MUST match the `declare_predict_edges` calls
-  emitted in the generated C++. They do NOT correspond to
+- The edges drawn here MUST match the `declare_predict_edges` and
+  `declare_context_edges` calls emitted in the generated C++, taken
+  together (a prior parent of a sampled parameter is a context edge,
+  `validator.md` Check #6). They do NOT correspond to
   `declare_dependencies` (that's the Gibbs DAG, internal to the
   sampler).
 - Sibling priors that are independent in the generative story have
