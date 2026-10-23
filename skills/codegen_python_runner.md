@@ -11,22 +11,20 @@ description: |
   + PSIS-LOO via arviz), run timing, joint-NUTS threshold
   tightening, and the reference-template catalogue (examples/*.cpp).
   Mirror of codegen_r_runner.md for the Python (pybind11) backend.
-  The entry-point skill `codegen.md` and `start.md` Phase 6 point here
+  The entry-point skill `codegen.md` and `start.md` Phase 5 point here
   for Python runner emission when the chosen runtime is Python (or
   Both R+Python dual-module).
 ---
 
 # AI4BayesCode codegen -- Python runner + reference templates
 
-**PREREQUISITE GATE -- L2 first.** Do not load this file, and do not
-emit any runner / Layer-3 harness, until the V-static validator has
-returned PASS on the current `.cpp` -- L2 semantic checklist + AD-twin
-(Check #12) -- and its per-check verdict table is printed
-(`validator.md` Sec.0; `codegen.md` Sec.11 Step 2, HARD ORDERING GATE).
-The runner is then RUN by the V-runtime validator, not by the generator.
-This file hands you executable runtime machinery; if the V-static
-verdict has not been printed yet, you are in the runtime-before-semantic
-reversal.
+**PREREQUISITE GATE -- write, never run.** Load this file after the
+`.cpp` is written. The runner you write here is RUN only by the validator
+subagent, in L3, after its L2 table (semantic checklist + AD-twin,
+Check #12) is complete with no FAIL (`validator.md` Sec.0.1; `codegen.md`
+Sec.11 HARD ORDERING GATE). This file hands you executable runtime
+machinery; running it yourself, or before that L2 table exists, is the
+runtime-before-semantic reversal.
 
 Companion skill to `codegen.md`. Load this when writing the generated
 `.py` runner: `AI4BayesCode.sourceCpp` setup, constructor-argument
@@ -66,11 +64,12 @@ the runner deliverables are independent (`.R` + `.py`).
 2. Do NOT write or edit `<folder>/<ClassName>.cpp` here. It was written in
    Phase 4 with BOTH its `@example:python` and `@example:R` header blocks
    (`codegen_cpp.md` Sec.5 "Header `@example` block") and validated by its
-   SHA-256. Copy this runner's DGP FROM the `.cpp`. Any `.cpp` edit voids
-   the V-static PASS and restarts at L1 (`validator.md` Sec.0.5).
+   SHA-256. Copy this runner's DGP FROM the `.cpp`. Any `.cpp` edit is
+   re-checked by a new validator from L1 (`validator.md` Sec.0.5).
 3. Write the Python runner `<folder>/run_<ClassName>.py` following the
    template below. It holds the 2 chains and the Layer-3 R2/R3 checks
-   and **gates generation**: V-runtime runs it after its own R1 (same
+   and **gates generation**: the validator runs it in L3, after L2 and its
+   own R1 (same
    CORRECTNESS INVARIANT as the R side: Layer-3 always runs and must
    PASS regardless of the user's harness choice).
 4. **Deliverable depends on the "Delivered-code validation harness"
@@ -524,7 +523,7 @@ runs Python from **the project root** -- the directory containing both
 and the fix is documented.
 
 ```python
-# === run_<ClassName>.py -- Layer 3 harness (R2 + R3; R1 runs in V-runtime's own script) ===
+# === run_<ClassName>.py -- Layer 3 harness (R2 + R3; R1 runs in the validator's own script) ===
 import os, sys, time
 import numpy as np
 
@@ -576,7 +575,7 @@ def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
 # NOTE: AI4BayesCode.diagnose (table + trace/ACF/density plot) is SHIPPED in the
 # AI4BayesCode package -- there is NO helper to define here.
 
-# R1 is not here: V-runtime has already run it in its own script
+# R1 is not here: the validator has already run it in its own script
 # (validator.md R1). This runner holds the chains, R2 and R3.
 
 # === R2. 2-chain MCMC convergence (sequential; see _run_two_chains) ===

@@ -327,7 +327,7 @@ later, at Sec.2 and Sec.3. **Once the model is confirmed**, ask the upfront ques
 
    > "Maximum number of full generate->validate attempts before I stop
    > and report? **The first generation counts as attempt 1** (so 5 =
-   > the initial generation + at most 4 fixes). The validator's internal
+   > the initial generation + at most 4 revised `.cpp` files). The validator's internal
    > R-hat budget escalation does NOT count as an attempt. Default 5."
    >
    > Options: 5 (default) / 10 / 20 / Unlimited (opt-in)
@@ -498,8 +498,8 @@ choosing it re-renders the summary and re-fires the gate.
 Alongside the summary-review question above, also ask whether the
 runtime validation code should be SHIPPED in the delivered files.
 The generated R runner currently carries a large block of validation
-code (R-hat/ESS, posterior-predictive p-values, PSIS-LOO, smoke
-checks); for a first-time user that scaffolding obscures the simple
+code (R-hat/ESS, posterior-predictive p-values, PSIS-LOO); for a
+first-time user that scaffolding obscures the simple
 "how do I use this" path.
 
 Ask in PLAIN language -- do NOT use the word "harness" (a first-time
@@ -1081,51 +1081,46 @@ the structured picker UI. Three firm rules:
    every block that has an observation layer. See `codegen_cpp.md Sec.6a`
    per-observation-family templates (Gaussian / Bernoulli / Poisson /
    Multinomial / BART-noise).
-8. **Gradient verification (Check #12) is done by V-static.** For every
-   NUTS block with a hand-written gradient, the V-static validator builds
+8. **Gradient verification (Check #12) is done by the validator.** For
+   every NUTS block with a hand-written gradient, the validator builds
    and runs the AD-twin in its own scratch directory (`codegen_cpp.md
    Sec.6b`, `validator.md` Sec.0); the generator writes no verification
    file.
 9. **Assemble the composite in the constructor.** See
    `codegen_cpp.md Sec.7`.
-10. **Dispatch V-static for L1 + L2.** A fresh validator subagent
-    compiles the `.cpp` and runs the full validator checklist + the
-    AD-twin gradient check (Check #12) (`validator.md` Sec.0); PRINT the
-    per-check verdict table it returns (Sec.11 Step 2). NO runner file
-    exists yet at this step -- that is deliberate: the L3 harness must
-    not exist until L2 has passed (see the **HARD ORDERING GATE** at the
-    top of Sec.11).
-11. **Only after V-static PASS: emit the `.R` / `.py` runner and
-    dispatch V-runtime for L3.** See `codegen_r_runner.md` /
+10. **Emit the `.R` / `.py` runner.** See `codegen_r_runner.md` /
     `codegen_python_runner.md` for the runner template + Layer 3 wiring.
-    A fresh validator subagent runs the runtime checks in order (Sec.11
-    Steps 3-4: smoke -> 2-chain -> posterior check). Do NOT report
-    "validation passed" off the runtime run alone.
+    Write it, never run it: only the validator runs it, in L3, after its
+    L2 table is complete with no FAIL (see the **HARD ORDERING GATE** at
+    the top of Sec.11).
+11. **Dispatch the validator.** One fresh validator subagent runs L1
+    (compile) -> L2 (the full checklist + the AD-twin, Check #12) -> L3
+    (smoke -> 2-chain -> posterior check), strictly in that order, and
+    stops at the first failure (`validator.md` Sec.0). PRINT the report
+    it returns (Sec.11 Step 2).
 
 ---
 
 ## 11. Compile and run verification
 
 **Before reporting success to the user, the generated files are verified
-by independent validator subagents (`validator.md` Sec.0): V-static runs
-L1 + L2, then V-runtime runs L3.** Order is **L1 -> L2 -> L3** -- compile, then the
+by one independent validator subagent (`validator.md` Sec.0), which runs
+all three layers in one pass.** Order is **L1 -> L2 -> L3** -- compile, then the
 **semantic validator checklist (L2)**, then the **runtime checks (L3: smoke -> two-chain
 -> posterior)** -- cheapest-to-most-expensive per `validator.md`. Run the STATIC L2 checks
 BEFORE the expensive runtime: L3 passing does NOT prove correctness (a wrong Jacobian /
 parallel-update / parameterization runs clean -- R-hat ~1.00, BPV in range, LOO k<0.5 -- yet
-samples the WRONG posterior), so clear L2 first. A failed layer is handled by the loop in
-`validator.md` Sec.0.5 (a `.cpp` change restarts at L1):
+samples the WRONG posterior), so clear L2 first. Any failure stops the run; the generator
+fixes and a new validator runs again from L1 (`validator.md` Sec.0.5):
 
-> **HARD ORDERING GATE -- L2 must PASS before the L3 runtime harness is written or run.**
-> The steps below are an ORDER, not a menu. V-runtime is dispatched only after V-static has
-> returned PASS, and it checks the `.cpp` hash against the V-static report before doing
-> anything (`validator.md` Sec.0.1); any `.cpp` edit after the L2 PASS voids it. Nobody may
-> write or run the two-chain / runtime R harness until BOTH L2 checks have PASSED: the
-> **semantic validator checklist**
-> AND the **AD-twin gradient-vs-autodiff comparison** (Check #12 -- a SEPARATE throwaway C++
-> file, `codegen_cpp.md Sec.6b`). The L3 runtime harness is the **LAST** thing you build.
-> The `codegen_r_runner.md` runner is a single file that does compile + smoke + two-chain in
-> one shot -- that is exactly why it tempts you to run it first. Do not.
+> **HARD ORDERING GATE -- no L3 step before L2 is complete with no FAIL.**
+> The steps below are an ORDER, not a menu. The validator writes its L2 table first, and
+> only then sources or runs the runner, constructs the generated model or calls `step()`
+> (`validator.md` Sec.0.1). L2 is BOTH the **semantic validator checklist** AND the
+> **AD-twin gradient-vs-autodiff comparison** (Check #12 -- a SEPARATE throwaway C++ file,
+> `codegen_cpp.md Sec.6b`). The runner already exists when the validator starts, and it runs
+> the two chains in one shot -- that is exactly why it tempts a validator to run it first.
+> Do not.
 >
 > **FORBIDDEN (the recurring reversal):** writing the validation runner, running the 4k+4k
 > two-chain diagnostic, reporting *"runtime validation passed cleanly,"* and only THEN doing
@@ -1138,28 +1133,28 @@ samples the WRONG posterior), so clear L2 first. A failed layer is handled by th
 > inadequate" -- it needs an L3 measurement (rhat / ess_ratio) that does not
 > exist yet. That is not a licence to run L3 early. Pass L2 with the DIAGONAL
 > default, run L3, and if L3's ess_ratio or R-hat says the metric is inadequate,
-> REGENERATE with the dense metric and re-run L1 -> L2 -> L3 in order. The
+> REGENERATE with the dense metric; a new validator runs L1 -> L2 -> L3 in order. The
 > attempt budget covers this; it is the intended resolution, not an overrun.
 >
-> **SELF-CHECK before you say "validation passed":** the transcript must show a V-static PASS
-> table and then a V-runtime PASS table, both for the same `.cpp` SHA-256, and that hash must
-> be the hash of the file you deliver. Any runtime result without a prior V-static PASS on
-> that hash is VOID: restart at L1 (`validator.md` Sec.0.5).
+> **SELF-CHECK before you say "validation passed":** the transcript must show the validator's
+> report with every L2 row PASS or N/A, followed by the L3 results, for one `.cpp` SHA-256
+> that equals the hash of the file you deliver. A report whose L3 ran with an L2 row FAIL or
+> missing is VOID: restart at L1 (`validator.md` Sec.0.5).
 
 ### Step 1: Compile check
 
-V-static compiles the file with `ai4bayescode_source("<file>.cpp", ...)`
-(L1). A compile error comes back as a FAIL row; the generator fixes the
-code and dispatches a fresh V-static.
+The validator compiles the file with `ai4bayescode_source("<file>.cpp", ...)`
+(L1). A compile error ends the run with an L1 FAIL; the generator fixes
+the code and dispatches a new validator.
 
 ### Step 2: Validator checklist (L2 semantic -- run BEFORE the runtime checks)
 
-After compile passes, V-static runs the full validator checklist in `skills/validator.md` (the
+After compile passes, the validator runs the full validator checklist in `skills/validator.md` (the
 Semantic-layer checks: distribution parameterization, parallel-update bugs, dead
 parameters, missing intercepts, Jacobian handling, DAG consistency, RNG separation, the
 gradient-verification-via-autodiff Check #12, the conditional #14-#25, and #26,
 which fires on every wrapper). Any
-failure is fixed by the generator and re-checked by a fresh V-static before proceeding. **This is the layer that
+failure ends the run with an L2 FAIL; the generator fixes and a new validator runs again from L1. **This is the layer that
 catches the silent-correctness bugs the runtime checks CANNOT**, so it must be cleared
 before the expensive L3 chains below. In particular the **AD-twin (Check #12)** -- the
 autodiff-vs-hand-written gradient comparison -- is the cheapest correctness check and runs
@@ -1167,17 +1162,18 @@ HERE (gen-time / L2), BEFORE the Step 3-4 runtime: a wrong gradient caught by th
 running the smoke + two-chain diagnostic on broken code (a chain on a wrong gradient can even
 *look* like it converges).
 
-**MANDATORY ARTIFACT -- print the verdict, or the layer did not run.** Print the
-verdict table V-static returns in the conversation (check id ->
-PASS / FAIL / N-A, one line of reasoning each, conditional checks included).
-The FIRST `model$step()` of ANY runtime execution -- the Step-3 smoke test
-included -- must come AFTER this table exists in the transcript. An unprinted
-checklist counts as NOT run: silent "I checked it mentally" is exactly how the
-runtime-before-semantic reversal happens.
+**MANDATORY ARTIFACT -- the L2 table, or the layer did not run.** The validator
+writes its L2 table (check id -> PASS / FAIL / N-A, one line of reasoning each,
+conditional checks included) into its report BEFORE its first runtime action,
+and the generator prints the report in the conversation. The FIRST
+`model$step()` of ANY runtime execution -- the Step-3 smoke test included --
+must come AFTER that table is written. An unwritten checklist counts as NOT
+run: silent "I checked it mentally" is exactly how the runtime-before-semantic
+reversal happens.
 
 ### Step 3: Smoke test (THROWAWAY -- delete file on PASS)
 
-V-runtime writes a minimal smoke-test script in its own scratch
+The validator writes a minimal smoke-test script in its own scratch
 directory. The smoke test does:
 
 - `model <- new(<ClassName>, ..., rng_seed = 42L, keep_history = FALSE)`
@@ -1196,12 +1192,12 @@ directory. The smoke test does:
   silent-default-substitution scan -- a wrapper that quietly fills a
   missing input from a training-set mean passes every other check.
 
-These are a subset; V-runtime runs `validator.md`'s full R1 section
+These are a subset; the validator runs `validator.md`'s full R1 section
 (including the member-function sweep, the #23 / #26 runtime halves, the
 `@example` block(s) and the `int main()` demo).
 
 **The smoke-test script never enters the user's folder.** It lives in
-V-runtime's scratch directory and is deleted before the validator
+the validator's scratch directory and is deleted before the validator
 returns -- it verifies the generation once, then it is gone. Ongoing
 compile-smoke coverage is provided by the repo's F4 audit
 (`tests_autodiff/audit_compile_smoke.R`), not by per-model smoke
@@ -1213,7 +1209,7 @@ exceptions.
 
 ### Step 4: Two-chain diagnostic (REQUIRED to run+pass at gen-time; shipping is governed by the validation-harness opt-in)
 
-V-runtime runs 2 chains from different initial values to check for
+The validator runs 2 chains from different initial values to check for
 non-identifiability and basic convergence -- the Layer 3 R2 section of
 the runner template in `codegen_r_runner.md`. Use a small synthetic
 dataset (e.g. N=50-100) but long chains (4000 burnin + 4000 keep) to
@@ -1258,7 +1254,7 @@ chain2 <- run_chain_<ClassName>(<data_args>, seed = 2L, n_burnin = 4000, n_keep 
 - **One chain diverged (Inf/NaN)**: bad prior (too flat) or numerical
   overflow. Suggest tighter prior or check parameterization.
 
-If any check fails, V-runtime reports FAIL with a specific diagnosis
+If any check fails, the validator reports FAIL with a specific diagnosis
 and the generator fixes per `validator.md` Sec.0.5. Do NOT silently
 pass a model that shows NI.
 
@@ -1287,8 +1283,9 @@ run, and produce reasonable samples out of the box.
   on autodiff or Eigen at runtime.** The AD-twin, probe and smoke files
   live only in the validator's own scratch directory and are deleted
   before it returns (`validator.md` Sec.0.3). The final deliverable to
-  the user workspace is *only* the production `<ClassName>.cpp` and the
-  R / Python runner (1 .cpp + 1 .R / .py); any extra file or folder
+  the user workspace is *only* the production `<ClassName>.cpp` and one
+  R / Python file -- `example_<ClassName>` by default, `run_<ClassName>`
+  only if the user opted in; any extra file or folder
   confuses users into thinking it's part of their output.
 - **Never leave a `smoke_<ClassName>.R` / `smoke_test.R` file behind
   after Step 3 PASS.** Smoke tests are throwaway; same rule as
@@ -1519,9 +1516,9 @@ run, and produce reasonable samples out of the box.
   off the run object -- `ai4bayescode_run_chains()` already returns `wall`
   per chain. Do NOT call `ai4bayescode_perf_hint()`: it is deprecated, and
   it only asks the caller to recompute numbers the run object already has.
-- **Check #12 gradient verification always runs, inside V-static.**
-  For every NUTS block with a hand-written gradient, the V-static
-  validator (`validator.md` Sec.0):
+- **Check #12 gradient verification always runs, in the validator's L2.**
+  For every NUTS block with a hand-written gradient, the validator
+  (`validator.md` Sec.0):
     1. writes a companion file in its own scratch directory that calls
        the hand-written log-densities and gradients verbatim and adds an
        AD log-density written from the confirmed model + a verify

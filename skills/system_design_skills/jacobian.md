@@ -51,7 +51,7 @@ sensitive) but Layer 2 Check #5 MUST catch at code review.
 #### Rule: Check #12 (AD verification) runs at gen-time
 
 For every block with a hand-written log-density + gradient pair,
-the V-static validator (`validator.md` Sec.0) writes a throwaway
+the validator (`validator.md` Sec.0) writes a throwaway
 companion file in its own scratch directory that pastes the hand-written
 functions verbatim, adds an `autodiff::var` log-density written from
 the confirmed model, and compares gradients and log-density differences
@@ -206,7 +206,7 @@ from the SINGLE templated forward + the user's analytic inverse:
    `|fwd_J(u) * rev_J(T(u)) - 1| < 1e-10` -- the bijection invariant.
 
 On any probe failure the generator fixes the bijection before
-shipping; the probe file is written, run and deleted by V-static in its
+shipping; the probe file is written, run and deleted by the validator in its
 own scratch directory (mirrors the Check #12 companion-file pattern).
 
 **Users still never write a Jacobian.** They write the forward map

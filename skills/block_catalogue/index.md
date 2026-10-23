@@ -61,8 +61,8 @@ by block count):
   the concrete reference composition for THIS block -- the analogue of a core
   `examples/*.cpp`, showing the exact wiring, `set_current`, `predict_at`, runner.
 - **ValidationSkill** (`ValidationSkill:` field -> `<tier>/<Block>/skills/<Block>_validation.md`)
-  + **`ChecksApplicable:`**: apply these block-specific checks at validation time --
-  see `validator.md` ("Contributed-block checks").
+  + **`ChecksApplicable:`**: the validator applies these block-specific checks
+  (`validator.md` Sec.0, "Contributed-block checks").
 
 **Confirm it.** Surface the selected block + the alternative candidates in the
 existing model-confirmation gate (`codegen.md` Sec.3 / `start.md` Phase 3) so the user
