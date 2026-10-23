@@ -19,9 +19,9 @@ description: |
 > at least one child.
 
 Validation of a generated sampler proceeds in **three** layers, from
-cheapest to most expensive. Sub-steps within Layer 3 share the same
-2-chain run, so running them in sequence is essentially free after the
-chains finish.
+cheapest to most expensive. Within Layer 3, R1 runs on a fresh model
+before any chain; R2 and R3 share the same 2-chain run, so R3 is
+essentially free after the chains finish.
 
 > **Contributed-block checks (local / downloaded blocks).** If the sampler uses a
 > LOCAL (`blocks_local/`) or DOWNLOADED (`blocks_download/`) block, that block ships
@@ -35,7 +35,7 @@ chains finish.
 > is selected + its Example loaded.
 
 1. **Syntactic** -- compilation. The C++ compiler does this for free; no
-   manual checklist. If `sourceCpp` fails, fix and retry.
+   manual checklist. A compile error is an L1 FAIL (Sec.0.5).
 2. **Semantic** -- code-level review. Twenty-six checks (#1-#26), all
    Layer-2 semantic. Most are static code review; a few -- #12 (gradient
    verification via autodiff), #14 (bijection probes), and #15 (library
@@ -44,20 +44,133 @@ chains finish.
    and #13 (RNG separation) fire conditionally; Check #26 (kernel-control
    conformance) fires on every wrapper. These catch bugs that compile
    and run without error but produce a wrong posterior.
-3. **Runtime** -- all execution-based checks, sharing one pair of chains
-   produced with `keep_history = TRUE`:
-   - **R1. Smoke test** (~10 steps) -- catches immediate failures, non-
-     finite values, predict_at state mutation, and freeze->predict_at
-     history misalignment (a frozen block that stalls its history breaks
-     posterior-predictive over the joint draws).
-   - **R2. 2-chain R-hat / ESS** (4000 burnin + 4000 keep per chain) --
+3. **Runtime** -- every check that constructs the model or calls
+   `step()`:
+   - **R1. Smoke test** (~10 steps, on a fresh model, before any chain)
+     -- the member-function sweep, the runtime halves of Checks #23 and
+     #26, running the `@example` block(s) and the `int main()` demo, and
+     the catches for immediate failures, non-finite values, predict_at
+     state mutation, and freeze->predict_at history misalignment (a
+     frozen block that stalls its history breaks posterior-predictive
+     over the joint draws).
+   - **R2. 2-chain R-hat / ESS** (4000 burnin + 4000 keep per chain,
+     `keep_history = TRUE`) --
      does the sampler converge to some stationary distribution?
    - **R3. Posterior check** (Bayesian p-values + PSIS-LOO, reuses R2's
      chains) -- is that stationary distribution the right posterior?
 
-Work through the layers in order. If a layer fails, fix the code and
-re-run that layer before moving on. Within Layer 3, run R1 -> R2 -> R3
-in order; failure at an earlier step means don't bother with the next.
+## 0. Who runs the validation: independent validator subagents
+
+In the sampler-generation flow, the agent that wrote the code (the
+GENERATOR) does not validate it. Each layer is run by a fresh VALIDATOR
+subagent that has not seen the generator's reasoning. Code written with
+an intent tends to be read as that intent; a reader who knows only the
+confirmed model and the files reads what the code actually does. (The
+block-design flow, `block_design_skills/validate.md`, runs the same
+layers itself, in the same order.)
+
+### 0.1 Strict order: L1 -> L2 -> L3. No exception.
+
+- **L3 never starts before L2 has PASSED on the exact `.cpp` that L3
+  will run.** "Starts" includes writing or loading a runner, compiling a
+  module for a runtime call, and the first `step()` of any kind.
+- L2 never starts before L1 has passed on that file.
+- V-static never constructs the model and never calls `step()`,
+  `readapt_NUTS` or `freeze`; L1 is compile-only. Every check that
+  constructs the model is runtime and runs in V-runtime's R1.
+- The `.cpp` is identified by its SHA-256. V-static reports the hash it
+  validated; V-runtime recomputes it before doing anything and returns
+  `REFUSED: hash mismatch` if it differs. Any edit to the `.cpp` after an
+  L2 PASS voids that PASS: the next round starts again at L1.
+- Within L3: R1 -> R2 -> R3, stopping at the first failure.
+
+### 0.2 The two validators
+
+| Validator | Runs | Dispatched when | Receives |
+|---|---|---|---|
+| V-static | L1 compile, then every applicable L2 check (#1-#26, including the #12 AD-twin and the #14 / #15 probes) | the `.cpp` is written | (1) the confirmed spec: the model as signed off in Phase 3 (equations, symbol table, DAG) plus the user's verbatim answers to every later question that changes the model or block plan (VI/MCMC split and VI families, spike family, optional modes such as DART, exposed vs hardcoded hyperparameters); (2) the absolute path of the `.cpp`; (3) backend(s), library include path, output folder; (4) attempt number |
+| V-runtime | L3: R1 in its own scratch script on a fresh model (the member-function sweep, the #23 / #26 runtime halves, the `@example` block(s) and the `int main()` demo), then R2 -> R3 on the runner's 2 chains | the generator has printed a V-static PASS and written the runner | (1)-(4) above, the runner path(s), and the V-static report (hash + verdict table) |
+
+For the C++-only backend the generator still writes an R runner, as a
+throwaway L3 harness; it is never delivered.
+
+Every dispatch is a NEW subagent. A re-check after a fix never goes to
+the validator that reported the failure, and never to the generator.
+The generator passes only the inputs above -- not its reasoning, design
+notes or expectations ("this should pass because ..."). Dispatch
+silently: these are procedural steps (`start.md` "Ask the user?" table),
+not actions that need the user's permission.
+
+### 0.3 What a validator may and may not do
+
+- MAY read anything; compile; run the generated code and the runner;
+  write throwaway files (AD-twin, probes, the R1 script) in its OWN
+  scratch directory, and delete them before it returns.
+- MAY NOT edit, regenerate or "fix" any deliverable (`.cpp`, runner,
+  example files), and MAY NOT change a sampler setting, a budget, a seed
+  or a threshold to make a check pass.
+- Check #12 (AD-twin): the validator writes the autodiff log-density
+  FROM THE CONFIRMED MODEL, in the coordinates and block split the
+  `.cpp` uses, and for the same target: the block's full conditional
+  given the ctx keys it reads, with every variable the `.cpp`
+  integrates out or augments treated the same way. It compares the
+  twin with the production code -- gradients at random points, and
+  log-density DIFFERENCES to a reference point (the additive constant
+  cancels). It never copies the production log-density into the twin:
+  a copied twin repeats the production code's mistakes. On a mismatch
+  the validator re-derives its twin term by term before reporting; a
+  FAIL row names the differing term and says whether the log-density
+  difference or only the gradient disagrees; a mismatch it cannot
+  localise is reported as `FAIL (twin-unresolved)` with both
+  expressions. File template: `codegen_cpp.md` Sec.6b.
+
+### 0.4 What a validator returns
+
+1. Header: layers run, `.cpp` path and SHA-256, overall `PASS` / `FAIL` /
+   `REFUSED`.
+2. One row per check, conditional checks included (N/A with the reason):
+   `| check | PASS / FAIL / N/A | evidence | defect | fix |`. Evidence is
+   a quoted `file:line` or a measured number. `fix` names the change in
+   terms of the model or the code (a missing Jacobian term at a line, a
+   misread parameterization, a missing binding) -- never a setting tuned
+   to the validation data.
+3. V-runtime adds the numbers: per key the max rank-R-hat and min ESS,
+   the Bayesian p-values, and the Pareto-k summary (diagnostic only).
+
+### 0.5 The loop
+
+1. The generator writes the `.cpp`, dispatches V-static, and prints the
+   returned verdict table.
+2. FAIL -> the generator fixes the `.cpp`; back to 1 with a fresh
+   V-static.
+3. PASS -> the generator writes the runner (copying its DGP from the
+   `.cpp`, never editing the `.cpp`) and dispatches V-runtime.
+4. REFUSED (hash mismatch) -> the `.cpp` changed after its L2 PASS;
+   back to 1.
+5. FAIL in the runner only -> the generator fixes the runner; fresh
+   V-runtime. FAIL that needs a `.cpp` change -> back to 1 (the L2 PASS
+   is void).
+6. PASS -> the generator checks that the SHA-256 of the `.cpp` it
+   delivers equals the hash both validators reported, then delivers
+   (`start.md` Sec.4-5). It deletes the throwaway runner unless the
+   user chose to keep it.
+
+**Attempt counting** (the one definition; `start.md` and `codegen.md`
+point here): the first `.cpp` is attempt 1, and each later change to
+the `.cpp` starts a new attempt. A runner-only fix with a fresh
+V-runtime stays in the same attempt, and so does the R2 re-run at
+20000 + 20000. A REFUSED dispatch adds no attempt of its own.
+
+### 0.6 Hosts without subagents
+
+If the host cannot start a subagent, the generator runs the same checks
+itself, in the same order, with the same report format and the same
+hash rule.
+
+Work through the layers in order (Sec.0.1). If a layer fails, the
+generator fixes and a fresh validator re-checks per Sec.0.5 (a `.cpp`
+change restarts at L1). Within Layer 3, R1 -> R2 -> R3 in order;
+failure at an earlier step means don't bother with the next.
 
 **The R2 GATE is rank-R-hat >= 1.05; 1.01 is the strict bar you investigate
 against, not a second gate.** Above 1.01, treat it as a MIXING failure by
@@ -115,9 +228,10 @@ registry is the authoritative cross-reference.
 
 **Check #12 status note:** Check #12 is the one Layer-2 check that runs a
 numerical comparison (#14 and #15 also compile a throwaway file, but their
-verdict is a code-level one) -- the AI writes a throwaway `tests_autodiff/verify_<ClassName>.cpp`
-during generation, confirms max-diff tolerances, and deletes the file
-on PASS. See Sec.12 below for the full template.
+verdict is a code-level one) -- the V-static validator writes a throwaway verify file
+in its own scratch directory, with the autodiff log-density written from the confirmed
+model (Sec.0.3), confirms the max-diff tolerances, and deletes the file before it
+returns. See Sec.12 below for the full template.
 
 **Checks #15-17** are pre-merge obligations for any example using
 `*_gibbs_block` or hand-written Gibbs; the `block_catalogue/index.md` and
@@ -130,19 +244,21 @@ overall gate.
 ## Layer 2 -- Semantic
 
 Twenty-six checks. **Checks #1-#11, #13, #18, #19, #20, #21, #22,
-#23, #25, and #26 are static** -- the AI audits them by reading the
-generated `.cpp` (plus, for #23 readapt_NUTS and #26 freeze/unfreeze,
-R-level round-trip tests in the runner), no execution required. Checks #15-#17 are
+#23, #25, and #26 are static** -- the V-static validator audits them by reading the
+generated `.cpp`, no execution required. The runtime halves of #23
+(readapt_NUTS round-trip) and #26 (freeze / unfreeze tests) construct the
+model, so they are not L2: V-runtime runs them in R1. Checks #15-#17 are
 defined in `codegen_priors.md` Sec.2c-2e. **Checks #12, #14 and #15 compile a
 throwaway file; #12 (gradient verification via autodiff) is the one that
-executes a numerical comparison** -- the AI writes a throwaway
-companion file `tests_autodiff/verify_<ClassName>.cpp` that copies the
-production hand-written log-density verbatim and adds
-`autodiff::var`-compatible templated versions, compiles it, runs a
-5-20-point autodiff-vs-handwritten comparison (finite-difference
+executes a numerical comparison** -- the V-static validator writes a
+throwaway companion file in its own scratch directory that calls the
+production hand-written log-density and gradient as written and adds an
+`autodiff::var`-compatible log-density written from the confirmed model
+(Sec.0.3), compiles it, runs a 5-20-point autodiff-vs-handwritten
+comparison of gradients and log-density differences (finite-difference
 fallback for blocks using `lgamma` / `digamma`), and confirms max abs
-diff < 1e-8 (AD) or < 1e-5 (FD) per block. On PASS the AI **deletes**
-the verify file. The production `.cpp` is shipped with no `#ifdef`, no
+diff < 1e-8 (AD) or < 1e-5 (FD) per block. The validator deletes the
+file before it returns. The production `.cpp` is shipped with no `#ifdef`, no
 autodiff code, no Eigen, no verification scaffolding; the user compiles
 it as-is with `Rcpp::sourceCpp(...)`. See Check #12 body below for the
 full template.
@@ -1052,7 +1168,7 @@ Check #1 (wrong parameterization), #4 (missing intercept / offset),
 or #5 (Jacobian). When the model uses joint_NUTS, audit Check #11
 FIRST before blaming #1/#4/#5.
 
-### 12. Gradientverification via autodiff
+### 12. Gradient verification via autodiff
 
 **Trigger:** any NUTS-based block with a hand-written gradient -- i.e.,
 every generated sampler that uses `nuts_block` with a
@@ -1060,26 +1176,30 @@ every generated sampler that uses `nuts_block` with a
 blocks that don't carry a hand-written gradient (`bart_block`,
 `*_gibbs_block`) are not subject to this check.
 
-**Mechanism (the one execution-based semantic check):** the AI writes
-a throwaway companion file `tests_autodiff/verify_<ClassName>.cpp`
-alongside the production `.cpp`. The companion contains:
-  - copies (verbatim) of the production hand-written log-density
-    functions (both versions come from the same LLM think; drift is
-    negligible);
-  - templated (`autodiff::var`-compatible) versions of the same math;
+**Mechanism (the one execution-based semantic check):** the V-static
+validator writes a throwaway companion file in its own scratch directory
+(Sec.0.3). The companion contains:
+  - the production hand-written log-density and gradient functions,
+    copied verbatim and called as written (never edited);
+  - an `autodiff::var`-compatible log-density written FROM THE CONFIRMED
+    MODEL, in the coordinates and block split the production code uses
+    -- not a templated copy of the production log-density, which would
+    repeat its mistakes;
   - a self-contained `int main()` (backend-neutral -- no Rcpp, no
-    pybind) that samples random theta points, compares hand-written grad
-    vs autodiff grad for each NUTS block, prints a PASS/FAIL line per
-    block, and exits non-zero on failure.
+    pybind) that samples random theta points and, for each NUTS block,
+    compares the hand-written gradient with the autodiff gradient and the
+    log-density difference lp(theta_a) - lp(theta_b) of the two versions
+    (the additive constant cancels), prints a PASS/FAIL line per block,
+    and exits non-zero on failure.
 
 For blocks whose log-density uses `lgamma` / `digamma` / other
 special functions that the autodiff library doesn't overload, the AI falls
-back to **finite-differenceverification** (central-difference of the hand-
+back to **finite-difference verification** (central-difference of the hand-
 written wrap). FD precision is ~1e-5 vs AD's ~1e-8.
 
-The AI compiles the verify file, calls the verify function, and
-asserts every `max_diff < 1e-8` for AD-backed blocks / `< 1e-5` for
-FD-backed blocks. On PASS, the AI **deletes** the verify file. The
+The validator compiles the verify file, calls the verify function, and
+asserts every `max_grad` and `max_dlp` < 1e-8 for AD-backed blocks /
+< 1e-5 for FD-backed blocks. It deletes the verify file before it returns. The
 production `.cpp` is delivered unchanged -- no `#ifdef`, no autodiff
 code, no Eigen, no verification artifacts. User never sees verification code.
 
@@ -1100,18 +1220,16 @@ templated lp, compute `gradient()` on the whole vector) is in
    natural-scale log-densities wrapped by `constraints::*::wrap`. No
    autodiff includes, no `#ifdef AI4BAYESCODE_VERIFY_GRADIENTS`, no
    templated variants.
-2. AI generated `tests_autodiff/verify_<ClassName>.cpp` at some point
-   during generation.
-3. AI ran the verify function successfully (generation log should
-   record the max_diff values per block).
-4. AI deleted `tests_autodiff/verify_<ClassName>.cpp` after PASS (the
-   file should NOT be in the delivered artifact).
+2. The V-static report records `max_grad` and `max_dlp` per block.
+3. No verify file is in the delivered folder.
 
 **What the user sees:** nothing. They `Rcpp::sourceCpp("<ClassName>.cpp")`
 and get the hand-written sampler at full speed.
 
 **Failure routing at generation:**
-- `max_diff_<block> > threshold` -> bug in that block's hand-written
+- log-density-difference mismatch -> the production log-density
+  disagrees with the model at the term the report names.
+- gradient-only mismatch -> bug in that block's hand-written
   gradient. Common classes:
   - sign error (`d/dx(-0.5 x^2) = -x`, not `+x`)
   - factor missing (forgot `2` from `d/dx x^2 = 2x`)
@@ -1211,8 +1329,8 @@ the three probes above.
 
 **Mechanism (companion file pattern, mirroring Check #12):**
 
-The AI generates a throwaway `tests_autodiff/verify_<ClassName>_v1.cpp`
-alongside the production `.cpp`. The companion contains:
+The V-static validator writes a throwaway probe file in its own scratch
+directory. The companion contains:
 
   - `#include` of the production cpp's templated `Forward` and
     `Inverse` types (or copies them inline if they are local types
@@ -1223,8 +1341,8 @@ alongside the production `.cpp`. The companion contains:
     spanning the bijection's working domain and asserts all three
     probes above.
 
-The AI compiles the verify file, runs it, asserts all
-`max_residual < tolerance`, and on PASS deletes the verify file.
+The validator compiles the probe file, runs it, asserts all
+`max_residual < tolerance`, and deletes the file before it returns.
 The production cpp ships unchanged (no autodiff include in
 production, no probe scaffolding visible to the user).
 
@@ -1250,7 +1368,8 @@ struct UserInverse {
 };
 
 // BACKEND-NEUTRAL throwaway: compiled and run directly (no Rcpp, no
-// pybind), so it works under any backend. DELETE on PASS.
+// pybind), so it works under any backend. Deleted by the validator
+// before it returns (PASS or FAIL).
 int main() {
     auto bij = make_templated_bijection_1d(UserForward{}, UserInverse{});
     const double TOL_ROUND   = 1e-10;
@@ -1286,9 +1405,9 @@ int main() {
   bijection invariant (`J_fwd * J_rev = 1`). Same root cause as
   round-trip failure or as a sign error in the inverse.
 
-On any failure, the agent fixes the bijection BEFORE shipping; the
-companion file stays in `tests_autodiff/` until all three probes
-PASS.
+On any failure, V-static reports the failing probe and its residuals;
+the generator fixes the bijection and a fresh V-static re-runs from L1
+(Sec.0.5).
 
 **Joint blocks / multi-dim bijections:** Out of scope at this version.
 `templated_bijection_1d` is strictly 1D scalar. Multi-dim bijections
@@ -1769,7 +1888,8 @@ whereas `readapt_NUTS` exists only on the models that have a NUTS kernel
 (22 of the 42 shipped examples) and needs the concrete class name in its
 casts. Bind it in each model's RCPP_MODULE block.
 
-**Sub-checks** (all must pass):
+**Sub-checks** -- (a) and (b) are static (V-static, L2); (c) is runtime
+(V-runtime, R1). All must pass:
 
 **(a) State preservation -- static grep.** The wrapper's
 `readapt_NUTS(int n, bool reset)` body must:
@@ -1800,9 +1920,9 @@ The wrapper's `readapt_NUTS` body should reference ONLY
 `readapt_rng_`. See `system_design.md Sec.8` for the three-RNG
 discipline.
 
-**(c) R-level round-trip test.** The throwaway Layer-3 runner
-(`run_<ClassName>.R`) must include the following bitwise
-identity test (or a test of equivalent form):
+**(c) R-level round-trip test -- runtime.** V-runtime's R1 script
+(Sec.0.3) includes the following bitwise identity test (or a test of
+equivalent form):
 
 ```r
 m <- new(<ClassName>, ...)
@@ -1989,7 +2109,8 @@ static reasoning.
 interface.md Sec.1 -- every user-facing wrapper class MUST expose
 `freeze` / `unfreeze` / `get_frozen`.
 
-**Four sub-checks** (all must pass):
+**Four sub-checks** -- (a) is static (V-static, L2); (b)-(d) are runtime
+(V-runtime, R1). All must pass:
 
 **(a) Presence -- static grep.** The wrapper's RCPP_MODULE MUST contain
 `.method("freeze", ...)`, `.method("unfreeze", ...)`, and
@@ -2010,8 +2131,8 @@ grep -E '\.def\("freeze"|\.def\("unfreeze"|\.def\("get_frozen"|AI4BAYESCODE_PYBI
      examples/<ClassName>.cpp   # must find all three (or the macro)
 ```
 
-**(b) Whitelist / blacklist gate -- runtime R test.** The throwaway
-Layer-3 runner (`run_<ClassName>.R`) must include:
+**(b) Whitelist / blacklist gate -- runtime R test.** V-runtime's R1
+script (Sec.0.3) includes:
 
 ```r
 m <- new(<ClassName>, ...)
@@ -2031,7 +2152,7 @@ stopifnot(inherits(res, "error"))
 
 If the composite contains any block from the freeze BLACKLIST
 (`bart_block` / `genbart_block` / `hmm_block` / any `vi_block` subclass),
-the runner ALSO asserts:
+the R1 script ALSO asserts:
 
 ```r
 res <- tryCatch(m$freeze("<blacklist_block_name>"), error = identity)
@@ -2040,7 +2161,7 @@ stopifnot(inherits(res, "error"),
 ```
 
 **(c) Idempotent refreeze warning -- runtime R test.** If the composite
-contains at least one whitelisted block (nearly all do), the runner
+contains at least one whitelisted block (nearly all do), the R1 script
 includes:
 
 ```r
@@ -2172,11 +2293,11 @@ stopifnot(setequal(m$get_frozen(), saved))     # closure: get_frozen -> freeze -
 m$unfreeze()
 ```
 
-**(d) Stale-derived warning -- static grep.** For any wrapper whose
+**(d) Stale-derived warning -- runtime R test.** For any wrapper whose
 composite has a deterministic refresher (`register_refresher(key, fn)`)
-that reads a whitelisted block's `name()`, the runner should include a
-test that freezing that block emits an `Rcpp::warning` mentioning the
-downstream derived key:
+that reads a whitelisted block's `name()`, V-runtime's R1 script
+includes a test that freezing that block emits an `Rcpp::warning`
+mentioning the downstream derived key:
 
 ```r
 w <- tryCatch(m$freeze("<upstream_of_derived_key>"),
@@ -2228,11 +2349,15 @@ behave through the R interface.
 
 ---
 
-## Layer 3 -- Runtime (R1 + R2 + R3, all on the same 2 chains)
+## Layer 3 -- Runtime (R1 on a fresh model; R2 + R3 on the same 2 chains)
 
-All runtime checks share a single pair of chains, run with
-`keep_history = TRUE` so R can pull per-draw parameters out of
-`model$get_history()`. Execute the sub-steps in order -- R1 -> R2 -> R3.
+Run by the V-runtime validator, and only after V-static has returned PASS
+on the same `.cpp` (Sec.0.1: the hash must match).
+
+R1 runs on a fresh model before any chain. R2 and R3 share a single pair
+of chains, run with `keep_history = TRUE` so R can pull per-draw
+parameters out of `model$get_history()`. Execute the sub-steps in order
+-- R1 -> R2 -> R3.
 Failure at an earlier step means don't bother with the next one.
 
 **Never compare against a frequentist fit during validation** (`survival::survreg`,
@@ -2243,6 +2368,12 @@ in which case the comparison means nothing.
 
 ### R1. Smoke test
 
+**Owner:** V-runtime, in its own scratch script, on a fresh model, before
+any chain. Every runtime test in this section -- and the runtime halves of
+Checks #23 and #26 -- goes in that one script; the runner does not repeat
+them. R1 also runs the `.cpp`'s `@example` block(s) and its `int main()`
+demo as written; an error in either is an R1 FAIL.
+
 **Purpose:** call every built-in method of the wrapper once and catch
 immediate failures -- a missing or broken binding, non-finite values,
 `predict_at` mutating state, exceptions during `step`, silent
@@ -2252,7 +2383,8 @@ is affordable even for slow models (BART, large data).
 
 **R1 is all-or-nothing.** Any check in this section that fails, fails R1
 outright. There are no warnings at R1, no partial passes, and no deferring a
-failure to R2/R3 -- fix the code and re-run R1.
+failure to R2/R3 -- report R1 FAIL and stop; the fix and the restart
+follow Sec.0.5 (a `.cpp` change restarts at L1).
 
 **Member-function conformance sweep -- MANDATORY. Any one failing is an R1
 FAIL.** Every built-in method of the generated wrapper is checked HERE, at
@@ -2537,7 +2669,7 @@ with this few steps, slow-mixing variables give false positives. Dead-
 parameter detection lives in Semantic #3 (code review) and is covered
 by the R-hat check in R2 (a dead parameter trivially fails R-hat).
 
-**R code to emit:**
+**R1 script code (V-runtime writes it in its scratch directory):**
 ```r
 model$step(10L)
 d <- model$get_current()
@@ -2693,14 +2825,14 @@ predict_dag_smoke <- function(model, sample_newdata = list(), stochastic_keys = 
     }
 }
 # Default sweep: try list() plus every singleton subset of data_inputs
-# the generator emits a smoke-data fixture for. The wrapper's smoke-data
+# the R1 script builds a smoke-data fixture for. The wrapper's smoke-data
 # fixture should supply at least ONE non-empty newdata combination per
 # distinct data_input, sized to differ from training N where applicable.
 predict_dag_smoke(model, sample_newdata = SMOKE_NEWDATA, stochastic_keys = STOCHASTIC_KEYS)
 ```
 
-The wrapper-specific `SMOKE_NEWDATA` is a list of newdata candidates the
-generator must emit alongside the model. Minimum coverage:
+The wrapper-specific `SMOKE_NEWDATA` is a list of newdata candidates that
+V-runtime builds in its R1 script from the `.cpp`'s DGP. Minimum coverage:
 
 1. `list()` -- empty newdata; every refresher whose declared parents are
    either non-data-input or supplied-by-default must fire.
@@ -2735,13 +2867,10 @@ failing them at 4k+4k would be a false negative. Declare FAILURE only
 if R-hat stays `>= 1.05` even at the 20k+20k budget -- at that point
 the cause is almost certainly a semantic bug (parameterization,
 parallel/sequential, Jacobian, dead param) rather than slow mixing;
-return to Layer 2 and re-audit.
+V-runtime reports R2 FAIL and the fix follows Sec.0.5.
 
-**Attempt-budget note (cross-ref codegen.md "Generation attempt
-budget"):** this 4k->20k MCMC-budget escalation is WITHIN the current
-generation attempt and does NOT consume a codegen attempt. Only a
-full regenerate increments the user's `max_attempts` counter; the
-first generation is attempt 1.
+**Attempt budget:** this re-run stays within the current attempt
+(Sec.0.5 defines attempt counting).
 
 **ESS is a soft criterion, not a hard one -- but extreme degeneracy
 DOES fail.** Compute `ess_ratio = min(ESS_bulk, ESS_tail) / n_keep`
@@ -2908,8 +3037,8 @@ if (ess_ratio < 0.01) {
 
 If R-hat stays >= 1.05 even at the 20k+20k extended budget, the likely
 cause is a Semantic bug (parameterization, parallel/sequential,
-Jacobian, dead param) -- return to Layer 2 and re-audit before trusting
-the posterior -- but if the model has exchangeable components, first rule
+Jacobian, dead param) -- V-runtime reports R2 FAIL and the fix follows
+Sec.0.5 -- but if the model has exchangeable components, first rule
 out label switching (R2.L).
 
 ### R2.L. Label switching
@@ -3480,22 +3609,23 @@ if (pct_k_lo < 50 || pct_k_hi >= 10) {
 
 ## Running the validator
 
-- **Layer 1 (Syntactic):** run `sourceCpp`. Compilation errors -> fix
-  and retry.
+- **Layer 1 (Syntactic):** V-static compiles the `.cpp`. A compile
+  error is an L1 FAIL (Sec.0.5).
 - **Layer 2 (Semantic):** walk the generated `.cpp` through the 26
   semantic checks (#1-#26; #15-#17 are defined in
   `codegen_priors.md` Sec.2c-2e). Check #12 (gradient verification) is execution-based and
-  done at generation time via a throwaway
-  `tests_autodiff/verify_<ClassName>.cpp` companion file (see the
-  Check #12 body above for the template); the rest are static code
+  done by V-static via a throwaway companion file in its own scratch
+  directory (see Sec.0.3 and the Check #12 body above for the template);
+  the rest are static code
   review. Checks #11 (joint_nuts_block), #13 (RNG separation), #18
   (dense metric), #23 (readapt_NUTS), #24 (joint-NUTS pathology), and
   #25 (rjmcmc / Dirac-spike) fire conditionally -- only when the
   relevant pattern is present. **Check #26 (kernel-control conformance)
   fires on EVERY wrapper.**
-- **Layer 3 (Runtime):** emit R1, R2, R3 into the R runner. They share
-  the same 2 chains (keep_history = TRUE). R1 is a smoke test; R2 is
-  R-hat + ESS; R3 is posterior-predictive p-values + PSIS-LOO.
+- **Layer 3 (Runtime):** V-runtime runs R1 -> R2 -> R3 in order. R1 is
+  its own scratch script on a fresh model, before any chain; R2 (R-hat +
+  ESS) and R3 (posterior-predictive p-values + PSIS-LOO) share the
+  runner's 2 chains (keep_history = TRUE).
 
 If an R-layer assertion fails, the likely cause is Layer 2. Specifically:
 - R1 fails -> Rcpp API (Semantic #8) or numerical stability (#9).

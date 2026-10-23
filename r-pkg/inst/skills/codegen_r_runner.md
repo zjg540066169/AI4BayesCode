@@ -7,7 +7,7 @@ description: |
   ai4bayescode_rhat_summary / ai4bayescode_diagnose flow (NO generated
   helpers in the example; the harness-internal run_chain_<ClassName>()
   with keep_history = TRUE is NOT shipped), Layer 3 validator wiring
-  (R1 smoke check, R2
+  (the 2 chains, R2
   rank-normalized R-hat + ESS via posterior, R3 Bayesian p-values +
   PSIS-LOO via loo), run timing, joint-NUTS threshold
   tightening, and the reference-template catalogue (examples/*.cpp).
@@ -18,11 +18,14 @@ description: |
 # AI4BayesCode codegen -- R runner + reference templates
 
 **PREREQUISITE GATE -- L2 first.** Do not load this file, and do not
-emit or run any runner / Layer-3 harness, until the L2 semantic
-checklist + AD-twin (Check #12) have PASSED with the per-check verdict
-table printed (`codegen.md` Sec.11 Step 2, HARD ORDERING GATE). This
-file hands you executable runtime machinery; if L2 has not been
-printed yet, you are in the runtime-before-semantic reversal.
+emit any runner / Layer-3 harness, until the V-static validator has
+returned PASS on the current `.cpp` -- L2 semantic checklist + AD-twin
+(Check #12) -- and its per-check verdict table is printed
+(`validator.md` Sec.0; `codegen.md` Sec.11 Step 2, HARD ORDERING GATE).
+The runner is then RUN by the V-runtime validator, not by the generator.
+This file hands you executable runtime machinery; if the V-static
+verdict has not been printed yet, you are in the runtime-before-semantic
+reversal.
 
 Companion skill to `codegen.md`. Load this when writing the generated
 `.R` runner: ai4bayescode_source setup, constructor-argument reference
@@ -42,21 +45,17 @@ For the C++ file emission, see `codegen_cpp.md`.
 ## 9. Output
 
 1. Create output folder if missing (default `./generated/<ClassName>/`).
-2. Write `<folder>/<ClassName>.cpp`. **It MUST carry BOTH the `@example:R`
-   AND the `@example:python` header blocks** (per `codegen_cpp.md` Sec.5 "Header
-   `@example` block") -- the `.cpp` is ALWAYS dual-module, so a Python user who
-   takes the same file must still see the Python example via
-   `AI4BayesCode.doc()`, and an R user the R example via `ai4bayescode_doc()`.
-   Both blocks are the SAME toy DGP this runner uses, distilled to <= ~8
-   runnable lines using each language's packaged API (`library(AI4BayesCode)`
-   -> `new(<ClassName>, ...)` for R; `AI4BayesCode.source(...)` -> `Mod(...)`
-   for Python). Write the DGP once and mirror it into BOTH header blocks so
-   the runner and both doc cards cannot drift.
+2. Do NOT write or edit `<folder>/<ClassName>.cpp` here. It was written in
+   Phase 4 with BOTH its `@example:R` and `@example:python` header blocks
+   (`codegen_cpp.md` Sec.5 "Header `@example` block") and validated by its
+   SHA-256. Copy this runner's DGP FROM the `.cpp`. Any `.cpp` edit voids
+   the V-static PASS and restarts at L1 (`validator.md` Sec.0.5).
 3. Write the R runner `<folder>/run_<ClassName>.R` following the
-   template below and **use it to gate generation** (it carries the
-   Layer-3 R1/R2/R3 harness -- see the CORRECTNESS INVARIANT in
-   `codegen.md` "Delivered-code validation harness": Layer-3 ALWAYS
-   runs and must PASS regardless of the user's harness choice).
+   template below. It holds the 2 chains and the Layer-3 R2/R3 checks
+   and **gates generation**: V-runtime runs it after its own R1 (see the
+   CORRECTNESS INVARIANT in `codegen.md` "Delivered-code validation
+   harness": Layer-3 ALWAYS runs and must PASS regardless of the user's
+   harness choice).
 4. **Deliverable depends on the "Delivered-code validation harness"
    answer:**
    - **No / minimal example (default):** on validator PASS, **DELETE**
@@ -93,7 +92,7 @@ through the SHIPPED multi-chain helpers (`ai4bayescode_run_chains`,
 generated helper functions at all -- the constructor is an inline
 closure argument. The
 `run_chain_<ClassName>()` chain helper defined in the R runner
-template below is HARNESS-INTERNAL (Layer-3 R1/R2/R3 + sim1 need its
+template below is HARNESS-INTERNAL (Layer-3 R2/R3 + sim1 need its
 `pp = predict_at(...)` collection) and is NEVER copied into the
 delivered example; the whole harness is throwaway and NOT shipped in
 the default case.
@@ -408,7 +407,7 @@ ai4bayescode_source("<folder>/<ClassName>.cpp")   # relative path; no AI4BayesCo
 # ===========================================================================
 
 # ---- Helper: run ONE chain with history, return (hist, pp, wall_sec) -----
-# The runner uses keep_history = TRUE so validator Layer 3 (R1/R2/R3) can
+# The runner uses keep_history = TRUE so validator Layer 3 (R2/R3) can
 # work on the stored draws. Wall-clock time is captured for the timing line.
 #
 # HARD RULE (naming) -- everything is named after the model, i.e. the
@@ -576,7 +575,8 @@ pack2 <- function(x1, x2) {
     }
 }
 
-# ---- Layer 3 R1: smoke test ----------------------------------------------
+# ---- Layer 3 R2 precondition: kept draws finite --------------------------
+# (R1 has already passed in V-runtime's own script; validator.md R1.)
 # `c1$hist` / `c2$hist` are already burn-in-stripped (sliced inside
 # run_chain) so checks below only see kept draws.
 stopifnot(all(sapply(c1$hist, function(x) all(is.finite(x)))))

@@ -335,17 +335,9 @@ later, at Sec.2 and Sec.3. **Once the model is confirmed**, ask the upfront ques
    Counting semantics -- state these to the user if asked, and follow
    them exactly:
 
-   - **One "attempt" = one full `generate -> validate` cycle** (code
-     generation + compile + Layer-3 R1/R2/R3 + Checks #1-26).
-   - **The first generation IS attempt 1** -- it is NOT a free or
-     uncounted "attempt 0". The counter starts at 1 on the initial
-     generation. `max_attempts = N` therefore means at most **N total**
-     cycles INCLUDING the first generation (N = 5 => initial generation
-     + at most 4 regenerations).
-   - **The validator's internal MCMC-budget escalation** (R2 R-hat
-     4k+4k -> 20k+20k re-run) is part of the CURRENT attempt and does
-     NOT increment the attempt counter. Only a full regenerate
-     increments it.
+   - **What counts as an attempt** is defined once, in `validator.md`
+     Sec.0.5. `max_attempts = N` means at most N attempts, the first
+     included.
    - **On reaching the cap** (attempt N has been generated and still
      fails validation): STOP. Do not silently continue and do not
      hard-error. Report: the best attempt so far, the exact validator
@@ -555,8 +547,8 @@ Deliverable on PASS:
   The whole Layer-3 harness -- `run_<ClassName>.R` / `.py`, including
   its internal `run_chain_<ClassName>()` helper, the two-chain
   diagnostic, R-hat/ESS, posterior-predictive checks -- is throwaway and
-  is DELETED on PASS (same rule as the smoke test: "Delete on PASS. No
-  exceptions."). It is never copied into the delivered example.
+  is DELETED on PASS (same rule as the smoke test). It is never copied
+  into the delivered example.
 - **Yes:** ship the full `run_<ClassName>.R` Layer-3 runner
   (the `codegen_r_runner.md` template) as today.
 
@@ -1121,7 +1113,8 @@ L1 + L2, then V-runtime runs L3.** Order is **L1 -> L2 -> L3** -- compile, then 
 -> posterior)** -- cheapest-to-most-expensive per `validator.md`. Run the STATIC L2 checks
 BEFORE the expensive runtime: L3 passing does NOT prove correctness (a wrong Jacobian /
 parallel-update / parameterization runs clean -- R-hat ~1.00, BPV in range, LOO k<0.5 -- yet
-samples the WRONG posterior), so clear L2 first. Fix-and-re-run a layer before the next:
+samples the WRONG posterior), so clear L2 first. A failed layer is handled by the loop in
+`validator.md` Sec.0.5 (a `.cpp` change restarts at L1):
 
 > **HARD ORDERING GATE -- L2 must PASS before the L3 runtime harness is written or run.**
 > The steps below are an ORDER, not a menu. V-runtime is dispatched only after V-static has
@@ -1148,11 +1141,10 @@ samples the WRONG posterior), so clear L2 first. Fix-and-re-run a layer before t
 > REGENERATE with the dense metric and re-run L1 -> L2 -> L3 in order. The
 > attempt budget covers this; it is the intended resolution, not an overrun.
 >
-> **SELF-CHECK before you say "validation passed":** you must have run L1 -> L2 -> L3 in that
-> order. If the status you are about to send would read *"runtime passed, still need the L2
-> gradient check / semantic audit"* -- you have ALREADY violated this gate. STOP, run L2
-> (checklist + AD-twin) NOW, fix anything it catches (re-run the affected layer), and report
-> success ONLY once L2 AND L3 have both passed in order.
+> **SELF-CHECK before you say "validation passed":** the transcript must show a V-static PASS
+> table and then a V-runtime PASS table, both for the same `.cpp` SHA-256, and that hash must
+> be the hash of the file you deliver. Any runtime result without a prior V-static PASS on
+> that hash is VOID: restart at L1 (`validator.md` Sec.0.5).
 
 ### Step 1: Compile check
 
@@ -1204,8 +1196,9 @@ directory. The smoke test does:
   silent-default-substitution scan -- a wrapper that quietly fills a
   missing input from a training-set mean passes every other check.
 
-These four are validator.md's R1, in full; emitting only the first two
-is the common shortfall.
+These are a subset; V-runtime runs `validator.md`'s full R1 section
+(including the member-function sweep, the #23 / #26 runtime halves, the
+`@example` block(s) and the `int main()` demo).
 
 **The smoke-test script never enters the user's folder.** It lives in
 V-runtime's scratch directory and is deleted before the validator
@@ -1215,7 +1208,8 @@ compile-smoke coverage is provided by the repo's F4 audit
 scripts. Same pattern as Check #12 verify files in `codegen_cpp.md Sec.6b`.
 
 Do NOT leave behind a `smoke_<ClassName>.R` or `smoke_test.R` with a
-"kept for reuse" note. Delete on PASS. No exceptions.
+"kept for reuse" note. The validator deletes it before it returns. No
+exceptions.
 
 ### Step 4: Two-chain diagnostic (REQUIRED to run+pass at gen-time; shipping is governed by the validation-harness opt-in)
 
@@ -1229,7 +1223,7 @@ avoid false positives from short runs.
 any user option** -- it is part of the correctness gate, not optional.
 What is *conditional* is whether it is **shipped**: per the
 "Ship the runtime validation code?" question above,
-- **default (No):** the Layer-3 runner (R1/R2/R3 incl. this Step-4
+- **default (No):** the Layer-3 runner (R2/R3 incl. this Step-4
   diagnostic) is a **throwaway** -- it gates generation, then on PASS
   it is DELETED and only `example_<ClassName>.R` (the usage example
   defined in `codegen_r_runner.md`) is delivered. Same throwaway rule
@@ -1264,8 +1258,9 @@ chain2 <- run_chain_<ClassName>(<data_args>, seed = 2L, n_burnin = 4000, n_keep 
 - **One chain diverged (Inf/NaN)**: bad prior (too flat) or numerical
   overflow. Suggest tighter prior or check parameterization.
 
-If any check fails, fix the code or report the issue to the user with
-a specific diagnosis. Do NOT silently pass a model that shows NI.
+If any check fails, V-runtime reports FAIL with a specific diagnosis
+and the generator fixes per `validator.md` Sec.0.5. Do NOT silently
+pass a model that shows NI.
 
 ### Common fixes for failing checks
 
@@ -1297,7 +1292,8 @@ run, and produce reasonable samples out of the box.
   confuses users into thinking it's part of their output.
 - **Never leave a `smoke_<ClassName>.R` / `smoke_test.R` file behind
   after Step 3 PASS.** Smoke tests are throwaway; same rule as
-  Check #12 verify files. Delete on PASS. No "kept for reuse" option.
+  Check #12 verify files: the validator deletes them before it returns.
+  No "kept for reuse" option.
   Ongoing compile-smoke coverage is provided by
   `tests_autodiff/audit_compile_smoke.R`, not by per-model smoke
   scripts.
@@ -1532,8 +1528,8 @@ run, and produce reasonable samples out of the box.
        function (`codegen_cpp.md Sec.6b` has the full template);
     2. compiles + runs it, comparing gradients and log-density
        differences;
-    3. asserts every `max_diff < 1e-8` for AD-backed blocks and
-       `< 1e-5` for FD-backed blocks;
+    3. asserts every `max_grad` and `max_dlp` < 1e-8 for AD-backed
+       blocks and < 1e-5 for FD-backed blocks;
     4. deletes the file before it returns. Nothing from the check
        reaches the user's workspace (Sec.12).
   The production `<ClassName>.cpp` stays 100% clean -- no `#ifdef`, no

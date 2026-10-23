@@ -6,8 +6,8 @@ description: |
   inline-constructor-lambda + shipped AI4BayesCode.run_chains /
   rhat_summary / diagnose flow (NO generated helpers in the example;
   harness-internal run_chain_<ClassName>() with keep_history=True is
-  NOT shipped), Layer 3 validator wiring (R1 smoke
-  check, R2 rank-normalized R-hat + ESS (AI4BayesCode numpy helpers), R3 Bayesian p-values
+  NOT shipped), Layer 3 validator wiring (the 2
+  chains, R2 rank-normalized R-hat + ESS (AI4BayesCode numpy helpers), R3 Bayesian p-values
   + PSIS-LOO via arviz), run timing, joint-NUTS threshold
   tightening, and the reference-template catalogue (examples/*.cpp).
   Mirror of codegen_r_runner.md for the Python (pybind11) backend.
@@ -63,21 +63,16 @@ the runner deliverables are independent (`.R` + `.py`).
 ## 9. Output
 
 1. Create output folder if missing (default `./generated/<ClassName>/`).
-2. Write `<folder>/<ClassName>.cpp`. **It MUST carry BOTH the
-   `@example:python` AND the `@example:R` header blocks** (per
-   `codegen_cpp.md` Sec.5 "Header `@example` block") -- the `.cpp` is ALWAYS
-   dual-module, so an R user who takes the same file must still see the R
-   example via `ai4bayescode_doc()`, and a Python user the Python example via
-   `AI4BayesCode.doc()`. Both blocks are the SAME toy DGP this runner uses,
-   distilled to <= ~8 runnable lines using each language's packaged API
-   (`AI4BayesCode.source(...)` -> `Mod(...)` for Python; `new(<ClassName>,
-   ...)` for R). Write the DGP once and mirror it into BOTH header blocks so
-   the runner and both doc cards cannot drift.
+2. Do NOT write or edit `<folder>/<ClassName>.cpp` here. It was written in
+   Phase 4 with BOTH its `@example:python` and `@example:R` header blocks
+   (`codegen_cpp.md` Sec.5 "Header `@example` block") and validated by its
+   SHA-256. Copy this runner's DGP FROM the `.cpp`. Any `.cpp` edit voids
+   the V-static PASS and restarts at L1 (`validator.md` Sec.0.5).
 3. Write the Python runner `<folder>/run_<ClassName>.py` following the
-   template below and **use it to gate generation** (it carries the
-   Layer-3 R1/R2/R3 harness -- same CORRECTNESS INVARIANT as the R
-   side: Layer-3 always runs and must PASS regardless of the user's
-   harness choice).
+   template below. It holds the 2 chains and the Layer-3 R2/R3 checks
+   and **gates generation**: V-runtime runs it after its own R1 (same
+   CORRECTNESS INVARIANT as the R side: Layer-3 always runs and must
+   PASS regardless of the user's harness choice).
 4. **Deliverable depends on the "Delivered-code validation harness"
    answer** (same rule as R version):
    - **No / minimal example (default):** on validator PASS, **DELETE**
@@ -111,10 +106,10 @@ EXCLUSIVELY through the SHIPPED helpers (`AI4BayesCode.run_chains`,
 generated helper functions at all -- the constructor is an inline
 lambda argument.
 The `run_chain_<ClassName>()` helper defined in the runner template
-below is HARNESS-INTERNAL (Layer-3 R1/R2/R3 + sim1 need its
+below is HARNESS-INTERNAL (Layer-3 R2/R3 + sim1 need its
 `pp = predict_at(...)` collection) and is NEVER copied into the
-delivered example; the whole harness (R2 R-hat/ESS, R3 BPV, PSIS-LOO,
-R1 smoke wiring) is throwaway and NOT shipped in the default case.
+delivered example; the whole harness (R2 R-hat/ESS, R3 BPV, PSIS-LOO)
+is throwaway and NOT shipped in the default case.
 
 **Emitting the advanced-control block (agent-facing rules -- these do NOT
 go into the file).** Same as the R skill: `readapt_NUTS` lines are
@@ -300,7 +295,7 @@ y_rep = model.predict_at({})["y_rep"]        # posterior predictive at training 
 ### Python runner template -- standard body (DEFAULT; harness-internal)
 
 This is the DEFAULT `run_chain_<ClassName>` body for the THROWAWAY
-Layer-3 harness (R1/R2/R3 + sim1 need the `pp = predict_at(...)`
+Layer-3 harness (R2/R3 + sim1 need the `pp = predict_at(...)`
 collection below, which the shipped `AI4BayesCode.run_chains` does not
 do). It is NEVER copied into the delivered example. Use it unless the
 composite has a NUTS-family child whose conditional posterior shifts
@@ -529,7 +524,7 @@ runs Python from **the project root** -- the directory containing both
 and the fix is documented.
 
 ```python
-# === run_<ClassName>.py -- Layer 3 harness (R1 + R2 + R3) ===
+# === run_<ClassName>.py -- Layer 3 harness (R2 + R3; R1 runs in V-runtime's own script) ===
 import os, sys, time
 import numpy as np
 
@@ -581,21 +576,8 @@ def run_chain_<ClassName>(<data_args>, *, seed, n_burn, n_keep,
 # NOTE: AI4BayesCode.diagnose (table + trace/ACF/density plot) is SHIPPED in the
 # AI4BayesCode package -- there is NO helper to define here.
 
-# === R1. Smoke test ===
-m_smoke = mod.<ClassName>(<data_args>, rng_seed=42, keep_history=False)
-m_smoke.step(10)
-cur = m_smoke.get_current()
-assert all(np.all(np.isfinite(np.asarray(v))) for v in cur.values()), \
-    "R1: get_current contains non-finite values after 10 steps"
-cur_before = {k: np.asarray(v).copy() for k, v in m_smoke.get_current().items()}
-pp = m_smoke.predict_at({})
-assert "y_rep" in pp and np.all(np.isfinite(np.asarray(pp["y_rep"]))), \
-    "R1: predict_at must produce finite y_rep"
-cur_after = m_smoke.get_current()
-for k, v_before in cur_before.items():
-    v_after = np.asarray(cur_after[k])
-    assert np.allclose(v_before, v_after), f"R1: predict_at mutated {k}"
-print("R1 smoke OK")
+# R1 is not here: V-runtime has already run it in its own script
+# (validator.md R1). This runner holds the chains, R2 and R3.
 
 # === R2. 2-chain MCMC convergence (sequential; see _run_two_chains) ===
 # Defer to validator.md Sec.R2 for the budget/escalation policy + the
@@ -632,6 +614,11 @@ def _run_two_chains(n_burn, n_keep):
     return c1, c2, time.time() - t0
 
 c1, c2, total_wall_sec = _run_two_chains(n_burn, n_keep)
+
+# --- R2 precondition: kept draws finite ------------------------------------
+for _c in (c1, c2):
+    assert all(np.all(np.isfinite(np.asarray(v))) for v in _c["hist"].values()), \
+        "R2: non-finite kept draw"
 
 # --- R-hat / ESS aggregation (rank-normalized, via arviz) ----------------
 # Matches validator.md Sec.R2 and codegen_r_runner.md r2_diag(): rank-normalized

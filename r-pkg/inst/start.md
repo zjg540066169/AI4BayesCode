@@ -72,7 +72,10 @@ below. Defaults exist to suggest a standing choice IN the question,
 not to bypass the question.
 
 **Delivery is gated on full validation.** NEVER tell the user the
-code is done before L1 + L2 + L3 R1/R2/R3 all pass. See Sec.5.
+code is done before L1 + L2 + L3 R1/R2/R3 all pass. See Sec.5. The
+layers run STRICTLY in order -- L1, then L2, then L3 -- each by an
+independent validator subagent (`skills/validator.md` Sec.0). **L3 never
+starts before L2 has passed on the same `.cpp`.**
 
 Every **design question** to the user MUST be a structured prompt
 with explicit, labeled options. Use whatever your environment's
@@ -178,13 +181,9 @@ run automatically without asking.
 | Model confirmation / DAG sign-off after presenting the inline DAG + table | YES |
 | Ship-ready confirmation ("save final files and finish?") | YES |
 | **Procedural workflow steps** | NO -- run automatically |
-| Compile the generated `.cpp` (`ai4bayescode_source(...)` in R, equivalent in Python) | NO |
-| L3 R1 smoke test (10 steps, finiteness, `predict_at` non-mutation, freeze -> `predict_at` history) | NO |
-| L3 R2 two-chain diagnostic (4k+4k, R-hat, ESS) | NO |
-| L3 R3 posterior-predictive Bayesian p-values + PSIS-LOO | NO |
+| Dispatch the V-static validator subagent: L1 compile + the full L2 semantic suite incl. the AD-twin (`validator.md` Sec.0) | NO |
+| Dispatch the V-runtime validator subagent: L3 R1 smoke -> R2 two-chain -> R3 posterior check -- ONLY after V-static returned PASS on the same `.cpp` | NO |
 | Render the prediction DAG inline (Mermaid / edge list) for the Sec.3 step | NO |
-| Apply the full L2 semantic-check suite (`validator.md`) against the `.cpp` | NO |
-| Delete the throwaway gradient-verify `.cpp` after Check #12 passes | NO |
 | Write the `.cpp` / runner files to the user's chosen output folder (default `./generated/<ClassName>/` only if not specified upfront) | NO (just write) |
 | Load the next instruction file per the phase schedule in Sec.1 | NO |
 
@@ -200,10 +199,12 @@ pause to ask the user**. (PSIS-LOO Pareto-k is DIAGNOSTIC-ONLY and
 never triggers a retry -- it is unreliable for BNP / mixture models
 where high k reflects the model class, not a sampler bug. The
 posterior-predictive p-value gate does not have that problem and DOES
-fail; see `validator.md` R3.a / R3.b.) Auto-retry up to N attempts total
-(including attempt #1), escalating the fix between attempts --
+fail; see `validator.md` R3.a / R3.b.) Auto-retry up to N attempts total,
+counted as `validator.md` Sec.0.5 defines (the first `.cpp` is attempt 1).
+Each attempt: the generator fixes, and a FRESH validator re-checks -- a
+`.cpp` change always restarts at L1. Escalate the fix between attempts --
 e.g., compile error -> fix the syntax / typo / missing include and
-recompile; R-hat fail at 4k+4k -> re-run at 20k+20k; still fails ->
+recompile; R-hat fail after the validator's own 20k+20k re-run ->
 re-tune metric / try non-centered reparam / try a joint block; etc.
 
 **N defaults to 5.** The user may override by specifying a different
@@ -366,9 +367,9 @@ class), not separate classes.
 | 2. Prior elicitation | when a user prior is missing / ambiguous | `skills/codegen_priors.md` |
 | 3. Model confirmation | before writing any code | `skills/codegen.md` Sec.3 (inline DAG + summary table) |
 | 4. C++ emission | when starting to write `.cpp` | `skills/codegen_cpp.md` -- **and, if the sampler will contain a `joint_nuts_block`, `skills/joint_nuts_failure.md` Modes 1-3 as well, BEFORE the block is written** |
-| 5. L1 compile + L2 semantic validation | after `.cpp` is written, BEFORE any runner file exists | `skills/validator.md` (L2 semantic checklist + AD-twin Check #12); PRINT the per-check verdict table |
-| 6. R / Python runner emission | ONLY after the printed L2 verdict PASSES | `skills/codegen_r_runner.md` (R backend) / `skills/codegen_python_runner.md` (Python backend; load whichever the chosen backend needs) |
-| 7. L3 runtime verification | after the runner compiles | `skills/validator.md` Layer 3 (R1 smoke -> R2 two-chain -> R3) |
+| 5. L1 compile + L2 semantic validation | after `.cpp` is written, BEFORE any runner file exists | Dispatch the V-static validator subagent (`skills/validator.md` Sec.0; it loads the L2 checklist + AD-twin Check #12 itself); PRINT the per-check verdict table it returns |
+| 6. R / Python runner emission | ONLY after the printed V-static verdict is PASS | `skills/codegen_r_runner.md` (R backend) / `skills/codegen_python_runner.md` (Python backend; load whichever the chosen backend needs) |
+| 7. L3 runtime verification | after the runner is written, and only on the `.cpp` V-static passed | Dispatch the V-runtime validator subagent (`skills/validator.md` Sec.0 + Layer 3: R1 smoke -> R2 two-chain -> R3) |
 
 **SKILL TEXT NEVER LEAKS INTO DELIVERED FILES.** The skill corpus
 (this file + everything under `skills/`) is YOUR operating manual,
@@ -578,10 +579,11 @@ This chat client renders **display / block math** but does NOT render **inline
 
 ## 4. Validator must run for every generation
 
-Walk through the L2 checks in `skills/validator.md` BEFORE any runtime
-execution of the generated model -- the smoke test's first `step()`
-included, not merely "before declaring the `.cpp` complete" -- and
-print the per-check verdict table (codegen.md Sec.11 Step 2). The most
+The V-static validator subagent walks through the L2 checks in
+`skills/validator.md` (Sec.0) BEFORE any runtime execution of the
+generated model -- the smoke test's first `step()` included, not merely
+"before declaring the `.cpp` complete" -- and the generator prints the
+per-check verdict table it returns (codegen.md Sec.11 Step 2). The most
 commonly missed checks this skill set has caught:
 
 - **Check #6 (DAG consistency).** Every key read inside a
@@ -681,7 +683,7 @@ full list but the critical ones:
   Writing the `.cpp` and runner to the output folder during the
   pipeline (so compile / L3 R1 / R2 / R3 can actually run) is NOT
   delivery. Delivery happens only after L1 + L2 + L3 R1/R2/R3 all
-  pass. While any phase is still running, do not phrase output as
+  pass, in that order, as reported by the validator subagents. While any phase is still running, do not phrase output as
   "done" / "ready" / "complete" / "the sampler compiles and the
   smoke test passes" in any way that suggests the work is finished.
   If the user asks "is it done?" the answer is "No -- [phase X] is

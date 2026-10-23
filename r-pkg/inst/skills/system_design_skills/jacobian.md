@@ -51,13 +51,14 @@ sensitive) but Layer 2 Check #5 MUST catch at code review.
 #### Rule: Check #12 (AD verification) runs at gen-time
 
 For every block with a hand-written log-density + gradient pair,
-the code-gen agent writes a throwaway
-`tests_autodiff/verify_<ClassName>.cpp` that pastes the hand-
-written functions verbatim, adds templated `autodiff::var` versions
-of the same math, and compares 5-20 random-theta points. Max diff must
-be < 1e-8 (AD) or < 1e-5 (finite-diff fallback for blocks using
-`lgamma` / `digamma`). On PASS, the verify file is DELETED. On
-FAIL, the hand-written gradient has a bug; fix it before shipping.
+the V-static validator (`validator.md` Sec.0) writes a throwaway
+companion file in its own scratch directory that pastes the hand-written
+functions verbatim, adds an `autodiff::var` log-density written from
+the confirmed model, and compares gradients and log-density differences
+at 5-20 random-theta points. Max diff must be < 1e-8 (AD) or < 1e-5
+(finite-diff fallback for blocks using `lgamma` / `digamma`). The file
+is deleted before the validator returns. On FAIL, the hand-written code
+has a bug; the generator fixes it before shipping.
 
 The production `.cpp` is scaffolding-free: no `#ifdef
 AI4BAYESCODE_VERIFY_GRADIENTS`, no autodiff includes, no Eigen
@@ -204,10 +205,9 @@ from the SINGLE templated forward + the user's analytic inverse:
 3. **Forward / reverse Jacobian inverse-pair**:
    `|fwd_J(u) * rev_J(T(u)) - 1| < 1e-10` -- the bijection invariant.
 
-On any probe failure the agent fixes the bijection before shipping;
-companion file `tests_autodiff/verify_<ClassName>_v1.cpp` is
-generated, run, and deleted on PASS (mirrors the Check #12
-companion-file pattern).
+On any probe failure the generator fixes the bijection before
+shipping; the probe file is written, run and deleted by V-static in its
+own scratch directory (mirrors the Check #12 companion-file pattern).
 
 **Users still never write a Jacobian.** They write the forward map
 once (templated), an analytic inverse once (non-templated), and the

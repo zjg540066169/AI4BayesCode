@@ -311,11 +311,12 @@ cfg.log_density_grad = [&, J, P, group_idx_key, y_key, x_key,
 ```
 
 **Check #12 (autodiff gradient verification) is REQUIRED** for this
-hand-coded gradient. Before shipping, the codegen agent writes
-`tests_autodiff/verify_<wrapper>.cpp` with a templated `autodiff::var`
-version of the same density and verifies max_diff < 1e-8 on 5-20
-random `(mu, sigma_alpha, sigma_y, alpha_raw, beta)` points, then
-deletes the verify file. See `validator.md Sec.12`.
+hand-coded gradient. Before shipping, the V-static validator writes an
+AD-twin in its own scratch directory -- an `autodiff::var` log-density
+written from the confirmed model -- and verifies max_grad and max_dlp
+< 1e-8 on 5-20 random `(mu, sigma_alpha, sigma_y, alpha_raw, beta)`
+points, then deletes it. See
+`validator.md` Sec.0 and Sec.12.
 
 ## 6. Crossed effects (two crossed RE levels)
 

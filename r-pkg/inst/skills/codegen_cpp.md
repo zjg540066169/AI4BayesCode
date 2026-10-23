@@ -646,13 +646,15 @@ order:
    (`start.md` phase table; `codegen.md` Sec.11 HARD ORDERING GATE). Do
    not write it here; it translates the same DGP a third time.
 
-**Validation keeps all three in sync.** If the R/Python runner changes (a
-different sample size, prior, or data shape), update the `int main()` demo AND
-the `@example` comment to match -- they are three renderings of ONE DGP. A
-validator pass must confirm the `@example` block actually runs and (for library
-examples) that two independent chains converge (rank-normalized R-hat); the
-embedded block itself stays single-chain (the 2-chain convergence run is a
-validation step, never shipped in the example).
+**Validation keeps all three in sync.** The runner copies its DGP FROM the
+`.cpp`, never the reverse: the runner, the `int main()` demo and the `@example`
+comment are three renderings of ONE DGP. Editing the `@example` block or the
+demo is a `.cpp` edit, so it voids the V-static PASS and restarts at L1
+(`validator.md` Sec.0.5). After L2, V-runtime's R1 confirms the `@example`
+block(s) and the demo actually run, and (for library examples) R2 confirms
+that two independent chains converge (rank-normalized R-hat); the embedded
+block itself stays single-chain (the 2-chain convergence run is a validation
+step, never shipped in the example).
 
 ### Joint NUTS log-density template (the default path; see Sec.4a)
 
@@ -1077,10 +1079,10 @@ AI-generated code:
    reference; if the AI gradient is wrong, rhat against Stan goes >
    1.5 instantly.
 
-Mandatory companion: **Check #12 verify file MUST also be vectorized**
-the same way (autodiff::var supports armadillo `*`, `.t()`, `dot`).
-Don't write the verify in scalar loops while the production cpp is
-vectorized -- the verify must exercise the same code path.
+Check #12 AD log-density: V-static writes it from the confirmed model,
+not from the production code (`validator.md` Sec.0.3, template Sec.6b).
+It may use armadillo operations (autodiff::var supports `*`, `.t()`,
+`dot`) for speed, but it is never modelled on the production code.
 
 ### Performance gain in production
 
@@ -1515,40 +1517,42 @@ declare context edges.
 
 The production `.cpp` carries only the hand-written log-density +
 analytic gradient. **No autodiff / Eigen code goes into the delivered
-file.** Check #12 happens in a THROWAWAY companion file that the AI
-creates, uses, and DELETES during generation. The user never sees
+file.** Check #12 happens in a THROWAWAY companion file that the V-static
+validator subagent creates in its own scratch directory, runs, and
+deletes before it returns (`validator.md` Sec.0). The user never sees
 verification code.
 
 ### Workflow
 
 ```
-                 AI GENERATION STEP
-                 ------------------
+                 GENERATION (generator)  /  L2 (V-static validator)
+                 -------------------------------------------------
 
-  1. AI writes production example:      examples/MyModel.cpp
+  1. Generator writes production example: <ClassName>.cpp
      (hand-written log-density + analytic grad only; no verification code)
 
-  2. AI writes verify companion:        tests_autodiff/verify_MyModel.cpp
+  2. V-static writes the verify companion in ITS OWN scratch directory:
      - Copies the hand-written log-density functions verbatim from step 1
-       (both come from the same LLM think, so drift is negligible)
-     - Adds templated (autodiff::var-compatible) versions of the same math
+       (called as written, never edited)
+     - Writes an autodiff::var-compatible log-density FROM THE CONFIRMED
+       MODEL, in the coordinates and block split step 1 uses -- not a
+       templated copy of step 1, which would repeat its mistakes
      - Adds a self-contained `int main()` (NO Rcpp / pybind -- the file is
        compiled and run directly, so the check works under any backend)
 
-  3. AI compiles + runs it with a plain c++ invocation (see the template
-     below). The file asserts its own thresholds and exits non-zero on
-     failure: `max_diff_<block> < 1e-8` for AD-differentiable blocks,
-     `< 1e-5` for FD-based blocks (see "Fallback" below).
+  3. V-static compiles + runs it with a plain c++ invocation (see the
+     template below). The file compares gradients and log-density
+     DIFFERENCES (the additive constant cancels), asserts its own
+     thresholds and exits non-zero on failure: `max_grad_<block>` and
+     `max_dlp_<block>` < 1e-8 for AD-differentiable blocks, < 1e-5 for
+     FD-based blocks (see "Fallback" below).
 
-  4. On PASS:   AI deletes tests_autodiff/verify_MyModel.cpp AND
-                runs `rmdir tests_autodiff/` to remove the (now empty)
-                directory. Final user workspace contains ONLY the
-                production .cpp + the R / Python runner -- no
-                tests_autodiff/ folder of any kind.
-     On FAIL:   AI pinpoints which block's diff exceeds, fixes the
-                hand-written gradient in the production file, and
-                re-runs from step 3. Common bugs are listed at the
-                bottom of this section.
+  4. V-static deletes the file before it returns, and reports
+     max_grad and max_dlp per block. The user's folder never contains verification
+     code. On FAIL the report names the block whose diff exceeds; the
+     GENERATOR fixes the production file and a fresh V-static re-runs
+     from L1 (`validator.md` Sec.0.5). Common bugs are listed at the
+     bottom of this section.
 
                        PRODUCTION TIME
                        ---------------
@@ -1558,11 +1562,11 @@ verification code.
   no verification artifacts. 100% clean.
 ```
 
-### Companion file template (tests_autodiff/verify_<ClassName>.cpp)
+### Companion file template (verify_<ClassName>.cpp, in the validator's scratch directory)
 
 ```cpp
-// Check #12 (gradient verification) for <ClassName>.cpp. THROWAWAY -- deleted after
-// PASS confirmed.
+// Check #12 (gradient verification) for <ClassName>.cpp. THROWAWAY -- written by the
+// V-static validator in its own scratch directory, deleted before it returns.
 
 // [[Rcpp::depends(RcppArmadillo)]]
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
@@ -1595,9 +1599,7 @@ namespace cs  = AI4BayesCode::constraints;
 namespace adw = AI4BayesCode::autodiff_wrap;
 
 // ---- (1) COPIES of hand-written log-density functions from production ----
-// VERBATIM from examples/<ClassName>.cpp -- same math, same grad formula.
-// AI pastes these in at generation; no drift because both versions come
-// from the same prompt.
+// VERBATIM from <ClassName>.cpp -- same math, same grad formula, unedited.
 namespace {
 
 double <block1>_log_density(const arma::vec& theta_nat,
@@ -1607,15 +1609,25 @@ double <block1>_log_density(const arma::vec& theta_nat,
 }
 // ... and every other NUTS block's log-density ...
 
-// ---- (2) Templated (AD-compatible) versions of the SAME math ----
-// Returns only the scalar lp; no gradient. T = autodiff::var at call
-// time. Math functions use unqualified `log`, `exp`, etc. for ADL.
+// ---- (2) Templated (AD-compatible) log-density FROM THE CONFIRMED MODEL ----
+// Written from the signed-off equations, NOT copied from (1). Same
+// coordinates, block split and target (conditional / marginal / augmented)
+// as (1); constants may differ, because only
+// log-density DIFFERENCES are compared. Returns only the scalar lp; no
+// gradient. T = autodiff::var at call time. Math functions use unqualified
+// `log`, `exp`, etc. for ADL.
 template <typename Vec>
 auto <block1>_lp_ad(const Vec& theta_nat, const block_context& ctx) {
     using T = typename std::decay<decltype(theta_nat[0])>::type;
     T lp = T(0);
-    // ... identical lp math, no grad writes, use `lp = lp - ...` style ...
+    // ... the model's lp, written from the confirmed equations, no grad writes ...
     return lp;
+}
+
+// ---- (2b) Plain double log-density FROM THE CONFIRMED MODEL for the FD-backed
+// blocks (lgamma / digamma etc.), so their value is checked independently too ----
+double <block_special>_lp_spec(const arma::vec& theta_nat, const block_context& ctx) {
+    // ... the model's lp for this block, written from the confirmed equations ...
 }
 
 // ---- (3) FD helper for non-AD blocks (lgamma / digamma etc.) ----
@@ -1637,7 +1649,7 @@ arma::vec fd_grad(const arma::vec& theta_unc, WrapFn wrap_fn,
 // BACKEND-NEUTRAL: a self-contained int main(). No Rcpp, no pybind --
 // this file is compiled and RUN directly (see "At generation time" below),
 // so the check works identically whether the user's backend is R, Python,
-// or neither. It is throwaway: DELETE it on PASS.
+// or neither. It is throwaway: the validator deletes it before it returns.
 int main() {
     const int n_points = 20;
     const int seed     = 42;
@@ -1650,23 +1662,44 @@ int main() {
     std::uniform_real_distribution<double> unif_real(-2.0, 2.0);
     std::uniform_real_distribution<double> unif_log (-1.0, 1.5);
 
-    double max_diff_<block1> = 0.0;
+    double max_grad_<block1> = 0.0, max_dlp_<block1> = 0.0;
+    double max_grad_<block_special> = 0.0, max_dlp_<block_special> = 0.0;
     // ...
+
+    // One reference point per block, drawn once; log-density differences are
+    // taken to it, so the two versions may differ by an additive constant.
+    arma::vec g_ref(dim);
+    const arma::vec th_ref_<block1>{ /* random unconstrained */ };
+    const double lp_hw_ref_<block1> = cs::<kind>::wrap(th_ref_<block1>, &g_ref /* , bounds for bounded kinds */,
+        [&](const arma::vec& t, arma::vec* g) { return <block1>_log_density(t, ctx_<block1>, g); });
+    const double lp_ad_ref_<block1> = adw::wrap_<kind>(th_ref_<block1>, &g_ref,
+        [&](const auto& t) { return <block1>_lp_ad(t, ctx_<block1>); });
+    // FD-backed blocks: reference values on the natural scale.
+    // (kind real has no constrain(): pass the unconstrained vector directly.)
+    const arma::vec th_ref_nat_<bs> = cs::<kind>::constrain(arma::vec{ /* random unconstrained */ } /* , bounds for bounded kinds */);
+    const double lp_hw_nat_ref_<bs> = <block_special>_log_density(th_ref_nat_<bs>, ctx_<bs>, nullptr);
+    const double lp_spec_ref_<bs>   = <block_special>_lp_spec(th_ref_nat_<bs>, ctx_<bs>);
 
     for (int k = 0; k < n_points; ++k) {
         // --- AD verification for blocks without special functions ---
         {
             arma::vec th{ /* random unconstrained */ };
             arma::vec g_hw(dim), g_ad(dim);
-            double lp_hw = cs::<kind>::wrap(th, &g_hw,
+            double lp_hw = cs::<kind>::wrap(th, &g_hw /* , bounds for bounded kinds */,
                 [&](const arma::vec& t, arma::vec* g) {
                     return <block1>_log_density(t, ctx_<block1>, g);
                 });
             double lp_ad = adw::wrap_<kind>(th, &g_ad,
                 [&](const auto& t) { return <block1>_lp_ad(t, ctx_<block1>); });
-            double d = std::max(std::abs(lp_hw - lp_ad),
-                                arma::max(arma::abs(g_hw - g_ad)));
-            if (d > max_diff_<block1>) max_diff_<block1> = d;
+            // Log-density DIFFERENCE to a fixed reference point th_ref (drawn
+            // once before the loop, lp_hw_ref / lp_ad_ref evaluated there):
+            // the additive constant cancels, relative scale keeps it fair.
+            const double dlp_hw = lp_hw - lp_hw_ref_<block1>;
+            const double dlp_ad = lp_ad - lp_ad_ref_<block1>;
+            max_dlp_<block1>  = std::max(max_dlp_<block1>,
+                std::abs(dlp_hw - dlp_ad) / std::max(1.0, std::abs(dlp_hw)));
+            max_grad_<block1> = std::max(max_grad_<block1>,
+                arma::max(arma::abs(g_hw - g_ad)));
         }
 
         // --- FD verification for blocks whose lp uses lgamma / digamma etc. ---
@@ -1676,28 +1709,39 @@ int main() {
         {
             arma::vec th{ /* random unconstrained */ };
             auto wf = [&](const arma::vec& t, arma::vec* g) {
-                return cs::<kind>::wrap(t, g,
+                return cs::<kind>::wrap(t, g /* , bounds for bounded kinds */,
                     [&](const arma::vec& tn, arma::vec* gn) {
                         return <block_special>_log_density(tn, ctx_<bs>, gn);
                     });
             };
             arma::vec g_hw(dim);
-            wf(th, &g_hw);
+            const double lp_hw = wf(th, &g_hw);
             arma::vec g_fd = fd_grad(th, wf);
-            double d = arma::max(arma::abs(g_hw - g_fd));
-            if (d > max_diff_<block_special>) max_diff_<block_special> = d;
+            // Value check against the model-derived lp (natural scale, so
+            // compare the production lp on the same natural-scale point).
+            // (kind real has no constrain(): pass th directly.)
+            const double dlp_hw = <block_special>_log_density(cs::<kind>::constrain(th /* , bounds for bounded kinds */), ctx_<bs>, nullptr)
+                                  - lp_hw_nat_ref_<bs>;
+            const double dlp_spec = <block_special>_lp_spec(cs::<kind>::constrain(th /* , bounds for bounded kinds */), ctx_<bs>)
+                                  - lp_spec_ref_<bs>;
+            max_grad_<block_special> = std::max(max_grad_<block_special>,
+                arma::max(arma::abs(g_hw - g_fd)));
+            max_dlp_<block_special>  = std::max(max_dlp_<block_special>,
+                std::abs(dlp_hw - dlp_spec) / std::max(1.0, std::abs(dlp_hw)));
+            (void) lp_hw;
         }
     }
 
     // Verdict in-file: AD-backed blocks < 1e-8, FD-backed blocks < 1e-5.
     bool ok = true;
-    auto report = [&](const char* nm, double d, double tol) {
-        const bool pass = (d < tol);
+    auto report = [&](const char* nm, double dg, double dl, double tol) {
+        const bool pass = (dg < tol) && (dl < tol);
         ok = ok && pass;
-        std::printf("  [%s] %-28s max_diff = %.3e  (tol %.0e)\n",
-                    pass ? "PASS" : "FAIL", nm, d, tol);
+        std::printf("  [%s] %-28s max_grad = %.3e  max_dlp = %.3e  (tol %.0e)\n",
+                    pass ? "PASS" : "FAIL", nm, dg, dl, tol);
     };
-    report("<block1>",        max_diff_<block1>,        1e-8);
+    report("<block1>",        max_grad_<block1>,        max_dlp_<block1>,        1e-8);
+    report("<block_special>", max_grad_<block_special>, max_dlp_<block_special>, 1e-5);
     // ...one report() per block; use 1e-5 for FD-backed blocks...
 
     std::printf("%s  (n_points = %d, seed = %d)\n",
@@ -1783,7 +1827,7 @@ tail (above). Also eval lp+grad at stressed points: each POSITIVE param at its l
 model (NB->Poisson, t->Normal), FD/AD still agreeing; each INTERVAL param near both
 edges. A non-finite lp or FD/AD mismatch = unstable there; rewrite (don't clamp).
 
-### At generation time, the AI runs
+### V-static runs it
 
 Compile and run it directly -- no R, no Python, no package install:
 
@@ -1792,23 +1836,25 @@ Compile and run it directly -- no R, no Python, no package install:
 # inside RcppArmadillo, so ask R where they are. On a machine with the system
 # libarmadillo-dev package instead, leave ARMA_INC empty.
 ARMA_INC=$(Rscript -e 'cat(system.file("include", package="RcppArmadillo"))')
+SCRATCH=<the validator's own scratch directory>
 
 c++ -std=c++17 -O2 -I<include> -I<include>/mcmclib \
     -I<include>/mcmclib/BaseMatrixOps/include -I<include>/eigen \
     ${ARMA_INC:+-I$ARMA_INC} \
     -DMCMC_ENABLE_ARMA_WRAPPERS -DARMA_DONT_USE_WRAPPER \
-    tests_autodiff/verify_<ClassName>.cpp -o /tmp/verify_<ClassName> \
+    "$SCRATCH"/verify_<ClassName>.cpp -o "$SCRATCH"/verify_<ClassName> \
     -framework Accelerate        # macOS; use -lblas -llapack on Linux
-/tmp/verify_<ClassName>
+"$SCRATCH"/verify_<ClassName>
 ```
 
 It prints one PASS/FAIL line per block and exits non-zero on failure, so
 the thresholds live in the file (AD-backed < 1e-8, FD-backed < 1e-5)
 rather than in a language-specific driver. On a zero exit status, Check #12
-has passed -- delete `tests_autodiff/verify_<ClassName>.cpp` at that point.
+has passed; the validator deletes the file before it returns.
 
-If any `max_diff` exceeds its threshold -> AI pinpoints the block,
-opens the hand-written gradient, and fixes. Typical bugs:
+If `max_grad` or `max_dlp` exceeds its threshold, V-static reports the block and
+whether the gradient or the log-density difference disagrees; the
+generator opens the hand-written code and fixes it. Typical bugs:
 - sign error in a term (`d/dx(-0.5 x^2) = -x`, not `+x`)
 - factor missing (forgot `2` from `d/dx x^2 = 2x`)
 - wrong denominator (`sigma^2` vs `sigma^3` in sigma gradient)
@@ -1816,7 +1862,6 @@ opens the hand-written gradient, and fixes. Typical bugs:
   natural-scale function while `constraints::positive::wrap` is
   already adding it)
 
-Once `Check #12 PASS`, AI **deletes `tests_autodiff/verify_<ClassName>.cpp`**.
 The production `<ClassName>.cpp` is delivered unchanged -- no #ifdef,
 no scaffolding, no Eigen, no autodiff references.
 

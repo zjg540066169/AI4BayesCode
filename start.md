@@ -199,13 +199,12 @@ pause to ask the user**. (PSIS-LOO Pareto-k is DIAGNOSTIC-ONLY and
 never triggers a retry -- it is unreliable for BNP / mixture models
 where high k reflects the model class, not a sampler bug. The
 posterior-predictive p-value gate does not have that problem and DOES
-fail; see `validator.md` R3.a / R3.b.) Auto-retry up to N attempts total
-(including attempt #1). Each attempt: the generator fixes, and a FRESH
-validator re-checks from the layer the fix invalidates -- a `.cpp`
-change always restarts at L1 (`validator.md` Sec.0.5). Escalate the fix
-between attempts --
+fail; see `validator.md` R3.a / R3.b.) Auto-retry up to N attempts total,
+counted as `validator.md` Sec.0.5 defines (the first `.cpp` is attempt 1).
+Each attempt: the generator fixes, and a FRESH validator re-checks -- a
+`.cpp` change always restarts at L1. Escalate the fix between attempts --
 e.g., compile error -> fix the syntax / typo / missing include and
-recompile; R-hat fail at 4k+4k -> re-run at 20k+20k; still fails ->
+recompile; R-hat fail after the validator's own 20k+20k re-run ->
 re-tune metric / try non-centered reparam / try a joint block; etc.
 
 **N defaults to 5.** The user may override by specifying a different
