@@ -1089,39 +1089,46 @@ the structured picker UI. Three firm rules:
    every block that has an observation layer. See `codegen_cpp.md Sec.6a`
    per-observation-family templates (Gaussian / Bernoulli / Poisson /
    Multinomial / BART-noise).
-8. **Gradient verification (Check #12).** For every NUTS block with
-   a hand-written gradient, write + run + DELETE a throwaway
-   `tests_autodiff/verify_<ClassName>.cpp`. See `codegen_cpp.md Sec.6b`.
+8. **Gradient verification (Check #12) is done by V-static.** For every
+   NUTS block with a hand-written gradient, the V-static validator builds
+   and runs the AD-twin in its own scratch directory (`codegen_cpp.md
+   Sec.6b`, `validator.md` Sec.0); the generator writes no verification
+   file.
 9. **Assemble the composite in the constructor.** See
    `codegen_cpp.md Sec.7`.
-10. **Compile the `.cpp` (L1) and clear the L2 semantic layer.** Run the
-    full validator checklist + the AD-twin gradient check (Check #12) and
-    PRINT the per-check verdict table (Sec.11 Step 2). NO runner file
+10. **Dispatch V-static for L1 + L2.** A fresh validator subagent
+    compiles the `.cpp` and runs the full validator checklist + the
+    AD-twin gradient check (Check #12) (`validator.md` Sec.0); PRINT the
+    per-check verdict table it returns (Sec.11 Step 2). NO runner file
     exists yet at this step -- that is deliberate: the L3 harness must
-    not be in your hands until L2 has passed (see the **HARD ORDERING
-    GATE** at the top of Sec.11).
-11. **Only now emit the `.R` / `.py` runner and run L3.** See
-    `codegen_r_runner.md` / `codegen_python_runner.md` for the runner
-    template + Layer 3 wiring; then run the runtime checks in order
-    (Sec.11 Steps 3-4: smoke -> 2-chain). Do NOT report "validation
-    passed" off the runtime run alone. Delete the smoke-test file on
-    PASS.
+    not exist until L2 has passed (see the **HARD ORDERING GATE** at the
+    top of Sec.11).
+11. **Only after V-static PASS: emit the `.R` / `.py` runner and
+    dispatch V-runtime for L3.** See `codegen_r_runner.md` /
+    `codegen_python_runner.md` for the runner template + Layer 3 wiring.
+    A fresh validator subagent runs the runtime checks in order (Sec.11
+    Steps 3-4: smoke -> 2-chain -> posterior check). Do NOT report
+    "validation passed" off the runtime run alone.
 
 ---
 
 ## 11. Compile and run verification
 
-**After generating the .cpp and .R files, you MUST verify them before
-reporting success to the user.** Order is **L1 -> L2 -> L3** -- compile, then the
+**Before reporting success to the user, the generated files are verified
+by independent validator subagents (`validator.md` Sec.0): V-static runs
+L1 + L2, then V-runtime runs L3.** Order is **L1 -> L2 -> L3** -- compile, then the
 **semantic validator checklist (L2)**, then the **runtime checks (L3: smoke -> two-chain
 -> posterior)** -- cheapest-to-most-expensive per `validator.md`. Run the STATIC L2 checks
 BEFORE the expensive runtime: L3 passing does NOT prove correctness (a wrong Jacobian /
 parallel-update / parameterization runs clean -- R-hat ~1.00, BPV in range, LOO k<0.5 -- yet
 samples the WRONG posterior), so clear L2 first. Fix-and-re-run a layer before the next:
 
-> **HARD ORDERING GATE -- L2 must PASS before you write or run the L3 runtime harness.**
-> The steps below are an ORDER, not a menu. You may NOT write or run the two-chain /
-> runtime R harness until BOTH L2 checks have PASSED: the **semantic validator checklist**
+> **HARD ORDERING GATE -- L2 must PASS before the L3 runtime harness is written or run.**
+> The steps below are an ORDER, not a menu. V-runtime is dispatched only after V-static has
+> returned PASS, and it checks the `.cpp` hash against the V-static report before doing
+> anything (`validator.md` Sec.0.1); any `.cpp` edit after the L2 PASS voids it. Nobody may
+> write or run the two-chain / runtime R harness until BOTH L2 checks have PASSED: the
+> **semantic validator checklist**
 > AND the **AD-twin gradient-vs-autodiff comparison** (Check #12 -- a SEPARATE throwaway C++
 > file, `codegen_cpp.md Sec.6b`). The L3 runtime harness is the **LAST** thing you build.
 > The `codegen_r_runner.md` runner is a single file that does compile + smoke + two-chain in
@@ -1149,17 +1156,18 @@ samples the WRONG posterior), so clear L2 first. Fix-and-re-run a layer before t
 
 ### Step 1: Compile check
 
-Run `ai4bayescode_source("<file>.cpp", ...)` and verify it compiles
-without errors. If it fails, read the error, fix the code, and retry.
+V-static compiles the file with `ai4bayescode_source("<file>.cpp", ...)`
+(L1). A compile error comes back as a FAIL row; the generator fixes the
+code and dispatches a fresh V-static.
 
 ### Step 2: Validator checklist (L2 semantic -- run BEFORE the runtime checks)
 
-After compile passes, run the full validator checklist in `skills/validator.md` (the
+After compile passes, V-static runs the full validator checklist in `skills/validator.md` (the
 Semantic-layer checks: distribution parameterization, parallel-update bugs, dead
 parameters, missing intercepts, Jacobian handling, DAG consistency, RNG separation, the
 gradient-verification-via-autodiff Check #12, the conditional #14-#25, and #26,
 which fires on every wrapper). Any
-failure must be fixed -- and the layer re-run -- before proceeding. **This is the layer that
+failure is fixed by the generator and re-checked by a fresh V-static before proceeding. **This is the layer that
 catches the silent-correctness bugs the runtime checks CANNOT**, so it must be cleared
 before the expensive L3 chains below. In particular the **AD-twin (Check #12)** -- the
 autodiff-vs-hand-written gradient comparison -- is the cheapest correctness check and runs
@@ -1167,8 +1175,8 @@ HERE (gen-time / L2), BEFORE the Step 3-4 runtime: a wrong gradient caught by th
 running the smoke + two-chain diagnostic on broken code (a chain on a wrong gradient can even
 *look* like it converges).
 
-**MANDATORY ARTIFACT -- print the verdict, or the layer did not run.** Emit the
-checklist result as a per-check verdict table in the conversation (check id ->
+**MANDATORY ARTIFACT -- print the verdict, or the layer did not run.** Print the
+verdict table V-static returns in the conversation (check id ->
 PASS / FAIL / N-A, one line of reasoning each, conditional checks included).
 The FIRST `model$step()` of ANY runtime execution -- the Step-3 smoke test
 included -- must come AFTER this table exists in the transcript. An unprinted
@@ -1177,10 +1185,8 @@ runtime-before-semantic reversal happens.
 
 ### Step 3: Smoke test (THROWAWAY -- delete file on PASS)
 
-Write a minimal smoke-test runner file at
-`tests_autodiff/smoke_<ClassName>.R` (or inline in the `generated/`
-folder when the repo layout doesn't have tests_autodiff). The smoke
-test does:
+V-runtime writes a minimal smoke-test script in its own scratch
+directory. The smoke test does:
 
 - `model <- new(<ClassName>, ..., rng_seed = 42L, keep_history = FALSE)`
 - `model$step(10L)`
@@ -1201,8 +1207,9 @@ test does:
 These four are validator.md's R1, in full; emitting only the first two
 is the common shortfall.
 
-**On PASS, DELETE the smoke-test file.** The smoke test is a
-throwaway -- it verifies the generation once, then it is gone. Ongoing
+**The smoke-test script never enters the user's folder.** It lives in
+V-runtime's scratch directory and is deleted before the validator
+returns -- it verifies the generation once, then it is gone. Ongoing
 compile-smoke coverage is provided by the repo's F4 audit
 (`tests_autodiff/audit_compile_smoke.R`), not by per-model smoke
 scripts. Same pattern as Check #12 verify files in `codegen_cpp.md Sec.6b`.
@@ -1212,7 +1219,7 @@ Do NOT leave behind a `smoke_<ClassName>.R` or `smoke_test.R` with a
 
 ### Step 4: Two-chain diagnostic (REQUIRED to run+pass at gen-time; shipping is governed by the validation-harness opt-in)
 
-Run 2 chains from different initial values to check for
+V-runtime runs 2 chains from different initial values to check for
 non-identifiability and basic convergence -- the Layer 3 R2 section of
 the runner template in `codegen_r_runner.md`. Use a small synthetic
 dataset (e.g. N=50-100) but long chains (4000 burnin + 4000 keep) to
@@ -1281,15 +1288,13 @@ run, and produce reasonable samples out of the box.
 - Never store raw pointers to shared_data inside a leaf.
 - Never call `shared_data_t` from a log-density lambda (use `block_context&`).
 - Never mix constraint transforms and hand-written Jacobians.
-- **Never leave `tests_autodiff/verify_<ClassName>.cpp` behind after
-  Check #12 PASS** (the production `.cpp` must be scaffolding-free) and
-  never depend on autodiff or Eigen at runtime. **Also `rmdir
-  tests_autodiff/` if that directory becomes empty after the verify
-  file is deleted** -- the codegen agent's final deliverable to the
-  user workspace is *only* the production `<ClassName>.cpp` and the
-  R / Python runner (1 .cpp + 1 .R / .py). A leftover empty
-  `tests_autodiff/` confuses users into thinking it's part of their
-  output.
+- **Never put verification code in the user's folder, and never depend
+  on autodiff or Eigen at runtime.** The AD-twin, probe and smoke files
+  live only in the validator's own scratch directory and are deleted
+  before it returns (`validator.md` Sec.0.3). The final deliverable to
+  the user workspace is *only* the production `<ClassName>.cpp` and the
+  R / Python runner (1 .cpp + 1 .R / .py); any extra file or folder
+  confuses users into thinking it's part of their output.
 - **Never leave a `smoke_<ClassName>.R` / `smoke_test.R` file behind
   after Step 3 PASS.** Smoke tests are throwaway; same rule as
   Check #12 verify files. Delete on PASS. No "kept for reuse" option.
@@ -1518,19 +1523,19 @@ run, and produce reasonable samples out of the box.
   off the run object -- `ai4bayescode_run_chains()` already returns `wall`
   per chain. Do NOT call `ai4bayescode_perf_hint()`: it is deprecated, and
   it only asks the caller to recompute numbers the run object already has.
-- **Always run Check #12 gradient verification at generation time.**
-  For every NUTS block with a hand-written gradient, the AI must:
-    1. write a companion file `tests_autodiff/verify_<ClassName>.cpp`
-       that imports the hand-written log-densities verbatim and adds
-       templated AD versions + a verify function (see `codegen_cpp.md
-       Sec.6b` for the full template);
-    2. compile + run the verify function;
-    3. assert every `max_diff < 1e-8` for AD-backed blocks and
+- **Check #12 gradient verification always runs, inside V-static.**
+  For every NUTS block with a hand-written gradient, the V-static
+  validator (`validator.md` Sec.0):
+    1. writes a companion file in its own scratch directory that calls
+       the hand-written log-densities and gradients verbatim and adds an
+       AD log-density written from the confirmed model + a verify
+       function (`codegen_cpp.md Sec.6b` has the full template);
+    2. compiles + runs it, comparing gradients and log-density
+       differences;
+    3. asserts every `max_diff < 1e-8` for AD-backed blocks and
        `< 1e-5` for FD-backed blocks;
-    4. **DELETE `tests_autodiff/verify_<ClassName>.cpp` after PASS,
-       THEN `rmdir tests_autodiff/` if empty.** Leaving either the
-       verify file or an empty `tests_autodiff/` directory in the
-       user's workspace is a Hard Rule violation (Sec.12).
+    4. deletes the file before it returns. Nothing from the check
+       reaches the user's workspace (Sec.12).
   The production `<ClassName>.cpp` stays 100% clean -- no `#ifdef`, no
   autodiff references, no Eigen, no verification artifacts. Users never see
   the verify code, and compile the production `.cpp` directly with

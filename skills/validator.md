@@ -55,9 +55,97 @@ chains finish.
    - **R3. Posterior check** (Bayesian p-values + PSIS-LOO, reuses R2's
      chains) -- is that stationary distribution the right posterior?
 
-Work through the layers in order. If a layer fails, fix the code and
-re-run that layer before moving on. Within Layer 3, run R1 -> R2 -> R3
-in order; failure at an earlier step means don't bother with the next.
+## 0. Who runs the validation: independent validator subagents
+
+In the sampler-generation flow, the agent that wrote the code (the
+GENERATOR) does not validate it. Each layer is run by a fresh VALIDATOR
+subagent that has not seen the generator's reasoning. Code written with
+an intent tends to be read as that intent; a reader who knows only the
+confirmed model and the files reads what the code actually does. (The
+block-design flow, `block_design_skills/validate.md`, runs the same
+layers itself, in the same order.)
+
+### 0.1 Strict order: L1 -> L2 -> L3. No exception.
+
+- **L3 never starts before L2 has PASSED on the exact `.cpp` that L3
+  will run.** "Starts" includes writing or loading a runner, compiling a
+  module for a runtime call, and the first `step()` of any kind.
+- L2 never starts before L1 has passed on that file.
+- The `.cpp` is identified by its SHA-256. V-static reports the hash it
+  validated; V-runtime recomputes it before doing anything and returns
+  `REFUSED: hash mismatch` if it differs. Any edit to the `.cpp` after an
+  L2 PASS voids that PASS: the next round starts again at L1.
+- Within L3: R1 -> R2 -> R3, stopping at the first failure.
+
+### 0.2 The two validators
+
+| Validator | Runs | Dispatched when | Receives |
+|---|---|---|---|
+| V-static | L1 compile, then every applicable L2 check (#1-#26, including the #12 AD-twin and the #14 / #15 probes) | the `.cpp` is written | (1) the confirmed model exactly as the user signed it off in Phase 3 (equations, symbol table, DAG); (2) the absolute path of the `.cpp`; (3) backend(s), library include path, output folder; (4) attempt number |
+| V-runtime | L3: R1 -> R2 -> R3 | the generator has printed a V-static PASS and written the runner | (1)-(4) above, the runner path(s), and the V-static report (hash + verdict table) |
+
+Every dispatch is a NEW subagent. A re-check after a fix never goes to
+the validator that reported the failure, and never to the generator.
+The generator passes only the inputs above -- not its reasoning, design
+notes or expectations ("this should pass because ..."). Dispatch
+silently: these are procedural steps (`start.md` "Ask the user?" table),
+not actions that need the user's permission.
+
+### 0.3 What a validator may and may not do
+
+- MAY read anything; compile; run the generated code and the runner;
+  write throwaway files (AD-twin, probes, smoke scripts) in its OWN
+  scratch directory, and delete them before it returns.
+- MAY NOT edit, regenerate or "fix" any deliverable (`.cpp`, runner,
+  example files), and MAY NOT change a sampler setting, a budget, a seed
+  or a threshold to make a check pass.
+- Check #12 (AD-twin): the validator writes the autodiff log-density
+  FROM THE CONFIRMED MODEL, in the coordinates and block split the
+  `.cpp` uses, and compares it with the production code -- gradients at
+  random points, and log-density DIFFERENCES between pairs of points
+  (the additive constant cancels). It never copies the production
+  log-density into the twin: a copied twin repeats the production
+  code's mistakes. File template: `codegen_cpp.md` Sec.6b.
+
+### 0.4 What a validator returns
+
+1. Header: layers run, `.cpp` path and SHA-256, overall `PASS` / `FAIL` /
+   `REFUSED`.
+2. One row per check, conditional checks included (N/A with the reason):
+   `| check | PASS / FAIL / N/A | evidence | defect | fix |`. Evidence is
+   a quoted `file:line` or a measured number. `fix` names the change in
+   terms of the model or the code (a missing Jacobian term at a line, a
+   misread parameterization, a missing binding) -- never a setting tuned
+   to the validation data.
+3. V-runtime adds the numbers: per key the max rank-R-hat and min ESS,
+   the Bayesian p-values, and the Pareto-k summary (diagnostic only).
+
+### 0.5 The loop
+
+1. The generator writes the `.cpp`, dispatches V-static, and prints the
+   returned verdict table.
+2. FAIL -> the generator fixes the `.cpp`; back to 1 with a fresh
+   V-static.
+3. PASS -> the generator writes the runner and dispatches V-runtime.
+4. FAIL in the runner only -> the generator fixes the runner; fresh
+   V-runtime. FAIL that needs a `.cpp` change -> back to 1 (the L2 PASS
+   is void).
+5. PASS -> delivery (`start.md` Sec.4-5). The generator deletes the
+   throwaway runner unless the user chose to keep it.
+
+Each pass through 1-4 counts as one attempt of the `start.md` retry
+budget.
+
+### 0.6 Hosts without subagents
+
+If the host cannot start a subagent, the generator runs the same checks
+itself, in the same order, with the same report format and the same
+hash rule.
+
+Work through the layers in order (Sec.0.1). If a layer fails, the
+generator fixes the code and a fresh validator re-runs from the layer the
+fix invalidates (Sec.0.5). Within Layer 3, R1 -> R2 -> R3 in order;
+failure at an earlier step means don't bother with the next.
 
 **The R2 GATE is rank-R-hat >= 1.05; 1.01 is the strict bar you investigate
 against, not a second gate.** Above 1.01, treat it as a MIXING failure by
@@ -115,9 +203,10 @@ registry is the authoritative cross-reference.
 
 **Check #12 status note:** Check #12 is the one Layer-2 check that runs a
 numerical comparison (#14 and #15 also compile a throwaway file, but their
-verdict is a code-level one) -- the AI writes a throwaway `tests_autodiff/verify_<ClassName>.cpp`
-during generation, confirms max-diff tolerances, and deletes the file
-on PASS. See Sec.12 below for the full template.
+verdict is a code-level one) -- the V-static validator writes a throwaway verify file
+in its own scratch directory, with the autodiff log-density written from the confirmed
+model (Sec.0.3), confirms the max-diff tolerances, and deletes the file before it
+returns. See Sec.12 below for the full template.
 
 **Checks #15-17** are pre-merge obligations for any example using
 `*_gibbs_block` or hand-written Gibbs; the `block_catalogue/index.md` and
@@ -130,19 +219,20 @@ overall gate.
 ## Layer 2 -- Semantic
 
 Twenty-six checks. **Checks #1-#11, #13, #18, #19, #20, #21, #22,
-#23, #25, and #26 are static** -- the AI audits them by reading the
+#23, #25, and #26 are static** -- the V-static validator audits them by reading the
 generated `.cpp` (plus, for #23 readapt_NUTS and #26 freeze/unfreeze,
 R-level round-trip tests in the runner), no execution required. Checks #15-#17 are
 defined in `codegen_priors.md` Sec.2c-2e. **Checks #12, #14 and #15 compile a
 throwaway file; #12 (gradient verification via autodiff) is the one that
-executes a numerical comparison** -- the AI writes a throwaway
-companion file `tests_autodiff/verify_<ClassName>.cpp` that copies the
-production hand-written log-density verbatim and adds
-`autodiff::var`-compatible templated versions, compiles it, runs a
-5-20-point autodiff-vs-handwritten comparison (finite-difference
+executes a numerical comparison** -- the V-static validator writes a
+throwaway companion file in its own scratch directory that calls the
+production hand-written log-density and gradient as written and adds an
+`autodiff::var`-compatible log-density written from the confirmed model
+(Sec.0.3), compiles it, runs a 5-20-point autodiff-vs-handwritten
+comparison of gradients and log-density differences (finite-difference
 fallback for blocks using `lgamma` / `digamma`), and confirms max abs
-diff < 1e-8 (AD) or < 1e-5 (FD) per block. On PASS the AI **deletes**
-the verify file. The production `.cpp` is shipped with no `#ifdef`, no
+diff < 1e-8 (AD) or < 1e-5 (FD) per block. The validator deletes the
+file before it returns. The production `.cpp` is shipped with no `#ifdef`, no
 autodiff code, no Eigen, no verification scaffolding; the user compiles
 it as-is with `Rcpp::sourceCpp(...)`. See Check #12 body below for the
 full template.
@@ -1060,26 +1150,30 @@ every generated sampler that uses `nuts_block` with a
 blocks that don't carry a hand-written gradient (`bart_block`,
 `*_gibbs_block`) are not subject to this check.
 
-**Mechanism (the one execution-based semantic check):** the AI writes
-a throwaway companion file `tests_autodiff/verify_<ClassName>.cpp`
-alongside the production `.cpp`. The companion contains:
-  - copies (verbatim) of the production hand-written log-density
-    functions (both versions come from the same LLM think; drift is
-    negligible);
-  - templated (`autodiff::var`-compatible) versions of the same math;
+**Mechanism (the one execution-based semantic check):** the V-static
+validator writes a throwaway companion file in its own scratch directory
+(Sec.0.3). The companion contains:
+  - the production hand-written log-density and gradient functions,
+    copied verbatim and called as written (never edited);
+  - an `autodiff::var`-compatible log-density written FROM THE CONFIRMED
+    MODEL, in the coordinates and block split the production code uses
+    -- not a templated copy of the production log-density, which would
+    repeat its mistakes;
   - a self-contained `int main()` (backend-neutral -- no Rcpp, no
-    pybind) that samples random theta points, compares hand-written grad
-    vs autodiff grad for each NUTS block, prints a PASS/FAIL line per
-    block, and exits non-zero on failure.
+    pybind) that samples random theta points and, for each NUTS block,
+    compares the hand-written gradient with the autodiff gradient and the
+    log-density difference lp(theta_a) - lp(theta_b) of the two versions
+    (the additive constant cancels), prints a PASS/FAIL line per block,
+    and exits non-zero on failure.
 
 For blocks whose log-density uses `lgamma` / `digamma` / other
 special functions that the autodiff library doesn't overload, the AI falls
 back to **finite-differenceverification** (central-difference of the hand-
 written wrap). FD precision is ~1e-5 vs AD's ~1e-8.
 
-The AI compiles the verify file, calls the verify function, and
+The validator compiles the verify file, calls the verify function, and
 asserts every `max_diff < 1e-8` for AD-backed blocks / `< 1e-5` for
-FD-backed blocks. On PASS, the AI **deletes** the verify file. The
+FD-backed blocks. It deletes the verify file before it returns. The
 production `.cpp` is delivered unchanged -- no `#ifdef`, no autodiff
 code, no Eigen, no verification artifacts. User never sees verification code.
 
@@ -1100,12 +1194,9 @@ templated lp, compute `gradient()` on the whole vector) is in
    natural-scale log-densities wrapped by `constraints::*::wrap`. No
    autodiff includes, no `#ifdef AI4BAYESCODE_VERIFY_GRADIENTS`, no
    templated variants.
-2. AI generated `tests_autodiff/verify_<ClassName>.cpp` at some point
-   during generation.
-3. AI ran the verify function successfully (generation log should
-   record the max_diff values per block).
-4. AI deleted `tests_autodiff/verify_<ClassName>.cpp` after PASS (the
-   file should NOT be in the delivered artifact).
+2. The V-static report records the max_diff per block, for the
+   gradient and for the log-density difference.
+3. No verify file is in the delivered folder.
 
 **What the user sees:** nothing. They `Rcpp::sourceCpp("<ClassName>.cpp")`
 and get the hand-written sampler at full speed.
@@ -1211,8 +1302,8 @@ the three probes above.
 
 **Mechanism (companion file pattern, mirroring Check #12):**
 
-The AI generates a throwaway `tests_autodiff/verify_<ClassName>_v1.cpp`
-alongside the production `.cpp`. The companion contains:
+The V-static validator writes a throwaway probe file in its own scratch
+directory. The companion contains:
 
   - `#include` of the production cpp's templated `Forward` and
     `Inverse` types (or copies them inline if they are local types
@@ -1223,8 +1314,8 @@ alongside the production `.cpp`. The companion contains:
     spanning the bijection's working domain and asserts all three
     probes above.
 
-The AI compiles the verify file, runs it, asserts all
-`max_residual < tolerance`, and on PASS deletes the verify file.
+The validator compiles the probe file, runs it, asserts all
+`max_residual < tolerance`, and deletes the file before it returns.
 The production cpp ships unchanged (no autodiff include in
 production, no probe scaffolding visible to the user).
 
@@ -2229,6 +2320,9 @@ behave through the R interface.
 ---
 
 ## Layer 3 -- Runtime (R1 + R2 + R3, all on the same 2 chains)
+
+Run by the V-runtime validator, and only after V-static has returned PASS
+on the same `.cpp` (Sec.0.1: the hash must match).
 
 All runtime checks share a single pair of chains, run with
 `keep_history = TRUE` so R can pull per-draw parameters out of
@@ -3485,9 +3579,9 @@ if (pct_k_lo < 50 || pct_k_hi >= 10) {
 - **Layer 2 (Semantic):** walk the generated `.cpp` through the 26
   semantic checks (#1-#26; #15-#17 are defined in
   `codegen_priors.md` Sec.2c-2e). Check #12 (gradient verification) is execution-based and
-  done at generation time via a throwaway
-  `tests_autodiff/verify_<ClassName>.cpp` companion file (see the
-  Check #12 body above for the template); the rest are static code
+  done by V-static via a throwaway companion file in its own scratch
+  directory (see Sec.0.3 and the Check #12 body above for the template);
+  the rest are static code
   review. Checks #11 (joint_nuts_block), #13 (RNG separation), #18
   (dense metric), #23 (readapt_NUTS), #24 (joint-NUTS pathology), and
   #25 (rjmcmc / Dirac-spike) fire conditionally -- only when the
