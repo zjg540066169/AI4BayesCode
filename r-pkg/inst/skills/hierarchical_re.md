@@ -311,7 +311,7 @@ cfg.log_density_grad = [&, J, P, group_idx_key, y_key, x_key,
 ```
 
 **Check #12 (autodiff gradient verification) is REQUIRED** for this
-hand-coded gradient. Before shipping, the V-static validator writes an
+hand-coded gradient. Before shipping, the validator writes an
 AD-twin in its own scratch directory -- an `autodiff::var` log-density
 written from the confirmed model -- and verifies max_grad and max_dlp
 < 1e-8 on 5-20 random `(mu, sigma_alpha, sigma_y, alpha_raw, beta)`
@@ -422,11 +422,12 @@ problem -- so on low ess_ratio, try the DENSE metric FIRST, before adding draws
 (more draws do NOT raise ess_ratio if the metric is the wrong shape).
 
 ESCALATE BY MEASUREMENT, keep only if it helps (do NOT enable dense blindly):
-1. Set `cfg.use_dense_metric = true` and re-run the 2-chain diagnostic.
-2. If ess_ratio materially improves (>= ~2-3x) -> KEEP dense + add the Check #18
-   justification below.
+1. Regenerate with `cfg.use_dense_metric = true`: a new attempt, which a new
+   validator runs from L1 (`validator.md` Sec.0.5).
+2. If its ess_ratio materially improves on the earlier report's (>= ~2-3x) ->
+   KEEP dense + add the Check #18 justification below.
 3. If it does NOT improve (or dense diverges / is much slower) -> REVERT to
-   diagonal. The inefficiency is NOT a rotated-metric problem; the real fix is a
+   diagonal (another `.cpp` change, re-checked the same way). The inefficiency is NOT a rotated-metric problem; the real fix is a
    reparameterization (NC for a residual funnel) or a specialized block
    (`gmrf_precision_block` / `gmrf_whitened_ess_block` for spatial ICAR / CAR;
    whitened ESS for dense GP latents). A speculative dense metric can be SLOWER
@@ -437,9 +438,9 @@ cfg.use_dense_metric = true;
 // Sampling note: <param_a> and <param_b> are strongly correlated, so the
 // sampler uses a full covariance metric rather than a per-axis one.
 //
-// (Agent-side, NOT in the delivered file: record in the L2 verdict table
-// that diagonal gave rhat = <r> / ess_ratio = <e> at 20k+20k and dense
-// raised ess_ratio <old> -> <new>, MEASURED.)
+// (NOT in the delivered file: the diagonal numbers come from the earlier
+// validator report, which the generator passes to the new validator
+// (validator.md Sec.0.2); the validator records old -> new in its report.)
 ```
 
 Geometries where the diagonal metric is frequently inefficient (still CONFIRM by

@@ -765,8 +765,9 @@ and run by the validator in its scratch directory, not shipped; for a library
 example: `tests_autodiff/test_<model>_<blockname>_gibbs_parity.cpp`).
 Same 10,000-draw mean/variance comparison, same tolerances.
 
-A `*_gibbs_block` usage with neither a block-level parity test nor a
-passing per-usage one (depending on `params_fn`) is a Layer 2 FAIL.
+If validator finds a `*_gibbs_block` usage without a corresponding
+parity test (block-level OR per-usage, depending on `params_fn`),
+Layer 2 FAIL.
 
 Check #15 also covers other specialized library samplers:
 `elliptical_slice_sampling_block`,

@@ -17,15 +17,13 @@ description: |
 
 # AI4BayesCode codegen -- R runner + reference templates
 
-**PREREQUISITE GATE -- L2 first.** Do not load this file, and do not
-emit any runner / Layer-3 harness, until the V-static validator has
-returned PASS on the current `.cpp` -- L2 semantic checklist + AD-twin
-(Check #12) -- and its per-check verdict table is printed
-(`validator.md` Sec.0; `codegen.md` Sec.11 Step 2, HARD ORDERING GATE).
-The runner is then RUN by the V-runtime validator, not by the generator.
-This file hands you executable runtime machinery; if the V-static
-verdict has not been printed yet, you are in the runtime-before-semantic
-reversal.
+**PREREQUISITE GATE -- write, never run.** Load this file after the
+`.cpp` is written. The runner you write here is RUN only by the validator
+subagent, in L3, after its L2 table (semantic checklist + AD-twin,
+Check #12) is complete with no FAIL (`validator.md` Sec.0.1; `codegen.md`
+Sec.11 HARD ORDERING GATE). This file hands you executable runtime
+machinery; running it yourself, or before that L2 table exists, is the
+runtime-before-semantic reversal.
 
 Companion skill to `codegen.md`. Load this when writing the generated
 `.R` runner: ai4bayescode_source setup, constructor-argument reference
@@ -48,11 +46,12 @@ For the C++ file emission, see `codegen_cpp.md`.
 2. Do NOT write or edit `<folder>/<ClassName>.cpp` here. It was written in
    Phase 4 with BOTH its `@example:R` and `@example:python` header blocks
    (`codegen_cpp.md` Sec.5 "Header `@example` block") and validated by its
-   SHA-256. Copy this runner's DGP FROM the `.cpp`. Any `.cpp` edit voids
-   the V-static PASS and restarts at L1 (`validator.md` Sec.0.5).
+   SHA-256. Copy this runner's DGP FROM the `.cpp`. Any `.cpp` edit is
+   re-checked by a new validator from L1 (`validator.md` Sec.0.5).
 3. Write the R runner `<folder>/run_<ClassName>.R` following the
    template below. It holds the 2 chains and the Layer-3 R2/R3 checks
-   and **gates generation**: V-runtime runs it after its own R1 (see the
+   and **gates generation**: the validator runs it in L3, after L2 and its
+   own R1 (see the
    CORRECTNESS INVARIANT in `codegen.md` "Delivered-code validation
    harness": Layer-3 ALWAYS runs and must PASS regardless of the user's
    harness choice).
@@ -576,7 +575,7 @@ pack2 <- function(x1, x2) {
 }
 
 # ---- Layer 3 R2 precondition: kept draws finite --------------------------
-# (R1 has already passed in V-runtime's own script; validator.md R1.)
+# (R1 has already passed in the validator's own script; validator.md R1.)
 # `c1$hist` / `c2$hist` are already burn-in-stripped (sliced inside
 # run_chain) so checks below only see kept draws.
 stopifnot(all(sapply(c1$hist, function(x) all(is.finite(x)))))

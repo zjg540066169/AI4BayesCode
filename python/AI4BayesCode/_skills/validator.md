@@ -32,7 +32,8 @@ essentially free after the chains finish.
 > the block's OWN checks, defined in that validation skill). The block's bundled
 > example + library test (`test_<Block>.cpp`) are the reference for what a passing
 > run looks like. See `block_catalogue/index.md` ("Contributed blocks") for how the block
-> is selected + its Example loaded.
+> is selected + its Example loaded. The validator applies these checks: the static ones
+> in L2, any that constructs the model in R1.
 
 1. **Syntactic** -- compilation. The C++ compiler does this for free; no
    manual checklist. A compile error is an L1 FAIL (Sec.0.5).
@@ -59,53 +60,57 @@ essentially free after the chains finish.
    - **R3. Posterior check** (Bayesian p-values + PSIS-LOO, reuses R2's
      chains) -- is that stationary distribution the right posterior?
 
-## 0. Who runs the validation: independent validator subagents
+## 0. Who runs the validation: one independent validator subagent
 
 In the sampler-generation flow, the agent that wrote the code (the
-GENERATOR) does not validate it. Each layer is run by a fresh VALIDATOR
-subagent that has not seen the generator's reasoning. Code written with
-an intent tends to be read as that intent; a reader who knows only the
-confirmed model and the files reads what the code actually does. (The
-block-design flow, `block_design_skills/validate.md`, runs the same
-layers itself, in the same order.)
+GENERATOR) does not validate it. One fresh VALIDATOR subagent, which has
+not seen the generator's reasoning, runs all three layers in one pass.
+Code written with an intent tends to be read as that intent; a reader who
+knows only the confirmed model and the files reads what the code actually
+does. (The block-design flow, `block_design_skills/validate.md`, runs the
+same layers itself, in the same order.)
 
 ### 0.1 Strict order: L1 -> L2 -> L3. No exception.
 
-- **L3 never starts before L2 has PASSED on the exact `.cpp` that L3
-  will run.** "Starts" includes writing or loading a runner, compiling a
-  module for a runtime call, and the first `step()` of any kind.
-- L2 never starts before L1 has passed on that file.
-- V-static never constructs the model and never calls `step()`,
-  `readapt_NUTS` or `freeze`; L1 is compile-only. Every check that
-  constructs the model is runtime and runs in V-runtime's R1.
-- The `.cpp` is identified by its SHA-256. V-static reports the hash it
-  validated; V-runtime recomputes it before doing anything and returns
-  `REFUSED: hash mismatch` if it differs. Any edit to the `.cpp` after an
-  L2 PASS voids that PASS: the next round starts again at L1.
-- Within L3: R1 -> R2 -> R3, stopping at the first failure.
+- L1 (compile), then L2 (every applicable check #1-#26, one row each),
+  then L3 (R1 -> R2 -> R3).
+- **No L3 step before the L2 table is complete with no FAIL row.** The
+  validator writes its L2 table into its report first. "L3 step" includes
+  sourcing or running the runner, compiling a module for a runtime call,
+  constructing the generated model, and the first `step()` of any kind.
+- L2 reads the code and compiles throwaway probe files (the #12 AD-twin,
+  the #14 bijection probes, the #15 parity test, which drives a standalone
+  library block with the `params_fn` copied from the `.cpp`, or a copy of
+  the rjmcmc hook's draw code). It never
+  constructs the generated model: every check that does runs in R1.
+- **Any failure stops the run.** The validator reports FAIL at that step
+  and returns; nothing after it runs.
 
-### 0.2 The two validators
+### 0.2 What the validator receives
 
-| Validator | Runs | Dispatched when | Receives |
-|---|---|---|---|
-| V-static | L1 compile, then every applicable L2 check (#1-#26, including the #12 AD-twin and the #14 / #15 probes) | the `.cpp` is written | (1) the confirmed spec: the model as signed off in Phase 3 (equations, symbol table, DAG) plus the user's verbatim answers to every later question that changes the model or block plan (VI/MCMC split and VI families, spike family, optional modes such as DART, exposed vs hardcoded hyperparameters); (2) the absolute path of the `.cpp`; (3) backend(s), library include path, output folder; (4) attempt number |
-| V-runtime | L3: R1 in its own scratch script on a fresh model (the member-function sweep, the #23 / #26 runtime halves, the `@example` block(s) and the `int main()` demo), then R2 -> R3 on the runner's 2 chains | the generator has printed a V-static PASS and written the runner | (1)-(4) above, the runner path(s), and the V-static report (hash + verdict table) |
+(1) The confirmed spec: the model as signed off in Phase 3 (equations,
+symbol table, DAG) plus the user's verbatim answers to every later
+question that changes the model or block plan (VI/MCMC split and VI
+families, spike family, optional modes such as DART, exposed vs
+hardcoded hyperparameters). (2) The absolute paths of the `.cpp` and the
+runner(s). (3) Backend(s), library include path, output folder.
+(4) Attempt number. (5) When the `.cpp` changes a sampler setting because
+of an earlier validator report (Check #18), that report.
 
-For the C++-only backend the generator still writes an R runner, as a
-throwaway L3 harness; it is never delivered.
+The generator passes only these inputs -- not its reasoning, design notes
+or expectations ("this should pass because ..."). Every dispatch is a NEW
+subagent; a re-check after a fix never goes to the validator that
+reported the failure. Dispatch silently: it is a procedural step
+(`start.md` "Ask the user?" table), not an action that needs the user's
+permission. For the C++-only backend the generator still writes an R
+runner, as a throwaway L3 harness; it is never delivered.
 
-Every dispatch is a NEW subagent. A re-check after a fix never goes to
-the validator that reported the failure, and never to the generator.
-The generator passes only the inputs above -- not its reasoning, design
-notes or expectations ("this should pass because ..."). Dispatch
-silently: these are procedural steps (`start.md` "Ask the user?" table),
-not actions that need the user's permission.
+### 0.3 What the validator may and may not do
 
-### 0.3 What a validator may and may not do
-
-- MAY read anything; compile; run the generated code and the runner;
-  write throwaway files (AD-twin, probes, the R1 script) in its OWN
-  scratch directory, and delete them before it returns.
+- MAY read anything and compile. It runs the generated model and the
+  runner only in L3.
+- MAY write throwaway files (AD-twin, probes, the R1 script) in its OWN
+  scratch directory, and deletes them before it returns.
 - MAY NOT edit, regenerate or "fix" any deliverable (`.cpp`, runner,
   example files), and MAY NOT change a sampler setting, a budget, a seed
   or a threshold to make a check pass.
@@ -124,53 +129,43 @@ not actions that need the user's permission.
   localise is reported as `FAIL (twin-unresolved)` with both
   expressions. File template: `codegen_cpp.md` Sec.6b.
 
-### 0.4 What a validator returns
+### 0.4 What the validator returns
 
-1. Header: layers run, `.cpp` path and SHA-256, overall `PASS` / `FAIL` /
-   `REFUSED`.
-2. One row per check, conditional checks included (N/A with the reason):
-   `| check | PASS / FAIL / N/A | evidence | defect | fix |`. Evidence is
-   a quoted `file:line` or a measured number. `fix` names the change in
-   terms of the model or the code (a missing Jacobian term at a line, a
-   misread parameterization, a missing binding) -- never a setting tuned
-   to the validation data.
-3. V-runtime adds the numbers: per key the max rank-R-hat and min ESS,
+1. Header: layers run, the step where the run stopped (if it failed),
+   `.cpp` path and SHA-256, overall `PASS` / `FAIL`.
+2. The L2 table, one row per check, conditional checks included (N/A
+   with the reason): `| check | PASS / FAIL / N/A | evidence | defect |
+   fix |`. Evidence is a quoted `file:line` or a measured number. `fix`
+   names the change in terms of the model or the code (a missing Jacobian
+   term at a line, a misread parameterization, a missing binding).
+3. If L3 ran: the R1 rows, then per key the max rank-R-hat and min ESS,
    the Bayesian p-values, and the Pareto-k summary (diagnostic only).
 
 ### 0.5 The loop
 
-1. The generator writes the `.cpp`, dispatches V-static, and prints the
-   returned verdict table.
-2. FAIL -> the generator fixes the `.cpp`; back to 1 with a fresh
-   V-static.
-3. PASS -> the generator writes the runner (copying its DGP from the
-   `.cpp`, never editing the `.cpp`) and dispatches V-runtime.
-4. REFUSED (hash mismatch) -> the `.cpp` changed after its L2 PASS;
-   back to 1.
-5. FAIL in the runner only -> the generator fixes the runner; fresh
-   V-runtime. FAIL that needs a `.cpp` change -> back to 1 (the L2 PASS
-   is void).
-6. PASS -> the generator checks that the SHA-256 of the `.cpp` it
-   delivers equals the hash both validators reported, then delivers
-   (`start.md` Sec.4-5). It deletes the throwaway runner unless the
-   user chose to keep it.
+1. The generator writes the `.cpp` and the runner, dispatches the
+   validator, and prints the report it returns.
+2. FAIL -> the generator fixes the `.cpp` or the runner, and a NEW
+   validator runs again from L1.
+3. PASS -> after any step the report's numbers call for (the Check #18
+   metric escalation, the R-hat gray-zone question in `start.md`; a
+   `.cpp` change is a new attempt), the generator checks that the SHA-256
+   of the `.cpp` it delivers equals the hash in the report, then delivers
+   (`start.md` Sec.4-5). It deletes the throwaway runner unless the user chose to
+   keep it.
 
 **Attempt counting** (the one definition; `start.md` and `codegen.md`
 point here): the first `.cpp` is attempt 1, and each later change to
-the `.cpp` starts a new attempt. A runner-only fix with a fresh
-V-runtime stays in the same attempt, and so does the R2 re-run at
-20000 + 20000. A REFUSED dispatch adds no attempt of its own.
+the `.cpp` starts a new attempt. A runner-only fix stays in the same
+attempt, and so does the R2 re-run at 20000 + 20000.
 
 ### 0.6 Hosts without subagents
 
-If the host cannot start a subagent, the generator runs the same checks
-itself, in the same order, with the same report format and the same
-hash rule.
+If the host cannot start a subagent, the generator runs the same
+procedure itself: same order, same stop-at-first-failure rule, same
+report and hash check.
 
-Work through the layers in order (Sec.0.1). If a layer fails, the
-generator fixes and a fresh validator re-checks per Sec.0.5 (a `.cpp`
-change restarts at L1). Within Layer 3, R1 -> R2 -> R3 in order;
-failure at an earlier step means don't bother with the next.
+### 0.7 The R2 gate
 
 **The R2 GATE is rank-R-hat >= 1.05; 1.01 is the strict bar you investigate
 against, not a second gate.** Above 1.01, treat it as a MIXING failure by
@@ -228,7 +223,7 @@ registry is the authoritative cross-reference.
 
 **Check #12 status note:** Check #12 is the one Layer-2 check that runs a
 numerical comparison (#14 and #15 also compile a throwaway file, but their
-verdict is a code-level one) -- the V-static validator writes a throwaway verify file
+verdict is a code-level one) -- the validator writes a throwaway verify file
 in its own scratch directory, with the autodiff log-density written from the confirmed
 model (Sec.0.3), confirms the max-diff tolerances, and deletes the file before it
 returns. See Sec.12 below for the full template.
@@ -244,13 +239,14 @@ overall gate.
 ## Layer 2 -- Semantic
 
 Twenty-six checks. **Checks #1-#11, #13, #18, #19, #20, #21, #22,
-#23, #25, and #26 are static** -- the V-static validator audits them by reading the
-generated `.cpp`, no execution required. The runtime halves of #23
-(readapt_NUTS round-trip) and #26 (freeze / unfreeze tests) construct the
-model, so they are not L2: V-runtime runs them in R1. Checks #15-#17 are
+#23, #25, and #26 are static** -- the validator audits them by reading the
+generated `.cpp`, no execution required. The runtime parts of #6
+(predict_at / get_dag tests), #23 (readapt_NUTS round-trip) and #26
+(freeze / unfreeze tests) construct the model, so they are not L2: they
+run in R1. Checks #15-#17 are
 defined in `codegen_priors.md` Sec.2c-2e. **Checks #12, #14 and #15 compile a
 throwaway file; #12 (gradient verification via autodiff) is the one that
-executes a numerical comparison** -- the V-static validator writes a
+executes a numerical comparison** -- the validator writes a
 throwaway companion file in its own scratch directory that calls the
 production hand-written log-density and gradient as written and adds an
 `autodiff::var`-compatible log-density written from the confirmed model
@@ -609,9 +605,13 @@ Sampling vs prediction discipline (codegen_cpp.md Sec.6c, Hard Rule #5):
 
 ### Acceptance test (machine-checkable, must pass before shipping)
 
+(A), (B) and (C) are static (L2). (D) constructs the model, so it runs in
+R1, next to the Confirmed-DAG checks on the predictable variables.
+
 **(A) Node-set equality.**
-1. Extract node set from user-verified mermaid in chat: `U`.
-2. Extract from generated `get_dag()`:
+1. Extract node set from the confirmed DAG in the spec (Sec.0.2): `U`.
+2. Extract from the `.cpp`'s `declare_predict_edges` / `declare_data_input`
+   calls:
    `G = keys(predict_edges)  U  values(predict_edges)  U  data_inputs`.
 3. Apply the permitted renames (`y -> y_rep`, snake_case
    conversions like `Z_mat -> Z_mat_flat`). Optional hyperparent
@@ -980,7 +980,7 @@ Acceptance conditions (all must hold):
    context edge (`BART->f_bart`, `genBART->r`, `amplitude->K_matrix`),
    parallel to the `BART->f_bart` edge in `examples/BartNoise.cpp`.
 
-Detection: `ai4bayescode_plot_dag(model)` must render the prior context faded and
+Detection (runtime, R1): `ai4bayescode_plot_dag(model)` must render the prior context faded and
 the solid predict sub-DAG unchanged; `predict_at(list())` output keys
 must be IDENTICAL with and without context edges (proves BFS
 isolation). See codegen_cpp.md Sec.6c "Generative-DAG context edges" and
@@ -991,7 +991,7 @@ predict_at must NOT echo training data.** Part of Check #6 (DAG
 consistency); not a new numbered check.
 
 (a) **No data-echo stubs.** `predict_at` MUST NOT return the observed
-training `y` as `y_rep`. Detection: with a model fit to data `y`,
+training `y` as `y_rep`. Detection (runtime, R1): with a model fit to data `y`,
 `max|predict_at(list())$y_rep - y|` must be > 0 (a real
 posterior-predictive draw differs from the data). Two shipped
 examples (BSplineRegression, HSGPRegression) historically
@@ -1176,7 +1176,7 @@ every generated sampler that uses `nuts_block` with a
 blocks that don't carry a hand-written gradient (`bart_block`,
 `*_gibbs_block`) are not subject to this check.
 
-**Mechanism (the one execution-based semantic check):** the V-static
+**Mechanism (the one execution-based semantic check):** the
 validator writes a throwaway companion file in its own scratch directory
 (Sec.0.3). The companion contains:
   - the production hand-written log-density and gradient functions,
@@ -1193,9 +1193,11 @@ validator writes a throwaway companion file in its own scratch directory
     and exits non-zero on failure.
 
 For blocks whose log-density uses `lgamma` / `digamma` / other
-special functions that the autodiff library doesn't overload, the AI falls
-back to **finite-difference verification** (central-difference of the hand-
-written wrap). FD precision is ~1e-5 vs AD's ~1e-8.
+special functions that the autodiff library doesn't overload, the validator
+falls back to **finite-difference verification** of the gradient
+(central-difference of the hand-written wrap) and checks log-density
+differences against a plain-double log-density written from the confirmed
+model (`codegen_cpp.md` Sec.6b (2b)). FD precision is ~1e-5 vs AD's ~1e-8.
 
 The validator compiles the verify file, calls the verify function, and
 asserts every `max_grad` and `max_dlp` < 1e-8 for AD-backed blocks /
@@ -1214,13 +1216,13 @@ The verify-file recipe for joint blocks (build `VectorXvar`, call the
 templated lp, compute `gradient()` on the whole vector) is in
 `codegen_cpp.md` Sec."Constraint-kind selector".
 
-**What to look for in the AI's workflow (as validator):**
+**What to look for:**
 
 1. Production `examples/<ClassName>.cpp` contains ONLY hand-written
    natural-scale log-densities wrapped by `constraints::*::wrap`. No
    autodiff includes, no `#ifdef AI4BAYESCODE_VERIFY_GRADIENTS`, no
    templated variants.
-2. The V-static report records `max_grad` and `max_dlp` per block.
+2. The validator's report records `max_grad` and `max_dlp` per block.
 3. No verify file is in the delivered folder.
 
 **What the user sees:** nothing. They `Rcpp::sourceCpp("<ClassName>.cpp")`
@@ -1329,7 +1331,7 @@ the three probes above.
 
 **Mechanism (companion file pattern, mirroring Check #12):**
 
-The V-static validator writes a throwaway probe file in its own scratch
+The validator writes a throwaway probe file in its own scratch
 directory. The companion contains:
 
   - `#include` of the production cpp's templated `Forward` and
@@ -1405,8 +1407,8 @@ int main() {
   bijection invariant (`J_fwd * J_rev = 1`). Same root cause as
   round-trip failure or as a sign error in the inverse.
 
-On any failure, V-static reports the failing probe and its residuals;
-the generator fixes the bijection and a fresh V-static re-runs from L1
+On any failure, the validator reports the failing probe and its residuals;
+the generator fixes the bijection and a new validator runs again from L1
 (Sec.0.5).
 
 **Joint blocks / multi-dim bijections:** Out of scope at this version.
@@ -1483,8 +1485,9 @@ diagonal, escalate on diagnostics.
    The delivered comment is plain language only (e.g. "// Sampling note:
    the group mean and the raw effects are strongly correlated, so the
    sampler uses a full covariance metric."). The check number and the
-   measured evidence (R-hat / ess_ratio before and after, at which
-   budget) go in the L2 verdict table, never in the shipped file.
+   measured evidence (R-hat / ess_ratio before, from the earlier
+   validator report (Sec.0.2), and after, from this run's L3, at which
+   budget) go in the validator's report, never in the shipped file.
    Acceptable reasons:
    - **Reparameterization explored and ruled out** (preferred fix
      for anisotropy; see `codegen_cpp.md` Sec.4a "Metric choice: prefer the adapted DIAGONAL
@@ -1888,8 +1891,8 @@ whereas `readapt_NUTS` exists only on the models that have a NUTS kernel
 (22 of the 42 shipped examples) and needs the concrete class name in its
 casts. Bind it in each model's RCPP_MODULE block.
 
-**Sub-checks** -- (a) and (b) are static (V-static, L2); (c) is runtime
-(V-runtime, R1). All must pass:
+**Sub-checks** -- (a) and (b) are static (L2); (c) is runtime (R1). All
+must pass:
 
 **(a) State preservation -- static grep.** The wrapper's
 `readapt_NUTS(int n, bool reset)` body must:
@@ -1920,7 +1923,7 @@ The wrapper's `readapt_NUTS` body should reference ONLY
 `readapt_rng_`. See `system_design.md Sec.8` for the three-RNG
 discipline.
 
-**(c) R-level round-trip test -- runtime.** V-runtime's R1 script
+**(c) R-level round-trip test -- runtime.** The validator's R1 script
 (Sec.0.3) includes the following bitwise identity test (or a test of
 equivalent form):
 
@@ -2109,8 +2112,8 @@ static reasoning.
 interface.md Sec.1 -- every user-facing wrapper class MUST expose
 `freeze` / `unfreeze` / `get_frozen`.
 
-**Four sub-checks** -- (a) is static (V-static, L2); (b)-(d) are runtime
-(V-runtime, R1). All must pass:
+**Four sub-checks** -- (a) is static (L2); (b)-(d) are runtime (R1). All
+must pass:
 
 **(a) Presence -- static grep.** The wrapper's RCPP_MODULE MUST contain
 `.method("freeze", ...)`, `.method("unfreeze", ...)`, and
@@ -2131,7 +2134,7 @@ grep -E '\.def\("freeze"|\.def\("unfreeze"|\.def\("get_frozen"|AI4BAYESCODE_PYBI
      examples/<ClassName>.cpp   # must find all three (or the macro)
 ```
 
-**(b) Whitelist / blacklist gate -- runtime R test.** V-runtime's R1
+**(b) Whitelist / blacklist gate -- runtime R test.** The validator's R1
 script (Sec.0.3) includes:
 
 ```r
@@ -2273,7 +2276,7 @@ Also test the checkpoint restore round-trip closure (freeze -> get_frozen
 # Freeze a mix of forms first. get_dag() exposes the DAG edges
 # (gibbs_reads / gibbs_invalidates / predict_edges / context_edges /
 # data_inputs) -- NOT a block list, so pick the targets from the
-# composition you just generated: add "<component_name>" if the model
+# composition in the generated .cpp: add "<component_name>" if the model
 # has a joint_nuts_block, "<rj_name>.gamma" if it has an rjmcmc_block,
 # and always the whitelisted block name.
 targets <- c("<whitelist_block_name>")   # + the forms this model supports
@@ -2295,7 +2298,7 @@ m$unfreeze()
 
 **(d) Stale-derived warning -- runtime R test.** For any wrapper whose
 composite has a deterministic refresher (`register_refresher(key, fn)`)
-that reads a whitelisted block's `name()`, V-runtime's R1 script
+that reads a whitelisted block's `name()`, the validator's R1 script
 includes a test that freezing that block emits an `Rcpp::warning`
 mentioning the downstream derived key:
 
@@ -2351,8 +2354,8 @@ behave through the R interface.
 
 ## Layer 3 -- Runtime (R1 on a fresh model; R2 + R3 on the same 2 chains)
 
-Run by the V-runtime validator, and only after V-static has returned PASS
-on the same `.cpp` (Sec.0.1: the hash must match).
+Run by the validator only after its L2 table is complete with no FAIL row
+(Sec.0.1).
 
 R1 runs on a fresh model before any chain. R2 and R3 share a single pair
 of chains, run with `keep_history = TRUE` so R can pull per-draw
@@ -2368,10 +2371,10 @@ in which case the comparison means nothing.
 
 ### R1. Smoke test
 
-**Owner:** V-runtime, in its own scratch script, on a fresh model, before
-any chain. Every runtime test in this section -- and the runtime halves of
-Checks #23 and #26 -- goes in that one script; the runner does not repeat
-them. R1 also runs the `.cpp`'s `@example` block(s) and its `int main()`
+**Owner:** the validator, in its own scratch script, on a fresh model,
+before any chain. Every runtime test in this section -- and the runtime
+parts of Checks #6, #23 and #26 -- goes in that one script; the runner does
+not repeat them. R1 also runs the `.cpp`'s `@example` block(s) and its `int main()`
 demo as written; an error in either is an R1 FAIL.
 
 **Purpose:** call every built-in method of the wrapper once and catch
@@ -2564,6 +2567,23 @@ binding only one leaves the other call shape reporting no valid method. In
 Python the argument is also reachable by keyword. A wrapper whose R entry
 point is `predict_at_r(Rcpp::List)` needs the pair there too.
 
+**Confirmed-DAG checks -- MANDATORY, no skip. Any one failing is an R1
+FAIL.** The variables `predict_at` returns must be consistent with the
+DAG the user signed off in Phase 3. The partial-newdata checks below test
+`predict_at` against the model's OWN declared graph, so they cannot see a
+predictable variable that the confirmed DAG does not have, or one it has
+that the model never returns. Write the confirmed DAG's nodes out from the
+confirmed spec (never from the `.cpp`), applying the renames and permitted
+omissions of Check #6 (A).3. Then emit both.
+
+**(1) Nothing outside the DAG.** Every key returned by any `predict_at`
+call of the sweep below is a node of the confirmed DAG.
+
+**(2) Everything the DAG predicts.** `SMOKE_NEWDATA` contains one entry
+that supplies every declared data input at its training value. That call
+returns the replicate of every observed node of the confirmed DAG, and
+every confirmed node downstream of a supplied data input.
+
 **`predict_at` partial-newdata checks -- MANDATORY, no skip. Any one
 failing is an R1 FAIL.** Read the declared predict edges out of
 `m$get_dag()$predict_edges`, the replaceable inputs out of `$data_inputs`
@@ -2669,7 +2689,7 @@ with this few steps, slow-mixing variables give false positives. Dead-
 parameter detection lives in Semantic #3 (code review) and is covered
 by the R-hat check in R2 (a dead parameter trivially fails R-hat).
 
-**R1 script code (V-runtime writes it in its scratch directory):**
+**R1 script code (the validator writes it in its scratch directory):**
 ```r
 model$step(10L)
 d <- model$get_current()
@@ -2704,6 +2724,22 @@ if (all(c("predict_at", "freeze", "unfreeze") %in% names(model))) {
     stopifnot(!inherits(pf, "try-error"))  # freeze + predict_at must not error
     stopifnot(identical(s_before, s_after))
 }
+
+# --- Confirmed-DAG checks (Semantic #6) --------------------------------
+# CONFIRMED_NODES: the nodes of the DAG the user signed off in Phase 3, after
+# the renames and omissions of Check #6 (A).3; CONFIRMED_FULL: the nodes the
+# full-prediction entry must return (replicates of the observed nodes, and
+# the confirmed nodes downstream of a supplied data input). Both written by
+# the validator from the confirmed spec, never read off the .cpp.
+# FULL_NEWDATA: the SMOKE_NEWDATA entry that supplies every data input.
+# Single-draw path; a wrapper with no history path has only the one-argument call.
+pa1 <- function(nd) tryCatch(model$predict_at(nd, TRUE), error = function(e)
+    if (grepl("takes ONE list argument", conditionMessage(e))) model$predict_at(nd) else stop(e))
+for (nd in SMOKE_NEWDATA) {
+    out <- setdiff(names(pa1(nd)), names(nd))
+    stopifnot(all(out %in% CONFIRMED_NODES))                   # (1)
+}
+stopifnot(all(CONFIRMED_FULL %in% names(pa1(FULL_NEWDATA))))  # (2)
 
 # --- Predict-DAG consistency smoke (Semantic #6) -----------------------
 # Cycle through every reasonable subset of the declared data_input keys
@@ -2832,7 +2868,7 @@ predict_dag_smoke(model, sample_newdata = SMOKE_NEWDATA, stochastic_keys = STOCH
 ```
 
 The wrapper-specific `SMOKE_NEWDATA` is a list of newdata candidates that
-V-runtime builds in its R1 script from the `.cpp`'s DGP. Minimum coverage:
+the validator builds in its R1 script from the `.cpp`'s DGP. Minimum coverage:
 
 1. `list()` -- empty newdata; every refresher whose declared parents are
    either non-data-input or supplied-by-default must fire.
@@ -2851,6 +2887,9 @@ V-runtime builds in its R1 script from the `.cpp`'s DGP. Minimum coverage:
    The third row is the smoke trigger for the silent-default-substitution
    bug: y_rep MUST be absent because v2 (per-observation variance, sized
    to N) cannot be defaulted from training when N changes.
+3. One entry that supplies every declared data input at its training
+   value (`FULL_NEWDATA`) -- the full prediction of the Confirmed-DAG
+   checks.
 
 ### R2. 2-chain MCMC convergence
 
@@ -2867,7 +2906,7 @@ failing them at 4k+4k would be a false negative. Declare FAILURE only
 if R-hat stays `>= 1.05` even at the 20k+20k budget -- at that point
 the cause is almost certainly a semantic bug (parameterization,
 parallel/sequential, Jacobian, dead param) rather than slow mixing;
-V-runtime reports R2 FAIL and the fix follows Sec.0.5.
+the validator reports R2 FAIL and the fix follows Sec.0.5.
 
 **Attempt budget:** this re-run stays within the current attempt
 (Sec.0.5 defines attempt counting).
@@ -3037,7 +3076,7 @@ if (ess_ratio < 0.01) {
 
 If R-hat stays >= 1.05 even at the 20k+20k extended budget, the likely
 cause is a Semantic bug (parameterization, parallel/sequential,
-Jacobian, dead param) -- V-runtime reports R2 FAIL and the fix follows
+Jacobian, dead param) -- the validator reports R2 FAIL and the fix follows
 Sec.0.5 -- but if the model has exchangeable components, first rule
 out label switching (R2.L).
 
@@ -3389,7 +3428,7 @@ fit's variance; smaller S inflates k-hat estimation noise. Larger S
 block's termination computation if k-hat hovers near 0.7.
 
 **Action chain on FAIL** (the codegen agent runs these in order
-within the 5-attempt budget, escalating between attempts):
+within `max_attempts` (Sec.0.5), escalating between attempts):
 
 1. **Increase optimizer epochs / loosen tau to 0.05**: maybe q just
    hasn't converged; re-run RAABBVI with tau_terminal = 0.05.
@@ -3409,7 +3448,7 @@ within the 5-attempt budget, escalating between attempts):
    MCMC for it (degrades pure-VI to hybrid, or hybrid back to
    pure-MCMC).
 
-If still failing at attempt 5, report per the `start.md` failure-
+If still failing at the `max_attempts` cap, report per the `start.md` failure-
 recovery policy and stop; the user decides.
 
 ### R3. Posterior check (Bayesian p-values + PSIS-LOO)
@@ -3484,7 +3523,7 @@ never gated:
   R3.a can never fail a binary model.
 - TWO OR MORE central statistics outside simultaneously -> **FAIL** the
   attempt (semantic bug: the posterior predictive does not reproduce
-  the data). Route back to Layer 2 and retry per the attempt budget.
+  the data). The fix follows Sec.0.5.
 - **Narrower pass band (0.10, 0.90) when the sampler uses
   `joint_nuts_block`** -- silent
   miscalibration bugs in concatenate-and-slice code are more insidious
@@ -3609,12 +3648,12 @@ if (pct_k_lo < 50 || pct_k_hi >= 10) {
 
 ## Running the validator
 
-- **Layer 1 (Syntactic):** V-static compiles the `.cpp`. A compile
+- **Layer 1 (Syntactic):** the validator compiles the `.cpp`. A compile
   error is an L1 FAIL (Sec.0.5).
 - **Layer 2 (Semantic):** walk the generated `.cpp` through the 26
   semantic checks (#1-#26; #15-#17 are defined in
   `codegen_priors.md` Sec.2c-2e). Check #12 (gradient verification) is execution-based and
-  done by V-static via a throwaway companion file in its own scratch
+  done by the validator via a throwaway companion file in its own scratch
   directory (see Sec.0.3 and the Check #12 body above for the template);
   the rest are static code
   review. Checks #11 (joint_nuts_block), #13 (RNG separation), #18
@@ -3622,7 +3661,7 @@ if (pct_k_lo < 50 || pct_k_hi >= 10) {
   #25 (rjmcmc / Dirac-spike) fire conditionally -- only when the
   relevant pattern is present. **Check #26 (kernel-control conformance)
   fires on EVERY wrapper.**
-- **Layer 3 (Runtime):** V-runtime runs R1 -> R2 -> R3 in order. R1 is
+- **Layer 3 (Runtime):** the validator runs R1 -> R2 -> R3 in order. R1 is
   its own scratch script on a fresh model, before any chain; R2 (R-hat +
   ESS) and R3 (posterior-predictive p-values + PSIS-LOO) share the
   runner's 2 chains (keep_history = TRUE).

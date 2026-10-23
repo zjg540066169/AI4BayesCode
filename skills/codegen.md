@@ -1171,7 +1171,7 @@ must come AFTER that table is written. An unwritten checklist counts as NOT
 run: silent "I checked it mentally" is exactly how the runtime-before-semantic
 reversal happens.
 
-### Step 3: Smoke test (THROWAWAY -- delete file on PASS)
+### Step 3: Smoke test (THROWAWAY -- deleted by the validator before it returns)
 
 The validator writes a minimal smoke-test script in its own scratch
 directory. The smoke test does:
@@ -1288,7 +1288,7 @@ run, and produce reasonable samples out of the box.
   only if the user opted in; any extra file or folder
   confuses users into thinking it's part of their output.
 - **Never leave a `smoke_<ClassName>.R` / `smoke_test.R` file behind
-  after Step 3 PASS.** Smoke tests are throwaway; same rule as
+  after Step 3.** Smoke tests are throwaway; same rule as
   Check #12 verify files: the validator deletes them before it returns.
   No "kept for reuse" option.
   Ongoing compile-smoke coverage is provided by

@@ -80,7 +80,8 @@ same layers itself, in the same order.)
   constructing the generated model, and the first `step()` of any kind.
 - L2 reads the code and compiles throwaway probe files (the #12 AD-twin,
   the #14 bijection probes, the #15 parity test, which drives a standalone
-  library block with the `params_fn` copied from the `.cpp`). It never
+  library block with the `params_fn` copied from the `.cpp`, or a copy of
+  the rjmcmc hook's draw code). It never
   constructs the generated model: every check that does runs in R1.
 - **Any failure stops the run.** The validator reports FAIL at that step
   and returns; nothing after it runs.
@@ -146,9 +147,11 @@ runner, as a throwaway L3 harness; it is never delivered.
    validator, and prints the report it returns.
 2. FAIL -> the generator fixes the `.cpp` or the runner, and a NEW
    validator runs again from L1.
-3. PASS -> the generator checks that the SHA-256 of the `.cpp` it
-   delivers equals the hash in the report, then delivers (`start.md`
-   Sec.4-5). It deletes the throwaway runner unless the user chose to
+3. PASS -> after any step the report's numbers call for (the Check #18
+   metric escalation, the R-hat gray-zone question in `start.md`; a
+   `.cpp` change is a new attempt), the generator checks that the SHA-256
+   of the `.cpp` it delivers equals the hash in the report, then delivers
+   (`start.md` Sec.4-5). It deletes the throwaway runner unless the user chose to
    keep it.
 
 **Attempt counting** (the one definition; `start.md` and `codegen.md`
@@ -602,14 +605,13 @@ Sampling vs prediction discipline (codegen_cpp.md Sec.6c, Hard Rule #5):
 
 ### Acceptance test (machine-checkable, must pass before shipping)
 
-(A) is checked twice: in L2 from the `.cpp`'s `declare_*` calls, and in R1
-on the running model (the Confirmed-DAG checks). (B) and (C) are static
-(L2). (D) constructs the model, so it runs in R1.
+(A), (B) and (C) are static (L2). (D) constructs the model, so it runs in
+R1, next to the Confirmed-DAG checks on the predictable variables.
 
 **(A) Node-set equality.**
-1. Extract node set from user-verified mermaid in chat: `U`.
+1. Extract node set from the confirmed DAG in the spec (Sec.0.2): `U`.
 2. Extract from the `.cpp`'s `declare_predict_edges` / `declare_data_input`
-   calls (L2), and from `get_dag()` on the running model (R1):
+   calls:
    `G = keys(predict_edges)  U  values(predict_edges)  U  data_inputs`.
 3. Apply the permitted renames (`y -> y_rep`, snake_case
    conversions like `Z_mat -> Z_mat_flat`). Optional hyperparent
@@ -1214,7 +1216,7 @@ The verify-file recipe for joint blocks (build `VectorXvar`, call the
 templated lp, compute `gradient()` on the whole vector) is in
 `codegen_cpp.md` Sec."Constraint-kind selector".
 
-**What to look for in the AI's workflow (as validator):**
+**What to look for:**
 
 1. Production `examples/<ClassName>.cpp` contains ONLY hand-written
    natural-scale log-densities wrapped by `constraints::*::wrap`. No
@@ -2274,7 +2276,7 @@ Also test the checkpoint restore round-trip closure (freeze -> get_frozen
 # Freeze a mix of forms first. get_dag() exposes the DAG edges
 # (gibbs_reads / gibbs_invalidates / predict_edges / context_edges /
 # data_inputs) -- NOT a block list, so pick the targets from the
-# composition you just generated: add "<component_name>" if the model
+# composition in the generated .cpp: add "<component_name>" if the model
 # has a joint_nuts_block, "<rj_name>.gamma" if it has an rjmcmc_block,
 # and always the whitelisted block name.
 targets <- c("<whitelist_block_name>")   # + the forms this model supports
@@ -2566,30 +2568,21 @@ Python the argument is also reachable by keyword. A wrapper whose R entry
 point is `predict_at_r(Rcpp::List)` needs the pair there too.
 
 **Confirmed-DAG checks -- MANDATORY, no skip. Any one failing is an R1
-FAIL.** The variables `predict_at` can return must be exactly the ones in
-the DAG the user signed off in Phase 3. The partial-newdata checks below
-test `predict_at` against the model's OWN declared graph, so a wrongly
-declared edge would pass them; these checks first pin the declared graph
-to the confirmed one. Write the confirmed DAG out from the confirmed spec
-(never from the `.cpp`), applying the renames and permitted omissions of
-Check #6 (A).3, as three objects: its data inputs, its predict edges and
-its context edges, splitting the edges by the context-edge rules of
-Check #6 (a prior parent of a sampled parameter, or the forest / kernel
-convention, is a context edge; every other edge is a predict edge). Then
-emit all three.
+FAIL.** The variables `predict_at` returns must be consistent with the
+DAG the user signed off in Phase 3. The partial-newdata checks below test
+`predict_at` against the model's OWN declared graph, so they cannot see a
+predictable variable that the confirmed DAG does not have, or one it has
+that the model never returns. Write the confirmed DAG's nodes out from the
+confirmed spec (never from the `.cpp`), applying the renames and permitted
+omissions of Check #6 (A).3. Then emit both.
 
-**(1) Same data inputs.** `get_dag()$data_inputs` equals the confirmed
-data inputs.
+**(1) Nothing outside the DAG.** Every key returned by any `predict_at`
+call of the sweep below is a node of the confirmed DAG.
 
-**(2) Same edges.** `get_dag()$predict_edges` equals the confirmed
-predict edges and `get_dag()$context_edges` equals the confirmed context
-edges, as edge sets. Equal edges and data inputs give equal node sets.
-
-**(3) The full prediction.** `SMOKE_NEWDATA` below contains one entry
-that supplies every data input at once. With (2) passed, the partial-
-newdata sweep then checks every predictable variable against the
-confirmed DAG itself: each one the confirmed graph makes reachable is
-returned, and nothing else is.
+**(2) Everything the DAG predicts.** `SMOKE_NEWDATA` contains one entry
+that supplies every declared data input at its training value. That call
+returns the replicate of every observed node of the confirmed DAG, and
+every confirmed node downstream of a supplied data input.
 
 **`predict_at` partial-newdata checks -- MANDATORY, no skip. Any one
 failing is an R1 FAIL.** Read the declared predict edges out of
@@ -2733,15 +2726,20 @@ if (all(c("predict_at", "freeze", "unfreeze") %in% names(model))) {
 }
 
 # --- Confirmed-DAG checks (Semantic #6) --------------------------------
-# CONFIRMED_DATA / CONFIRMED_PREDICT / CONFIRMED_CONTEXT: the data inputs and
-# the predict / context edges of the DAG the user signed off in Phase 3,
-# written by the validator from the confirmed spec (never read off the .cpp).
-edge_set <- function(e) sort(as.character(unlist(
-    lapply(names(e), function(s) paste(s, "->", e[[s]])))))
-dag0 <- model$get_dag()
-stopifnot(setequal(as.character(dag0$data_inputs), CONFIRMED_DATA))
-stopifnot(identical(edge_set(dag0$predict_edges), edge_set(CONFIRMED_PREDICT)))
-stopifnot(identical(edge_set(dag0$context_edges), edge_set(CONFIRMED_CONTEXT)))
+# CONFIRMED_NODES: the nodes of the DAG the user signed off in Phase 3, after
+# the renames and omissions of Check #6 (A).3; CONFIRMED_FULL: the nodes the
+# full-prediction entry must return (replicates of the observed nodes, and
+# the confirmed nodes downstream of a supplied data input). Both written by
+# the validator from the confirmed spec, never read off the .cpp.
+# FULL_NEWDATA: the SMOKE_NEWDATA entry that supplies every data input.
+# Single-draw path; a wrapper with no history path has only the one-argument call.
+pa1 <- function(nd) tryCatch(model$predict_at(nd, TRUE), error = function(e)
+    if (grepl("takes ONE list argument", conditionMessage(e))) model$predict_at(nd) else stop(e))
+for (nd in SMOKE_NEWDATA) {
+    out <- setdiff(names(pa1(nd)), names(nd))
+    stopifnot(all(out %in% CONFIRMED_NODES))                   # (1)
+}
+stopifnot(all(CONFIRMED_FULL %in% names(pa1(FULL_NEWDATA))))  # (2)
 
 # --- Predict-DAG consistency smoke (Semantic #6) -----------------------
 # Cycle through every reasonable subset of the declared data_input keys
@@ -2889,8 +2887,9 @@ the validator builds in its R1 script from the `.cpp`'s DGP. Minimum coverage:
    The third row is the smoke trigger for the silent-default-substitution
    bug: y_rep MUST be absent because v2 (per-observation variance, sized
    to N) cannot be defaulted from training when N changes.
-3. One entry that supplies every data input at once (the fourth row
-   above) -- the full prediction of the Confirmed-DAG checks.
+3. One entry that supplies every declared data input at its training
+   value (`FULL_NEWDATA`) -- the full prediction of the Confirmed-DAG
+   checks.
 
 ### R2. 2-chain MCMC convergence
 

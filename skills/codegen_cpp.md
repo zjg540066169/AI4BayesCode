@@ -1698,11 +1698,11 @@ int main() {
                 [&](const auto& t) { return <block1>_lp_ad(t, ctx_<block1>); });
             // Log-density DIFFERENCE to a fixed reference point th_ref (drawn
             // once before the loop, lp_hw_ref / lp_ad_ref evaluated there):
-            // the additive constant cancels, relative scale keeps it fair.
+            // the additive constant cancels.
             const double dlp_hw = lp_hw - lp_hw_ref_<block1>;
             const double dlp_ad = lp_ad - lp_ad_ref_<block1>;
             max_dlp_<block1>  = std::max(max_dlp_<block1>,
-                std::abs(dlp_hw - dlp_ad) / std::max(1.0, std::abs(dlp_hw)));
+                std::abs(dlp_hw - dlp_ad));
             max_grad_<block1> = std::max(max_grad_<block1>,
                 arma::max(arma::abs(g_hw - g_ad)));
         }
@@ -1732,7 +1732,7 @@ int main() {
             max_grad_<block_special> = std::max(max_grad_<block_special>,
                 arma::max(arma::abs(g_hw - g_fd)));
             max_dlp_<block_special>  = std::max(max_dlp_<block_special>,
-                std::abs(dlp_hw - dlp_spec) / std::max(1.0, std::abs(dlp_hw)));
+                std::abs(dlp_hw - dlp_spec));
             (void) lp_hw;
         }
     }

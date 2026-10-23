@@ -410,11 +410,10 @@ it?"), re-render it after EVERY human-in-the-loop revision, and never
 move to Phase 4 without an explicit user sign-off on a summary the
 user has actually SEEN.
 
-The phase split above is deliberate: the L2 checklist must be loaded,
-run, and its verdict PRINTED before the Layer-3 runtime harness (which
-lives inside the runner file) is even written. Loading the runner
-skill first puts executable runtime machinery in hand one phase before
-the semantic checklist -- that is exactly the historical
+The phase split above is deliberate: the generator writes the runner in
+Phase 5 but never runs it; only the validator runs it, in L3, after its
+L2 table is complete with no FAIL (`skills/validator.md` Sec.0.1). Running
+it before that table exists is exactly the historical
 runtime-before-semantic reversal (codegen.md Sec.11 HARD ORDERING
 GATE).
 
