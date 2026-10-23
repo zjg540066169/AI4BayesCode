@@ -422,10 +422,11 @@ problem -- so on low ess_ratio, try the DENSE metric FIRST, before adding draws
 (more draws do NOT raise ess_ratio if the metric is the wrong shape).
 
 ESCALATE BY MEASUREMENT, keep only if it helps (do NOT enable dense blindly):
-1. Regenerate with `cfg.use_dense_metric = true`: a new attempt, which a new
-   validator runs from L1 (`validator.md` Sec.0.5).
+1. Regenerate with `cfg.use_dense_metric = true` and the rest of Check #18
+   (justification below, pilot / warmup / adapt iters): a new attempt, which a
+   new validator runs from L1 (`validator.md` Sec.0.5).
 2. If its ess_ratio materially improves on the earlier report's (>= ~2-3x) ->
-   KEEP dense + add the Check #18 justification below.
+   KEEP dense.
 3. If it does NOT improve (or dense diverges / is much slower) -> REVERT to
    diagonal (another `.cpp` change, re-checked the same way). The inefficiency is NOT a rotated-metric problem; the real fix is a
    reparameterization (NC for a residual funnel) or a specialized block

@@ -49,7 +49,7 @@ essentially free after the chains finish.
    `step()`:
    - **R1. Smoke test** (~10 steps, on a fresh model, before any chain)
      -- the member-function sweep, the runtime halves of Checks #23 and
-     #26, running the `@example` block(s) and the `int main()` demo, and
+     #26, running the `@example` block(s), and
      the catches for immediate failures, non-finite values, predict_at
      state mutation, and freeze->predict_at history misalignment (a
      frozen block that stalls its history breaks posterior-predictive
@@ -89,7 +89,7 @@ same layers itself, in the same order.)
 ### 0.2 What the validator receives
 
 (1) The confirmed spec: the model as signed off in Phase 3 (equations,
-symbol table, DAG) plus the user's verbatim answers to every later
+symbol table, DAG, plus any node added after a Check #6 (E) FAIL) plus the user's verbatim answers to every later
 question that changes the model or block plan (VI/MCMC split and VI
 families, spike family, optional modes such as DART, exposed vs
 hardcoded hyperparameters). (2) The absolute paths of the `.cpp` and the
@@ -533,7 +533,8 @@ is a bug.
 ### The Full-Reconstruction Discipline
 
 For every node `N` in the user-verified DAG that is NEITHER a root
-(prior / data input) NOR the terminal observed node, **`N` must be
+(prior / data input, or a node whose parents in the DAG are all
+context-edge parents) NOR the terminal observed node, **`N` must be
 fully reconstructable from its declared parents at predict time**.
 "Fully reconstructable" means ALL FOUR conditions below hold:
 
@@ -610,8 +611,8 @@ in R1, next to the R1 predictable-variable check.
 
 **(A) Node-set equality.**
 1. Extract node set from the confirmed DAG in the spec (Sec.0.2): `U`.
-2. Extract from the `.cpp`'s `declare_predict_edges` / `declare_data_input`
-   calls:
+2. Extract from the `.cpp`'s `declare_predict_edges` / `declare_context_edges` /
+   `declare_data_input` calls:
    `G = keys/values(predict_edges)  U  keys/values(context_edges)  U  data_inputs`.
 3. Apply the permitted renames (`y -> y_rep`, snake_case
    conversions like `Z_mat -> Z_mat_flat`). Optional hyperparent
@@ -641,10 +642,11 @@ parent is inlined => bug.
 From the model EQUATIONS of the confirmed spec -- not from the DAG -- list
 `PREDICTABLE`: every variable that depends, directly or through other
 equations, on a data input (a covariate or other replaceable input, not
-the observed response), plus the replicate of every observed variable
+the observed response; a quantity the model fixes from the training inputs
+is a constant), plus the replicate of every observed variable
 (renames of (A).3). Each must be a node of `U`. A missing one is a FAIL
-that names it; the generator adds it to the DAG and to the code's predict
-graph. (A) cannot catch this: when the DAG and the code leave out the
+that names it; the generator adds it to the DAG it passes to the next
+validator and to the code's predict graph. (A) cannot catch this: when the DAG and the code leave out the
 same variable, the two still agree.
 
 **(D) Replacement-roundtrip smoke test.**
@@ -2386,8 +2388,8 @@ in which case the comparison means nothing.
 **Owner:** the validator, in its own scratch script, on a fresh model,
 before any chain. Every runtime test in this section -- and the runtime
 parts of Checks #6, #23 and #26 -- goes in that one script; the runner does
-not repeat them. R1 also runs the `.cpp`'s `@example` block(s) and its `int main()`
-demo as written; an error in either is an R1 FAIL.
+not repeat them. R1 also runs the `.cpp`'s `@example` block(s) as written;
+an error in one is an R1 FAIL.
 
 **Purpose:** call every built-in method of the wrapper once and catch
 immediate failures -- a missing or broken binding, non-finite values,
@@ -2583,10 +2585,11 @@ point is `predict_at_r(Rcpp::List)` needs the pair there too.
 FAIL.** The partial-newdata checks below test `predict_at` only against
 the model's OWN declared graph, so they cannot see a predictable variable
 the model never returns. `PREDICTABLE` is the list of Check #6 (E),
-written out from the confirmed spec (never from the `.cpp`).
-`SMOKE_NEWDATA` contains one entry that supplies every declared data
-input at its training value; that call must return every variable in
-`PREDICTABLE`. A missing one is a FAIL that names it.
+written out from the confirmed spec (never from the `.cpp`), under the
+(A).3 renames. `SMOKE_NEWDATA` contains one entry that supplies every
+declared data input at its training value; that call must return every
+variable in `PREDICTABLE` that it does not supply. A missing one is a FAIL
+that names it.
 
 **`predict_at` partial-newdata checks -- MANDATORY, no skip. Any one
 failing is an R1 FAIL.** Read the declared predict edges out of
@@ -2688,7 +2691,8 @@ stopifnot(inherits(res, "error"))
 
 Silent acceptance is how a caller believes it swapped the data and did not.
 
-**Budget:** ~10 steps total. Do not add a dead-parameter check here --
+**Budget:** ~10 steps total, apart from the `@example` block(s), which run
+as written. Do not add a dead-parameter check here --
 with this few steps, slow-mixing variables give false positives. Dead-
 parameter detection lives in Semantic #3 (code review) and is covered
 by the R-hat check in R2 (a dead parameter trivially fails R-hat).
@@ -2731,12 +2735,12 @@ if (all(c("predict_at", "freeze", "unfreeze") %in% names(model))) {
 
 # --- Predictable-variable check (Semantic #6) --------------------------
 # PREDICTABLE: the list of Check #6 (E), written by the validator from the
-# confirmed spec, never read off the .cpp. FULL_NEWDATA: the SMOKE_NEWDATA
+# confirmed spec under the (A).3 renames, never read off the .cpp. FULL_NEWDATA: the SMOKE_NEWDATA
 # entry that supplies every data input at its training value.
 # Single-draw path; a wrapper with no history path has only the one-argument call.
 pa1 <- function(nd) tryCatch(model$predict_at(nd, TRUE), error = function(e)
     if (grepl("takes ONE list argument", conditionMessage(e))) model$predict_at(nd) else stop(e))
-miss <- setdiff(PREDICTABLE, names(pa1(FULL_NEWDATA)))
+miss <- setdiff(PREDICTABLE, c(names(FULL_NEWDATA), names(pa1(FULL_NEWDATA))))
 if (length(miss)) stop("[R1] predict_at does not return predictable variable(s): ",
                        paste(miss, collapse = ", "))
 

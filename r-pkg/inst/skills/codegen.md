@@ -628,9 +628,9 @@ NOT "block B reads A during MCMC sampling". The two DAGs are
 distinct and confusing them is a common failure mode (see
 `system_design.md` Sec.4). Practical rules:
 
-- The edges drawn here MUST match the `declare_predict_edges` and
-  `declare_context_edges` calls emitted in the generated C++, taken
-  together (a prior parent of a sampled parameter is a context edge,
+- The edges drawn here MUST match the `declare_predict_edges` calls,
+  and the `declare_context_edges` calls between drawn nodes, emitted in
+  the generated C++ (a prior parent of a sampled parameter is a context edge,
   `validator.md` Check #6). They do NOT correspond to
   `declare_dependencies` (that's the Gibbs DAG, internal to the
   sampler).
@@ -1195,8 +1195,8 @@ directory. The smoke test does:
   missing input from a training-set mean passes every other check.
 
 These are a subset; the validator runs `validator.md`'s full R1 section
-(including the member-function sweep, the #23 / #26 runtime halves, the
-`@example` block(s) and the `int main()` demo).
+(including the member-function sweep, the #23 / #26 runtime halves and the
+`@example` block(s)).
 
 **The smoke-test script never enters the user's folder.** It lives in
 the validator's scratch directory and is deleted before the validator

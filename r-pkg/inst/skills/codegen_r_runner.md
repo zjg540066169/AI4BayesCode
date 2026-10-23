@@ -45,8 +45,8 @@ For the C++ file emission, see `codegen_cpp.md`.
 1. Create output folder if missing (default `./generated/<ClassName>/`).
 2. Do NOT write or edit `<folder>/<ClassName>.cpp` here. It was written in
    Phase 4 with BOTH its `@example:R` and `@example:python` header blocks
-   (`codegen_cpp.md` Sec.5 "Header `@example` block") and validated by its
-   SHA-256. Copy this runner's DGP FROM the `.cpp`. Any `.cpp` edit is
+   (`codegen_cpp.md` Sec.5 "Header `@example` block"). Copy this runner's DGP
+   FROM the `.cpp`. Any `.cpp` edit is
    re-checked by a new validator from L1 (`validator.md` Sec.0.5).
 3. Write the R runner `<folder>/run_<ClassName>.R` following the
    template below. It holds the 2 chains and the Layer-3 R2/R3 checks

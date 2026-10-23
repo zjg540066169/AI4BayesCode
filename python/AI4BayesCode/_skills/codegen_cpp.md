@@ -651,7 +651,7 @@ order:
 comment are three renderings of ONE DGP. Editing the `@example` block or the
 demo is a `.cpp` edit, re-checked by a new validator from L1
 (`validator.md` Sec.0.5). After L2, the validator's R1 confirms the `@example`
-block(s) and the demo actually run, and (for library examples) R2 confirms
+block(s) actually run, and (for library examples) R2 confirms
 that two independent chains converge (rank-normalized R-hat); the embedded
 block itself stays single-chain (the 2-chain convergence run is a validation
 step, never shipped in the example).
@@ -1291,13 +1291,13 @@ pointwise_loglik <- function(hist, y) {
    belongs to the Gibbs DAG, not the predict DAG). But the predict
    DAG MUST reconstruct the full generative chain as shown to the user
    for verification -- every node from the user-verified DAG appears
-   in `shared_data`, every edge appears in `declare_predict_edges`,
+   in `shared_data`, every edge appears in `declare_predict_edges` or `declare_context_edges`,
    and every deterministic intermediate gets its own
    `register_refresher` so `predict_at` walks the chain explicitly.
-   The acceptance test: after codegen, `get_dag()$predict_edges`
-   keys  U  values,  U  `data_inputs`, MUST equal the node set of the
-   user-verified DAG (modulo the `y_rep` renaming of the observed
-   `y` node). See Sec.6c below for the canonical multi-layer pattern
+   The acceptance test: after codegen, `get_dag()$predict_edges` and
+   `$context_edges` keys  U  values,  U  `data_inputs`, MUST contain the
+   node set of the user-verified DAG, any extra node appearing only in
+   context edges (modulo the `y_rep` renaming of the observed `y` node). See Sec.6c below for the canonical multi-layer pattern
    and validator.md Check #6 for the structural check.
 
 ---
@@ -1456,10 +1456,13 @@ impl_->data().register_stochastic_refresher(
    `Zbeta`, `theta`, `y`, `v2`).
 2. Read the generated wrapper. Collect:
    - keys appearing as source or target of `declare_predict_edges`,
+   - keys appearing as source or target of `declare_context_edges`,
    - keys appearing in `declare_data_input`.
 3. Rename `y` -> `y_rep` in the user-verified set (this is the only
    permitted renaming).
-4. Take the symmetric difference. If non-empty, FIX before shipping
+4. Every user-verified node must be collected, and a collected node outside
+   that set must appear only in `declare_context_edges` (validator.md
+   Check #6 (A).4). Otherwise FIX before shipping
    -- never let the DAG drift from what the user approved.
 
 ### Sampling vs prediction -- Gibbs may collapse, predict may NOT
