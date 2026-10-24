@@ -1245,14 +1245,14 @@ and get the hand-written sampler at full speed.
 **Failure routing at generation:**
 - log-density-difference mismatch -> the production log-density
   disagrees with the model at the term the report names.
+  - double-counted Jacobian (user added `+ log(sigma)` inside the
+    natural-scale function while `constraints::positive::wrap` is
+    already adding it -- see Check #5)
 - gradient-only mismatch -> bug in that block's hand-written
   gradient. Common classes:
   - sign error (`d/dx(-0.5 x^2) = -x`, not `+x`)
   - factor missing (forgot `2` from `d/dx x^2 = 2x`)
   - wrong denominator (`sigma^2` vs `sigma^3`)
-  - double-counted Jacobian (user added `+ log(sigma)` inside the
-    natural-scale function while `constraints::positive::wrap` is
-    already adding it -- see Check #5)
 - Multiple blocks diverging by similar magnitude -> suspect wrong
   parameterization (sd vs variance, rate vs scale) -- check Layer 2
   Check #1 before fixing per-block gradients.
