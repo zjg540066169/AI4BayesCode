@@ -23,6 +23,9 @@ from AI4BayesCode.doc import _parse_example
 
 
 def main() -> int:
+    # The child logs echoed below may hold characters the console code page
+    # cannot show; the harness itself must not crash on them.
+    sys.stdout.reconfigure(errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--part", type=int, default=1)
     ap.add_argument("--n-parts", type=int, default=1)

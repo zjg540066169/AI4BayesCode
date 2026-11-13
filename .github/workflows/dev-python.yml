@@ -36,7 +36,8 @@ jobs:
           New-Item -ItemType Directory -Force $lib, $tmp | Out-Null
           $env:TMP = $tmp; $env:TEMP = $tmp; $env:TMPDIR = $tmp
           $env:AI4B_LIB = $lib
-          R CMD INSTALL -l "$lib" r-pkg *>&1 | Tee-Object -FilePath ci-logs/install.txt
+          # R.exe, not R: in PowerShell "r" is the built-in alias of Invoke-History.
+          R.exe CMD INSTALL -l "$lib" r-pkg *>&1 | Tee-Object -FilePath ci-logs/install.txt
           Rscript tools/ci/r_paths_check.R *>&1 | Tee-Object -FilePath ci-logs/check.txt
           exit $LASTEXITCODE
       - name: Publish logs

@@ -19,6 +19,7 @@ import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
+from ._console import safe_print as print  # noqa: A001 (see _console.py)
 
 __all__ = ["install_skill"]
 

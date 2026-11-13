@@ -31,6 +31,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Iterable
+from ._console import safe_print as print  # noqa: A001 (see _console.py)
 
 __all__ = ["prompt", "generate", "models", "skills_path", "set_key", "key_status"]
 
@@ -60,7 +61,7 @@ def _skill(name: str) -> str:
     if not p:
         return ""
     try:
-        return Path(p).read_text()
+        return Path(p).read_text(encoding="utf-8")
     except OSError:
         return ""
 
@@ -232,7 +233,7 @@ def prompt(model_description: str, *, backend: str = "both", output_path: str = 
             raise FileNotFoundError(
                 "model_description looks like a file path but no such file "
                 f"exists: {model_description}")
-        model_description = Path(model_description).read_text()
+        model_description = Path(model_description).read_text(encoding="utf-8")
     if not isinstance(model_description, str) or not model_description.strip():
         raise ValueError("model_description must be a non-empty model description")
     if classname is None:
@@ -264,7 +265,7 @@ def prompt(model_description: str, *, backend: str = "both", output_path: str = 
 def _offline_emit(p: dict, output_path: str, verbose: bool) -> dict:
     out = Path(output_path); out.mkdir(parents=True, exist_ok=True)
     pf = out / "PROMPT.txt"
-    pf.write_text("===== SYSTEM =====\n" + p["system"] + "\n\n===== USER =====\n" + p["user"])
+    pf.write_text("===== SYSTEM =====\n" + p["system"] + "\n\n===== USER =====\n" + p["user"], encoding="utf-8")
     rf = out / "README_generate.txt"
     rf.write_text(
         "No API key was available, so generate() emitted the prompt.\n"
@@ -272,7 +273,7 @@ def _offline_emit(p: dict, output_path: str, verbose: bool) -> dict:
         "  (B) Online: set a key once with AI4BayesCode.set_key(\"sk-ant-...\", \"anthropic\")\n"
         "      (or pass API_key= / LLM=), then re-run AI4BayesCode.generate(...).\n"
         "      (The Messages API path uses the 'anthropic' SDK, a core dependency.)\n"
-        f"Target class: {p['classname']}   backend: {p['backend']}\n")
+        f"Target class: {p['classname']}   backend: {p['backend']}\n", encoding="utf-8")
     if verbose:
         print(f"No API key -- wrote prompt to:\n  {pf}\n  {rf}")
     return {"prompt_path": str(pf), "readme_path": str(rf), "prompt": p, "called_api": False}
@@ -1216,7 +1217,7 @@ def _write_emitted(txt, output_path, classname):
             # never honor an absolute path or a ".." that would escape the dir.
             pp = out / Path(path).name
         pp.parent.mkdir(parents=True, exist_ok=True)
-        pp.write_text(blk["code"])
+        pp.write_text(blk["code"], encoding="utf-8")
         files.append(str(pp))
         if str(pp).endswith(".cpp"):
             cpp_path = str(pp)
@@ -1493,7 +1494,7 @@ def generate(model_description: str | None = None, *, classname: str | None = No
                 raise RuntimeError(f"{e}{hint}") from e
             raise
         files, cpp_path, runner_path = _write_emitted(txt, output_path, classname)
-        (out / f"{classname}_transcript.md").write_text(txt)
+        (out / f"{classname}_transcript.md").write_text(txt, encoding="utf-8")
 
         if not files:
             # No usable code block -- the model deferred the code or was truncated.

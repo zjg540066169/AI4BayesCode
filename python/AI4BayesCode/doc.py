@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import re
 from types import ModuleType
+from ._console import safe_print as print  # noqa: A001 (see _console.py)
 
 __all__ = ["doc"]
 
@@ -24,7 +25,7 @@ _DOC_REGISTRY: dict[str, str] = {}
 
 def _register_source(cpp_path: str) -> list[str]:
     try:
-        src = open(cpp_path, "r").read()
+        src = open(cpp_path, "r", encoding="utf-8").read()
     except OSError:
         return []
     names = _exposed_names(src)
@@ -211,12 +212,12 @@ def doc(x) -> None:
             src_path = str(cand)
 
     if not src_path or not os.path.isfile(src_path):
-        print(f"  {class_name or x}: source not found — pass the .cpp path for the full "
+        print(f"  {class_name or x}: source not found -- pass the .cpp path for the full "
               f"card, or use help(mod.{class_name or 'YourModel'}) for the pybind "
               f"signature.")
         return None
 
-    src = open(src_path, "r").read()
+    src = open(src_path, "r", encoding="utf-8").read()
     # Use the actual exposed CLASS name for the card (the passed name may be the
     # PYBIND11_MODULE name, e.g. "<Class>_module").
     classes = _class_names(src)
@@ -227,7 +228,8 @@ def doc(x) -> None:
     methods = _parse_methods(src)
     desc = _parse_header(src)
     ex_block = _parse_example(src, "python")
-    bar = "─" * 64
+    from ._console import glyph
+    bar = glyph("\u2500", "-") * 64
 
     print(bar)
     print(f"  {class_name}")
@@ -246,7 +248,7 @@ def doc(x) -> None:
             print(f"      {a['name']:<14}{comma}   # {a['hint']}{tail}")
     else:
         print(f"Construct:  mod.{class_name}(...)   "
-              f"(could not parse args — try help(mod.{class_name}))")
+              f"(could not parse args -- try help(mod.{class_name}))")
 
     print("\nMethods:")
     shown = []

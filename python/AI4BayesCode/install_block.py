@@ -17,6 +17,7 @@ import shutil
 import sys
 import tempfile
 import urllib.request
+from ._console import safe_print as print  # noqa: A001 (see _console.py)
 
 _HUB_REPO = "zjg540066169/AI4BayesCode-hub"
 _HUB_REF = "main"

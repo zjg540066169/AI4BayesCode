@@ -13,6 +13,7 @@ from __future__ import annotations
 import numpy as np
 
 from .utils import ess_bulk, rhat
+from ._console import safe_print as print  # noqa: A001 (see _console.py)
 
 __all__ = ["rhat_summary"]
 

@@ -40,6 +40,7 @@ import warnings
 from typing import Any, Callable, Iterable, Optional
 
 import numpy as np
+from ._console import safe_print as print  # noqa: A001 (see _console.py)
 
 
 def _strip_burn(hist, n_burn):

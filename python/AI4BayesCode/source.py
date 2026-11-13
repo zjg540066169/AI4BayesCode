@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Iterable
 
 import pybind11
+from ._console import safe_print as print  # noqa: A001 (see _console.py)
 
 __all__ = ["source", "vendored_include_path"]
 
@@ -473,7 +474,9 @@ def source(
     except Exception:
         pass
     if not quiet:
-        print(f"✓ Loaded '{module_name}' — run  AI4BayesCode.doc(\"{module_name}\")  for usage.")
+        from ._console import glyph
+        print(f"{glyph(chr(0x2713) + ' ', '')}Loaded '{module_name}' -- run  "
+              f"AI4BayesCode.doc(\"{module_name}\")  for usage.")
     return module
 
 
