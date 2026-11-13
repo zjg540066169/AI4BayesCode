@@ -37,6 +37,14 @@
 #' `PKG_LIBS` you define with a line-continuation `\\` or `$(shell ...)` is
 #' merged by appending rather than prepending -- correctness is preserved.)
 #'
+#' @section A file name with a space:
+#' Rcpp cannot build a file whose name contains a space, so such a file is
+#' compiled from a copy beside it, named `.ai4b_` plus the name with the
+#' spaces replaced by underscores (`my model.cpp` gives `.ai4b_my_model.cpp`).
+#' The copy is kept, so that an unchanged file is not rebuilt, and can be
+#' deleted at any time. In a folder that cannot be written to, the copy goes
+#' to R's temporary folder.
+#'
 #' @param code Either a path to a `.cpp` file, or a length-1 character string
 #'   containing the `.cpp` source. A string that is not an existing path is
 #'   written to a temporary `.cpp` and sourced.
