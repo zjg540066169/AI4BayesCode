@@ -39,7 +39,7 @@ child = ("import sys, AI4BayesCode\n"
          "arg = sys.argv[1]\n"
          "code = arg if sys.argv[2] == 'file' else open(arg, encoding='utf-8').read() + '// text\\n'\n"
          "mod = AI4BayesCode.source(code, rebuild=True, quiet=True)\n"
-         "print('child built', mod.__file__)\n")
+         "print('child built', ascii(mod.__file__))\n")
 for kind in ("file", "text"):
     subprocess.run([sys.executable, "-c", child, str(src), kind], check=True)
 
