@@ -152,13 +152,20 @@ ai4bayescode_source <- function(code,
         if (!identical(build_file, cpp_file)) paste0("-I", shQuote(src_dir)),
         # Template-heavy samplers can exceed the COFF limit of 2^15 sections.
         if (.Platform$OS.type == "windows") "-Wa,-mbig-obj",
+        # exp, log and pow from the Universal C Runtime, several times faster
+        # than Rtools' own (see AI4BayesCode/win_ucrt_math.hpp); the matching
+        # --wrap is in `libs`.
+        if (.Platform$OS.type == "windows")
+            "-DAI4B_WIN_UCRT_MATH -include AI4BayesCode/win_ucrt_math.hpp",
         extra_cppflags
     )
 
     libs <- if (Sys.info()[["sysname"]] == "Darwin") {
         c("-framework Accelerate", extra_libs)
     } else {
-        c("$(BLAS_LIBS)", "$(LAPACK_LIBS)", extra_libs)
+        c("$(BLAS_LIBS)", "$(LAPACK_LIBS)",
+          if (.Platform$OS.type == "windows") "-Wl,--wrap=exp,--wrap=log,--wrap=pow",
+          extra_libs)
     }
 
     # Rcpp::sourceCpp caches on the SOURCE text; it cannot see that a

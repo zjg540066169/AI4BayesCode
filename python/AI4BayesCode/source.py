@@ -408,6 +408,10 @@ def _compile_flags(include_root: Path, cxx: str | None = None) -> list[str]:
             "-DMS_WIN64=",
             # Template-heavy samplers exceed the COFF section limit of 2^15.
             "-Wa,-mbig-obj",
+            # exp, log and pow from the Universal C Runtime, several times
+            # faster than Rtools' own (see AI4BayesCode/win_ucrt_math.hpp).
+            # _link_flags adds the matching --wrap.
+            "-DAI4B_WIN_UCRT_MATH", "-include", "AI4BayesCode/win_ucrt_math.hpp",
             # MSYS2's Armadillo turns on SuperLU and ARPACK, with an MSYS-style
             # include path the native compiler cannot resolve. Nothing here uses
             # them.
@@ -455,6 +459,9 @@ def _link_flags(cxx: str | None = None) -> list[str]:
             # A static OpenBLAS (Rtools ships only static libraries) brings its
             # Fortran and OpenMP runtimes along.
             args += ["-lgfortran", "-lquadmath", "-fopenmp"]
+        # The calls to exp, log and pow go to the functions that
+        # win_ucrt_math.hpp (see _compile_flags) defines.
+        args.append("-Wl,--wrap=exp,--wrap=log,--wrap=pow")
         # libstdc++ and libgcc go in statically, so a different copy of them
         # already loaded in the process cannot clash.
         return args + ["-static-libgcc", "-static-libstdc++"] + _python_link_args()
