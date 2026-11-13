@@ -1,0 +1,196 @@
+name: Windows
+
+# Native Windows support, end to end:
+#   skill-install  the one-line install and update commands from the website,
+#                  in Windows PowerShell 5.1, PowerShell 7 and Git Bash
+#   r-examples     the R package with R + Rtools: every example's R usage block
+#   python         the Python package: unit tests and every example's usage block
+#   cpp            the header library with the MSYS2 MinGW-w64 toolchain: the
+#                  C++ test suite and every example's built-in main()
+
+on:
+  push:
+    branches: [main, windows-support]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  skill-install:
+    name: Skill install (${{ matrix.shell }})
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh, bash]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: repo   # only for the check script; the install clones from GitHub
+      - name: Use the Git for Windows installer defaults
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ci-logs | Out-Null
+          git --version
+          git config --show-origin --get-all core.autocrlf
+          git config --global core.autocrlf true
+          git config --global pull.rebase false
+          python -m pip install --quiet pyyaml
+      - name: Install and update (PowerShell)
+        if: matrix.shell != 'bash'
+        shell: ${{ matrix.shell }}
+        run: |
+          $ErrorActionPreference = 'Continue'   # the interactive default
+          "PowerShell $($PSVersionTable.PSVersion)  HOME=$HOME" | Out-File -Append -Encoding utf8 ci-logs/install.txt
+          git clone --depth 1 --branch ${{ github.head_ref || github.ref_name }} https://github.com/${{ github.repository }}.git "$HOME/.claude/skills/AI4BayesCode" 2>&1 | Out-File -Append -Encoding utf8 ci-logs/install.txt
+          git clone --depth 1 --branch ${{ github.head_ref || github.ref_name }} https://github.com/${{ github.repository }}.git "$HOME/.agents/skills/AI4BayesCode" 2>&1 | Out-File -Append -Encoding utf8 ci-logs/install.txt
+          git -C "$HOME/.claude/skills/AI4BayesCode" pull --ff-only 2>&1 | Out-File -Append -Encoding utf8 ci-logs/install.txt
+          git -C "$HOME/.agents/skills/AI4BayesCode" pull --ff-only 2>&1 | Out-File -Append -Encoding utf8 ci-logs/install.txt
+          git clone --depth 1 https://github.com/${{ github.repository }}.git "${{ runner.temp }}/published" 2>&1 | Out-File -Append -Encoding utf8 ci-logs/install.txt
+      - name: Install and update (Git Bash)
+        if: matrix.shell == 'bash'
+        shell: bash
+        run: |
+          echo "bash $BASH_VERSION  HOME=$HOME  ($(cygpath -w "$HOME"))" | tee -a ci-logs/install.txt
+          git clone --depth 1 --branch ${{ github.head_ref || github.ref_name }} https://github.com/${{ github.repository }}.git "$HOME/.claude/skills/AI4BayesCode" 2>&1 | tee -a ci-logs/install.txt
+          git clone --depth 1 --branch ${{ github.head_ref || github.ref_name }} https://github.com/${{ github.repository }}.git "$HOME/.agents/skills/AI4BayesCode" 2>&1 | tee -a ci-logs/install.txt
+          git -C "$HOME/.claude/skills/AI4BayesCode" pull --ff-only 2>&1 | tee -a ci-logs/install.txt
+          git -C "$HOME/.agents/skills/AI4BayesCode" pull --ff-only 2>&1 | tee -a ci-logs/install.txt
+          git clone --depth 1 https://github.com/${{ github.repository }}.git "${{ runner.temp }}/published" 2>&1 | tee -a ci-logs/install.txt
+      - name: Check where the skill landed and that SKILL.md parses
+        shell: pwsh
+        run: |
+          python repo/tools/ci/check_skill_install.py --report-only "${{ runner.temp }}/published" *>&1 | Tee-Object -FilePath ci-logs/check.txt
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-skill-${{ matrix.shell }}
+          path: ci-logs
+
+  r-examples:
+    name: R examples (${{ matrix.part }}/6)
+    runs-on: windows-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: r-pkg
+      - name: Install the R package
+        shell: bash
+        run: |
+          mkdir -p ci-logs
+          R CMD INSTALL r-pkg 2>&1 | tee ci-logs/install.txt
+      - name: Run every example's R usage block
+        shell: bash
+        run: Rscript tools/ci/run_examples.R ${{ matrix.part }} 6 ci-logs/examples 2>&1 | tee ci-logs/summary.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-r-${{ matrix.part }}
+          path: |
+            ci-logs
+            !ci-logs/**/*_wd/**
+
+  python:
+    name: Python
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        shell: bash
+        run: |
+          mkdir -p ci-logs
+          python -m pip install --upgrade pip
+          pip install numpy pybind11 pytest scipy pyyaml matplotlib networkx arviz
+          pip install -e ./python --no-deps 2>&1 | tee ci-logs/install.txt
+          for c in g++ clang++ c++ cl gcc; do echo "$c: $(command -v $c)"; done | tee ci-logs/compilers.txt
+      - name: Unit tests
+        shell: bash
+        run: python -m pytest python/tests -q -p no:cacheprovider 2>&1 | tee ci-logs/pytest.txt
+      - name: Run the example usage blocks
+        if: always()
+        shell: bash
+        run: python tools/ci/run_examples.py --limit 3 --log-dir ci-logs/examples 2>&1 | tee ci-logs/summary.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-python
+          path: |
+            ci-logs
+            !ci-logs/**/*_wd/**
+
+  cpp:
+    name: C++ (MSYS2 UCRT64)
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-armadillo
+            mingw-w64-ucrt-x86_64-openblas
+      - name: C++ test suite
+        run: |
+          mkdir -p ci-logs
+          g++ --version | head -1 | tee ci-logs/compiler.txt
+          cd tests && make run LDLIBS=-lopenblas 2>&1 | tee ../ci-logs/suite.txt
+      - name: Every example's built-in main()
+        if: always()
+        run: bash tools/ci/run_examples_standalone.sh ci-logs/examples 2>&1 | tee ci-logs/examples-summary.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-cpp
+          path: ci-logs
+
+  # Development only: collect every job's logs on the ci-logs branch, so they
+  # can be read without signing in to GitHub.
+  publish-logs:
+    name: Publish logs
+    if: always() && github.event_name == 'push' && github.ref_name == 'windows-support'
+    needs: [skill-install, r-examples, python, cpp]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: logs
+      - name: Push the logs
+        working-directory: logs
+        run: |
+          printf '%s\n' "run ${{ github.run_id }}" "sha ${{ github.sha }}" \
+            "skill-install ${{ needs.skill-install.result }}" "r-examples ${{ needs.r-examples.result }}" \
+            "python ${{ needs.python.result }}" "cpp ${{ needs.cpp.result }}" > RUN.txt
+          git init -q -b ci-logs
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -qm "Windows CI logs, run ${{ github.run_id }}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs

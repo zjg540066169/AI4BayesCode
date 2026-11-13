@@ -1,6 +1,6 @@
 ---
 name: AI4BayesCode
-description: Build Bayesian MCMC samplers with AI4BayesCode — a header-only C++ library of composable, stateful block-wise MCMC kernels (Gibbs / NUTS / slice / ESS / VI / BART / GP / HMM / particle-Gibbs / RJMCMC / ...). Use when the user wants to (a) GENERATE a sampler for a Bayesian model by composing existing blocks, or (b) DESIGN a brand-new sampler block primitive for the library. Triggers: "I want a sampler for <model>", "compose / generate an MCMC sampler", "design a new block", a model written as y ~ ... with priors, or any AI4BayesCode request.
+description: 'Build Bayesian MCMC samplers with AI4BayesCode — a header-only C++ library of composable, stateful block-wise MCMC kernels (Gibbs / NUTS / slice / ESS / VI / BART / GP / HMM / particle-Gibbs / RJMCMC / ...). Use when the user wants to (a) GENERATE a sampler for a Bayesian model by composing existing blocks, or (b) DESIGN a brand-new sampler block primitive for the library. Triggers: "I want a sampler for <model>", "compose / generate an MCMC sampler", "design a new block", a model written as y ~ ... with priors, or any AI4BayesCode request.'
 ---
 
 # AI4BayesCode
