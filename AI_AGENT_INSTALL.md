@@ -54,56 +54,42 @@ Install target:
 - D. All available
 ```
 
-## 3. Install
+## 3. Install or update
 
-The skill is the whole repository, cloned straight into the agent's skills folder.
-`git clone` creates the missing parent folders, so no `mkdir` is needed.
+The skill is the whole repository, fetched straight into the agent's skills folder. One
+command does both jobs: the first run installs, and running it again updates to the
+newest version. `git init` creates the missing folders and is safe to repeat.
 
 Claude Code:
 
 ```bash
-git clone --depth 1 https://github.com/zjg540066169/AI4BayesCode.git "$HOME/.claude/skills/AI4BayesCode"
+git init -q "$HOME/.claude/skills/AI4BayesCode"; git -C "$HOME/.claude/skills/AI4BayesCode" pull -q --ff-only https://github.com/zjg540066169/AI4BayesCode.git main
 ```
 
 Codex:
 
 ```bash
-git clone --depth 1 https://github.com/zjg540066169/AI4BayesCode.git "$HOME/.agents/skills/AI4BayesCode"
+git init -q "$HOME/.agents/skills/AI4BayesCode"; git -C "$HOME/.agents/skills/AI4BayesCode" pull -q --ff-only https://github.com/zjg540066169/AI4BayesCode.git main
 ```
 
-Before cloning, check the target folder:
-
 - If `CLAUDE_CONFIG_DIR` is set, Claude Code reads skills from `$CLAUDE_CONFIG_DIR/skills`.
-  Clone there instead. In PowerShell write it `$env:CLAUDE_CONFIG_DIR`: a bare
+  Use that folder instead. In PowerShell write it `$env:CLAUDE_CONFIG_DIR`: a bare
   `$CLAUDE_CONFIG_DIR` there is an unset PowerShell variable.
-- If the target folder already exists, find out whether it is a clone of its own:
-  `git -C "<target>" rev-parse --show-toplevel` must print the target folder itself (on Windows
-  git prints `C:/Users/...`: compare ignoring case and `/` versus `\`). If it
-  does, update it (section 4) and do not clone. If it does not, it is an older copy made
-  without git. Ask the user before removing it, remove it, then clone. Removing it in bash:
-  `rm -rf "<target>"`. In PowerShell: `Remove-Item -Recurse -Force "<target>"`.
+- If the pull stops with "untracked working tree files would be overwritten", the folder
+  holds an older copy made without git. If it stops with "Not possible to fast-forward",
+  the upstream history was rewritten. In both cases ask the user, remove the folder and run
+  the command again. Removing it in bash: `rm -rf "<target>"`. In PowerShell:
+  `Remove-Item -Recurse -Force "<target>"`.
 - Codex: earlier instructions installed into `$HOME/.codex/skills/AI4BayesCode`. Codex still
   reads that folder, so a copy there makes the skill appear twice. Ask the user, then remove
   it the same way.
-- If Claude Code or Codex runs inside WSL, run the commands inside WSL. A clone made from
+- If Claude Code or Codex runs inside WSL, run the command inside WSL. A copy made from
   Windows PowerShell lands in the Windows profile, which an agent inside WSL never reads.
 
 Afterwards tell the user to restart Claude Code (then type `/AI4BayesCode`) or Codex (then type
 `$AI4BayesCode` or pick it from `/skills`).
 
-## 4. Update
-
-```bash
-git -C "$HOME/.claude/skills/AI4BayesCode" pull --ff-only
-```
-
-For Codex, use `$HOME/.agents/skills/AI4BayesCode`. Run it only after the check in section 3
-shows that the folder is a clone of its own. Otherwise git searches the parent folders for a
-repository and would pull into that one instead, for example a dotfiles repository that
-tracks the home folder. If the pull stops with "Not possible to fast-forward", the upstream
-history was rewritten. Ask the user, remove the folder and clone again.
-
-## 5. Install for Cursor project rule
+## 4. Install for Cursor project rule
 
 Inside the user's target project (not this package), create the file
 `.cursor/rules/ai4bayescode.mdc` with your file-writing tool, with this content:
@@ -124,7 +110,7 @@ Load `SKILL.md` first, then `start.md`, then only the phase sub-skills needed. G
 goes in the user's own project, never inside the installed skill.
 ```
 
-## 6. Final install report
+## 5. Final install report
 
 Report:
 

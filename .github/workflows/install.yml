@@ -1,8 +1,9 @@
 name: Install
 
 # The three ways to install the agent skill, on every OS:
-#   git-clone   the one-line commands from the website, in each shell a user
-#               may type them into
+#   website     the install-or-update command from the website, in each shell a
+#               user may type it into: a fresh install, an update to a newer
+#               commit, and an update of a clone made by earlier instructions
 #   from-r      ai4bayescode_install_skill() in R
 #   from-python AI4BayesCode.install_skill() in Python
 # Each run checks that SKILL.md lands where Claude Code and Codex look and that
@@ -22,8 +23,8 @@ env:
   BRANCH: ${{ github.head_ref || github.ref_name }}
 
 jobs:
-  git-clone:
-    name: git clone (${{ matrix.os }}, ${{ matrix.shell }})
+  website:
+    name: website command (${{ matrix.os }}, ${{ matrix.shell }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -38,10 +39,17 @@ jobs:
     defaults:
       run:
         shell: ${{ matrix.shell }}   # the shell under test; other steps name theirs
+    env:
+      URL: https://github.com/${{ github.repository }}.git
+      # main before Windows support: no .gitattributes, so Git for Windows
+      # checked it out with CRLF line endings
+      OLD_MAIN: 9cd2e8d187b2ba2461e58011f1a8bff6e1172643
+    # Each step runs the command exactly as the website shows it, one agent per
+    # step, so the step fails when that line fails in any shell.
     steps:
       - uses: actions/checkout@v4
         with:
-          path: repo   # only for the check script; the install clones from GitHub
+          path: repo   # only for the check script; the command fetches from GitHub
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -51,31 +59,44 @@ jobs:
         run: |
           git config --global core.autocrlf true
           git config --global pull.rebase false
-      - name: Install and update (the commands on the website)
-        run: |
-          git clone --depth 1 --branch ${{ env.BRANCH }} https://github.com/${{ github.repository }}.git "$HOME/.claude/skills/AI4BayesCode"
-          git clone --depth 1 --branch ${{ env.BRANCH }} https://github.com/${{ github.repository }}.git "$HOME/.agents/skills/AI4BayesCode"
-          git -C "$HOME/.claude/skills/AI4BayesCode" pull --ff-only
-          git -C "$HOME/.agents/skills/AI4BayesCode" pull --ff-only
-      - name: Check
+      - name: Install for Claude Code
+        run: git init -q "$HOME/.claude/skills/AI4BayesCode"; git -C "$HOME/.claude/skills/AI4BayesCode" pull -q --ff-only ${{ env.URL }} ${{ env.BRANCH }}
+      - name: Install for Codex
+        run: git init -q "$HOME/.agents/skills/AI4BayesCode"; git -C "$HOME/.agents/skills/AI4BayesCode" pull -q --ff-only ${{ env.URL }} ${{ env.BRANCH }}
+      - name: Check the install
         shell: bash
         run: |
           python -m pip install --quiet pyyaml
-          python repo/tools/ci/check_skill_install.py
-      - name: Remove both installs again
+          python repo/tools/ci/check_skill_install.py --git-head "$(git ls-remote "$URL" "refs/heads/$BRANCH" | cut -f1)"
+      - name: Go back one commit, as if a new version came out since
         shell: bash
-        run: rm -rf "$USERPROFILE/.claude/skills/AI4BayesCode" "$USERPROFILE/.agents/skills/AI4BayesCode" "$HOME/.claude/skills/AI4BayesCode" "$HOME/.agents/skills/AI4BayesCode"
-      # The alternative single line that installs the first time and updates
-      # afterwards, run twice (install, then update) in the same shell.
-      - name: One line for install and update, run twice
         run: |
-          git init -q "$HOME/.claude/skills/AI4BayesCode"; git -C "$HOME/.claude/skills/AI4BayesCode" pull -q --ff-only https://github.com/${{ github.repository }}.git ${{ env.BRANCH }}
-          git init -q "$HOME/.agents/skills/AI4BayesCode"; git -C "$HOME/.agents/skills/AI4BayesCode" pull -q --ff-only https://github.com/${{ github.repository }}.git ${{ env.BRANCH }}
-          git init -q "$HOME/.claude/skills/AI4BayesCode"; git -C "$HOME/.claude/skills/AI4BayesCode" pull -q --ff-only https://github.com/${{ github.repository }}.git ${{ env.BRANCH }}
-          git init -q "$HOME/.agents/skills/AI4BayesCode"; git -C "$HOME/.agents/skills/AI4BayesCode" pull -q --ff-only https://github.com/${{ github.repository }}.git ${{ env.BRANCH }}
-      - name: Check the single-line install
+          for d in "$HOME/.claude/skills/AI4BayesCode" "$HOME/.agents/skills/AI4BayesCode"; do
+            git -C "$d" reset -q --hard HEAD~1
+          done
+      - name: Update for Claude Code (the same command)
+        run: git init -q "$HOME/.claude/skills/AI4BayesCode"; git -C "$HOME/.claude/skills/AI4BayesCode" pull -q --ff-only ${{ env.URL }} ${{ env.BRANCH }}
+      - name: Update for Codex (the same command)
+        run: git init -q "$HOME/.agents/skills/AI4BayesCode"; git -C "$HOME/.agents/skills/AI4BayesCode" pull -q --ff-only ${{ env.URL }} ${{ env.BRANCH }}
+      - name: Check the update
         shell: bash
-        run: python repo/tools/ci/check_skill_install.py
+        run: python repo/tools/ci/check_skill_install.py --git-head "$(git ls-remote "$URL" "refs/heads/$BRANCH" | cut -f1)"
+      - name: Start over from a shallow clone of the old main, as the earlier instructions made
+        shell: bash
+        run: |
+          for d in "$HOME/.claude/skills/AI4BayesCode" "$HOME/.agents/skills/AI4BayesCode"; do
+            rm -rf "$d"
+            git init -q "$d"
+            git -C "$d" fetch -q --depth 1 "$URL" "$OLD_MAIN"
+            git -C "$d" checkout -q -b main FETCH_HEAD
+          done
+      - name: Update the old clone for Claude Code (the same command)
+        run: git init -q "$HOME/.claude/skills/AI4BayesCode"; git -C "$HOME/.claude/skills/AI4BayesCode" pull -q --ff-only ${{ env.URL }} ${{ env.BRANCH }}
+      - name: Update the old clone for Codex (the same command)
+        run: git init -q "$HOME/.agents/skills/AI4BayesCode"; git -C "$HOME/.agents/skills/AI4BayesCode" pull -q --ff-only ${{ env.URL }} ${{ env.BRANCH }}
+      - name: Check the update of the old clone
+        shell: bash
+        run: python repo/tools/ci/check_skill_install.py --git-head "$(git ls-remote "$URL" "refs/heads/$BRANCH" | cut -f1)"
 
   from-r:
     name: ai4bayescode_install_skill() (${{ matrix.os }})

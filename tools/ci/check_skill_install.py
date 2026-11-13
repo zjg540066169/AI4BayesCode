@@ -6,8 +6,10 @@ folder it checks that SKILL.md exists, that git checked it out with LF line
 endings, and that the frontmatter parses as strict YAML with the expected
 name and description.
 
-Usage: python tools/ci/check_skill_install.py [--report-only DIR ...]
-Folders given with --report-only are checked and printed but never fail the run.
+Usage: python tools/ci/check_skill_install.py [--git-head SHA] [--report-only DIR ...]
+With --git-head, each agent folder must also be a clean git checkout of SHA, as
+the install command on the website leaves it. Folders given with --report-only
+are checked and printed but never fail the run.
 """
 from __future__ import annotations
 
@@ -56,7 +58,24 @@ def check(folder: Path) -> list[str]:
     return problems
 
 
+def check_git(folder: Path, head: str) -> list[str]:
+    if not (folder / ".git").exists():
+        return ["not a git checkout"]
+    git = ["git", "-C", str(folder)]
+    got = subprocess.run(git + ["rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    problems = [] if got == head else [f"HEAD is {got[:12]}, expected {head[:12]}"]
+    dirty = subprocess.run(git + ["status", "--porcelain"], capture_output=True, text=True).stdout
+    if dirty.strip():
+        problems.append("the working tree is not clean:\n" + dirty.rstrip())
+    return problems
+
+
 def main(argv: list[str]) -> int:
+    head = None
+    if "--git-head" in argv:
+        i = argv.index("--git-head")
+        head = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
     report_only = []
     if "--report-only" in argv:
         report_only = [Path(p) for p in argv[argv.index("--report-only") + 1:]]
@@ -70,7 +89,7 @@ def main(argv: list[str]) -> int:
     failed = False
     for label, folder in targets.items():
         print(f"{label}: {folder}")
-        problems = check(folder)
+        problems = check(folder) + (check_git(folder, head) if head else [])
         for p in problems:
             print(f"    FAIL {p}")
         print("    OK" if not problems else "")
