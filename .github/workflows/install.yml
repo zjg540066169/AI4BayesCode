@@ -62,6 +62,20 @@ jobs:
         run: |
           python -m pip install --quiet pyyaml
           python repo/tools/ci/check_skill_install.py
+      - name: Remove both installs again
+        shell: bash
+        run: rm -rf "$USERPROFILE/.claude/skills/AI4BayesCode" "$USERPROFILE/.agents/skills/AI4BayesCode" "$HOME/.claude/skills/AI4BayesCode" "$HOME/.agents/skills/AI4BayesCode"
+      # The alternative single line that installs the first time and updates
+      # afterwards, run twice (install, then update) in the same shell.
+      - name: One line for install and update, run twice
+        run: |
+          git init -q "$HOME/.claude/skills/AI4BayesCode"; git -C "$HOME/.claude/skills/AI4BayesCode" pull -q --ff-only https://github.com/${{ github.repository }}.git ${{ env.BRANCH }}
+          git init -q "$HOME/.agents/skills/AI4BayesCode"; git -C "$HOME/.agents/skills/AI4BayesCode" pull -q --ff-only https://github.com/${{ github.repository }}.git ${{ env.BRANCH }}
+          git init -q "$HOME/.claude/skills/AI4BayesCode"; git -C "$HOME/.claude/skills/AI4BayesCode" pull -q --ff-only https://github.com/${{ github.repository }}.git ${{ env.BRANCH }}
+          git init -q "$HOME/.agents/skills/AI4BayesCode"; git -C "$HOME/.agents/skills/AI4BayesCode" pull -q --ff-only https://github.com/${{ github.repository }}.git ${{ env.BRANCH }}
+      - name: Check the single-line install
+        shell: bash
+        run: python repo/tools/ci/check_skill_install.py
 
   from-r:
     name: ai4bayescode_install_skill() (${{ matrix.os }})

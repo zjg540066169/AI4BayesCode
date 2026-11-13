@@ -23,7 +23,7 @@ jobs:
   r-examples:
     name: R examples (${{ matrix.part }}/8)
     runs-on: windows-latest
-    timeout-minutes: 240
+    timeout-minutes: 350
     strategy:
       fail-fast: false
       matrix:
@@ -45,8 +45,8 @@ jobs:
       - name: Run every example's R usage block
         shell: bash
         # R has no fork on Windows, so the four chains run one after another;
-        # the nonparametric mixtures need most of an hour that way.
-        run: Rscript tools/ci/run_examples.R ${{ matrix.part }} 8 ci-logs/examples 5400 2>&1 | tee ci-logs/summary.txt
+        # with R's own BLAS the nonparametric mixtures then take one to two hours.
+        run: Rscript tools/ci/run_examples.R ${{ matrix.part }} 8 ci-logs/examples 14400 2>&1 | tee ci-logs/summary.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
