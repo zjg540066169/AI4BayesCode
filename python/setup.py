@@ -37,7 +37,7 @@ setup(
     package_data={"AI4BayesCode": ["start.md", "_examples/**/*", "_vendored_include/**/*", "_skills/**/*"]},
     install_requires=[
         "numpy>=1.24",
-        "pybind11>=2.11",
+        "pybind11>=2.13",
         "anthropic>=0.40",        # generate() Anthropic backend (a core dependency)
     ],
     extras_require={
@@ -51,6 +51,10 @@ setup(
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Operating System :: Microsoft :: Windows",
+        "Operating System :: MacOS",
+        "Operating System :: POSIX :: Linux",
         "Programming Language :: C++",
         "Topic :: Scientific/Engineering",
         "Topic :: Scientific/Engineering :: Mathematics",

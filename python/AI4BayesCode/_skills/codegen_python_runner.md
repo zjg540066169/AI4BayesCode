@@ -185,6 +185,12 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
 
    The harness-internal `run_chain_<ClassName>()` stays in the
    throwaway runner only.
+
+   On Windows `AI4BayesCode.run_chains` runs the chains one after
+   another by default (there is no fork), so both forms above work as
+   written there. Do not add `n_jobs`: parallel workers on Windows
+   re-import the example script, which has no
+   `if __name__ == "__main__":` guard.
 5. **Synthetic data block** -- produces the same fixtures the harness
    used so the example runs as-is.
 6. **Multi-chain usage + diagnostics (the everyday flow)** -- the

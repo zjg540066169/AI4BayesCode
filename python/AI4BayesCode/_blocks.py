@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import io
 from pathlib import Path
+from ._console import safe_print as print  # noqa: A001 (see _console.py)
 
 
 def _examples_dir() -> Path:

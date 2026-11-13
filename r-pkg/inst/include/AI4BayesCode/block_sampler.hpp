@@ -91,6 +91,7 @@
 #include <unordered_map>
 
 #include "types.hpp"
+#include "math_constants.hpp"   // M_PI and friends under MinGW -std=c++17
 
 #ifndef MCMC_USE_RCPP_ARMADILLO
 # include <armadillo>

@@ -58,6 +58,7 @@ from .doc import doc
 from .generate import prompt, generate, models, skills_path, set_key, key_status, stream_check
 from .install_block import (
     install_block, available_blocks, installed_blocks, remove_block, blocks_path)
+from .install_skill import install_skill
 from .plot_dag import plot_dag
 from .run_chains import run_chains
 from .perf_hint import perf_hint
@@ -89,6 +90,7 @@ __all__ = [
     "stream_check",
     "vendored_include_path",
     "install_block",
+    "install_skill",
     "available_blocks",
     "installed_blocks",
     "remove_block",

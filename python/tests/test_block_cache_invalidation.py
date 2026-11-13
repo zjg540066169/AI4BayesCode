@@ -33,8 +33,8 @@ def block(tmp_path, monkeypatch):
     root = tmp_path / "blocks_local" / "toy_block"
     root.mkdir(parents=True)
     hdr = root / "toy_block.hpp"
-    hdr.write_text("namespace toy { inline double magic() { return 1.0; } }\n")
-    (root / "manifest.dcf").write_text("Block: toy_block\nVersion: 0.1.0\n")
+    hdr.write_text("namespace toy { inline double magic() { return 1.0; } }\n", encoding="utf-8")
+    (root / "manifest.dcf").write_text("Block: toy_block\nVersion: 0.1.0\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     return hdr, FLAGS_FIXED + [f"-I{root}"]
 
@@ -51,7 +51,7 @@ def test_editing_a_block_header_moves_the_signature(block):
     text = "// the model source, unchanged throughout\n"
     before = _signature(text, flags, [], "clang-19")
 
-    hdr.write_text("namespace toy { inline double magic() { return 42.0; } }\n")
+    hdr.write_text("namespace toy { inline double magic() { return 42.0; } }\n", encoding="utf-8")
     _bump_mtime(hdr)
     after = _signature(text, flags, [], "clang-19")
 
@@ -74,7 +74,7 @@ def test_a_new_file_in_the_bundle_moves_the_signature(block):
     hdr, flags = block
     text = "// model\n"
     before = _signature(text, flags, [], "clang-19")
-    (hdr.parent / "toy_detail.hpp").write_text("// new\n")
+    (hdr.parent / "toy_detail.hpp").write_text("// new\n", encoding="utf-8")
     assert _signature(text, flags, [], "clang-19") != before
 
 
@@ -82,7 +82,7 @@ def test_removing_a_file_from_the_bundle_moves_the_signature(block):
     hdr, flags = block
     text = "// model\n"
     extra = hdr.parent / "toy_detail.hpp"
-    extra.write_text("// new\n")
+    extra.write_text("// new\n", encoding="utf-8")
     before = _signature(text, flags, [], "clang-19")
     extra.unlink()
     assert _signature(text, flags, [], "clang-19") != before
@@ -95,12 +95,12 @@ def test_core_include_dirs_are_fingerprinted(tmp_path, monkeypatch):
     headers be loaded."""
     core = tmp_path / "vendored" / "eigen"
     core.mkdir(parents=True)
-    (core / "Dense.hpp").write_text("// a\n")
+    (core / "Dense.hpp").write_text("// a\n", encoding="utf-8")
     flags = [f"-I{core}"]
     monkeypatch.chdir(tmp_path)
 
     before = _contributed_block_fingerprint(flags)
-    (core / "Dense.hpp").write_text("// b -- much longer content here\n")
+    (core / "Dense.hpp").write_text("// b -- much longer content here\n", encoding="utf-8")
     _bump_mtime(core / "Dense.hpp")
     assert _contributed_block_fingerprint(flags) != before
 
@@ -127,9 +127,9 @@ def _write_bundle(root, name, *, manifest=True, header=True, block_name=None,
         for f in drop_fields:
             fields.pop(f, None)
         (d / "manifest.dcf").write_text(
-            "".join(f"{k}: {v}\n" for k, v in fields.items()))
+            "".join(f"{k}: {v}\n" for k, v in fields.items()), encoding="utf-8")
     if header:
-        (d / f"{name}.hpp").write_text("// x\n")
+        (d / f"{name}.hpp").write_text("// x\n", encoding="utf-8")
     return d
 
 

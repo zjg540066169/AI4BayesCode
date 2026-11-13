@@ -1,0 +1,4 @@
+# Check out text files with LF line endings on every OS. Git for Windows
+# otherwise converts them to CRLF by default, and some agents then fail to
+# read the SKILL.md frontmatter.
+* text=auto eol=lf

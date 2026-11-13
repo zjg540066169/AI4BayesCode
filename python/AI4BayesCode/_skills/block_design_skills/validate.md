@@ -227,6 +227,11 @@ What to surface as you start (a heads-up, NOT a gate):
  `-DMCMC_ENABLE_ARMA_WRAPPERS -DARMA_DONT_USE_WRAPPER` + RcppArmadillo's include dir on `-I`
  + `-framework Accelerate` (macOS; on Linux use `-lblas -llapack` instead). The block header
  `#include "AI4BayesCode/block_sampler.hpp"`; the test `#include "<Block>.hpp"`.
+ On Windows there is no `c++`, no `/Library/...` and no `-framework`, and in PowerShell
+ `-o /tmp/...` means `\tmp` on the current drive. Use the Windows recipe in `codegen_cpp.md`
+ "The validator runs it", run from the repo root with `include` as `<include>`,
+ `./.block_design_staging/<Block>/test_<Block>.cpp` as the source, `-I ./.block_design_staging/<Block>`
+ added, and the `.exe` written to your scratch directory.
  Two portability cautions: (a) the RcppArmadillo include path above is the macOS
  `/Library/Frameworks/R.framework/...` default -- on Linux/other, resolve it with
  `Rscript -e 'cat(system.file("include", package="RcppArmadillo"))'`; (b) **pass the flags as

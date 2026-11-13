@@ -62,3 +62,74 @@ test_that("ai4bayescode_source errors clearly on a non-existent path that is not
         regexp = "neither an existing file nor recognizable C\\+\\+ source"
     )
 })
+
+test_that("a file with a space in its name follows edits to its local headers", {
+    skip_on_cran()
+    skip_if_not_installed("Rcpp")
+    skip_if_not_installed("RcppArmadillo")
+
+    # Rcpp's dependency scan resolves #include "..." beside the file it builds,
+    # so the space-free copy must sit beside the original.
+    dir <- tempfile("ai4b_spaced_")
+    dir.create(dir)
+    hdr <- file.path(dir, "helper.hpp")
+    writeLines("inline int helper_value() { return 1; }", hdr)
+    cpp <- file.path(dir, "my model.cpp")
+    writeLines(c("#include <Rcpp.h>", "#include \"helper.hpp\"",
+                 "// [[Rcpp::export]]", "int spaced_value() { return helper_value(); }"),
+               cpp)
+    e <- new.env()
+    ai4bayescode_source(cpp, env = e, quiet = TRUE)
+    expect_identical(e$spaced_value(), 1L)
+    Sys.sleep(1.1)   # a new mtime on a filesystem with one-second resolution
+    writeLines("inline int helper_value() { return 2; }", hdr)
+    ai4bayescode_source(cpp, env = e, quiet = TRUE)
+    expect_identical(e$spaced_value(), 2L)
+})
+
+test_that("the build temp folder must be plain ASCII for the Windows toolchain", {
+    # R's own code page is UTF-8 from R 4.2 on, but the assembler and linker
+    # read paths in the system's ANSI code page, so only ASCII is always safe.
+    ok <- AI4BayesCode:::.ai4b_ansi_ok
+    expect_true(ok("C:/Users/runneradmin/tmp x/RtmpAB12"))
+    expect_true(ok("C:\\Users\\RUNNER~1\\TMPX~1"))
+    expect_false(ok(enc2utf8("C:/Users/runneradmin/tmp x \u7edf\u8ba1")))
+    expect_false(ok(enc2utf8("C:/Users/Jos\u00e9/AppData/Local/Temp")))
+})
+
+test_that("processes staging the same spaced file at once never see a broken copy", {
+    skip_on_cran()
+    skip_on_os("windows")   # mclapply forks; the copy is renamed into place on every OS
+    dir <- tempfile("ai4b_race_")
+    dir.create(dir)
+    cpp <- file.path(dir, "my model.cpp")
+    writeLines(rep("// some generated sampler code, a reasonably long line of text", 3000), cpp)
+    ref <- unname(tools::md5sum(cpp))
+    staged <- file.path(dir, ".ai4b_my_model.cpp")
+    for (round in 1:10) {
+        unlink(staged)
+        go <- as.numeric(Sys.time()) + 0.3   # all workers start at the same moment
+        seen <- parallel::mclapply(1:2, function(i) {   # R CMD check allows two
+            while (as.numeric(Sys.time()) < go) {}
+            p <- AI4BayesCode:::.ai4b_stage_spaced_file(cpp)
+            identical(unname(tools::md5sum(p)), ref)
+        }, mc.cores = 2)
+        expect_true(all(unlist(seen)), info = paste("round", round))
+    }
+    expect_length(list.files(dir, pattern = "^\\.ai4b_tmp_", all.files = TRUE), 0L)
+})
+
+test_that("the staged copy of a read-only file stays writable and follows edits", {
+    dir <- tempfile("ai4b_ro_")
+    dir.create(dir)
+    cpp <- file.path(dir, "my model.cpp")
+    writeLines("// one", cpp)
+    Sys.chmod(cpp, "0444")
+    p1 <- AI4BayesCode:::.ai4b_stage_spaced_file(cpp)
+    expect_identical(dirname(p1), normalizePath(dir, winslash = "/"))
+    Sys.chmod(cpp, "0644")
+    writeLines("// two", cpp)
+    p2 <- AI4BayesCode:::.ai4b_stage_spaced_file(cpp)
+    expect_identical(p2, p1)
+    expect_identical(readLines(p2), "// two")
+})

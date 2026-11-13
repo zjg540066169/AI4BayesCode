@@ -17,18 +17,36 @@ for full details.
 ### As an agent skill (Claude Code / Codex / Cursor / ...)
 
 The repository root is the skill package (`SKILL.md` + `start.md` + the C++
-library under `include/`). Clone it into your agent's skills directory, then
-launch it.
+library under `include/`). One command puts it into your agent's skills folder,
+and the same command updates it to a new version. It is the same on macOS,
+Linux and Windows. On Windows, run it in PowerShell. It does not work in Command
+Prompt. If your agent runs inside WSL, run it inside WSL.
 
-**Claude Code** -- clone into `~/.claude/skills`, reload, then type `/AI4BayesCode`:
+**Claude Code** -- install into `~/.claude/skills`, restart, then type `/AI4BayesCode`:
 ```bash
-git clone https://github.com/zjg540066169/AI4BayesCode.git ~/.claude/skills/AI4BayesCode
+git init -q "$HOME/.claude/skills/AI4BayesCode"; git -C "$HOME/.claude/skills/AI4BayesCode" pull -q --ff-only https://github.com/zjg540066169/AI4BayesCode.git main
 ```
 
-**Codex** -- clone into `~/.codex/skills`, restart, then type `/AI4BayesCode`
-(or, if your build has no slash commands, tell it to read `start.md`):
+**Codex** -- install into `~/.agents/skills`, restart, then type `$AI4BayesCode` or
+pick it from `/skills` (the Codex app also lists it among the slash commands):
 ```bash
-git clone https://github.com/zjg540066169/AI4BayesCode.git ~/.codex/skills/AI4BayesCode
+git init -q "$HOME/.agents/skills/AI4BayesCode"; git -C "$HOME/.agents/skills/AI4BayesCode" pull -q --ff-only https://github.com/zjg540066169/AI4BayesCode.git main
+```
+
+If the command reports an error, delete the folder and run it again.
+
+If you installed with older instructions, delete the old `AI4BayesCode` folder
+before you run it. For Codex, also delete the old copy in `~/.codex/skills`, or
+Codex lists the skill twice.
+
+**Without git, or from any terminal:** once the R or Python package below is
+installed, one call puts the skill in place for both Claude Code and Codex, the
+same way on Windows, macOS and Linux. Run it again to update.
+```r
+AI4BayesCode::ai4bayescode_install_skill()
+```
+```python
+import AI4BayesCode; AI4BayesCode.install_skill()
 ```
 
 For Cursor, the AI-assisted install, or letting your agent install it for you,
@@ -38,11 +56,20 @@ see `AI_AGENT_INSTALL.md`.
 ```r
 remotes::install_github("zjg540066169/AI4BayesCode", subdir = "r-pkg")
 ```
+On Windows the compiler is [Rtools](https://cran.r-project.org/bin/windows/Rtools/)
+for your R version (Rtools44 for R 4.4, Rtools45 for R 4.5 and later).
 
-### Python  (>= 3.11; a C++ compiler; `brew install armadillo`)
+### Python  (>= 3.11, a C++17 compiler and Armadillo)
 ```bash
 pip install "git+https://github.com/zjg540066169/AI4BayesCode.git#subdirectory=python"
 ```
+Without git, install the same code from GitHub's zip archive:
+```bash
+pip install "https://github.com/zjg540066169/AI4BayesCode/archive/refs/heads/main.zip#subdirectory=python"
+```
+Armadillo: `brew install armadillo` on macOS, `apt-get install libarmadillo-dev` on
+Debian/Ubuntu. On Windows, Rtools44 or newer (above) already holds the compiler, Armadillo
+and OpenBLAS. Without it, use MSYS2 instead, as `python/README.md` describes.
 
 ## Quick start (R)
 

@@ -455,6 +455,30 @@ runtime -- it decides the compile call AND whether to even ask for a library pat
 - R:      `requireNamespace("AI4BayesCode", quietly = TRUE)`
 - Python: `importlib.util.find_spec("AI4BayesCode") is not None`
 
+**On Windows** (Claude Code runs shell commands in Git Bash or PowerShell, Codex in
+PowerShell):
+
+- The R installer does not put `Rscript` on PATH. If `Rscript --version` fails, use the
+  newest `C:\Program Files\R\R-<version>\bin\Rscript.exe` (a per-user install lives under
+  `%LOCALAPPDATA%\Programs\R\`). In PowerShell, run a quoted path with `&`, and never type a
+  bare `R`: there it is the built-in alias of `Invoke-History`.
+- Python is `python`, or the `py` launcher's `py -3` when `python` is not on PATH. `py -3`
+  takes the newest python.org install, never a conda environment or an active venv, so use
+  whichever of the two finds AI4BayesCode in the check above, and keep using that one. Run
+  Python scripts with `-X utf8` (`python -X utf8 runner.py`), so printing Greek letters or
+  other non-ASCII text cannot fail on the console code page.
+- Compiling needs a MinGW-w64 toolchain. The R backend needs the Rtools of the installed R
+  (Rtools44 for R 4.4, Rtools45 for R 4.5 and later). The Python backend uses Rtools44 or
+  newer too, or MSYS2 with its gcc, armadillo and openblas64 packages (`AI_AGENT_INSTALL.md`
+  Sec.1). If neither is installed, tell the user and stop.
+- Put R and Python code in script files and run those (`Rscript.exe script.R`, and
+  `python -X utf8 script.py` with the Python chosen above). Inline `-e` / `-c` code breaks on
+  the different quoting rules of PowerShell, Git Bash and cmd.
+- Inside R and Python code, write paths with forward slashes (`C:/Users/me/project`), never
+  `C:\...` (backslash starts an escape) or Git Bash's `/c/...`.
+- PowerShell has no `grep` or `sed`. Use `Select-String -CaseSensitive -Pattern '<regex>' <file>`
+  there, or your own search tool. A missing tool is not a failed check.
+
 **If the package IS installed (the recommended setup):**
 
 - Use the installed-package API everywhere, with a **RELATIVE** path:

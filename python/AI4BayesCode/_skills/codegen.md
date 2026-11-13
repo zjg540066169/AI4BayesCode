@@ -227,7 +227,8 @@ later, at Sec.2 and Sec.3. **Once the model is confirmed**, ask the upfront ques
    > Your sampler will be able to run from R, Python, and C++ either way. Which
    > language would you like the ready-to-run example written in?
    > - R (default) -- a short .R script that runs the sampler and shows diagnostics.
-   > - Python -- the same as a .py script (needs Python >= 3.11 and pybind11 >= 2.11).
+   > - Python -- the same as a .py script (needs Python >= 3.11 and pybind11 >= 2.13;
+   >   on Windows also Rtools or MSYS2 for the compiler).
    > - Both R and Python -- an example in each.
    > - C++ only -- just the .cpp file and its built-in demo; no R or Python script.
 
@@ -578,6 +579,12 @@ Also assert the example carries NO hand-rolled chain machinery:
 grep -nE 'run_chain_|make_[A-Z]' example_<ClassName>.R
 grep -nE 'run_chain_|def make_'  example_<ClassName>.py
 ```
+
+PowerShell has no `grep`. There, run the same checks with `Select-String -CaseSensitive`
+(grep is case-sensitive, Select-String is not by default):
+`Select-String -CaseSensitive -Quiet 'ai4bayescode_run_chains' example_<ClassName>.R` must print
+`True`, and `Select-String -CaseSensitive 'run_chain_|make_[A-Z]' example_<ClassName>.R` must
+print nothing.
 
 If a required grep fails, or a forbidden one matches, the example is
 non-compliant -- REWRITE it to the runner skills' usage-example template:

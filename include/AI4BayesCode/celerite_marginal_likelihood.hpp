@@ -66,6 +66,7 @@
 #endif
 
 #include <celerite/celerite.h>
+#include "math_constants.hpp"   // M_PI etc. under MinGW -std=c++17
 
 #include <cmath>
 #include <limits>

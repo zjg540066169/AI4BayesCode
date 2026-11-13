@@ -1,6 +1,6 @@
 ---
 name: AI4BayesCode
-description: Build Bayesian MCMC samplers with AI4BayesCode — a header-only C++ library of composable, stateful block-wise MCMC kernels (Gibbs / NUTS / slice / ESS / VI / BART / GP / HMM / particle-Gibbs / RJMCMC / ...). Use when the user wants to (a) GENERATE a sampler for a Bayesian model by composing existing blocks, or (b) DESIGN a brand-new sampler block primitive for the library. Triggers: "I want a sampler for <model>", "compose / generate an MCMC sampler", "design a new block", a model written as y ~ ... with priors, or any AI4BayesCode request.
+description: 'Build Bayesian MCMC samplers with AI4BayesCode — a header-only C++ library of composable, stateful block-wise MCMC kernels (Gibbs / NUTS / slice / ESS / VI / BART / GP / HMM / particle-Gibbs / RJMCMC / ...). Use when the user wants to (a) GENERATE a sampler for a Bayesian model by composing existing blocks, or (b) DESIGN a brand-new sampler block primitive for the library. Triggers: "I want a sampler for <model>", "compose / generate an MCMC sampler", "design a new block", a model written as y ~ ... with priors, or any AI4BayesCode request.'
 ---
 
 # AI4BayesCode
@@ -39,7 +39,8 @@ This skill bundles the AI4BayesCode C++ library, not just the guidance:
   live). Treat it as the RESOLVED AI4BayesCode path for the whole session: the codegen flow does
   **NOT** ask "Path to the AI4BayesCode folder" — use this skill root automatically, and substitute
   its absolute path for the bare `AI4BayesCode/` prefix in every compile recipe (so the `-I` points
-  at `<this-skill>/include`). Only ask for a path if the user explicitly wants a DIFFERENT
+  at `<this-skill>/include`; on Windows write it with forward slashes, e.g.
+  `C:/Users/<you>/.claude/skills/AI4BayesCode`). Only ask for a path if the user explicitly wants a DIFFERENT
   AI4BayesCode checkout.
 - **User-GENERATED output** (the new `.cpp` + runner, or a new `blocks_local/<Block>/` bundle)
   goes in the USER's own project (`./generated/...`, the user's chosen folder), **NEVER inside

@@ -37,6 +37,14 @@
 #' `PKG_LIBS` you define with a line-continuation `\\` or `$(shell ...)` is
 #' merged by appending rather than prepending -- correctness is preserved.)
 #'
+#' @section A file name with a space:
+#' Rcpp cannot build a file whose name contains a space, so such a file is
+#' compiled from a copy beside it, named `.ai4b_` plus the name with the
+#' spaces replaced by underscores (`my model.cpp` gives `.ai4b_my_model.cpp`).
+#' The copy is kept, so that an unchanged file is not rebuilt, and can be
+#' deleted at any time. In a folder that cannot be written to, the copy goes
+#' to R's temporary folder.
+#'
 #' @param code Either a path to a `.cpp` file, or a length-1 character string
 #'   containing the `.cpp` source. A string that is not an existing path is
 #'   written to a temporary `.cpp` and sourced.
@@ -91,6 +99,15 @@ ai4bayescode_source <- function(code,
     }
 
     cpp_file <- .ai4b_resolve_code(code)
+    # Rcpp::sourceCpp() cannot build a file whose name contains a space: it
+    # refuses one on Windows, and make splits the object name elsewhere.
+    # Compile a copy with a space-free name, made beside the original (see
+    # .ai4b_stage_spaced_file); the original folder also stays on the include
+    # path.
+    src_dir <- dirname(cpp_file)
+    build_file <- cpp_file
+    if (grepl(" ", basename(cpp_file), fixed = TRUE))
+        build_file <- .ai4b_stage_spaced_file(cpp_file)
 
     inc <- system.file("include", package = "AI4BayesCode")
     if (!nzchar(inc) || !dir.exists(inc)) {
@@ -132,13 +149,23 @@ ai4bayescode_source <- function(code,
         # compile then opens with a macro-redefinition warning.
         "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_RCPP_MODULE",
+        if (!identical(build_file, cpp_file)) paste0("-I", shQuote(src_dir)),
+        # Template-heavy samplers can exceed the COFF limit of 2^15 sections.
+        if (.Platform$OS.type == "windows") "-Wa,-mbig-obj",
+        # exp, log and pow from the Universal C Runtime, several times faster
+        # than Rtools' own (see AI4BayesCode/win_ucrt_math.hpp); the matching
+        # --wrap is in `libs`.
+        if (.Platform$OS.type == "windows")
+            "-DAI4B_WIN_UCRT_MATH -include AI4BayesCode/win_ucrt_math.hpp",
         extra_cppflags
     )
 
     libs <- if (Sys.info()[["sysname"]] == "Darwin") {
         c("-framework Accelerate", extra_libs)
     } else {
-        c("$(BLAS_LIBS)", "$(LAPACK_LIBS)", extra_libs)
+        c("$(BLAS_LIBS)", "$(LAPACK_LIBS)",
+          if (.Platform$OS.type == "windows") "-Wl,--wrap=exp,--wrap=log,--wrap=pow",
+          extra_libs)
     }
 
     # Rcpp::sourceCpp caches on the SOURCE text; it cannot see that a
@@ -172,11 +199,31 @@ ai4bayescode_source <- function(code,
         }
     }, add = TRUE)
 
-    Rcpp::sourceCpp(cpp_file,
-                    rebuild = rebuild,
-                    verbose = verbose,
-                    env     = env,
-                    ...)
+    # The MinGW-w64 assembler and linker write their temporary files to TMP (or
+    # TEMP), not R's TMPDIR, and read paths in the ANSI code page, so a temp
+    # folder with other characters (a Chinese user name on an English system)
+    # breaks every build. Point both at a spelling of R's temp folder they can
+    # open for the build.
+    build_tmp <- .ai4b_ansi_tempdir()
+    if (!is.null(build_tmp)) {
+        old_tmp <- Sys.getenv(c("TMP", "TEMP"), unset = NA)
+        Sys.setenv(TMP = build_tmp, TEMP = build_tmp)
+        on.exit({
+            for (v in names(old_tmp))
+                if (is.na(old_tmp[[v]])) Sys.unsetenv(v)
+                else do.call(Sys.setenv, stats::setNames(list(old_tmp[[v]]), v))
+        }, add = TRUE)
+    }
+    # On Windows Rcpp normalizes "<file's folder>/../inst/include" whether or not
+    # it exists, which warns "The system cannot find the path specified" on
+    # every call for a file outside a package source tree. That one is noise.
+    withCallingHandlers(
+        Rcpp::sourceCpp(build_file, rebuild = rebuild, verbose = verbose, env = env, ...),
+        warning = function(w) {
+            if (.Platform$OS.type == "windows" &&
+                grepl("/inst/include\"", conditionMessage(w), fixed = TRUE))
+                invokeRestart("muffleWarning")
+        })
 
     # Register class -> source for ai4bayescode_doc(), and hint the user.
     cls <- tryCatch(.ai4b_doc_register(cpp_file), error = function(e) character(0))
@@ -241,13 +288,10 @@ ai4bayescode_source <- function(code,
     our_cpp <- paste(cppflags, collapse = " ")
     our_lib <- paste(libs,     collapse = " ")
 
-    # Locate the user's effective Makevars (the one R would otherwise read).
-    user_mk <- Sys.getenv("R_MAKEVARS_USER", unset = NA)
-    if (is.na(user_mk) || !nzchar(user_mk) || !file.exists(user_mk)) {
-        default_name <- if (.Platform$OS.type == "windows") "Makevars.win" else "Makevars"
-        default_mk   <- path.expand(file.path("~", ".R", default_name))
-        user_mk      <- if (file.exists(default_mk)) default_mk else NA_character_
-    }
+    # Locate the user's effective Makevars, by R's own rule (on Windows
+    # Makevars.ucrt, Makevars.win64, Makevars.win, then Makevars).
+    user_mk <- tools::makevars_user()
+    user_mk <- if (length(user_mk)) user_mk[[1L]] else NA_character_
 
     out_lines    <- character()
     user_cpp_rhs <- character()
@@ -302,3 +346,94 @@ ai4bayescode_source <- function(code,
     mk
 }
 
+
+
+# ---------------------------------------------------------------------------
+# Internal: a copy of `cpp_file` under a space-free name, ".ai4b_<name>", in
+# the same folder, so that Rcpp's dependency scan finds the file's local
+# headers (and compiles their companion .cpp files) as it would for the
+# original. It is rewritten only when the text changes, since Rcpp rebuilds
+# whenever the file is newer than its last build. A new copy is written under
+# a private name and then renamed into place, so R processes that stage the
+# same file at once (parallel workers) never see a half-written copy, and it
+# is always writable, whatever the mode of the original. In a read-only folder
+# the copy goes under tempdir(), keyed by content.
+# ---------------------------------------------------------------------------
+#' @keywords internal
+#' @noRd
+.ai4b_stage_spaced_file <- function(cpp_file) {
+    name <- gsub("[[:space:]]+", "_", basename(cpp_file))
+    dst  <- file.path(dirname(cpp_file), paste0(".ai4b_", name))
+    key  <- unname(tools::md5sum(cpp_file))
+    same <- function() file.exists(dst) && identical(unname(tools::md5sum(dst)), key)
+    if (!same()) {
+        tmp <- tempfile(".ai4b_tmp_", tmpdir = dirname(cpp_file), fileext = ".tmp")
+        ok  <- isTRUE(suppressWarnings(file.copy(cpp_file, tmp, copy.mode = FALSE)))
+        mv  <- function() isTRUE(suppressWarnings(file.rename(tmp, dst)))
+        if (ok && !mv()) {
+            # Windows does not rename over a read-only file (an old copy of a
+            # read-only original): remove it, then try once more.
+            unlink(dst, force = TRUE)
+            ok <- mv()
+        }
+        if (file.exists(tmp)) unlink(tmp, force = TRUE)
+        if (!ok && !same()) {
+            dir <- file.path(tempdir(), "ai4b_src", substr(key, 1L, 16L))
+            dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+            dst <- file.path(dir, name)
+            if (!file.exists(dst)) file.copy(cpp_file, dst, copy.mode = FALSE)
+        }
+    }
+    normalizePath(dst, winslash = "/", mustWork = TRUE)
+}
+
+# ---------------------------------------------------------------------------
+# Internal (Windows): TRUE when `path` is plain ASCII. The MinGW-w64 assembler
+# and linker read paths in the system's ANSI code page, which plain ASCII
+# always fits.
+# ---------------------------------------------------------------------------
+#' @keywords internal
+#' @noRd
+.ai4b_ansi_ok <- function(path) !grepl("[^ -~]", path)
+
+# ---------------------------------------------------------------------------
+# Internal (Windows): TRUE when the system's ANSI code page can spell `path`,
+# so the compiler tools can open it. R's own code page (l10n_info()) is UTF-8
+# from R 4.2 on, whatever the system uses, so this reads the system's from
+# the registry.
+# ---------------------------------------------------------------------------
+#' @keywords internal
+#' @noRd
+.ai4b_system_cp_covers <- function(path) {
+    read_reg <- get0("readRegistry", envir = asNamespace("utils"), mode = "function")
+    acp <- if (!is.null(read_reg))
+        tryCatch(read_reg("SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage",
+                          "HLM")[["ACP"]], error = function(e) NULL)
+    if (is.null(acp)) return(FALSE)
+    if (identical(acp, "65001")) return(TRUE)
+    # A round trip, since iconv may map a character it cannot spell to a
+    # similar one (a best fit), which would name a different folder.
+    there <- iconv(enc2utf8(path), "UTF-8", paste0("CP", acp))
+    !is.na(there) && identical(iconv(there, paste0("CP", acp), "UTF-8"), enc2utf8(path))
+}
+
+# ---------------------------------------------------------------------------
+# Internal (Windows): the folder to point TMP and TEMP at for a build: R's
+# temp folder, or its 8.3 short name when the long one is not plain ASCII.
+# NULL leaves TMP and TEMP as they are (and on other systems).
+# ---------------------------------------------------------------------------
+#' @keywords internal
+#' @noRd
+.ai4b_ansi_tempdir <- function() {
+    if (.Platform$OS.type != "windows") return(NULL)
+    td <- normalizePath(tempdir(), mustWork = FALSE)
+    if (.ai4b_ansi_ok(td)) return(td)
+    short <- utils::shortPathName(td)
+    if (nzchar(short) && .ai4b_ansi_ok(short)) return(short)
+    tmp <- Sys.getenv("TMP", Sys.getenv("TEMP"))
+    if (!(nzchar(tmp) && (.ai4b_ansi_ok(tmp) || .ai4b_system_cp_covers(tmp))))
+        warning("The temporary folder ", td, " has characters outside the Windows ",
+                "code page and no short (8.3) name, which the compiler tools need. Set ",
+                "TMP and TEMP to a plain-ASCII folder before starting R.", call. = FALSE)
+    NULL
+}

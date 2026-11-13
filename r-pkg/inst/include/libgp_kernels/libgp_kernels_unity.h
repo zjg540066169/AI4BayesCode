@@ -19,6 +19,12 @@
 #define AI4BAYESCODE_LIBGP_KERNELS_UNITY_H
 
 // Headers first (declare the types we need publicly).
+// MinGW-w64 hides M_PI under -std=c++17 (see
+// include/AI4BayesCode/math_constants.hpp); spelled as its <math.h> spells it.
+#include <cmath>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 #include "cov.h"
 #include "cov_factory.h"
 #include "cov_noise.h"

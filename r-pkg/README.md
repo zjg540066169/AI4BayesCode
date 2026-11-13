@@ -20,9 +20,14 @@ remotes::install_local("r-pkg")
 ```
 
 ```bash
-# equivalently, from a shell:
-cd r-pkg && R CMD INSTALL .
+# equivalently, from a shell in the repo root (macOS / Linux):
+R CMD INSTALL r-pkg
 ```
+
+On Windows, install [Rtools](https://cran.r-project.org/bin/windows/Rtools/) for your R
+version first. From PowerShell, call R by its full path (`R.exe` is not on PATH, and a bare
+`R` is the built-in alias of `Invoke-History` there):
+`& "C:\Program Files\R\R-<version>\bin\R.exe" CMD INSTALL r-pkg`.
 
 ## Quick start
 

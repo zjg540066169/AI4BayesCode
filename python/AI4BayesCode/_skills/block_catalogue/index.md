@@ -45,7 +45,7 @@ by block count):
 
 1. **Index (cheap).** Build a one-line-per-block index from the manifests:
    `glob ./blocks_local/*/manifest.dcf`, then
-   `glob ~/.AI4BayesCode/blocks_download/*/manifest.dcf`, and read each manifest's
+   `glob ~/.AI4BayesCode/blocks_download/*/manifest.dcf` (the folder `ai4bayescode_blocks_path()` in R or `AI4BayesCode.blocks_path()` in Python returns; on Windows `~` is `%USERPROFILE%`), and read each manifest's
    `Block` + `RoutingKey` (one short line each). Do NOT read the full cards yet.
    (No local/downloaded blocks present -> skip to core.)
 2. **Filter.** From that index (local rows first, then downloaded), pick the 5-10

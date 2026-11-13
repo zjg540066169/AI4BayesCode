@@ -19,15 +19,12 @@ def test_validate_launches_runner_without_doubling_folder(tmp_path, monkeypatch)
     # runner_path as the script arg WHILE setting cwd to its parent, so Python
     # resolved it against that cwd -> "generated/generated/X_runner.py: can't open
     # file" and EVERY attempt failed as `incomplete` (the bug the user hit).
-    # Patch the compile step. `AI4BayesCode.source` the ATTR is the re-exported
-    # function (shadows the submodule), so reach the real submodule via importlib
-    # and patch its `source` -- what `_validate`'s `from .source import source` binds.
-    _src_mod = importlib.import_module("AI4BayesCode.source")
-    monkeypatch.setattr(_src_mod, "source", lambda *a, **k: None)
+    # Patch the compile step (_compile_check compiles in a child Python).
+    monkeypatch.setattr(gen, "_compile_check", lambda *a, **k: None)
     gen_dir = tmp_path / "generated"
     gen_dir.mkdir()
-    (gen_dir / "X.cpp").write_text("// dummy\n")
-    (gen_dir / "X_runner.py").write_text("print('AI4BAYES_VALIDATE: PASS')\n")
+    (gen_dir / "X.cpp").write_text("// dummy\n", encoding="utf-8")
+    (gen_dir / "X_runner.py").write_text("print('AI4BAYES_VALIDATE: PASS')\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)                                  # cwd has ./generated as a subdir
     res = gen._validate("generated/X.cpp", "generated/X_runner.py", "X", verbose=False)
     assert res["ok"] and res["stage"] == "converged", res
@@ -38,17 +35,16 @@ def test_validate_retries_parent_cwd_for_root_relative_cpp(tmp_path, monkeypatch
     # (relative to the PROJECT ROOT). The harness runs from the runner's OWN dir first
     # (where that path would double + crash), so it must RETRY from the parent -- else
     # the model wastes attempts rewriting the compile path (the live-test's 3 attempts).
-    _src_mod = importlib.import_module("AI4BayesCode.source")
-    monkeypatch.setattr(_src_mod, "source", lambda *a, **k: None)
+    monkeypatch.setattr(gen, "_compile_check", lambda *a, **k: None)
     gen_dir = tmp_path / "generated"
     gen_dir.mkdir()
-    (gen_dir / "X.cpp").write_text("// dummy\n")
+    (gen_dir / "X.cpp").write_text("// dummy\n", encoding="utf-8")
     # Runner opens a ROOT-relative path "generated/X.cpp": resolves ONLY when cwd is the
     # project root, NOT when cwd is generated/ (there it would be generated/generated/X.cpp).
     (gen_dir / "X_runner.py").write_text(
         "import os\n"
         "open(os.path.join('generated', 'X.cpp')).close()\n"
-        "print('AI4BAYES_VALIDATE: PASS')\n")
+        "print('AI4BAYES_VALIDATE: PASS')\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     res = gen._validate("generated/X.cpp", "generated/X_runner.py", "X", verbose=False)
     assert res["ok"] and res["stage"] == "converged", res
@@ -58,12 +54,11 @@ def test_validate_surfaces_launch_failure_exit_status(tmp_path, monkeypatch):
     # Parity with R: a runner that exits NON-ZERO with NO output must surface the
     # exit status (a real cause), not fall through to a blank `incomplete` detail
     # (the empty-detail case that confused the model in the original bug report).
-    _src_mod = importlib.import_module("AI4BayesCode.source")
-    monkeypatch.setattr(_src_mod, "source", lambda *a, **k: None)
+    monkeypatch.setattr(gen, "_compile_check", lambda *a, **k: None)
     gen_dir = tmp_path / "generated"
     gen_dir.mkdir()
-    (gen_dir / "X.cpp").write_text("// dummy\n")
-    (gen_dir / "X_runner.py").write_text("import sys\nsys.exit(3)\n")   # no output, nonzero exit
+    (gen_dir / "X.cpp").write_text("// dummy\n", encoding="utf-8")
+    (gen_dir / "X_runner.py").write_text("import sys\nsys.exit(3)\n", encoding="utf-8")   # no output, nonzero exit
     monkeypatch.chdir(tmp_path)
     res = gen._validate("generated/X.cpp", "generated/X_runner.py", "X", verbose=False)
     assert not res["ok"]
@@ -76,17 +71,16 @@ def test_validate_detail_anchors_on_sentinel_not_stderr_noise(tmp_path, monkeypa
     # warning to STDERR, concatenated AFTER stdout. The returned `detail` must still
     # show the R-hat / PASS summary (anchored on the sentinel line), not the trailing
     # stderr noise -- the confusing `_ARRAY_API not found` detail on a PASS result.
-    _src_mod = importlib.import_module("AI4BayesCode.source")
-    monkeypatch.setattr(_src_mod, "source", lambda *a, **k: None)
+    monkeypatch.setattr(gen, "_compile_check", lambda *a, **k: None)
     gen_dir = tmp_path / "generated"
     gen_dir.mkdir()
-    (gen_dir / "X.cpp").write_text("// dummy\n")
+    (gen_dir / "X.cpp").write_text("// dummy\n", encoding="utf-8")
     (gen_dir / "X_runner.py").write_text(
         "import sys\n"
         "print('R1 smoke OK')\n"
         "print('  beta   max Rhat=1.000')\n"
         "print('AI4BAYES_VALIDATE: PASS')\n"
-        "sys.stderr.write('\\n'.join('bottleneck _ARRAY_API not found %d' % i for i in range(30)))\n")
+        "sys.stderr.write('\\n'.join('bottleneck _ARRAY_API not found %d' % i for i in range(30)))\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     res = gen._validate("generated/X.cpp", "generated/X_runner.py", "X", verbose=False)
     assert res["ok"] and res["stage"] == "converged", res
@@ -495,9 +489,9 @@ _srcmod = importlib.import_module("AI4BayesCode.source")
 
 def test_validate_no_runner_stage(tmp_path, monkeypatch):
     # compile step is patched to succeed -> we land on the no_runner stage.
-    monkeypatch.setattr(_srcmod, "source", lambda *a, **k: None)
+    monkeypatch.setattr(gen, "_compile_check", lambda *a, **k: None)
     cpp = tmp_path / "X.cpp"
-    cpp.write_text("// stub")
+    cpp.write_text("// stub", encoding="utf-8")
     r = gen._validate(str(cpp), None, "X")
     assert r["ok"] is False
     assert r["stage"] == "no_runner"
@@ -507,9 +501,9 @@ def test_validate_compile_stage(tmp_path, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("compile boom")
 
-    monkeypatch.setattr(_srcmod, "source", boom)
+    monkeypatch.setattr(gen, "_compile_check", boom)
     cpp = tmp_path / "Y.cpp"
-    cpp.write_text("// stub")
+    cpp.write_text("// stub", encoding="utf-8")
     r = gen._validate(str(cpp), None, "Y")
     assert r["ok"] is False
     assert r["stage"] == "compile"
@@ -517,17 +511,17 @@ def test_validate_compile_stage(tmp_path, monkeypatch):
 
 
 def test_validate_converged_and_convergence_via_runner(tmp_path, monkeypatch):
-    monkeypatch.setattr(_srcmod, "source", lambda *a, **k: None)
+    monkeypatch.setattr(gen, "_compile_check", lambda *a, **k: None)
     cpp = tmp_path / "Z.cpp"
-    cpp.write_text("// stub")
+    cpp.write_text("// stub", encoding="utf-8")
     ok_runner = tmp_path / "Z_runner.py"
-    ok_runner.write_text("print('AI4BAYES_VALIDATE: PASS')\n")
+    ok_runner.write_text("print('AI4BAYES_VALIDATE: PASS')\n", encoding="utf-8")
     r = gen._validate(str(cpp), str(ok_runner), "Z")
     assert r["ok"] is True
     assert r["stage"] == "converged"
 
     bad_runner = tmp_path / "Z_bad_runner.py"
-    bad_runner.write_text("print('AI4BAYES_VALIDATE: FAIL maxRhat=1.42')\n")
+    bad_runner.write_text("print('AI4BAYES_VALIDATE: FAIL maxRhat=1.42')\n", encoding="utf-8")
     r2 = gen._validate(str(cpp), str(bad_runner), "Z")
     assert r2["ok"] is False
     assert r2["stage"] == "convergence"
@@ -544,12 +538,14 @@ def test_claude_p_call_wraps_stdout(monkeypatch):
 
     captured = {}
 
-    def fake_run(args, input=None, capture_output=None, text=None):
+    def fake_run(args, input=None, **kwargs):
         captured["args"] = args
         captured["input"] = input
+        captured["kwargs"] = kwargs
         return _Proc()
 
     monkeypatch.setattr(gen.subprocess, "run", fake_run)
+    monkeypatch.setattr(gen.shutil, "which", lambda name: None)
     parsed = gen._claude_p_call("SYS", [{"role": "user", "content": "hello"}],
                                 "claude-opus-4-8")
     assert parsed["stop_reason"] == "end_turn"
@@ -557,6 +553,8 @@ def test_claude_p_call_wraps_stdout(monkeypatch):
     assert captured["args"][:2] == ["claude", "-p"]
     assert "--model" in captured["args"]
     assert "SYS" in captured["input"] and "user: hello" in captured["input"]
+    # UTF-8 both ways, whatever the console code page (Windows).
+    assert captured["kwargs"].get("encoding") == "utf-8"
 
 
 # ---------------------------------------------------------------------------
@@ -880,3 +878,26 @@ def test_use_cli_true_without_claude_warns_and_falls_back(tmp_path, monkeypatch)
                            use_cli=True, verbose=False)
     assert res["called_api"] is False
     assert (td / "PROMPT.txt").is_file()
+
+
+
+def test_compile_check_keeps_the_first_compiler_error(tmp_path, monkeypatch):
+    # The repair loop is sent the compiler's FIRST error, usually the cause. The
+    # child's output is a Python traceback ending in source()'s error, whose
+    # compiler text follows "stderr:". A long log used to be cut from its
+    # start, which dropped that first error.
+    errors = "".join(f"M.cpp:{i}:5: error: use of undeclared identifier 'later_{i}_"
+                     + "n" * 200 + "'\n" for i in range(100))
+    child = ("Traceback (most recent call last):\n  File \"<string>\", line 1\n"
+             "RuntimeError: Compilation failed (exit 1).\ncommand:\n  g++ -O2 M.cpp\n"
+             "stderr:\nM.cpp:2:5: error: use of undeclared identifier 'first_cause'\n"
+             + errors)
+
+    class Done:
+        returncode, stdout, stderr = 1, "", child
+    monkeypatch.setattr(gen.subprocess, "run", lambda *a, **k: Done())
+    with pytest.raises(RuntimeError) as err:
+        gen._compile_check(tmp_path / "M.cpp")
+    msg = str(err.value)
+    assert msg.startswith("M.cpp:2:5: error: use of undeclared identifier 'first_cause'")
+    assert "later_99_" in msg and "Traceback" not in msg and len(msg) <= 12100

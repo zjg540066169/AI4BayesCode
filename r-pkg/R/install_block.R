@@ -18,9 +18,32 @@
     # User-global, language-agnostic block store SHARED with the Python package
     # (same `$AI4BAYESCODE_DATA_HOME` override). One directory across R / Python /
     # C++ and across all projects, so a block installed once is found everywhere.
-    base <- Sys.getenv("AI4BAYESCODE_DATA_HOME",
-                       unset = file.path(path.expand("~"), ".AI4BayesCode"))
-    file.path(base, "blocks_download")
+    # .ai4b_home_dir(), not path.expand("~"): on Windows R's "~" is Documents
+    # while Python's is the profile folder, which split the shared store in two.
+    custom <- Sys.getenv("AI4BAYESCODE_DATA_HOME")
+    if (nzchar(custom)) return(file.path(custom, "blocks_download"))
+    d <- file.path(.ai4b_home_dir(), ".AI4BayesCode", "blocks_download")
+    # Earlier versions kept R's blocks under Documents on Windows: move each
+    # one that the shared store lacks, and drop the old folder once empty.
+    legacy <- file.path(path.expand("~"), ".AI4BayesCode", "blocks_download")
+    if (.Platform$OS.type == "windows" && dir.exists(legacy) &&
+        normalizePath(legacy, winslash = "/") != normalizePath(d, winslash = "/",
+                                                                mustWork = FALSE)) {
+        dir.create(d, recursive = TRUE, showWarnings = FALSE)
+        for (b in list.files(legacy, all.files = TRUE, no.. = TRUE)) {
+            to <- file.path(d, b)
+            if (!file.exists(to)) suppressWarnings(file.rename(file.path(legacy, b), to))
+        }
+        if (!length(list.files(legacy, all.files = TRUE, no.. = TRUE))) {
+            unlink(legacy, recursive = TRUE)
+        } else if (is.null(getOption("AI4BayesCode.legacy_blocks_noted"))) {
+            options(AI4BayesCode.legacy_blocks_noted = TRUE)
+            message("Some installed blocks are still in ", legacy, ". Move them to ",
+                    d, " (or delete them if a copy is already there) so that R and ",
+                    "Python share them.")
+        }
+    }
+    d
 }
 
 #' Path to the per-user contributed-block library
@@ -77,13 +100,15 @@ ai4bayescode_blocks_path <- function(name = NULL) {
     if (!length(dirs)) return("")
     parts <- character(0)
     for (d in dirs) {
-        fs <- list.files(d, recursive = TRUE, full.names = TRUE,
-                         pattern = "\\.(hpp|h|hh|hxx|ipp|cpp|cc|dcf)$")
-        if (!length(fs)) next
-        fs <- sort(fs)
-        info <- file.info(fs)
-        parts <- c(parts, paste(sub(paste0("^", d, "/?"), "", fs),
-                                info$size, as.numeric(info$mtime),
+        # Relative names straight from list.files(): stripping the folder with
+        # sub() compiled the path as a regular expression, which "(", "+" or a
+        # backslash in a Windows path ("Program Files (x86)") breaks.
+        rel <- list.files(d, recursive = TRUE, full.names = FALSE,
+                          pattern = "\\.(hpp|h|hh|hxx|ipp|cpp|cc|dcf)$")
+        if (!length(rel)) next
+        rel <- sort(rel)
+        info <- file.info(file.path(d, rel))
+        parts <- c(parts, paste(rel, info$size, as.numeric(info$mtime),
                                 sep = "\x1f"))
     }
     if (!length(parts)) return("")

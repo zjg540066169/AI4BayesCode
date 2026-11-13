@@ -1,0 +1,172 @@
+name: Install
+
+# The three ways to install the agent skill, on every OS:
+#   website     the install-or-update command from the website, in each shell a
+#               user may type it into: a fresh install, an update to a newer
+#               commit, and an update of a clone made by earlier instructions
+#   from-r      ai4bayescode_install_skill() in R
+#   from-python AI4BayesCode.install_skill() in Python
+# Each run checks that SKILL.md lands where Claude Code and Codex look and that
+# its frontmatter parses as strict YAML.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BRANCH: ${{ github.head_ref || github.ref_name }}
+  # The ref the install functions download. They always download from
+  # zjg540066169/AI4BayesCode, so a branch that lives anywhere else (a fork, a
+  # pull request from one) is replaced by the base branch, or main.
+  INSTALL_REF: ${{ (github.event.pull_request.head.repo.full_name || github.repository) == 'zjg540066169/AI4BayesCode' && (github.head_ref || github.ref_name) || github.base_ref || 'main' }}
+
+jobs:
+  website:
+    name: website command (${{ matrix.os }}, ${{ matrix.shell }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, shell: powershell }
+          - { os: windows-latest, shell: pwsh }
+          - { os: windows-latest, shell: bash }
+          - { os: macos-latest, shell: 'zsh {0}' }
+          - { os: ubuntu-latest, shell: bash }
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}   # the shell under test; other steps name theirs
+    env:
+      # The repository that holds BRANCH: the fork, for a pull request from one
+      URL: ${{ github.event.pull_request.head.repo.clone_url || format('https://github.com/{0}.git', github.repository) }}
+      # main before Windows support: no .gitattributes, so Git for Windows
+      # checked it out with CRLF line endings
+      OLD_MAIN: 9cd2e8d187b2ba2461e58011f1a8bff6e1172643
+    # Each step runs the command exactly as the website shows it, one agent per
+    # step, so the step fails when that line fails in any shell.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: repo   # only for the check script; the command fetches from GitHub
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Use the Git for Windows installer defaults
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          git config --global core.autocrlf true
+          git config --global pull.rebase false
+      - name: Install for Claude Code
+        run: git init -q "$HOME/.claude/skills/AI4BayesCode"; git -C "$HOME/.claude/skills/AI4BayesCode" pull -q --ff-only ${{ env.URL }} ${{ env.BRANCH }}
+      - name: Install for Codex
+        run: git init -q "$HOME/.agents/skills/AI4BayesCode"; git -C "$HOME/.agents/skills/AI4BayesCode" pull -q --ff-only ${{ env.URL }} ${{ env.BRANCH }}
+      - name: Check the install
+        shell: bash
+        run: |
+          python -m pip install --quiet pyyaml
+          head=$(git ls-remote --exit-code "$URL" "refs/heads/$BRANCH" | cut -f1)
+          python repo/tools/ci/check_skill_install.py --git-head "$head"
+      - name: Go back one commit, as if a new version came out since
+        shell: bash
+        run: |
+          for d in "$HOME/.claude/skills/AI4BayesCode" "$HOME/.agents/skills/AI4BayesCode"; do
+            git -C "$d" reset -q --hard HEAD~1
+          done
+      - name: Update for Claude Code (the same command)
+        run: git init -q "$HOME/.claude/skills/AI4BayesCode"; git -C "$HOME/.claude/skills/AI4BayesCode" pull -q --ff-only ${{ env.URL }} ${{ env.BRANCH }}
+      - name: Update for Codex (the same command)
+        run: git init -q "$HOME/.agents/skills/AI4BayesCode"; git -C "$HOME/.agents/skills/AI4BayesCode" pull -q --ff-only ${{ env.URL }} ${{ env.BRANCH }}
+      - name: Check the update
+        shell: bash
+        run: |
+          head=$(git ls-remote --exit-code "$URL" "refs/heads/$BRANCH" | cut -f1)
+          python repo/tools/ci/check_skill_install.py --git-head "$head"
+      - name: Start over from a shallow clone of the old main, as the earlier instructions made
+        shell: bash
+        run: |
+          for d in "$HOME/.claude/skills/AI4BayesCode" "$HOME/.agents/skills/AI4BayesCode"; do
+            rm -rf "$d"
+            git init -q "$d"
+            git -C "$d" fetch -q --depth 1 "https://github.com/${{ github.repository }}.git" "$OLD_MAIN"
+            git -C "$d" checkout -q -b main FETCH_HEAD
+          done
+      - name: Update the old clone for Claude Code (the same command)
+        run: git init -q "$HOME/.claude/skills/AI4BayesCode"; git -C "$HOME/.claude/skills/AI4BayesCode" pull -q --ff-only ${{ env.URL }} ${{ env.BRANCH }}
+      - name: Update the old clone for Codex (the same command)
+        run: git init -q "$HOME/.agents/skills/AI4BayesCode"; git -C "$HOME/.agents/skills/AI4BayesCode" pull -q --ff-only ${{ env.URL }} ${{ env.BRANCH }}
+      - name: Check the update of the old clone
+        shell: bash
+        run: |
+          head=$(git ls-remote --exit-code "$URL" "refs/heads/$BRANCH" | cut -f1)
+          python repo/tools/ci/check_skill_install.py --git-head "$head"
+
+  from-r:
+    name: ai4bayescode_install_skill() (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::Rcpp
+            any::RcppArmadillo
+      - name: Install the R package
+        shell: bash
+        run: R CMD INSTALL r-pkg
+      - name: Install the skill, update it, then check
+        shell: Rscript {0}
+        run: |
+          library(AI4BayesCode)
+          ai4bayescode_install_skill(ref = Sys.getenv("INSTALL_REF"))
+          ai4bayescode_install_skill(ref = Sys.getenv("INSTALL_REF"))   # the update path
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check
+        shell: bash
+        run: |
+          python -m pip install --quiet pyyaml
+          python tools/ci/check_skill_install.py
+
+  from-python:
+    name: AI4BayesCode.install_skill() (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the Python package
+        shell: bash
+        run: |
+          python -m pip install --quiet --upgrade pip
+          pip install --quiet numpy pybind11 pyyaml
+          pip install --quiet -e ./python --no-deps
+      - name: Install the skill, update it, then check
+        shell: bash
+        run: |
+          python -c "import os, AI4BayesCode; AI4BayesCode.install_skill(ref=os.environ['INSTALL_REF'])"
+          python -c "import os, AI4BayesCode; AI4BayesCode.install_skill(ref=os.environ['INSTALL_REF'])"
+          python tools/ci/check_skill_install.py

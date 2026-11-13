@@ -1,0 +1,204 @@
+name: Windows
+
+# Native Windows support, end to end (install.yml covers installing the skill):
+#   r-examples     the R package with R + Rtools: every example's R usage block
+#   r-paths        the R package from a library and temp folder whose paths
+#                  contain a space and non-ASCII characters
+#   python         the Python package with Rtools and with MSYS2: unit tests
+#                  and every example's usage block
+#   cpp            the header library with the MSYS2 MinGW-w64 toolchain: the
+#                  C++ test suite and every example's built-in main()
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  r-examples:
+    name: R examples (${{ matrix.part }}/8)
+    runs-on: windows-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: r-pkg
+      - name: Install the R package
+        shell: bash
+        run: |
+          mkdir -p ci-logs
+          R CMD INSTALL r-pkg 2>&1 | tee ci-logs/install.txt
+      - name: Run every example's R usage block
+        shell: bash
+        # R has no fork on Windows, so the four chains run one after another;
+        # with R's own BLAS the nonparametric mixtures then take one to two hours.
+        run: Rscript tools/ci/run_examples.R ${{ matrix.part }} 8 ci-logs/examples 14400 2>&1 | tee ci-logs/summary.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-r-${{ matrix.part }}
+          path: |
+            ci-logs
+            !ci-logs/**/*_wd/**
+
+  r-paths:
+    name: R ${{ matrix.r }}, unusual paths
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # release builds C++ as gnu++20 with Rtools45; R 4.4 as gnu++17 with Rtools44.
+        r: [release, '4.4']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ matrix.r }}
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::Rcpp
+            any::RcppArmadillo
+      - name: Library and temp folder with a space and Chinese characters
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ci-logs | Out-Null
+          # Under the profile on C:, as for a user whose account name has a
+          # space and Chinese characters. R needs an 8.3 short name for a temp
+          # folder with a space (it refuses to start otherwise), so record
+          # whether C: has them.
+          fsutil 8dot3name query C: | Out-File -Encoding utf8 ci-logs/8dot3.txt
+          $odd = "x " + [char]0x7EDF + [char]0x8BA1     # "x " then two CJK characters
+          $lib = Join-Path $env:USERPROFILE "R lib $odd"
+          $tmp = Join-Path $env:USERPROFILE "tmp $odd"
+          New-Item -ItemType Directory -Force $lib, $tmp | Out-Null
+          $env:TMP = $tmp; $env:TEMP = $tmp; $env:TMPDIR = $tmp
+          $env:AI4B_LIB = $lib
+          # R.exe, not R: in PowerShell "r" is the built-in alias of Invoke-History.
+          R.exe CMD INSTALL -l "$lib" r-pkg *>&1 | Tee-Object -FilePath ci-logs/install.txt
+          Rscript tools/ci/r_paths_check.R *>&1 | Tee-Object -FilePath ci-logs/check.txt
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-r-paths-${{ matrix.r }}
+          path: ci-logs
+
+  python:
+    name: Python, ${{ matrix.toolchain }} (${{ matrix.part }}/4)
+    runs-on: windows-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [rtools, msys2]
+        part: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # Rtools comes preinstalled on the runner. MSYS2 is set up the way a user
+      # would: its default folder, C:\msys64, with the packages the error
+      # message names; CXX then picks it over Rtools.
+      - uses: msys2/setup-msys2@v2
+        if: matrix.toolchain == 'msys2'
+        with:
+          msystem: UCRT64
+          release: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-armadillo
+            mingw-w64-ucrt-x86_64-openblas64
+      - name: Select MSYS2
+        if: matrix.toolchain == 'msys2'
+        shell: bash
+        run: echo 'CXX=C:\msys64\ucrt64\bin\g++.exe' >> "$GITHUB_ENV"
+      - name: Take the runner's other MinGW toolchains off PATH, as on a user's machine
+        shell: pwsh
+        run: |
+          $keep = $env:PATH -split ';' | Where-Object { $_ -and $_ -notmatch 'Strawberry|\\mingw64\\bin|\\msys64\\' }
+          "PATH=$($keep -join ';')" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Install
+        shell: bash
+        run: |
+          mkdir -p ci-logs
+          python -m pip install --upgrade pip
+          pip install numpy pybind11 pytest scipy pyyaml matplotlib networkx arviz
+          pip install -e ./python --no-deps 2>&1 | tee ci-logs/install.txt
+          python -c "from AI4BayesCode.source import _compiler; print('compiler:', _compiler())" | tee ci-logs/compilers.txt
+      - name: Unit tests (text I/O must name its encoding)
+        if: matrix.part == 1
+        shell: bash
+        run: python -X warn_default_encoding -W error::EncodingWarning -m pytest python/tests -q -p no:cacheprovider 2>&1 | tee ci-logs/pytest.txt
+      - name: Compile from a profile path with a space and Chinese characters
+        if: matrix.part == 1
+        shell: pwsh
+        run: |
+          # Under the profile on C:, as for a user whose account name has a
+          # space and Chinese characters (the D: work drive has no 8.3 names).
+          $odd = "x " + [char]0x7EDF + [char]0x8BA1
+          $env:LOCALAPPDATA = Join-Path $env:USERPROFILE "app data $odd"
+          $env:TMP = Join-Path $env:USERPROFILE "tmp $odd"; $env:TEMP = $env:TMP
+          New-Item -ItemType Directory -Force $env:LOCALAPPDATA, $env:TMP | Out-Null
+          python tools/ci/py_paths_check.py *>&1 | Tee-Object -FilePath ci-logs/paths.txt
+          exit $LASTEXITCODE
+      - name: Run the example usage blocks
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: python tools/ci/run_examples.py --part ${{ matrix.part }} --n-parts 4 --log-dir ci-logs/examples --timeout 5400 2>&1 | tee ci-logs/summary.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-python-${{ matrix.toolchain }}-${{ matrix.part }}
+          path: |
+            ci-logs
+            !ci-logs/**/*_wd/**
+
+  cpp:
+    name: C++ (MSYS2 UCRT64)
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-armadillo
+            mingw-w64-ucrt-x86_64-openblas64
+      - name: C++ test suite
+        run: |
+          mkdir -p ci-logs
+          g++ --version | head -1 | tee ci-logs/compiler.txt
+          cd tests && make run 2>&1 | tee ../ci-logs/suite.txt
+      - name: Every example's built-in main()
+        if: ${{ !cancelled() }}
+        run: bash tools/ci/run_examples_standalone.sh ci-logs/examples 2>&1 | tee ci-logs/examples-summary.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-cpp
+          path: ci-logs

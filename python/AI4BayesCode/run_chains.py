@@ -24,22 +24,29 @@ negligible.
 
 On Unix (macOS / Linux) the chains FORK, so the factory is inherited
 through memory and a lambda / local closure works directly -- exactly
-like R's `mclapply(function(s) new(Mod, ..., s))`. On Windows (no fork)
-the workers spawn a fresh interpreter, so there the factory must be a
-PICKLABLE callable (a top-level function or plain class, not a lambda);
-if it can't be pickled the run falls back to sequential automatically.
+like R's `mclapply(function(s) new(Mod, ..., s))`. Windows has no fork,
+so there the chains run one after another by default, as in R. Pass
+``n_jobs > 1`` to spawn workers instead: each re-imports the calling
+script, so the factory has to be a top-level function, everything it
+uses has to be defined at module top level, and the call has to sit under
+``if __name__ == "__main__":``. So does all other work the script does: a
+worker runs whatever is outside the guard before its chain. When that cannot
+work (a lambda, a factory from ``python -c`` or a notebook) the chains run
+sequentially.
 """
 
 from __future__ import annotations
 
 import multiprocessing as mp
 import os
+import pickle
 import sys
 import time
 import warnings
 from typing import Any, Callable, Iterable, Optional
 
 import numpy as np
+from ._console import safe_print as print  # noqa: A001 (see _console.py)
 
 
 def _strip_burn(hist, n_burn):
@@ -91,7 +98,7 @@ def _chain_worker(factory: Callable[[int], Any], seed: int,
         # (hist=None + "error") so the surviving chains stay usable.
         warnings.warn(f"run_chains: chain seed={seed} failed: {e}")
         return {"seed": seed, "wall": time.time() - t0, "hist": None,
-                "error": str(e)}
+                "error": str(e), "error_type": type(e).__name__}
 
 
 # The active factory for the fork path. Set in the parent immediately before the
@@ -100,6 +107,9 @@ def _chain_worker(factory: Callable[[int], Any], seed: int,
 # R's mclapply). Only touched on the fork path and cleared right after.
 _ACTIVE_FACTORY: Optional[Callable[[int], Any]] = None
 
+
+# Errors a spawned worker raises when it cannot rebuild the factory.
+_REBUILD_ERRORS = ("NameError", "AttributeError", "ImportError", "ModuleNotFoundError")
 
 _BLAS_THREAD_VARS = ("VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS",
                      "OMP_NUM_THREADS", "MKL_NUM_THREADS")
@@ -145,6 +155,22 @@ def _chain_worker_fork(seed: int, n_burn: int, n_keep: int,
 _DEFAULT_SEEDS = (101, 202, 303, 404)
 
 
+def _spawn_obstacle(factory) -> str:
+    """Why spawned workers could not rebuild ``factory``, or "" if they can."""
+    try:
+        pickle.dumps(factory)
+    except Exception as e:  # noqa: BLE001
+        return (f"the factory cannot be sent to worker processes ({type(e).__name__}); "
+                "on Windows use a top-level function, not a lambda or closure")
+    if getattr(factory, "__module__", None) == "__main__":
+        main_file = getattr(sys.modules.get("__main__"), "__file__", None)
+        if not main_file or not os.path.isfile(main_file):
+            return ("the factory is defined in a session that has no script file "
+                    "(python -c, standard input or a notebook), which worker "
+                    "processes cannot import")
+    return ""
+
+
 def run_chains(
     factory: Callable[[int], Any],
     *,
@@ -169,9 +195,10 @@ def run_chains(
                 lambda s: MyModel(y, X, seed=s, keep_history=True),
                 seeds=[1, 2, 3, 4])
 
-        A top-level (picklable) function also works and is the only
-        parallel-safe form on Windows (spawn). If the parallel pool
-        cannot start, the chains fall back to running sequentially.
+        On Windows see the module docstring: sequential by default, and
+        parallel only for a top-level function called under the
+        ``__main__`` guard. If the parallel pool cannot start, the chains
+        fall back to running sequentially.
 
     seeds : iterable of int
         One seed per chain. Chain count = len(seeds).
@@ -179,7 +206,8 @@ def run_chains(
         Warmup and sampled iterations per chain.
     n_jobs : int, optional
         Number of parallel processes. Defaults to min(len(seeds),
-        cpu_count()). Set to 1 for sequential execution.
+        cpu_count()) where the platform can fork, and to 1 (sequential)
+        on Windows. Set to 1 for sequential execution.
     history_keys : list of str, optional
         Subset of history keys to return (saves memory for big chains).
         If None, return all keys from `get_history()`.
@@ -207,8 +235,16 @@ def run_chains(
         return []
     if n_burn < 0 or n_keep < 1:   # R parity: stopifnot(n_burn>=0, n_keep>=1)
         raise ValueError("n_burn must be >= 0 and n_keep >= 1")
+    can_fork = sys.platform != "win32" and "fork" in mp.get_all_start_methods()
     if n_jobs is None:
-        n_jobs = min(len(seeds), os.cpu_count() or 1)
+        # Without fork every worker re-imports the caller's script, which only
+        # works for a guarded script with a top-level factory; so sequential
+        # is the default there, as it is in R.
+        n_jobs = min(len(seeds), os.cpu_count() or 1) if can_fork else 1
+    if getattr(mp.current_process(), "_inheriting", False):
+        raise RuntimeError(
+            "run_chains() was called while a worker process was importing the main "
+            "script. Put the call under  if __name__ == '__main__':  or pass n_jobs=1.")
 
     args = [(factory, int(s), n_burn, n_keep, history_keys) for s in seeds]
 
@@ -223,9 +259,8 @@ def run_chains(
     if n_jobs == 1:
         return _sequential()
 
-    use_fork = sys.platform != "win32" and "fork" in mp.get_all_start_methods()
     results: Optional[list[dict]] = None
-    if use_fork:
+    if can_fork:
         # Unix: FORK. The factory is handed to the workers through inherited
         # memory (the `_ACTIVE_FACTORY` global set just before the pool forks),
         # NOT through the task queue -- so only the picklable seed/counts are
@@ -255,20 +290,48 @@ def run_chains(
         finally:
             _ACTIVE_FACTORY = None
     else:
-        # Windows (no fork): SPAWN a fresh interpreter, which requires the factory
-        # to be picklable. A lambda / local closure raises PicklingError -- caught
-        # below and run sequentially so the call still succeeds.
-        try:
-            ctx = mp.get_context("spawn")
-            with ctx.Pool(processes=n_jobs) as pool:
-                results = pool.starmap(_chain_worker, args)
-        except Exception as e:  # noqa: BLE001  (PicklingError, ...)
-            warnings.warn(
-                f"run_chains: parallel execution failed "
-                f"({type(e).__name__}: {e}); running the {len(seeds)} chains "
-                f"sequentially instead. On Windows pass a top-level picklable "
-                f"factory (not a lambda / local closure), or use n_jobs=1.")
-            results = None
+        # Windows (no fork): SPAWN fresh interpreters. Each one unpickles the
+        # factory by importing the module that defines it, so check first that
+        # this can work at all; otherwise run sequentially without spawning.
+        reason = _spawn_obstacle(factory)
+        if reason:
+            warnings.warn(f"run_chains: {reason}; running the {len(seeds)} chains "
+                          "sequentially.")
+        else:
+            from concurrent.futures import ProcessPoolExecutor
+            try:
+                ctx = mp.get_context("spawn")
+                # Windows allows at most 61 worker processes per pool.
+                with ProcessPoolExecutor(max_workers=min(n_jobs, 61), mp_context=ctx) as ex:
+                    results = list(ex.map(_chain_worker, *zip(*args)))
+            except Exception as e:  # noqa: BLE001  (BrokenProcessPool, ...)
+                warnings.warn(
+                    f"run_chains: parallel execution failed "
+                    f"({type(e).__name__}: {e}); running the {len(seeds)} chains "
+                    "sequentially instead.")
+                results = None
+            if results is not None and all(r.get("error_type") in _REBUILD_ERRORS
+                                           for r in results):
+                # Every worker failed the way a worker that cannot rebuild the
+                # factory fails (a name defined only under the __main__ guard,
+                # say). Run the first chain here: if it works, run the rest here
+                # as well; if it fails too, the model itself fails and the
+                # results stand as they are.
+                if verbose:
+                    print(f"[AI4BayesCode.run_chains] chain seed={args[0][1]} ...")
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    first = _chain_worker(*args[0])
+                if "error" not in first:
+                    warnings.warn(
+                        "run_chains: every parallel chain failed in its worker (on "
+                        "Windows the factory and everything it uses must be defined at "
+                        "module top level); running the chains sequentially instead.")
+                    results = [first]
+                    for a in args[1:]:
+                        if verbose:
+                            print(f"[AI4BayesCode.run_chains] chain seed={a[1]} ...")
+                        results.append(_chain_worker(*a))
 
     if results is None:
         results = _sequential()
