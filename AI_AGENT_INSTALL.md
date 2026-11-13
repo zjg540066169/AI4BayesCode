@@ -37,8 +37,8 @@ needed before the first sampler can be validated, not for the install:
   `& "C:\Program Files\R\R-<version>\bin\Rscript.exe" --version`.
 - **Python backend:** Python 3.11 or newer with the AI4BayesCode package, a C++17 compiler and
   the Armadillo headers. macOS: `brew install armadillo`. Debian/Ubuntu:
-  `apt-get install libarmadillo-dev`. Windows: Rtools for the installed R version already holds
-  everything. Without R, install MSYS2 (https://www.msys2.org, default folder `C:\msys64`),
+  `apt-get install libarmadillo-dev`. Windows: Rtools44 or newer (the Rtools of R 4.4 or later)
+  already holds everything. Otherwise install MSYS2 (https://www.msys2.org, default folder `C:\msys64`),
   then in the "MSYS2 UCRT64" terminal run
   `pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-armadillo mingw-w64-ucrt-x86_64-openblas64`.
 

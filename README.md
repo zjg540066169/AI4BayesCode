@@ -68,8 +68,8 @@ Without git, install the same code from GitHub's zip archive:
 pip install "https://github.com/zjg540066169/AI4BayesCode/archive/refs/heads/main.zip#subdirectory=python"
 ```
 Armadillo: `brew install armadillo` on macOS, `apt-get install libarmadillo-dev` on
-Debian/Ubuntu. On Windows, Rtools (above) already holds the compiler, Armadillo and
-OpenBLAS. Without R, use MSYS2 instead, as `python/README.md` describes.
+Debian/Ubuntu. On Windows, Rtools44 or newer (above) already holds the compiler, Armadillo
+and OpenBLAS. Without it, use MSYS2 instead, as `python/README.md` describes.
 
 ## Quick start (R)
 
