@@ -367,21 +367,35 @@ ai4bayescode_source <- function(code,
 }
 
 # ---------------------------------------------------------------------------
-# Internal (Windows): TRUE when the MinGW-w64 assembler and linker can open
-# `path`. They read paths in the system (ANSI) code page.
+# Internal (Windows): TRUE when `path` is plain ASCII. The MinGW-w64 assembler
+# and linker read paths in the system's ANSI code page, which plain ASCII
+# always fits.
 # ---------------------------------------------------------------------------
 #' @keywords internal
 #' @noRd
-.ai4b_ansi_ok <- function(path) {
-    if (!grepl("[^ -~]", path)) return(TRUE)
-    cp <- l10n_info()$system.codepage   # R >= 4.1
-    !is.null(cp) && !is.na(iconv(enc2utf8(path), "UTF-8", paste0("CP", cp)))
+.ai4b_ansi_ok <- function(path) !grepl("[^ -~]", path)
+
+# ---------------------------------------------------------------------------
+# Internal (Windows): TRUE when the system's ANSI code page can spell `path`,
+# so the compiler tools can open it. R's own code page (l10n_info()) is UTF-8
+# from R 4.2 on, whatever the system uses, so this reads the system's from
+# the registry.
+# ---------------------------------------------------------------------------
+#' @keywords internal
+#' @noRd
+.ai4b_system_cp_covers <- function(path) {
+    read_reg <- get0("readRegistry", envir = asNamespace("utils"), mode = "function")
+    acp <- if (!is.null(read_reg))
+        tryCatch(read_reg("SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage",
+                          "HLM")[["ACP"]], error = function(e) NULL)
+    !is.null(acp) &&
+        (identical(acp, "65001") || !is.na(iconv(enc2utf8(path), "UTF-8", paste0("CP", acp))))
 }
 
 # ---------------------------------------------------------------------------
 # Internal (Windows): the folder to point TMP and TEMP at for a build: R's
-# temp folder, or its 8.3 short name when the toolchain cannot open the long
-# one. NULL leaves TMP and TEMP as they are (and on other systems).
+# temp folder, or its 8.3 short name when the long one is not plain ASCII.
+# NULL leaves TMP and TEMP as they are (and on other systems).
 # ---------------------------------------------------------------------------
 #' @keywords internal
 #' @noRd
@@ -392,9 +406,9 @@ ai4bayescode_source <- function(code,
     short <- utils::shortPathName(td)
     if (nzchar(short) && .ai4b_ansi_ok(short)) return(short)
     tmp <- Sys.getenv("TMP", Sys.getenv("TEMP"))
-    if (nzchar(tmp) && .ai4b_ansi_ok(tmp)) return(NULL)
-    warning("The temporary folder ", td, " has characters outside the Windows ",
-            "code page and no short (8.3) name, which the compiler tools need. Set ",
-            "TMP and TEMP to a plain-ASCII folder before starting R.", call. = FALSE)
+    if (!(nzchar(tmp) && (.ai4b_ansi_ok(tmp) || .ai4b_system_cp_covers(tmp))))
+        warning("The temporary folder ", td, " has characters outside the Windows ",
+                "code page and no short (8.3) name, which the compiler tools need. Set ",
+                "TMP and TEMP to a plain-ASCII folder before starting R.", call. = FALSE)
     NULL
 }

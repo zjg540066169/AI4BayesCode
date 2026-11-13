@@ -86,3 +86,13 @@ test_that("a file with a space in its name follows edits to its local headers", 
     ai4bayescode_source(cpp, env = e, quiet = TRUE)
     expect_identical(e$spaced_value(), 2L)
 })
+
+test_that("the build temp folder must be plain ASCII for the Windows toolchain", {
+    # R's own code page is UTF-8 from R 4.2 on, but the assembler and linker
+    # read paths in the system's ANSI code page, so only ASCII is always safe.
+    ok <- AI4BayesCode:::.ai4b_ansi_ok
+    expect_true(ok("C:/Users/runneradmin/tmp x/RtmpAB12"))
+    expect_true(ok("C:\\Users\\RUNNER~1\\TMPX~1"))
+    expect_false(ok(enc2utf8("C:/Users/runneradmin/tmp x \u7edf\u8ba1")))
+    expect_false(ok(enc2utf8("C:/Users/Jos\u00e9/AppData/Local/Temp")))
+})
