@@ -26,7 +26,7 @@ def _cp1252_stdout():
 
 def test_safe_print_degrades_instead_of_raising():
     out = _cp1252_stdout()
-    safe_print("✓ loaded σ ∝ 1/σ", file=out)
+    safe_print("\u2713 loaded \u03c3 \u221d 1/\u03c3", file=out)
     out.flush()
     text = out.buffer.getvalue().decode("cp1252")
     assert "loaded" in text and "?" in text
@@ -34,13 +34,13 @@ def test_safe_print_degrades_instead_of_raising():
 
 def test_glyph_falls_back_on_a_narrow_stdout():
     with contextlib.redirect_stdout(_cp1252_stdout()):
-        assert glyph("✓", "OK") == "OK"
+        assert glyph("\u2713", "OK") == "OK"
     assert glyph("x", "OK") == "x"
 
 
 def test_doc_reads_utf8_with_bom_and_prints_on_cp1252(tmp_path):
     cpp = tmp_path / "Bom.cpp"
-    cpp.write_bytes("﻿// Model: p(sigma) ∝ 1/sigma\n"
+    cpp.write_bytes("\ufeff// Model: p(sigma) \u221d 1/sigma\n"
                     "class Bom {};\n".encode("utf-8"))
     out = _cp1252_stdout()
     with contextlib.redirect_stdout(out):
