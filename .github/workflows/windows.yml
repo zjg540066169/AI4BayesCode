@@ -27,6 +27,9 @@ jobs:
       fail-fast: false
       matrix:
         shell: [powershell, pwsh, bash]
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}   # the shell under test; other steps name theirs
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,7 +45,6 @@ jobs:
           python -m pip install --quiet pyyaml
       - name: Install and update (PowerShell)
         if: matrix.shell != 'bash'
-        shell: ${{ matrix.shell }}
         run: |
           $ErrorActionPreference = 'Continue'   # the interactive default
           "PowerShell $($PSVersionTable.PSVersion)  HOME=$HOME" | Out-File -Append -Encoding utf8 ci-logs/install.txt
@@ -53,7 +55,6 @@ jobs:
           git clone --depth 1 https://github.com/${{ github.repository }}.git "${{ runner.temp }}/published" 2>&1 | Out-File -Append -Encoding utf8 ci-logs/install.txt
       - name: Install and update (Git Bash)
         if: matrix.shell == 'bash'
-        shell: bash
         run: |
           echo "bash $BASH_VERSION  HOME=$HOME  ($(cygpath -w "$HOME"))" | tee -a ci-logs/install.txt
           git clone --depth 1 --branch ${{ github.head_ref || github.ref_name }} https://github.com/${{ github.repository }}.git "$HOME/.claude/skills/AI4BayesCode" 2>&1 | tee -a ci-logs/install.txt
