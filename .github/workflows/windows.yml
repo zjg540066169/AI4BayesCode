@@ -74,12 +74,14 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force ci-logs | Out-Null
+          # Under the profile on C:, as for a user whose account name has a
+          # space and Chinese characters. R needs an 8.3 short name for a temp
+          # folder with a space (it refuses to start otherwise), so record
+          # whether C: has them.
+          fsutil 8dot3name query C: | Out-File -Encoding utf8 ci-logs/8dot3.txt
           $odd = "x " + [char]0x7EDF + [char]0x8BA1     # "x 统计"
-          $lib = Join-Path $env:RUNNER_TEMP "R lib $odd"
-          # No space in the temp folder: R itself refuses to start then unless
-          # Windows can give it a short (8.3) name, which the runner's D: drive
-          # does not. A user's C: drive normally can.
-          $tmp = Join-Path $env:RUNNER_TEMP ("tmp" + [char]0x7EDF + [char]0x8BA1)
+          $lib = Join-Path $env:USERPROFILE "R lib $odd"
+          $tmp = Join-Path $env:USERPROFILE "tmp $odd"
           New-Item -ItemType Directory -Force $lib, $tmp | Out-Null
           $env:TMP = $tmp; $env:TEMP = $tmp; $env:TMPDIR = $tmp
           $env:AI4B_LIB = $lib
@@ -139,9 +141,11 @@ jobs:
         if: matrix.part == 1
         shell: pwsh
         run: |
+          # Under the profile on C:, as for a user whose account name has a
+          # space and Chinese characters (the D: work drive has no 8.3 names).
           $odd = "x " + [char]0x7EDF + [char]0x8BA1
-          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP "app data $odd"
-          $env:TMP = Join-Path $env:RUNNER_TEMP "tmp $odd"; $env:TEMP = $env:TMP
+          $env:LOCALAPPDATA = Join-Path $env:USERPROFILE "app data $odd"
+          $env:TMP = Join-Path $env:USERPROFILE "tmp $odd"; $env:TEMP = $env:TMP
           New-Item -ItemType Directory -Force $env:LOCALAPPDATA, $env:TMP | Out-Null
           python tools/ci/py_paths_check.py *>&1 | Tee-Object -FilePath ci-logs/paths.txt
           exit $LASTEXITCODE
