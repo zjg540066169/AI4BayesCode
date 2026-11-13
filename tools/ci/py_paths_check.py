@@ -13,6 +13,9 @@ import numpy as np
 import AI4BayesCode
 from AI4BayesCode.source import _user_cache_dir
 
+# This script prints the Chinese folder names it tests; the console code page
+# of the CI runner cannot show them.
+sys.stdout.reconfigure(errors="backslashreplace")
 print("cache:", _user_cache_dir())
 print("temp:", tempfile.gettempdir())
 
