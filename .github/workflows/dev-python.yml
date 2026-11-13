@@ -1,0 +1,104 @@
+name: Dev Windows Python
+
+# Temporary, for iterating on the Windows Python build without waiting for the
+# long R jobs. Each job pushes its logs to its own ci-logs-* branch.
+
+on:
+  push:
+    branches: [win-py]
+
+permissions:
+  contents: write
+
+jobs:
+  r-paths:
+    name: R, unusual paths
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::Rcpp
+            any::RcppArmadillo
+      - name: Library and temp folder with a space and Chinese characters
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ci-logs | Out-Null
+          $odd = "x " + [char]0x7EDF + [char]0x8BA1     # "x 统计"
+          $lib = Join-Path $env:RUNNER_TEMP "R lib $odd"
+          $tmp = Join-Path $env:RUNNER_TEMP "tmp $odd"
+          New-Item -ItemType Directory -Force $lib, $tmp | Out-Null
+          $env:TMP = $tmp; $env:TEMP = $tmp; $env:TMPDIR = $tmp
+          $env:AI4B_LIB = $lib
+          R CMD INSTALL -l "$lib" r-pkg *>&1 | Tee-Object -FilePath ci-logs/install.txt
+          Rscript tools/ci/r_paths_check.R *>&1 | Tee-Object -FilePath ci-logs/check.txt
+          exit $LASTEXITCODE
+      - name: Publish logs
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/ci/publish_logs.sh ci-logs-r-paths ci-logs
+
+  python:
+    name: Python (${{ matrix.part }}/4)
+    runs-on: windows-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # The toolchain a Windows user installs: MSYS2 in its default folder,
+      # C:\msys64, with the three UCRT64 packages the error message names.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          release: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-armadillo
+            mingw-w64-ucrt-x86_64-openblas
+      - name: Install
+        shell: bash
+        run: |
+          mkdir -p ci-logs
+          python -m pip install --upgrade pip
+          pip install numpy pybind11 pytest scipy pyyaml matplotlib networkx arviz
+          pip install -e ./python --no-deps 2>&1 | tee ci-logs/install.txt
+          ls /c/msys64/ucrt64/bin/g++.exe | tee ci-logs/compilers.txt
+      - name: Unit tests
+        if: matrix.part == 1
+        shell: bash
+        run: python -m pytest python/tests -q -p no:cacheprovider 2>&1 | tee ci-logs/pytest.txt
+      - name: Compile from a profile path with a space and Chinese characters
+        if: matrix.part == 1
+        shell: pwsh
+        run: |
+          $odd = "x " + [char]0x7EDF + [char]0x8BA1
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP "app data $odd"
+          $env:TMP = Join-Path $env:RUNNER_TEMP "tmp $odd"; $env:TEMP = $env:TMP
+          New-Item -ItemType Directory -Force $env:LOCALAPPDATA, $env:TMP | Out-Null
+          python tools/ci/py_paths_check.py *>&1 | Tee-Object -FilePath ci-logs/paths.txt
+          exit $LASTEXITCODE
+      - name: Run the example usage blocks
+        if: always()
+        shell: bash
+        run: python tools/ci/run_examples.py --part ${{ matrix.part }} --n-parts 4 --log-dir ci-logs/examples --timeout 5400 2>&1 | tee ci-logs/summary.txt
+      - name: Publish logs
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/ci/publish_logs.sh ci-logs-py-${{ matrix.part }} ci-logs
+

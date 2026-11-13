@@ -20,7 +20,11 @@ git --version
 
 If git is missing, ask the user to install it. Windows: Git for Windows, for example
 `winget install --id Git.Git -e --source winget`, then open a new terminal. macOS:
-`xcode-select --install`. Linux: the distribution's package manager.
+`xcode-select --install`. Linux: the distribution's package manager. Alternatively, if the
+AI4BayesCode R or Python package is installed, it can install the skill without git:
+`Rscript -e "AI4BayesCode::ai4bayescode_install_skill()"` or
+`python -c "import AI4BayesCode; AI4BayesCode.install_skill()"`. Both work on any OS and
+install for both agents. Pass `"claude"` or `"codex"` to install for one of them only.
 
 The GENERATED samplers are compiled through the R or the Python package. One of them is
 needed before the first sampler can be validated, not for the install:
