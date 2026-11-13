@@ -74,7 +74,10 @@ def main(argv: list[str]) -> int:
     head = None
     if "--git-head" in argv:
         i = argv.index("--git-head")
-        head = argv[i + 1]
+        head = argv[i + 1] if i + 1 < len(argv) else ""
+        if not head:
+            print("--git-head needs a commit hash (an empty one would skip the git checks)")
+            return 2
         argv = argv[:i] + argv[i + 2:]
     report_only = []
     if "--report-only" in argv:

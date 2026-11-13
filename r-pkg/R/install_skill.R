@@ -51,31 +51,21 @@
     if (file.exists(d)) normalizePath(d, winslash = "/", mustWork = TRUE) else d
 }
 
-# Put a copy of `entries` (the files of the downloaded skill) at `d` without
-# ever leaving `d` half deleted. The copy is made beside the skills folder,
-# the old folder is moved aside in one step (on Windows that fails as a whole
-# while a file in it is open), the copy is moved in, and only then is the old
-# folder deleted. Working beside the skills folder keeps every move on one
-# volume and out of the folder the agent lists skills from.
+# One attempt at putting a copy of `entries` at `d`, with the staging folders
+# in `work`. FALSE when it failed before anything at `d` changed, so that
+# another `work` can be tried.
 #' @keywords internal
 #' @noRd
-.ai4b_replace_with_copy <- function(entries, d) {
-    dir.create(dirname(d), recursive = TRUE, showWarnings = FALSE)
-    work <- dirname(normalizePath(dirname(d), winslash = "/", mustWork = TRUE))
-    tag  <- paste0(Sys.getpid(), "-", format(as.numeric(Sys.time()) * 1e6, scientific = FALSE))
-    new  <- file.path(work, paste0(".AI4BayesCode-new-", tag))
-    old  <- file.path(work, paste0(".AI4BayesCode-old-", tag))
-    dir.create(new)
-    ok <- file.copy(entries, new, recursive = TRUE, copy.date = TRUE)
-    if (!all(ok) || !file.exists(file.path(new, "SKILL.md"))) {
+.ai4b_swap_in <- function(entries, d, work) {
+    tag <- paste0(Sys.getpid(), "-", format(as.numeric(Sys.time()) * 1e6, scientific = FALSE))
+    new <- file.path(work, paste0(".AI4BayesCode-new-", tag))
+    old <- file.path(work, paste0(".AI4BayesCode-old-", tag))
+    if (!dir.create(new, showWarnings = FALSE)) return(FALSE)
+    ok <- all(file.copy(entries, new, recursive = TRUE, copy.date = TRUE)) &&
+        file.exists(file.path(new, "SKILL.md"))
+    if (!ok || (dir.exists(d) && !isTRUE(suppressWarnings(file.rename(d, old))))) {
         unlink(new, recursive = TRUE, force = TRUE)
-        stop("Copying the skill next to '", d, "' failed.", call. = FALSE)
-    }
-    if (dir.exists(d) && !isTRUE(suppressWarnings(file.rename(d, old)))) {
-        unlink(new, recursive = TRUE, force = TRUE)
-        stop("Could not replace '", d, "'. Close any program that uses it (an ",
-             "editor, a terminal whose current folder is inside it), then run this ",
-             "again. The installed skill is unchanged.", call. = FALSE)
+        return(FALSE)
     }
     if (!isTRUE(suppressWarnings(file.rename(new, d)))) {
         if (dir.exists(old)) file.rename(old, d)
@@ -89,7 +79,51 @@
         if (dir.exists(old))
             message("  Note: the old copy could not be deleted. Delete ", old, " by hand.")
     }
-    invisible(d)
+    TRUE
+}
+
+# Put a copy of `entries` (the files of the downloaded skill) at `d` without
+# ever leaving `d` half deleted. The copy is made in a staging folder, the old
+# folder is moved aside in one step (on Windows that fails as a whole while a
+# file in it is open), the copy is moved in, and only then is the old folder
+# deleted. The staging folders go beside the skills folder, out of the folder
+# the agent lists skills from; when that place cannot be written or is another
+# volume (a skills folder mounted on its own), they go inside the skills
+# folder.
+#' @keywords internal
+#' @noRd
+.ai4b_replace_with_copy <- function(entries, d) {
+    dir.create(dirname(d), recursive = TRUE, showWarnings = FALSE)
+    skills <- normalizePath(dirname(d), winslash = "/", mustWork = TRUE)
+    for (work in unique(c(dirname(skills), skills)))
+        if (.ai4b_swap_in(entries, d, work)) return(invisible(d))
+    stop("Could not replace '", d, "'. If a program uses it (an editor, a terminal ",
+         "whose current folder is inside it), close it, then run this again. The ",
+         "installed skill is unchanged.", call. = FALSE)
+}
+
+# Download the skill at `ref` from GitHub and unpack it into `tmp`. Returns
+# the unpacked folder that holds SKILL.md.
+#' @keywords internal
+#' @noRd
+.ai4b_fetch_skill <- function(ref, tmp, quiet) {
+    zip <- file.path(tmp, "skill.zip")
+    url <- sprintf("https://github.com/%s/archive/%s.zip", .AI4B_SKILL_REPO, ref)
+    if (!quiet) message("Downloading the AI4BayesCode skill (", ref, ") from GitHub ...")
+    old <- options(timeout = max(600, getOption("timeout")))
+    on.exit(options(old), add = TRUE)
+    got <- tryCatch(utils::download.file(url, zip, mode = "wb", quiet = TRUE),
+                    error = function(e) conditionMessage(e),
+                    warning = function(w) conditionMessage(w))
+    if (!(is.numeric(got) && got == 0) || !file.exists(zip))
+        stop("Could not download ", url, "\n  ", got,
+             "\n  Check the network connection (and any proxy), then retry.",
+             call. = FALSE)
+    utils::unzip(zip, exdir = tmp)
+    top <- setdiff(list.dirs(tmp, recursive = FALSE), tmp)
+    if (length(top) != 1L || !file.exists(file.path(top, "SKILL.md")))
+        stop("The download from ", url, " does not contain the skill.", call. = FALSE)
+    top
 }
 
 #' Install the AI4BayesCode skill for Claude Code or Codex
@@ -142,22 +176,7 @@ ai4bayescode_install_skill <- function(agent = c("claude", "codex"), ref = "main
     tmp <- tempfile("ai4b_skill_")
     dir.create(tmp)
     on.exit(unlink(tmp, recursive = TRUE, force = TRUE), add = TRUE)
-    zip <- file.path(tmp, "skill.zip")
-    url <- sprintf("https://github.com/%s/archive/%s.zip", .AI4B_SKILL_REPO, ref)
-    if (!quiet) message("Downloading the AI4BayesCode skill (", ref, ") from GitHub ...")
-    old <- options(timeout = max(600, getOption("timeout")))
-    on.exit(options(old), add = TRUE)
-    got <- tryCatch(utils::download.file(url, zip, mode = "wb", quiet = TRUE),
-                    error = function(e) conditionMessage(e),
-                    warning = function(w) conditionMessage(w))
-    if (!(is.numeric(got) && got == 0) || !file.exists(zip))
-        stop("Could not download ", url, "\n  ", got,
-             "\n  Check the network connection (and any proxy), then retry.",
-             call. = FALSE)
-    utils::unzip(zip, exdir = tmp)
-    top <- setdiff(list.dirs(tmp, recursive = FALSE), tmp)
-    if (length(top) != 1L || !file.exists(file.path(top, "SKILL.md")))
-        stop("The download from ", url, " does not contain the skill.", call. = FALSE)
+    top <- .ai4b_fetch_skill(ref, tmp, quiet)
     entries <- list.files(top, all.files = TRUE, no.. = TRUE, full.names = TRUE)
 
     for (d in dests) .ai4b_replace_with_copy(entries, .ai4b_real_dest(d))

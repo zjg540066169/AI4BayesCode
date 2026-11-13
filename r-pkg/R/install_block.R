@@ -23,19 +23,24 @@
     custom <- Sys.getenv("AI4BAYESCODE_DATA_HOME")
     if (nzchar(custom)) return(file.path(custom, "blocks_download"))
     d <- file.path(.ai4b_home_dir(), ".AI4BayesCode", "blocks_download")
-    # Earlier versions kept R's blocks under Documents on Windows: move them.
+    # Earlier versions kept R's blocks under Documents on Windows: move each
+    # one that the shared store lacks, and drop the old folder once empty.
     legacy <- file.path(path.expand("~"), ".AI4BayesCode", "blocks_download")
-    if (.Platform$OS.type == "windows" && !dir.exists(d) && dir.exists(legacy) &&
+    if (.Platform$OS.type == "windows" && dir.exists(legacy) &&
         normalizePath(legacy, winslash = "/") != normalizePath(d, winslash = "/",
                                                                 mustWork = FALSE)) {
-        dir.create(dirname(d), recursive = TRUE, showWarnings = FALSE)
-        if (!isTRUE(suppressWarnings(file.rename(legacy, d)))) {
-            if (is.null(getOption("AI4BayesCode.legacy_blocks_noted"))) {
-                options(AI4BayesCode.legacy_blocks_noted = TRUE)
-                message("Installed blocks are still in ", legacy, ". Move that ",
-                        "folder to ", d, " so that R and Python share them.")
-            }
-            return(legacy)
+        dir.create(d, recursive = TRUE, showWarnings = FALSE)
+        for (b in list.files(legacy, all.files = TRUE, no.. = TRUE)) {
+            to <- file.path(d, b)
+            if (!file.exists(to)) suppressWarnings(file.rename(file.path(legacy, b), to))
+        }
+        if (!length(list.files(legacy, all.files = TRUE, no.. = TRUE))) {
+            unlink(legacy, recursive = TRUE)
+        } else if (is.null(getOption("AI4BayesCode.legacy_blocks_noted"))) {
+            options(AI4BayesCode.legacy_blocks_noted = TRUE)
+            message("Some installed blocks are still in ", legacy, ". Move them to ",
+                    d, " (or delete them if a copy is already there) so that R and ",
+                    "Python share them.")
         }
     }
     d

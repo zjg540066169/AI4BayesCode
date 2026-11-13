@@ -47,3 +47,23 @@ def test_same_build_from_another_cache_dir(loaded, tmp_path):
 def test_a_different_build_is_refused(loaded):
     with pytest.raises(RuntimeError, match="different build"):
         src.source(CODE + "// changed\n", cache_dir="build", quiet=True)
+
+
+def test_a_local_header_edit_changes_the_signature(tmp_path):
+    # A header included with quotes from the .cpp's own folder is not on the
+    # -I path, so its edits must reach the signature some other way.
+    import os
+    (tmp_path / "inner.hpp").write_text("inline int inner() { return 1; }\n", encoding="utf-8")
+    hdr = tmp_path / "helper.hpp"
+    hdr.write_text('#include "inner.hpp"\ninline int helper() { return inner(); }\n', encoding="utf-8")
+    cpp = tmp_path / "Model.cpp"
+    text = '#include "helper.hpp"\n#include "missing.hpp"\n' + CODE
+    cpp.write_text(text, encoding="utf-8")
+    before = src._local_include_fingerprint(cpp, text)
+    inner = tmp_path / "inner.hpp"
+    inner.write_text("inline int inner() { return 2; }\n", encoding="utf-8")
+    st = os.stat(inner)
+    os.utime(inner, ns=(st.st_atime_ns, st.st_mtime_ns + 2_000_000_000))
+    after = src._local_include_fingerprint(cpp, text)
+    assert before and after and before != after
+    assert src._local_include_fingerprint(cpp, CODE) == ""

@@ -104,7 +104,8 @@ def _old_skill(d: Path) -> None:
 
 
 def _leftovers(d: Path) -> list:
-    return sorted(p.name for p in d.parent.parent.glob(".AI4BayesCode-*"))
+    """Staging folders left beside or inside the skills folder."""
+    return sorted(p.name for w in (d.parent.parent, d.parent) for p in w.glob(".AI4BayesCode-*"))
 
 
 def test_install_skill_replaces_an_old_copy(monkeypatch, tmp_path):
@@ -167,3 +168,19 @@ def test_install_skill_leaves_a_linked_git_checkout_alone(monkeypatch, tmp_path)
     with pytest.raises(FileExistsError, match="git checkout"):
         inst.install_skill("claude", quiet=True)
     assert (target / ".git").is_dir() and d.is_symlink()
+
+
+@pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                    reason="needs POSIX permissions that apply to this user")
+def test_install_skill_stages_inside_the_skills_folder_when_beside_it_fails(monkeypatch, tmp_path):
+    # A skills folder that is its own mount, or whose parent cannot be
+    # written: the staging folders go inside the skills folder instead.
+    d = _fake_download(monkeypatch, tmp_path)
+    _old_skill(d)
+    os.chmod(d.parent.parent, 0o555)
+    try:
+        inst.install_skill("claude", quiet=True)
+    finally:
+        os.chmod(d.parent.parent, 0o755)
+    assert (d / "VERSION.txt").read_text(encoding="utf-8") == "new"
+    assert _leftovers(d) == []

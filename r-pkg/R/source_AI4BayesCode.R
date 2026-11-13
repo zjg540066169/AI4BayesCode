@@ -353,22 +353,36 @@ ai4bayescode_source <- function(code,
 # the same folder, so that Rcpp's dependency scan finds the file's local
 # headers (and compiles their companion .cpp files) as it would for the
 # original. It is rewritten only when the text changes, since Rcpp rebuilds
-# whenever the file is newer than its last build. In a read-only folder the
-# copy goes under tempdir(), keyed by content.
+# whenever the file is newer than its last build. A new copy is written under
+# a private name and then renamed into place, so R processes that stage the
+# same file at once (parallel workers) never see a half-written copy, and it
+# is always writable, whatever the mode of the original. In a read-only folder
+# the copy goes under tempdir(), keyed by content.
 # ---------------------------------------------------------------------------
 #' @keywords internal
 #' @noRd
 .ai4b_stage_spaced_file <- function(cpp_file) {
     name <- gsub("[[:space:]]+", "_", basename(cpp_file))
-    dst <- file.path(dirname(cpp_file), paste0(".ai4b_", name))
-    same <- file.exists(dst) &&
-        identical(unname(tools::md5sum(dst)), unname(tools::md5sum(cpp_file)))
-    if (!same && !isTRUE(suppressWarnings(file.copy(cpp_file, dst, overwrite = TRUE)))) {
-        key <- unname(tools::md5sum(cpp_file))
-        dir <- file.path(tempdir(), "ai4b_src", substr(key, 1L, 16L))
-        dir.create(dir, recursive = TRUE, showWarnings = FALSE)
-        dst <- file.path(dir, name)
-        if (!file.exists(dst)) file.copy(cpp_file, dst)
+    dst  <- file.path(dirname(cpp_file), paste0(".ai4b_", name))
+    key  <- unname(tools::md5sum(cpp_file))
+    same <- function() file.exists(dst) && identical(unname(tools::md5sum(dst)), key)
+    if (!same()) {
+        tmp <- tempfile(".ai4b_tmp_", tmpdir = dirname(cpp_file), fileext = ".tmp")
+        ok  <- isTRUE(suppressWarnings(file.copy(cpp_file, tmp, copy.mode = FALSE)))
+        mv  <- function() isTRUE(suppressWarnings(file.rename(tmp, dst)))
+        if (ok && !mv()) {
+            # Windows does not rename over a read-only file (an old copy of a
+            # read-only original): remove it, then try once more.
+            unlink(dst, force = TRUE)
+            ok <- mv()
+        }
+        if (file.exists(tmp)) unlink(tmp, force = TRUE)
+        if (!ok && !same()) {
+            dir <- file.path(tempdir(), "ai4b_src", substr(key, 1L, 16L))
+            dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+            dst <- file.path(dir, name)
+            if (!file.exists(dst)) file.copy(cpp_file, dst, copy.mode = FALSE)
+        }
     }
     normalizePath(dst, winslash = "/", mustWork = TRUE)
 }
@@ -395,8 +409,12 @@ ai4bayescode_source <- function(code,
     acp <- if (!is.null(read_reg))
         tryCatch(read_reg("SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage",
                           "HLM")[["ACP"]], error = function(e) NULL)
-    !is.null(acp) &&
-        (identical(acp, "65001") || !is.na(iconv(enc2utf8(path), "UTF-8", paste0("CP", acp))))
+    if (is.null(acp)) return(FALSE)
+    if (identical(acp, "65001")) return(TRUE)
+    # A round trip, since iconv may map a character it cannot spell to a
+    # similar one (a best fit), which would name a different folder.
+    there <- iconv(enc2utf8(path), "UTF-8", paste0("CP", acp))
+    !is.na(there) && identical(iconv(there, paste0("CP", acp), "UTF-8"), enc2utf8(path))
 }
 
 # ---------------------------------------------------------------------------

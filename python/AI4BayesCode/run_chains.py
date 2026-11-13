@@ -98,7 +98,7 @@ def _chain_worker(factory: Callable[[int], Any], seed: int,
         # (hist=None + "error") so the surviving chains stay usable.
         warnings.warn(f"run_chains: chain seed={seed} failed: {e}")
         return {"seed": seed, "wall": time.time() - t0, "hist": None,
-                "error": str(e)}
+                "error": str(e), "error_type": type(e).__name__}
 
 
 # The active factory for the fork path. Set in the parent immediately before the
@@ -107,6 +107,9 @@ def _chain_worker(factory: Callable[[int], Any], seed: int,
 # R's mclapply). Only touched on the fork path and cleared right after.
 _ACTIVE_FACTORY: Optional[Callable[[int], Any]] = None
 
+
+# Errors a spawned worker raises when it cannot rebuild the factory.
+_REBUILD_ERRORS = ("NameError", "AttributeError", "ImportError", "ModuleNotFoundError")
 
 _BLAS_THREAD_VARS = ("VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS",
                      "OMP_NUM_THREADS", "MKL_NUM_THREADS")
@@ -307,10 +310,15 @@ def run_chains(
                     f"({type(e).__name__}: {e}); running the {len(seeds)} chains "
                     "sequentially instead.")
                 results = None
-            if results is not None and all("error" in r for r in results):
-                # Run the first chain here. If it works, the workers could not
-                # rebuild the factory, so run the rest here as well; if it fails
-                # too, the model itself fails and the results stand as they are.
+            if results is not None and all(r.get("error_type") in _REBUILD_ERRORS
+                                           for r in results):
+                # Every worker failed the way a worker that cannot rebuild the
+                # factory fails (a name defined only under the __main__ guard,
+                # say). Run the first chain here: if it works, run the rest here
+                # as well; if it fails too, the model itself fails and the
+                # results stand as they are.
+                if verbose:
+                    print(f"[AI4BayesCode.run_chains] chain seed={args[0][1]} ...")
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
                     first = _chain_worker(*args[0])
@@ -319,7 +327,11 @@ def run_chains(
                         "run_chains: every parallel chain failed in its worker (on "
                         "Windows the factory and everything it uses must be defined at "
                         "module top level); running the chains sequentially instead.")
-                    results = [first] + [_chain_worker(*a) for a in args[1:]]
+                    results = [first]
+                    for a in args[1:]:
+                        if verbose:
+                            print(f"[AI4BayesCode.run_chains] chain seed={a[1]} ...")
+                        results.append(_chain_worker(*a))
 
     if results is None:
         results = _sequential()

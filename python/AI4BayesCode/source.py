@@ -34,6 +34,7 @@ import importlib.resources
 import importlib.util
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -533,8 +534,38 @@ def _contributed_block_fingerprint(flags: Iterable[str], skip: Iterable[str] = (
     return h.hexdigest()
 
 
+_LOCAL_INCLUDE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
+
+
+def _local_include_fingerprint(cpp_path: Path, text: str) -> str:
+    """(path, size, mtime) of each header the file includes with quotes from
+    its own folder, and of the headers those include in turn. The -I trees
+    are covered by _contributed_block_fingerprint; these are not."""
+    h = hashlib.sha256()
+    seen = set()
+    todo = [(Path(cpp_path).parent, text)]
+    while todo:
+        folder, src = todo.pop()
+        for name in _LOCAL_INCLUDE.findall(src):
+            p = folder / name
+            try:
+                if not p.is_file():
+                    continue
+                p = p.resolve()
+                if p in seen:
+                    continue
+                st = p.stat()
+                inner = p.read_text(encoding="utf-8-sig", errors="replace")
+            except OSError:
+                continue
+            seen.add(p)
+            h.update(f"{p}\x00{st.st_size}\x00{st.st_mtime_ns}\x00".encode())
+            todo.append((p.parent, inner))
+    return h.hexdigest()[:16] if seen else ""
+
+
 def _signature(text: str, flags: Iterable[str], libs: Iterable[str], cxx_id: str,
-               skip_roots: Iterable[str] = ()) -> str:
+               skip_roots: Iterable[str] = (), local_fp: str = "") -> str:
     h = hashlib.sha256()
     h.update(text.encode())
     flags = list(flags)
@@ -545,6 +576,8 @@ def _signature(text: str, flags: Iterable[str], libs: Iterable[str], cxx_id: str
     h.update(cxx_id.encode())   # compiler-version-aware (toolchain bump invalidates)
     h.update(b"\x00")
     h.update(_contributed_block_fingerprint(flags, skip_roots).encode())
+    if local_fp:
+        h.update(b"\x00" + local_fp.encode())
     return h.hexdigest()[:16]
 
 
@@ -603,7 +636,8 @@ def source(
     # include root, which on Windows is the toolchain's whole sysroot.
     arma = _find_armadillo(cxx)
     sig = _signature(text, flags, libs, _compiler_id(cxx) + "|" + _arma_fingerprint(arma),
-                     skip_roots=[str(arma)] if arma is not None else [])
+                     skip_roots=[str(arma)] if arma is not None else [],
+                     local_fp=_local_include_fingerprint(cpp_path, text))
 
     cache = Path(cache_dir) if cache_dir is not None else _user_cache_dir()
     cache.mkdir(parents=True, exist_ok=True)

@@ -65,29 +65,23 @@ def _remove_tree(d: Path) -> None:
         shutil.rmtree(d, onerror=clear_and_retry)
 
 
-def _replace_with_copy(src: Path, d: Path) -> None:
-    """Put a copy of ``src`` at ``d`` without ever leaving ``d`` half deleted.
+class _Untouched(Exception):
+    """A swap failed before anything at the destination changed."""
 
-    ``d`` is the real folder (see install_skill), never a link. The copy is
-    made beside the skills folder, the old folder is moved aside in one step
-    (on Windows that fails as a whole while a file in it is open), the copy is
-    moved in, and only then is the old folder deleted. Working beside the
-    skills folder keeps every move on one volume and out of the folder the
-    agent lists skills from."""
-    d.parent.mkdir(parents=True, exist_ok=True)
-    work = d.parent.parent
+
+def _swap_in(src: Path, d: Path, work: Path) -> None:
+    """One attempt at putting a copy of ``src`` at ``d``, with the staging
+    folders in ``work``. Raises _Untouched if it fails before ``d`` changes."""
     tag = f"{os.getpid()}-{time.time_ns()}"
     new, old = work / f".AI4BayesCode-new-{tag}", work / f".AI4BayesCode-old-{tag}"
-    shutil.copytree(src, new)
-    if d.exists():
-        try:
+    try:
+        shutil.copytree(src, new)
+        if d.exists():
             os.replace(d, old)
-        except OSError as exc:
+    except OSError as exc:
+        if new.exists():
             _remove_tree(new)
-            raise RuntimeError(
-                f"Could not replace {d}: {exc}\n  Close any program that uses it (an "
-                "editor, a terminal whose current folder is inside it), then run this "
-                "again. The installed skill is unchanged.") from exc
+        raise _Untouched(exc) from exc
     try:
         os.replace(new, d)
     except OSError:
@@ -100,6 +94,32 @@ def _replace_with_copy(src: Path, d: Path) -> None:
             _remove_tree(old)
         except OSError:
             print(f"  Note: the old copy could not be deleted. Delete {old} by hand.")
+
+
+def _replace_with_copy(src: Path, d: Path) -> None:
+    """Put a copy of ``src`` at ``d`` without ever leaving ``d`` half deleted.
+
+    ``d`` is the real folder (see install_skill), never a link. The copy is
+    made in a staging folder, the old folder is moved aside in one step (on
+    Windows that fails as a whole while a file in it is open), the copy is
+    moved in, and only then is the old folder deleted. The staging folders go
+    beside the skills folder, out of the folder the agent lists skills from;
+    when that place cannot be written or is another volume (a skills folder
+    mounted on its own), they go inside the skills folder."""
+    d.parent.mkdir(parents=True, exist_ok=True)
+    errors = []
+    for work in dict.fromkeys((d.parent.parent, d.parent)):
+        try:
+            _swap_in(src, d, work)
+            return
+        except _Untouched as exc:
+            errors.append(exc.args[0])
+    exc = errors[-1]
+    advice = ("\n  Close any program that uses it (an editor, a terminal whose current "
+              "folder is inside it), then run this again." if isinstance(exc, PermissionError)
+              else "")
+    raise RuntimeError(f"Could not replace {d}: {exc}{advice}\n  The installed skill "
+                       "is unchanged.") from exc
 
 
 def install_skill(agent=_AGENTS, ref: str = "main", quiet: bool = False,

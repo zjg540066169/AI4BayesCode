@@ -21,9 +21,10 @@ concurrency:
 
 env:
   BRANCH: ${{ github.head_ref || github.ref_name }}
-  # What the install functions download from this repository. A pull request
-  # from a fork has its branch only in the fork, so they take its base branch.
-  INSTALL_REF: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && github.base_ref || github.head_ref || github.ref_name }}
+  # The ref the install functions download. They always download from
+  # zjg540066169/AI4BayesCode, so a branch that lives anywhere else (a fork, a
+  # pull request from one) is replaced by the base branch, or main.
+  INSTALL_REF: ${{ (github.event.pull_request.head.repo.full_name || github.repository) == 'zjg540066169/AI4BayesCode' && (github.head_ref || github.ref_name) || github.base_ref || 'main' }}
 
 jobs:
   website:
@@ -71,7 +72,8 @@ jobs:
         shell: bash
         run: |
           python -m pip install --quiet pyyaml
-          python repo/tools/ci/check_skill_install.py --git-head "$(git ls-remote "$URL" "refs/heads/$BRANCH" | cut -f1)"
+          head=$(git ls-remote --exit-code "$URL" "refs/heads/$BRANCH" | cut -f1)
+          python repo/tools/ci/check_skill_install.py --git-head "$head"
       - name: Go back one commit, as if a new version came out since
         shell: bash
         run: |
@@ -84,7 +86,9 @@ jobs:
         run: git init -q "$HOME/.agents/skills/AI4BayesCode"; git -C "$HOME/.agents/skills/AI4BayesCode" pull -q --ff-only ${{ env.URL }} ${{ env.BRANCH }}
       - name: Check the update
         shell: bash
-        run: python repo/tools/ci/check_skill_install.py --git-head "$(git ls-remote "$URL" "refs/heads/$BRANCH" | cut -f1)"
+        run: |
+          head=$(git ls-remote --exit-code "$URL" "refs/heads/$BRANCH" | cut -f1)
+          python repo/tools/ci/check_skill_install.py --git-head "$head"
       - name: Start over from a shallow clone of the old main, as the earlier instructions made
         shell: bash
         run: |
@@ -100,7 +104,9 @@ jobs:
         run: git init -q "$HOME/.agents/skills/AI4BayesCode"; git -C "$HOME/.agents/skills/AI4BayesCode" pull -q --ff-only ${{ env.URL }} ${{ env.BRANCH }}
       - name: Check the update of the old clone
         shell: bash
-        run: python repo/tools/ci/check_skill_install.py --git-head "$(git ls-remote "$URL" "refs/heads/$BRANCH" | cut -f1)"
+        run: |
+          head=$(git ls-remote --exit-code "$URL" "refs/heads/$BRANCH" | cut -f1)
+          python repo/tools/ci/check_skill_install.py --git-head "$head"
 
   from-r:
     name: ai4bayescode_install_skill() (${{ matrix.os }})
