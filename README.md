@@ -39,16 +39,6 @@ If you installed with older instructions, delete the old `AI4BayesCode` folder
 before you run it. For Codex, also delete the old copy in `~/.codex/skills`, or
 Codex lists the skill twice.
 
-**Without git, or from any terminal:** once the R or Python package below is
-installed, one call puts the skill in place for both Claude Code and Codex, the
-same way on Windows, macOS and Linux. Run it again to update.
-```r
-AI4BayesCode::ai4bayescode_install_skill()
-```
-```python
-import AI4BayesCode; AI4BayesCode.install_skill()
-```
-
 For Cursor, the AI-assisted install, or letting your agent install it for you,
 see `AI_AGENT_INSTALL.md`.
 

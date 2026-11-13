@@ -153,6 +153,7 @@
 #' ai4bayescode_install_skill()           # Claude Code and Codex
 #' ai4bayescode_install_skill("claude")   # Claude Code only
 #' }
+#' @keywords internal
 #' @export
 ai4bayescode_install_skill <- function(agent = c("claude", "codex"), ref = "main",
                                        quiet = FALSE, force = FALSE) {

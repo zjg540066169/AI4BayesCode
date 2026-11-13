@@ -46,3 +46,4 @@ ai4bayescode_install_skill()           # Claude Code and Codex
 ai4bayescode_install_skill("claude")   # Claude Code only
 }
 }
+\keyword{internal}

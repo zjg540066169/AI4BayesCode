@@ -5,9 +5,6 @@
   has spaces or non-ASCII characters. On Windows, samplers take `exp()`,
   `log()` and `pow()` from the Universal C Runtime, which is several times
   faster than the versions Rtools links by default.
-* `ai4bayescode_install_skill()` installs the AI4BayesCode agent skill for
-  Claude Code and Codex without git, the same way on Windows, macOS and
-  Linux. Run it again to update.
 * `ai4bayescode_source()` compiles a file whose name contains a space on
   every system, from a copy named `.ai4b_<name>` beside it.
 * On Windows, the per-user block library is now in the profile folder, shared

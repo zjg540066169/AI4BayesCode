@@ -90,7 +90,6 @@ __all__ = [
     "stream_check",
     "vendored_include_path",
     "install_block",
-    "install_skill",
     "available_blocks",
     "installed_blocks",
     "remove_block",
