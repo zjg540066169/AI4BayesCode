@@ -30,9 +30,9 @@ def library(tmp_path, monkeypatch):
     root = tmp_path / "data_home"
     for b in ("blockA", "blockB"):
         (root / "blocks_download" / b).mkdir(parents=True)
-        (root / "blocks_download" / b / f"{b}.hpp").write_text("// x\n")
+        (root / "blocks_download" / b / f"{b}.hpp").write_text("// x\n", encoding="utf-8")
     (root / "PRECIOUS_USER_DATA").mkdir(parents=True)
-    (root / "PRECIOUS_USER_DATA" / "keepme.txt").write_text("do not delete\n")
+    (root / "PRECIOUS_USER_DATA" / "keepme.txt").write_text("do not delete\n", encoding="utf-8")
     monkeypatch.setenv("AI4BAYESCODE_DATA_HOME", str(root))
     # installed_blocks() reports BOTH tiers, and the local tier is relative to
     # the working directory -- so the cwd has to be isolated too, or the repo's
@@ -50,6 +50,9 @@ BAD_NAMES = [
     "../PRECIOUS_USER_DATA",
     "a/b",
     "a\\b",
+    "C:",                   # ntpath.join(root, "C:") is the library root
+    "D:",                   # ... and this one escapes to another drive
+    "nul",                  # a Windows device name
     None,
     42,
     ["blockA"],
@@ -148,10 +151,10 @@ def test_removing_a_project_local_block_says_where_it_is(tmp_path, monkeypatch, 
     m = importlib.import_module("AI4BayesCode.install_block")
     local = tmp_path / "blocks_local" / "toy_block"
     local.mkdir(parents=True)
-    (local / "toy_block.hpp").write_text("// x\n")
+    (local / "toy_block.hpp").write_text("// x\n", encoding="utf-8")
     dl = tmp_path / "dh" / "blocks_download" / "other_block"
     dl.mkdir(parents=True)
-    (dl / "other_block.hpp").write_text("// x\n")
+    (dl / "other_block.hpp").write_text("// x\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AI4BAYESCODE_DATA_HOME", str(tmp_path / "dh"))
 

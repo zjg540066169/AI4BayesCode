@@ -21,16 +21,23 @@ inlineCxxPlugin <- function() {
 
     # Avoid shQuote: Rcpp's PKG_CPPFLAGS parser only picks up the first
     # `-I` when paths are single-quoted. Plain unquoted -I works for paths
-    # without spaces (R library paths typically have no spaces). Mirror the
-    # six include roots resolved by ai4bayescode_source() so examples needing
-    # eigen / celerite / libgp also compile via the Rcpp plugin path.
+    # without spaces. On Windows the default user library sits under
+    # C:/Users/<account>/, which may contain one, so use Rcpp's own convention
+    # there: the 8.3 short name, with forward slashes. Mirror the six include
+    # roots resolved by ai4bayescode_source() so examples needing eigen /
+    # celerite / libgp also compile via the Rcpp plugin path.
+    build_path <- function(p) {
+        if (.Platform$OS.type == "windows" && grepl(" ", p, fixed = TRUE))
+            p <- utils::shortPathName(p)
+        chartr("\\", "/", p)
+    }
     cppflags <- paste(
-        paste0("-I", inc),
-        paste0("-I", mcmclib_inc),
-        paste0("-I", bmo_inc),
-        paste0("-I", eigen_inc),
-        paste0("-I", celerite_inc),
-        paste0("-I", libgp_inc),
+        paste0("-I", build_path(inc)),
+        paste0("-I", build_path(mcmclib_inc)),
+        paste0("-I", build_path(bmo_inc)),
+        paste0("-I", build_path(eigen_inc)),
+        paste0("-I", build_path(celerite_inc)),
+        paste0("-I", build_path(libgp_inc)),
         "-DMCMC_ENABLE_ARMA_WRAPPERS",
         # Trailing "=" makes this an EMPTY replacement, matching
         # RcppArmadillo's own `#define ARMA_DONT_USE_WRAPPER`. A bare -D

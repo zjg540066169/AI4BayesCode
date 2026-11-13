@@ -25,7 +25,7 @@ _DOC_REGISTRY: dict[str, str] = {}
 
 def _register_source(cpp_path: str) -> list[str]:
     try:
-        src = open(cpp_path, "r", encoding="utf-8").read()
+        src = open(cpp_path, "r", encoding="utf-8-sig", errors="replace").read()
     except OSError:
         return []
     names = _exposed_names(src)
@@ -217,7 +217,7 @@ def doc(x) -> None:
               f"signature.")
         return None
 
-    src = open(src_path, "r", encoding="utf-8").read()
+    src = open(src_path, "r", encoding="utf-8-sig", errors="replace").read()
     # Use the actual exposed CLASS name for the card (the passed name may be the
     # PYBIND11_MODULE name, e.g. "<Class>_module").
     classes = _class_names(src)

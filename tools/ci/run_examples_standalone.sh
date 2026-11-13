@@ -6,20 +6,26 @@
 # MinGW-w64 toolchain, independently of the R and Python packages.
 #
 # Usage: bash tools/ci/run_examples_standalone.sh [log_dir]
-# Environment: CXX (default g++), LIBS (default -lopenblas), EXTRA_CXXFLAGS,
+# Environment: CXX (default g++), LIBS (default -lopenblas, -lopenblas_64 on
+# Windows), EXTRA_CXXFLAGS,
 # TIMEOUT (seconds)
 set -u
 out=${1:-example-logs}
 mkdir -p "$out"
 inc=r-pkg/inst/include
-# On Windows the GNU dialect, as R uses: MinGW's math.h hides M_PI and the
-# other M_* constants in strict ISO mode.
-case "$(uname -s)" in MINGW*|MSYS*|UCRT*) std=gnu++17 ;; *) std=c++17 ;; esac
-flags=(-std=$std -O2
+flags=(-std=c++17 -O2
        -I"$inc" -I"$inc/mcmclib" -I"$inc/mcmclib/BaseMatrixOps/include"
        -I"$inc/eigen" -I"$inc/celerite/include" -I"$inc/libgp_kernels"
        -DMCMC_ENABLE_ARMA_WRAPPERS -DARMA_DONT_USE_WRAPPER=)
-read -r -a libs <<< "${LIBS:--lopenblas}"
+# Windows (MSYS2): the 64-bit-integer OpenBLAS that MSYS2's Armadillo expects,
+# a bigger object-file section table, and no SuperLU or ARPACK.
+case "$(uname -s)" in
+  MINGW*|MSYS*|UCRT*)
+    flags+=(-Wa,-mbig-obj -DARMA_DONT_USE_SUPERLU -DARMA_DONT_USE_ARPACK)
+    default_libs=-lopenblas_64 ;;
+  *) default_libs=-lopenblas ;;
+esac
+read -r -a libs <<< "${LIBS:-$default_libs}"
 read -r -a extra <<< "${EXTRA_CXXFLAGS:-}"
 cxx=${CXX:-g++}
 "$cxx" --version | head -1

@@ -120,6 +120,7 @@
 #include "block_sampler.hpp"
 
 #include <cmath>
+#include "math_constants.hpp"   // M_PI etc. under MinGW -std=c++17
 #include <functional>
 #include <random>
 #include <stdexcept>

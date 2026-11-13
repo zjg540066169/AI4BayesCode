@@ -233,7 +233,7 @@ def prompt(model_description: str, *, backend: str = "both", output_path: str = 
             raise FileNotFoundError(
                 "model_description looks like a file path but no such file "
                 f"exists: {model_description}")
-        model_description = Path(model_description).read_text(encoding="utf-8")
+        model_description = Path(model_description).read_text(encoding="utf-8-sig")
     if not isinstance(model_description, str) or not model_description.strip():
         raise ValueError("model_description must be a non-empty model description")
     if classname is None:
@@ -307,6 +307,27 @@ def _extract_code(text: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Validation: compile + run the emitted runner, detect convergence
 # ---------------------------------------------------------------------------
+def _utf8_env() -> dict:
+    """The environment for a child Python whose output is read back here."""
+    return dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+
+
+def _compile_check(cpp_path) -> None:
+    """Compile the sampler in a child Python and raise with its error output.
+
+    Not in this process: pybind11 registers a module's classes once per
+    interpreter, so after the first attempt every repaired build with the same
+    module name could no longer be loaded here."""
+    code = ("import sys, AI4BayesCode; "
+            "AI4BayesCode.source(sys.argv[1], rebuild=True, quiet=True)")
+    p = subprocess.run([sys.executable, "-c", code, str(Path(cpp_path).resolve())],
+                       capture_output=True, encoding="utf-8", errors="replace",
+                       env=_utf8_env())
+    if p.returncode != 0:
+        detail = ((p.stderr or "") + (p.stdout or "")).strip()
+        raise RuntimeError(detail[-12000:] or f"compilation failed (exit {p.returncode})")
+
+
 def _validate(cpp_path, runner_path, classname, verbose: bool = False) -> dict:
     """Compile the emitted .cpp, run its Python runner, grep for the sentinel.
 
@@ -315,8 +336,7 @@ def _validate(cpp_path, runner_path, classname, verbose: bool = False) -> dict:
     """
     # ---- 1. compile ----
     try:
-        from .source import source
-        source(cpp_path, rebuild=True, quiet=True)
+        _compile_check(cpp_path)
     except Exception as e:  # noqa: BLE001
         if verbose:
             print("  [validate] compile failed")
@@ -343,8 +363,11 @@ def _validate(cpp_path, runner_path, classname, verbose: bool = False) -> dict:
 
     def _run_from(wd):
         try:
+            # UTF-8 both ways: on Windows a piped child otherwise writes in the
+            # ANSI code page and dies on the first non-ASCII character it prints.
             p = subprocess.run([sys.executable, str(_rp)], cwd=str(wd),
-                               capture_output=True, text=True)
+                               capture_output=True, encoding="utf-8",
+                               errors="replace", env=_utf8_env())
             return (p.stdout or "") + (p.stderr or ""), p.returncode
         except Exception as e:  # noqa: BLE001
             return f"runner error: {e}", -1
@@ -1148,8 +1171,14 @@ def _claude_p_call(system, msgs, model):
                            for b in ct)
         rendered.append(f"{m['role']}: {ct}")
     prompt_text = system + "\n\n" + "\n\n".join(rendered)
-    args = ["claude", "-p"] + (["--model", model] if model else [])
-    proc = subprocess.run(args, input=prompt_text, capture_output=True, text=True)
+    # shutil.which honours PATHEXT, so this finds claude.exe or the npm claude.cmd
+    # shim on Windows, which CreateProcess would not find from a bare name.
+    exe = shutil.which("claude") or "claude"
+    if model and not re.fullmatch(r"[A-Za-z0-9._:\[\]-]+", model):
+        raise ValueError(f"unexpected characters in the model name {model!r}")
+    args = [exe, "-p"] + (["--model", model] if model else [])
+    proc = subprocess.run(args, input=prompt_text, capture_output=True,
+                          encoding="utf-8", errors="replace")
     return {"stop_reason": "end_turn",
             "content": [{"type": "text", "text": (proc.stdout or "") + (proc.stderr or "")}]}
 
@@ -1217,7 +1246,7 @@ def _write_emitted(txt, output_path, classname):
             # never honor an absolute path or a ".." that would escape the dir.
             pp = out / Path(path).name
         pp.parent.mkdir(parents=True, exist_ok=True)
-        pp.write_text(blk["code"], encoding="utf-8")
+        pp.write_text(blk["code"], encoding="utf-8", newline="\n")
         files.append(str(pp))
         if str(pp).endswith(".cpp"):
             cpp_path = str(pp)

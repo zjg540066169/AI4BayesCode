@@ -17,8 +17,9 @@ cur <- m$get_current()
 print(cur)
 stopifnot(abs(cur$mu - 3) < 1, abs(cur$sigma - 2) < 1)
 
-# A sampler given as a file in a folder with the same kind of name.
-src <- file.path(tempdir(), "my model", "Gauss.cpp")
+# A sampler given as a file whose folder and name contain spaces (Rcpp itself
+# refuses a file name with a space on Windows).
+src <- file.path(tempdir(), "my model", "my model.cpp")
 dir.create(dirname(src), recursive = TRUE, showWarnings = FALSE)
 file.copy(ai4bayescode_examples_path("GaussianLocationScale.cpp"), src)
 ai4bayescode_source(src, rebuild = TRUE)

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import warnings
 import shutil
 import sys
@@ -46,7 +47,9 @@ def _check_block_name(name: str) -> str:
     if not isinstance(name, str) or not name:
         raise ValueError(
             f"block name must be a non-empty string; got {name!r}")
-    if os.path.isabs(name) or "/" in name or "\\" in name or name in (".", ".."):
+    if (os.path.isabs(name) or "/" in name or "\\" in name or ":" in name
+            or name in (".", "..") or name.endswith((".", " "))
+            or re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?", name)):
         raise ValueError(
             f"block name must be a plain block name, not a path: {name!r}. "
             "Call AI4BayesCode.installed_blocks() to see what is installed.")

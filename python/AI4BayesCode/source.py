@@ -19,14 +19,16 @@ Python build needs a standalone Armadillo header tree. It is discovered from
 ``extra_cppflags=["-I/path/to/armadillo/include"]``. This is a documented
 system dependency.
 
-Windows: the module is built with the MinGW-w64 g++ of MSYS2's UCRT64
-environment, which also provides Armadillo and OpenBLAS. ``C:\\msys64`` (and the
-Scoop and Chocolatey install folders) are found automatically; set ``CXX`` to a
-``g++.exe`` to use another MinGW-w64 toolchain.
+Windows: the module is built with a MinGW-w64 toolchain that also provides
+Armadillo and OpenBLAS: Rtools (the toolchain R uses, found through
+``RTOOLS4x_HOME`` or ``C:\\rtools4x``) or MSYS2's UCRT64 environment
+(``C:\\msys64`` and the Scoop and Chocolatey install folders). Set ``CXX`` to a
+``g++.exe`` to use another one.
 """
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import importlib.resources
 import importlib.util
@@ -72,19 +74,35 @@ def _ext_suffix() -> str:
 
 
 _WINDOWS_TOOLCHAIN_HELP = (
-    "On Windows, AI4BayesCode compiles samplers with the MinGW-w64 toolchain of "
-    "MSYS2, which also provides Armadillo and OpenBLAS:\n"
-    "  1. Install MSYS2 from https://www.msys2.org (keep the default folder "
-    "C:\\msys64).\n"
-    "  2. Open the 'MSYS2 UCRT64' terminal and run:\n"
+    "On Windows, AI4BayesCode compiles samplers with a MinGW-w64 toolchain that "
+    "also provides Armadillo and OpenBLAS. Either of these works:\n"
+    "  * Rtools, the toolchain R uses on Windows (Rtools44 or newer, from "
+    "https://cran.r-project.org/bin/windows/Rtools/). If you use R, you "
+    "probably have it already.\n"
+    "  * MSYS2 (https://www.msys2.org, default folder C:\\msys64). In the "
+    "'MSYS2 UCRT64' terminal run:\n"
     "       pacman -S --needed mingw-w64-ucrt-x86_64-gcc "
-    "mingw-w64-ucrt-x86_64-armadillo mingw-w64-ucrt-x86_64-openblas\n"
-    "AI4BayesCode then finds C:\\msys64\\ucrt64 by itself. For a toolchain in "
-    "another folder, set the CXX environment variable to its g++.exe.")
+    "mingw-w64-ucrt-x86_64-armadillo mingw-w64-ucrt-x86_64-openblas64\n"
+    "AI4BayesCode finds both in their default folders. For a toolchain "
+    "somewhere else, set the CXX environment variable to its g++.exe.")
 
 
 def _is_windows() -> bool:
     return os.name == "nt"
+
+
+def _rtools_prefixes() -> list[Path]:
+    """Rtools toolchains, newest first. The compiler, Armadillo and a static
+    OpenBLAS all sit under <root>/x86_64-w64-mingw32.static.posix."""
+    roots = [Path(os.environ[v]) for v in ("RTOOLS46_HOME", "RTOOLS45_HOME", "RTOOLS44_HOME")
+             if os.environ.get(v)]
+    roots += [Path(rf"C:\rtools{v}") for v in (46, 45, 44)]
+    out: list[Path] = []
+    for root in roots:
+        p = root / "x86_64-w64-mingw32.static.posix"
+        if (p / "bin" / "g++.exe").is_file() and p not in out:
+            out.append(p)
+    return out
 
 
 def _msys2_ucrt64_prefixes() -> list[Path]:
@@ -106,20 +124,27 @@ def _toolchain_prefix(cxx: str) -> Path | None:
     return prefix if (prefix / "lib").is_dir() else None
 
 
+def _has_armadillo_and_blas(prefix: Path) -> bool:
+    return ((prefix / "include" / "armadillo").is_file()
+            and any((prefix / "lib").glob("libopenblas*.a")))
+
+
 def _compiler() -> str:
     cxx = os.environ.get("CXX")
     if cxx:
         return cxx
     if _is_windows():
-        # clang++ on Windows targets the MSVC toolchain, so only a MinGW-w64 g++
-        # can build the module without Visual Studio. MSYS2's comes first because
-        # the same environment also supplies Armadillo and OpenBLAS.
-        for prefix in _msys2_ucrt64_prefixes():
-            return str(prefix / "bin" / "g++.exe")
-        cxx = shutil.which("g++")
-        if cxx is None:
-            raise RuntimeError("No MinGW-w64 C++ compiler found.\n" + _WINDOWS_TOOLCHAIN_HELP)
-        return cxx
+        # clang++ on Windows targets the MSVC toolchain, and the g++ first on
+        # PATH (Strawberry Perl, a bare MinGW) usually lacks Armadillo and BLAS,
+        # so only toolchains that ship both are used. Rtools comes first: its
+        # libraries are static, so the module has no DLL to find at import.
+        found = _rtools_prefixes() + _msys2_ucrt64_prefixes()
+        for prefix in found:
+            if _has_armadillo_and_blas(prefix):
+                return str(prefix / "bin" / "g++.exe")
+        where = f" The toolchain in {found[0]} lacks Armadillo or OpenBLAS." if found else ""
+        raise RuntimeError("No MinGW-w64 toolchain with Armadillo and OpenBLAS was "
+                           "found." + where + "\n" + _WINDOWS_TOOLCHAIN_HELP)
     cxx = shutil.which("clang++") or shutil.which("g++")
     if cxx is None:
         raise RuntimeError(
@@ -129,10 +154,57 @@ def _compiler() -> str:
     return cxx
 
 
+def _ansi_path(path: str | os.PathLike) -> str:
+    """Windows: a spelling of an existing ``path`` that the MinGW-w64 assembler
+    and linker can open. Unlike the GCC driver they read their command line in
+    the ANSI code page, so a path with other characters (a Chinese user name on
+    an English system, say) is replaced by its 8.3 short form."""
+    s = str(path)
+    try:
+        s.encode("mbcs")
+        return s
+    except UnicodeEncodeError:
+        pass
+    import ctypes
+    from ctypes import wintypes
+    get_short = ctypes.windll.kernel32.GetShortPathNameW
+    get_short.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+    get_short.restype = wintypes.DWORD
+    n = get_short(s, None, 0)
+    if n:
+        buf = ctypes.create_unicode_buffer(n)
+        if get_short(s, buf, n):
+            try:
+                buf.value.encode("mbcs")
+                return buf.value
+            except UnicodeEncodeError:
+                pass
+    raise RuntimeError(
+        f"{s!r} cannot be passed to the MinGW-w64 assembler and linker: it has "
+        "characters outside the Windows code page and no short (8.3) name. Set "
+        "TMP and TEMP to a folder whose path is plain ASCII, and pass cache_dir= "
+        "such a folder.")
+
+
+def _toolchain_env(cxx: str) -> dict | None:
+    """Windows: the environment the compiler runs in. The toolchain's bin folder
+    goes first on PATH (MSYS2's cc1plus, as and ld load their DLLs from it), and
+    TMP/TEMP name a folder the assembler and linker can open (see _ansi_path)."""
+    if not _is_windows():
+        return None
+    env = dict(os.environ)
+    found = shutil.which(cxx)
+    if found:
+        env["PATH"] = str(Path(found).resolve().parent) + os.pathsep + env.get("PATH", "")
+    env["TMP"] = env["TEMP"] = _ansi_path(tempfile.gettempdir())
+    return env
+
+
 def _compiler_id(cxx: str) -> str:
     """A short, stable identifier for the compiler + its version (cache key)."""
     try:
-        out = subprocess.run([cxx, "--version"], capture_output=True, text=True)
+        out = subprocess.run([cxx, "--version"], capture_output=True,
+                             encoding="utf-8", errors="replace", env=_toolchain_env(cxx))
         first = (out.stdout or out.stderr or "").splitlines()
         return f"{cxx}|{first[0]}" if first else cxx
     except Exception:
@@ -157,6 +229,37 @@ def _find_armadillo(cxx: str | None = None) -> Path | None:
     return None
 
 
+@functools.lru_cache(maxsize=None)
+def _arma_blas_64bit(cxx: str, arma_include: str) -> bool:
+    """Whether this Armadillo calls BLAS and LAPACK with 64-bit integers.
+
+    MSYS2 patches Armadillo's config.hpp so that it does on 64-bit Windows. The
+    OpenBLAS linked in has to use the same integer width: with a 32-bit one,
+    det(), log_det() signs and LU pivots come out silently wrong."""
+    try:
+        res = subprocess.run(
+            [cxx, "-x", "c++", "-std=gnu++17", "-dM", "-E", "-DARMA_DONT_USE_WRAPPER=",
+             f"-I{arma_include}", "-"],
+            input="#include <armadillo_bits/config.hpp>\n", capture_output=True,
+            encoding="utf-8", errors="replace", env=_toolchain_env(cxx))
+    except OSError:
+        return False
+    return "#define ARMA_BLAS_64BIT_INT" in res.stdout
+
+
+def _arma_fingerprint(arma_include: Path | None) -> str:
+    """Version and configuration of the Armadillo in use, for the cache key."""
+    if arma_include is None:
+        return ""
+    h = hashlib.sha256()
+    for rel in ("armadillo_bits/arma_version.hpp", "armadillo_bits/config.hpp"):
+        try:
+            h.update((arma_include / rel).read_bytes())
+        except OSError:
+            pass
+    return h.hexdigest()[:16]
+
+
 # ---------------------------------------------------------------------------
 # Source resolution + flags
 # ---------------------------------------------------------------------------
@@ -167,7 +270,7 @@ def _resolve_code(code: str | os.PathLike) -> tuple[Path, str]:
     try:
         p = Path(code)
         if p.is_file():
-            return p.resolve(), p.read_text(encoding="utf-8")
+            return p.resolve(), p.read_text(encoding="utf-8-sig", errors="replace")
     except (TypeError, ValueError, OSError):
         pass
 
@@ -259,8 +362,7 @@ def _compile_flags(include_root: Path, cxx: str | None = None) -> list[str]:
             "If it is installed somewhere unusual, set ARMADILLO_INCLUDE_DIR "
             "to the directory containing the 'armadillo' header."
             + ("\n\n" + _WINDOWS_TOOLCHAIN_HELP if _is_windows() else ""))
-    if arma is not None:
-        flags.append(f"-I{arma}")
+    flags.append(f"-I{arma}")
     flags += [
         "-DMCMC_ENABLE_ARMA_WRAPPERS",
         # Trailing "=" makes this an EMPTY replacement, matching
@@ -281,7 +383,14 @@ def _compile_flags(include_root: Path, cxx: str | None = None) -> list[str]:
             "-DMS_WIN64=",
             # Template-heavy samplers exceed the COFF section limit of 2^15.
             "-Wa,-mbig-obj",
+            # MSYS2's Armadillo turns on SuperLU and ARPACK, with an MSYS-style
+            # include path the native compiler cannot resolve. Nothing here uses
+            # them.
+            "-DARMA_DONT_USE_SUPERLU",
+            "-DARMA_DONT_USE_ARPACK",
         ]
+        if sysconfig.get_config_var("Py_GIL_DISABLED"):
+            flags.append("-DPy_GIL_DISABLED=1")   # free-threaded CPython
     else:
         flags.append("-fvisibility=hidden")
     flags.append(f"-I{pybind11.get_include()}")
@@ -289,17 +398,15 @@ def _compile_flags(include_root: Path, cxx: str | None = None) -> list[str]:
 
 
 def _python_link_args() -> list[str]:
-    """Windows only: link the CPython DLL, through its import library when the
-    installation ships one (python.org and conda do), else the DLL itself."""
-    base = Path(sys.base_prefix)
-    name = f"python{sys.version_info.major}{sys.version_info.minor}"
-    if (base / "libs" / f"{name}.lib").is_file():
-        return [f"-L{base / 'libs'}", f"-l{name}"]
-    if (base / f"{name}.dll").is_file():
-        return [str(base / f"{name}.dll")]
-    raise RuntimeError(
-        f"Cannot find {name}.lib or {name}.dll under {base}; the Python "
-        "installation cannot be linked against.")
+    """Windows only: link the CPython DLL this interpreter runs on (python312,
+    python313t for a free-threaded build, ...), through its import library
+    when the installation ships one, else the DLL itself."""
+    import _winapi
+    dll = Path(_winapi.GetModuleFileName(sys.dllhandle))
+    libdir = Path(sys.base_prefix) / "libs"
+    if (libdir / f"{dll.stem}.lib").is_file():
+        return [f"-L{_ansi_path(libdir)}", f"-l{dll.stem}"]
+    return [_ansi_path(dll)]
 
 
 def _link_flags(cxx: str | None = None) -> list[str]:
@@ -307,10 +414,25 @@ def _link_flags(cxx: str | None = None) -> list[str]:
         return ["-framework", "Accelerate"]
     if _is_windows():
         prefix = _toolchain_prefix(cxx) if cxx else None
-        libdir = [f"-L{prefix / 'lib'}"] if prefix is not None else []
-        # OpenBLAS carries LAPACK. libstdc++ and libgcc go in statically, so a
-        # different copy of them already loaded in the process cannot clash.
-        return libdir + ["-lopenblas", "-static-libgcc", "-static-libstdc++"] + _python_link_args()
+        lib = prefix / "lib" if prefix is not None else None
+        arma = _find_armadillo(cxx)
+        wide = arma is not None and cxx is not None and _arma_blas_64bit(cxx, str(arma))
+        blas = "openblas_64" if wide else "openblas"
+        if wide and lib is not None and not any(lib.glob("libopenblas_64*.a")):
+            raise RuntimeError(
+                "This Armadillo calls BLAS and LAPACK with 64-bit integers (MSYS2 "
+                "builds it that way), so it needs the 64-bit-integer OpenBLAS. In "
+                "the 'MSYS2 UCRT64' terminal run:\n"
+                "  pacman -S --needed mingw-w64-ucrt-x86_64-openblas64")
+        args = [f"-L{_ansi_path(lib)}"] if lib is not None else []
+        args.append(f"-l{blas}")      # OpenBLAS carries LAPACK
+        if lib is not None and not (lib / f"lib{blas}.dll.a").is_file():
+            # A static OpenBLAS (Rtools ships only static libraries) brings its
+            # Fortran and OpenMP runtimes along.
+            args += ["-lgfortran", "-lquadmath", "-fopenmp"]
+        # libstdc++ and libgcc go in statically, so a different copy of them
+        # already loaded in the process cannot clash.
+        return args + ["-static-libgcc", "-static-libstdc++"] + _python_link_args()
     return ["-lblas", "-llapack", "-lm"]
 
 
@@ -320,18 +442,23 @@ _DLL_DIRS: dict[str, object] = {}
 
 
 def _add_dll_directory(cxx: str) -> None:
-    """Windows: let the module find the toolchain's DLLs (OpenBLAS and its
-    Fortran runtime). Python 3.8+ ignores PATH for extension-module
-    dependencies, so the directory has to be registered explicitly."""
+    """Windows: with MSYS2 the module links OpenBLAS dynamically, and that DLL
+    and its Fortran and OpenMP runtimes sit in the toolchain's bin folder.
+    Python 3.8+ ignores PATH for extension-module dependencies, so the folder
+    is registered explicitly. Rtools links everything statically and needs
+    nothing here."""
     found = shutil.which(cxx)
     if found is None:
         return
-    bindir = str(Path(found).resolve().parent)
-    if bindir not in _DLL_DIRS:
-        _DLL_DIRS[bindir] = os.add_dll_directory(bindir)
+    bindir = Path(found).resolve().parent
+    if not any(bindir.glob("libopenblas*.dll")):
+        return
+    key = str(bindir)
+    if key not in _DLL_DIRS:
+        _DLL_DIRS[key] = os.add_dll_directory(key)
 
 
-def _contributed_block_fingerprint(flags: Iterable[str]) -> str:
+def _contributed_block_fingerprint(flags: Iterable[str], skip: Iterable[str] = ()) -> str:
     """Content fingerprint of every header tree on the -I path.
 
     The flags alone are not enough. Reinstalling a block -- install_block(force=
@@ -353,8 +480,10 @@ def _contributed_block_fingerprint(flags: Iterable[str]) -> str:
     vendored tree).
     """
     h = hashlib.sha256()
+    skip = {os.path.normcase(os.path.abspath(r)) for r in skip}
     roots = sorted({f[2:] for f in flags
-                    if isinstance(f, str) and f.startswith("-I")})
+                    if isinstance(f, str) and f.startswith("-I")
+                    and os.path.normcase(os.path.abspath(f[2:])) not in skip})
     for root in roots:
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames.sort()
@@ -372,7 +501,8 @@ def _contributed_block_fingerprint(flags: Iterable[str]) -> str:
     return h.hexdigest()
 
 
-def _signature(text: str, flags: Iterable[str], libs: Iterable[str], cxx_id: str) -> str:
+def _signature(text: str, flags: Iterable[str], libs: Iterable[str], cxx_id: str,
+               skip_roots: Iterable[str] = ()) -> str:
     h = hashlib.sha256()
     h.update(text.encode())
     flags = list(flags)
@@ -382,7 +512,7 @@ def _signature(text: str, flags: Iterable[str], libs: Iterable[str], cxx_id: str
     h.update(b"\x00")
     h.update(cxx_id.encode())   # compiler-version-aware (toolchain bump invalidates)
     h.update(b"\x00")
-    h.update(_contributed_block_fingerprint(flags).encode())
+    h.update(_contributed_block_fingerprint(flags, skip_roots).encode())
     return h.hexdigest()[:16]
 
 
@@ -437,25 +567,45 @@ def source(
     cxx = _compiler()
     flags = _compile_flags(inc, cxx) + list(extra_cppflags)
     libs = _link_flags(cxx) + list(extra_libs)
-    sig = _signature(text, flags, libs, _compiler_id(cxx))
+    # Armadillo is keyed by its version and configuration, not by walking its
+    # include root, which on Windows is the toolchain's whole sysroot.
+    arma = _find_armadillo(cxx)
+    sig = _signature(text, flags, libs, _compiler_id(cxx) + "|" + _arma_fingerprint(arma),
+                     skip_roots=[str(arma)] if arma is not None else [])
 
     cache = Path(cache_dir) if cache_dir is not None else _user_cache_dir()
     cache.mkdir(parents=True, exist_ok=True)
     so_path = cache / f"{module_name}_{sig}{_ext_suffix()}"
 
+    # pybind11 registers a module's classes once per interpreter, so a second
+    # build of an already imported module cannot be loaded into this process.
+    loaded = sys.modules.get(module_name)
+    loaded_file = Path(getattr(loaded, "__file__", None) or "")
+    if loaded is not None and loaded_file.name.startswith(f"{module_name}_"):
+        if loaded_file.parent == cache and loaded_file.name.startswith(f"{module_name}_{sig}"):
+            if rebuild and not quiet:
+                print(f"'{module_name}' is already loaded in this Python session and "
+                      "is up to date; a rebuilt copy could not be loaded into it.")
+            return loaded
+        raise RuntimeError(
+            f"A different build of '{module_name}' is already loaded in this Python "
+            "session, and pybind11 cannot register the same classes twice. Restart "
+            "Python (or the notebook kernel) to load the new build.")
+
     if so_path.exists() and not rebuild:
         if verbose:
             print(f"[source] using cached {so_path}")
     else:
-        if _is_windows() and so_path.exists():
-            try:
-                so_path.unlink()
-            except PermissionError:
-                # Loaded earlier in this process: Windows locks the file, so the
-                # rebuild goes to a new name.
-                so_path = so_path.with_name(
-                    f"{module_name}_{sig}_{os.getpid()}_{time.time_ns()}{_ext_suffix()}")
-        _compile(cpp_path, so_path, flags, libs, cxx, verbose=verbose)
+        # Link under a temporary name, then move into place: a reader never sees
+        # a half-written module, and on Windows a cached file that another
+        # process has loaded (and so locked) is left alone.
+        tmp_path = so_path.with_name(
+            f"{module_name}_{sig}.{os.getpid()}-{time.time_ns()}.tmp{_ext_suffix()}")
+        _compile(cpp_path, tmp_path, flags, libs, cxx, verbose=verbose)
+        try:
+            os.replace(tmp_path, so_path)
+        except PermissionError:
+            so_path = tmp_path
 
     if _is_windows():
         _add_dll_directory(cxx)
@@ -463,9 +613,17 @@ def source(
     spec = importlib.util.spec_from_file_location(module_name, so_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Failed to create import spec for {so_path}")
-    module = importlib.util.module_from_spec(spec)
+    try:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    except ImportError as exc:
+        if _is_windows() and "DLL load failed" in str(exc):
+            raise ImportError(
+                f"{exc}\nThe module was built with {cxx}. Its OpenBLAS, Fortran "
+                "and OpenMP runtime DLLs are expected in that compiler's folder "
+                f"(registered: {', '.join(_DLL_DIRS) or 'none'}).") from exc
+        raise
     sys.modules[module_name] = module
-    spec.loader.exec_module(module)
 
     # Register class -> source for AI4BayesCode.doc(), and hint the user.
     try:
@@ -494,9 +652,13 @@ def _compile(cpp_file: Path, so_path: Path, cppflags: list[str], libs: list[str]
     cmd += [str(cpp_file), "-o", str(so_path), *libs]
     if py_lib:
         cmd += [f"-L{py_lib}"]
+    if _is_windows():
+        # The linker writes -o itself, so the folder must be one it can open.
+        cmd[cmd.index("-o") + 1] = str(Path(_ansi_path(so_path.parent)) / so_path.name)
     if verbose:
         print("[source] compile command:\n  " + " ".join(map(str, cmd)))
-    res = subprocess.run(cmd, capture_output=not verbose, text=True)
+    res = subprocess.run(cmd, capture_output=not verbose, encoding="utf-8",
+                         errors="replace", env=_toolchain_env(cxx))
     if res.returncode != 0:
         raise RuntimeError(
             f"Compilation failed (exit {res.returncode}).\n"

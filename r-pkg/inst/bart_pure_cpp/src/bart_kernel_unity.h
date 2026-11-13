@@ -34,7 +34,19 @@
 #include "BART/lambda.cpp"
 #include "BART/rand_draws.cpp"
 #include "BART/rtnorm.cpp"
+// randomkit's Windows branch includes <windows.h> and <wincrypt.h> only for
+// rk_devfill() / rk_randomseed(), which are never called here (seeding goes
+// through rk_seed()). Without this the Win32 macros (min, max, near, far, ...)
+// would leak into the user's code.
+#if defined(_WIN32) && !defined(RK_NO_WINCRYPT)
+# define RK_NO_WINCRYPT
+# define AI4B_UNDEF_RK_NO_WINCRYPT
+#endif
 #include "BART/randomkit.cpp"
+#ifdef AI4B_UNDEF_RK_NO_WINCRYPT
+# undef RK_NO_WINCRYPT
+# undef AI4B_UNDEF_RK_NO_WINCRYPT
+#endif
 
 // Scrub randomkit's global-scope macros.
 #ifdef N

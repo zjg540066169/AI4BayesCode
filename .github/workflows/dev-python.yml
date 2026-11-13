@@ -48,28 +48,35 @@ jobs:
         run: bash tools/ci/publish_logs.sh ci-logs-r-paths ci-logs
 
   python:
-    name: Python (${{ matrix.part }}/4)
+    name: Python, ${{ matrix.toolchain }} (${{ matrix.part }}/4)
     runs-on: windows-latest
     timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
+        toolchain: [rtools, msys2]
         part: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      # The toolchain a Windows user installs: MSYS2 in its default folder,
-      # C:\msys64, with the three UCRT64 packages the error message names.
+      # Rtools comes preinstalled on the runner. MSYS2 is set up the way a user
+      # would: its default folder, C:\msys64, with the packages the error
+      # message names; CXX then picks it over Rtools.
       - uses: msys2/setup-msys2@v2
+        if: matrix.toolchain == 'msys2'
         with:
           msystem: UCRT64
           release: false
           install: >-
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-armadillo
-            mingw-w64-ucrt-x86_64-openblas
+            mingw-w64-ucrt-x86_64-openblas64
+      - name: Select MSYS2
+        if: matrix.toolchain == 'msys2'
+        shell: bash
+        run: echo 'CXX=C:\msys64\ucrt64\bin\g++.exe' >> "$GITHUB_ENV"
       - name: Install
         shell: bash
         run: |
@@ -77,11 +84,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy pybind11 pytest scipy pyyaml matplotlib networkx arviz
           pip install -e ./python --no-deps 2>&1 | tee ci-logs/install.txt
-          ls /c/msys64/ucrt64/bin/g++.exe | tee ci-logs/compilers.txt
-      - name: Unit tests
+          python -c "from AI4BayesCode.source import _compiler; print('compiler:', _compiler())" | tee ci-logs/compilers.txt
+      - name: Unit tests (text I/O must name its encoding)
         if: matrix.part == 1
         shell: bash
-        run: python -m pytest python/tests -q -p no:cacheprovider 2>&1 | tee ci-logs/pytest.txt
+        run: python -X warn_default_encoding -W error::EncodingWarning -m pytest python/tests -q -p no:cacheprovider 2>&1 | tee ci-logs/pytest.txt
       - name: Compile from a profile path with a space and Chinese characters
         if: matrix.part == 1
         shell: pwsh
@@ -101,5 +108,5 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash tools/ci/publish_logs.sh ci-logs-py-${{ matrix.part }} ci-logs
+        run: bash tools/ci/publish_logs.sh ci-logs-py-${{ matrix.toolchain }}-${{ matrix.part }} ci-logs
 

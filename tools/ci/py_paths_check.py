@@ -1,8 +1,10 @@
-"""Compile and run a sampler when the build cache and temp folder live under
+"""Compile and run a sampler when the build cache and the temp folder live under
 paths with a space and non-ASCII characters, as they do for a Windows user
 whose account name has them. The Windows CI job sets LOCALAPPDATA and TMP.
 """
 import shutil
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -22,14 +24,22 @@ cur = m.get_current()
 print(cur)
 assert abs(cur["mu"][0] - 3) < 1 and abs(cur["sigma"][0] - 2) < 1
 
-# A sampler given as a file in a folder with the same kind of name, and the
-# same source passed as a string (source() then writes a temp .cpp).
-src = Path(tempfile.gettempdir()) / "my model" / "Gauss.cpp"
+# A changed build of the same module needs a fresh interpreter (pybind11
+# registers a module's classes once per process), so these run in children:
+# a source file in a folder whose name has a space and Chinese characters, and
+# the same source passed as text (source() then writes it under TMP).
+src = Path(tempfile.gettempdir()) / "my model" / "my model.cpp"
 src.parent.mkdir(parents=True, exist_ok=True)
-shutil.copy(AI4BayesCode.examples_path("GaussianLocationScale"), src)
-AI4BayesCode.source(src, rebuild=True, quiet=True)
-AI4BayesCode.source(src.read_text(encoding="utf-8"), rebuild=True, quiet=True)
+text = Path(AI4BayesCode.examples_path("GaussianLocationScale")).read_text(encoding="utf-8")
+src.write_text(text + "\n// a changed copy\n", encoding="utf-8")
+child = ("import sys, AI4BayesCode\n"
+         "arg = sys.argv[1]\n"
+         "code = arg if sys.argv[2] == 'file' else open(arg, encoding='utf-8').read() + '// text\\n'\n"
+         "mod = AI4BayesCode.source(code, rebuild=True, quiet=True)\n"
+         "print('child built', mod.__file__)\n")
+for kind in ("file", "text"):
+    subprocess.run([sys.executable, "-c", child, str(src), kind], check=True)
 
-# Rebuilding a module that is already loaded: Windows locks the loaded file.
-AI4BayesCode.example("GaussianLocationScale", rebuild=True)
+# Asking again in this process for the build already loaded returns it.
+assert AI4BayesCode.example("GaussianLocationScale") is mod
 print("PASS")

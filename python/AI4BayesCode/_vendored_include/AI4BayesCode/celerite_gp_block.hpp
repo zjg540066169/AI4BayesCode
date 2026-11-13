@@ -66,6 +66,7 @@
 #include <celerite/celerite.h>
 
 #include <cmath>
+#include "math_constants.hpp"   // M_PI etc. under MinGW -std=c++17
 #include <memory>
 #include <random>
 #include <stdexcept>

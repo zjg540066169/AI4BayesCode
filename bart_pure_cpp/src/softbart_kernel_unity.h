@@ -32,6 +32,21 @@
 
 #ifndef AI4BAYESCODE_SOFTBART_NO_UNITY
 
+// MinGW-w64 hides the M_* constants under -std=c++17 (see
+// include/AI4BayesCode/math_constants.hpp); spelled as its <math.h> spells them.
+#include <cmath>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+#ifndef M_LN2
+#define M_LN2 0.69314718055994530942
+#endif
+#ifndef M_2_PI
+#define M_2_PI 0.63661977236758134308
+#endif
+#ifndef M_SQRT1_2
+#define M_SQRT1_2 0.70710678118654752440
+#endif
 #include "SOFTBART_VENDOR/soft_bart_impl.h"
 
 #endif // AI4BAYESCODE_SOFTBART_NO_UNITY

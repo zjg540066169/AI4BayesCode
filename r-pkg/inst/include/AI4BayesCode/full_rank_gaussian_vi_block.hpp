@@ -57,6 +57,7 @@
 #include "vi_optimizer.hpp"
 
 #include <cmath>
+#include "math_constants.hpp"   // M_PI etc. under MinGW -std=c++17
 #include <functional>
 #include <limits>
 #include <random>

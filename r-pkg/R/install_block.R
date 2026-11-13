@@ -79,13 +79,15 @@ ai4bayescode_blocks_path <- function(name = NULL) {
     if (!length(dirs)) return("")
     parts <- character(0)
     for (d in dirs) {
-        fs <- list.files(d, recursive = TRUE, full.names = TRUE,
-                         pattern = "\\.(hpp|h|hh|hxx|ipp|cpp|cc|dcf)$")
-        if (!length(fs)) next
-        fs <- sort(fs)
-        info <- file.info(fs)
-        parts <- c(parts, paste(sub(paste0("^", d, "/?"), "", fs),
-                                info$size, as.numeric(info$mtime),
+        # Relative names straight from list.files(): stripping the folder with
+        # sub() compiled the path as a regular expression, which "(", "+" or a
+        # backslash in a Windows path ("Program Files (x86)") breaks.
+        rel <- list.files(d, recursive = TRUE, full.names = FALSE,
+                          pattern = "\\.(hpp|h|hh|hxx|ipp|cpp|cc|dcf)$")
+        if (!length(rel)) next
+        rel <- sort(rel)
+        info <- file.info(file.path(d, rel))
+        parts <- c(parts, paste(rel, info$size, as.numeric(info$mtime),
                                 sep = "\x1f"))
     }
     if (!length(parts)) return("")
