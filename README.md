@@ -33,8 +33,8 @@ pick it from `/skills` (the Codex app also lists it among the slash commands):
 git clone --depth 1 https://github.com/zjg540066169/AI4BayesCode.git "$HOME/.agents/skills/AI4BayesCode"
 ```
 
-To update later, run the line below (for Codex, write `.agents` in place of
-`.claude`). If it reports an error, delete the folder and clone again.
+To update for a new version, run the line below (for Codex, write `.agents` in
+place of `.claude`). If it reports an error, delete the folder and clone again.
 ```bash
 git -C "$HOME/.claude/skills/AI4BayesCode" pull --ff-only
 ```
