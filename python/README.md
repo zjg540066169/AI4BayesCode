@@ -42,6 +42,7 @@ and `py -m pip install .` works when `pip` is not on PATH.
 ## Usage
 
 ```python
+import numpy as np
 import AI4BayesCode
 
 # Compile a user `.cpp` file (pybind11 module) against the AI4BayesCode headers.
@@ -49,31 +50,34 @@ import AI4BayesCode
 # `source()` is self-contained -- the headers ship inside the installed package.
 mod = AI4BayesCode.source("MyModel.cpp")            # file path, or a source string
 
-# The module exposes the class defined in the .cpp:
-m = mod.MyModel(y, X, rng_seed=1, keep_history=True)
+# y, X: your data, loaded here at top level.
 
-# Standard MCMC workflow:
-m.step(5000)          # warmup
-m.step(5000)          # keep
-hist = m.get_history()
-
-# Convergence diagnostics:
-import numpy as np
-beta_samples = np.array(hist["beta"])
-for j in range(beta_samples.shape[1]):
-    print(j, AI4BayesCode.posterior_summary(beta_samples[:, j]))
-
-# Visualize the model DAG:
-AI4BayesCode.plot_dag(m, out_path="dag.png")
-
-# Run 4 parallel chains from different seeds. On Windows every worker
-# re-imports this script, so the call sits under the __main__ guard and
-# build() at module top level (without n_jobs, Windows runs the chains one
-# after another):
+# One sampler per seed, from a top-level function so that parallel workers
+# can build it too:
 def build(seed):
     return mod.MyModel(y, X, rng_seed=seed, keep_history=True)
 
+# On Windows every parallel worker re-imports this script and runs whatever
+# is outside this guard, so only definitions (and the data) stay above it.
 if __name__ == "__main__":
+    # The module exposes the class defined in the .cpp:
+    m = mod.MyModel(y, X, rng_seed=1, keep_history=True)
+
+    # Standard MCMC workflow:
+    m.step(5000)          # warmup
+    m.step(5000)          # keep
+    hist = m.get_history()
+
+    # Convergence diagnostics:
+    beta_samples = np.array(hist["beta"])
+    for j in range(beta_samples.shape[1]):
+        print(j, AI4BayesCode.posterior_summary(beta_samples[:, j]))
+
+    # Visualize the model DAG:
+    AI4BayesCode.plot_dag(m, out_path="dag.png")
+
+    # Run 4 parallel chains from different seeds (without n_jobs, Windows
+    # runs the chains one after another):
     chains = AI4BayesCode.run_chains(
         factory=build,
         seeds=[101, 202, 303, 404],
@@ -170,12 +174,16 @@ Armadillo headers at compile time.
 |----------|---------|
 | macOS (Homebrew) | `brew install armadillo` |
 | Debian / Ubuntu | `apt-get install libarmadillo-dev` |
-| conda (macOS, Linux) | `conda install -c conda-forge armadillo` |
+| conda (macOS, Linux) | `conda install -c conda-forge armadillo`, then set `ARMADILLO_INCLUDE_DIR` to `$CONDA_PREFIX/include` |
 | Windows, with R | [Rtools](https://cran.r-project.org/bin/windows/Rtools/) for your R version (Rtools44 or newer): it already holds the compiler, Armadillo and OpenBLAS |
 | Windows, without R | [MSYS2](https://www.msys2.org) in its default folder `C:\msys64`, then in the "MSYS2 UCRT64" terminal: `pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-armadillo mingw-w64-ucrt-x86_64-openblas64` |
 
 On Windows `source()` finds Rtools and MSYS2 in their default folders by itself; set
 `CXX` to a toolchain's `g++.exe` to choose another one.
+
+With conda on Linux, when the system has no BLAS and LAPACK libraries, link the
+environment's own: `source(..., extra_libs=[f"-L{lib}", f"-Wl,-rpath,{lib}"])` with
+`lib = os.environ["CONDA_PREFIX"] + "/lib"`.
 
 ## Files
 

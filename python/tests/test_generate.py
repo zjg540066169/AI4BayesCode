@@ -878,3 +878,26 @@ def test_use_cli_true_without_claude_warns_and_falls_back(tmp_path, monkeypatch)
                            use_cli=True, verbose=False)
     assert res["called_api"] is False
     assert (td / "PROMPT.txt").is_file()
+
+
+
+def test_compile_check_keeps_the_first_compiler_error(tmp_path, monkeypatch):
+    # The repair loop is sent the compiler's FIRST error, usually the cause. The
+    # child's output is a Python traceback ending in source()'s error, whose
+    # compiler text follows "stderr:". A long log used to be cut from its
+    # start, which dropped that first error.
+    errors = "".join(f"M.cpp:{i}:5: error: use of undeclared identifier 'later_{i}_"
+                     + "n" * 200 + "'\n" for i in range(100))
+    child = ("Traceback (most recent call last):\n  File \"<string>\", line 1\n"
+             "RuntimeError: Compilation failed (exit 1).\ncommand:\n  g++ -O2 M.cpp\n"
+             "stderr:\nM.cpp:2:5: error: use of undeclared identifier 'first_cause'\n"
+             + errors)
+
+    class Done:
+        returncode, stdout, stderr = 1, "", child
+    monkeypatch.setattr(gen.subprocess, "run", lambda *a, **k: Done())
+    with pytest.raises(RuntimeError) as err:
+        gen._compile_check(tmp_path / "M.cpp")
+    msg = str(err.value)
+    assert msg.startswith("M.cpp:2:5: error: use of undeclared identifier 'first_cause'")
+    assert "later_99_" in msg and "Traceback" not in msg and len(msg) <= 12100

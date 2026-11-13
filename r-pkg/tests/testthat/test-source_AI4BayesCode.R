@@ -62,3 +62,27 @@ test_that("ai4bayescode_source errors clearly on a non-existent path that is not
         regexp = "neither an existing file nor recognizable C\\+\\+ source"
     )
 })
+
+test_that("a file with a space in its name follows edits to its local headers", {
+    skip_on_cran()
+    skip_if_not_installed("Rcpp")
+    skip_if_not_installed("RcppArmadillo")
+
+    # Rcpp's dependency scan resolves #include "..." beside the file it builds,
+    # so the space-free copy must sit beside the original.
+    dir <- tempfile("ai4b_spaced_")
+    dir.create(dir)
+    hdr <- file.path(dir, "helper.hpp")
+    writeLines("inline int helper_value() { return 1; }", hdr)
+    cpp <- file.path(dir, "my model.cpp")
+    writeLines(c("#include <Rcpp.h>", "#include \"helper.hpp\"",
+                 "// [[Rcpp::export]]", "int spaced_value() { return helper_value(); }"),
+               cpp)
+    e <- new.env()
+    ai4bayescode_source(cpp, env = e, quiet = TRUE)
+    expect_identical(e$spaced_value(), 1L)
+    Sys.sleep(1.1)   # a new mtime on a filesystem with one-second resolution
+    writeLines("inline int helper_value() { return 2; }", hdr)
+    ai4bayescode_source(cpp, env = e, quiet = TRUE)
+    expect_identical(e$spaced_value(), 2L)
+})

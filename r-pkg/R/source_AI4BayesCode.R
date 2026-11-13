@@ -93,8 +93,9 @@ ai4bayescode_source <- function(code,
     cpp_file <- .ai4b_resolve_code(code)
     # Rcpp::sourceCpp() cannot build a file whose name contains a space: it
     # refuses one on Windows, and make splits the object name elsewhere.
-    # Compile a copy with a space-free name; its original folder stays on the
-    # include path, so relative #includes still resolve.
+    # Compile a copy with a space-free name, made beside the original (see
+    # .ai4b_stage_spaced_file); the original folder also stays on the include
+    # path.
     src_dir <- dirname(cpp_file)
     build_file <- cpp_file
     if (grepl(" ", basename(cpp_file), fixed = TRUE))
@@ -183,28 +184,26 @@ ai4bayescode_source <- function(code,
         }
     }, add = TRUE)
 
-    # The MinGW-w64 assembler and linker read paths in the ANSI code page, so a
-    # temp folder with other characters (a Chinese user name on an English
-    # system) breaks every build. Use its 8.3 short name for the build.
-    short_tmp <- .ai4b_ansi_tempdir()
-    if (!is.null(short_tmp)) {
+    # The MinGW-w64 assembler and linker write their temporary files to TMP (or
+    # TEMP), not R's TMPDIR, and read paths in the ANSI code page, so a temp
+    # folder with other characters (a Chinese user name on an English system)
+    # breaks every build. Point both at a spelling of R's temp folder they can
+    # open for the build.
+    build_tmp <- .ai4b_ansi_tempdir()
+    if (!is.null(build_tmp)) {
         old_tmp <- Sys.getenv(c("TMP", "TEMP"), unset = NA)
-        Sys.setenv(TMP = short_tmp, TEMP = short_tmp)
+        Sys.setenv(TMP = build_tmp, TEMP = build_tmp)
         on.exit({
             for (v in names(old_tmp))
                 if (is.na(old_tmp[[v]])) Sys.unsetenv(v)
                 else do.call(Sys.setenv, stats::setNames(list(old_tmp[[v]]), v))
         }, add = TRUE)
     }
-    dots <- list(...)
-    if (!is.null(short_tmp) && is.null(dots$cacheDir))
-        dots$cacheDir <- file.path(short_tmp, "sourceCpp-cache")
     # On Windows Rcpp normalizes "<file's folder>/../inst/include" whether or not
     # it exists, which warns "The system cannot find the path specified" on
     # every call for a file outside a package source tree. That one is noise.
     withCallingHandlers(
-        do.call(Rcpp::sourceCpp,
-                c(list(build_file, rebuild = rebuild, verbose = verbose, env = env), dots)),
+        Rcpp::sourceCpp(build_file, rebuild = rebuild, verbose = verbose, env = env, ...),
         warning = function(w) {
             if (.Platform$OS.type == "windows" &&
                 grepl("/inst/include\"", conditionMessage(w), fixed = TRUE))
@@ -335,36 +334,59 @@ ai4bayescode_source <- function(code,
 
 
 # ---------------------------------------------------------------------------
-# Internal: a copy of `cpp_file` under a space-free name, kept per content so
-# Rcpp's in-session cache still hits on an unchanged file.
+# Internal: a copy of `cpp_file` under a space-free name, ".ai4b_<name>", in
+# the same folder, so that Rcpp's dependency scan finds the file's local
+# headers (and compiles their companion .cpp files) as it would for the
+# original. It is rewritten only when the text changes, since Rcpp rebuilds
+# whenever the file is newer than its last build. In a read-only folder the
+# copy goes under tempdir(), keyed by content.
 # ---------------------------------------------------------------------------
 #' @keywords internal
 #' @noRd
 .ai4b_stage_spaced_file <- function(cpp_file) {
-    key <- unname(tools::md5sum(cpp_file))
-    dir <- file.path(tempdir(), "ai4b_src", substr(key, 1L, 16L))
-    dir.create(dir, recursive = TRUE, showWarnings = FALSE)
-    dst <- file.path(dir, gsub("[[:space:]]+", "_", basename(cpp_file)))
-    if (!file.exists(dst)) file.copy(cpp_file, dst)
+    name <- gsub("[[:space:]]+", "_", basename(cpp_file))
+    dst <- file.path(dirname(cpp_file), paste0(".ai4b_", name))
+    same <- file.exists(dst) &&
+        identical(unname(tools::md5sum(dst)), unname(tools::md5sum(cpp_file)))
+    if (!same && !isTRUE(suppressWarnings(file.copy(cpp_file, dst, overwrite = TRUE)))) {
+        key <- unname(tools::md5sum(cpp_file))
+        dir <- file.path(tempdir(), "ai4b_src", substr(key, 1L, 16L))
+        dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+        dst <- file.path(dir, name)
+        if (!file.exists(dst)) file.copy(cpp_file, dst)
+    }
     normalizePath(dst, winslash = "/", mustWork = TRUE)
 }
 
 # ---------------------------------------------------------------------------
-# Internal (Windows): the 8.3 short spelling of tempdir() when its path is not
-# plain ASCII, else NULL (nothing to do).
+# Internal (Windows): TRUE when the MinGW-w64 assembler and linker can open
+# `path`. They read paths in the system (ANSI) code page.
+# ---------------------------------------------------------------------------
+#' @keywords internal
+#' @noRd
+.ai4b_ansi_ok <- function(path) {
+    if (!grepl("[^ -~]", path)) return(TRUE)
+    cp <- l10n_info()$system.codepage   # R >= 4.1
+    !is.null(cp) && !is.na(iconv(enc2utf8(path), "UTF-8", paste0("CP", cp)))
+}
+
+# ---------------------------------------------------------------------------
+# Internal (Windows): the folder to point TMP and TEMP at for a build: R's
+# temp folder, or its 8.3 short name when the toolchain cannot open the long
+# one. NULL leaves TMP and TEMP as they are (and on other systems).
 # ---------------------------------------------------------------------------
 #' @keywords internal
 #' @noRd
 .ai4b_ansi_tempdir <- function() {
     if (.Platform$OS.type != "windows") return(NULL)
     td <- normalizePath(tempdir(), mustWork = FALSE)
-    if (!grepl("[^ -~]", td)) return(NULL)
+    if (.ai4b_ansi_ok(td)) return(td)
     short <- utils::shortPathName(td)
-    if (!nzchar(short) || grepl("[^ -~]", short)) {
-        warning("The temporary folder ", td, " is not a plain-ASCII path and has ",
-                "no short (8.3) name, which the compiler tools need. Set TMP and ",
-                "TEMP to a plain-ASCII folder before starting R.", call. = FALSE)
-        return(NULL)
-    }
-    short
+    if (nzchar(short) && .ai4b_ansi_ok(short)) return(short)
+    tmp <- Sys.getenv("TMP", Sys.getenv("TEMP"))
+    if (nzchar(tmp) && .ai4b_ansi_ok(tmp)) return(NULL)
+    warning("The temporary folder ", td, " has characters outside the Windows ",
+            "code page and no short (8.3) name, which the compiler tools need. Set ",
+            "TMP and TEMP to a plain-ASCII folder before starting R.", call. = FALSE)
+    NULL
 }

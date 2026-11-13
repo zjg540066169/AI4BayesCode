@@ -894,9 +894,7 @@ ai4bayescode_key_status <- function() {
 #' @noRd
 .ai4b_tool_base <- function(rel, pkg_root) {
     if (grepl("^blocks_local(/|$)", rel)) getwd()
-    else if (grepl("^blocks_download(/|$)", rel))
-        Sys.getenv("AI4BAYESCODE_DATA_HOME",
-                   unset = file.path(.ai4b_home_dir(), ".AI4BayesCode"))
+    else if (grepl("^blocks_download(/|$)", rel)) dirname(.ai4b_blocks_dir())
     else pkg_root
 }
 

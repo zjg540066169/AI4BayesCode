@@ -113,8 +113,8 @@ runner, as a throwaway L3 harness; it is never delivered.
 - MAY write throwaway files (AD-twin, probes, the R1 script) in its OWN
   scratch directory, and deletes them before it returns.
 - On Windows, call R and Python as `start.md` Sec.1b "On Windows" says (the full
-  `Rscript.exe` path, `py -3 -X utf8`, code in script files, forward-slash paths
-  inside code), and build the L2 throwaway files with the Windows recipe in
+  `Rscript.exe` path, the Python chosen there with `-X utf8`, code in script files,
+  forward-slash paths inside code), and build the L2 throwaway files with the Windows recipe in
   `codegen_cpp.md` "The validator runs it". The `grep` checks in this file run
   in PowerShell as `Select-String -CaseSensitive -Pattern '<regex>' <file>`.
 - MAY NOT edit, regenerate or "fix" any deliverable (`.cpp`, runner,

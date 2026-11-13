@@ -16,6 +16,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -52,7 +53,10 @@ def _is_skill_dir(d: Path) -> bool:
 def _remove_tree(d: Path) -> None:
     """rmtree that also clears the read-only bit git sets on pack files,
     which otherwise stops the deletion on Windows."""
-    def clear_and_retry(func, path, _exc):
+    def clear_and_retry(func, path, exc):
+        if os.name != "nt" or func not in (os.unlink, os.remove, os.rmdir) \
+                or os.path.islink(path):
+            raise exc[1] if isinstance(exc, tuple) else exc
         os.chmod(path, stat.S_IWRITE)
         func(path)
     if sys.version_info >= (3, 12):
@@ -61,7 +65,45 @@ def _remove_tree(d: Path) -> None:
         shutil.rmtree(d, onerror=clear_and_retry)
 
 
-def install_skill(agent=_AGENTS, ref: str = "main", quiet: bool = False) -> dict:
+def _replace_with_copy(src: Path, d: Path) -> None:
+    """Put a copy of ``src`` at ``d`` without ever leaving ``d`` half deleted.
+
+    ``d`` is the real folder (see install_skill), never a link. The copy is
+    made beside the skills folder, the old folder is moved aside in one step
+    (on Windows that fails as a whole while a file in it is open), the copy is
+    moved in, and only then is the old folder deleted. Working beside the
+    skills folder keeps every move on one volume and out of the folder the
+    agent lists skills from."""
+    d.parent.mkdir(parents=True, exist_ok=True)
+    work = d.parent.parent
+    tag = f"{os.getpid()}-{time.time_ns()}"
+    new, old = work / f".AI4BayesCode-new-{tag}", work / f".AI4BayesCode-old-{tag}"
+    shutil.copytree(src, new)
+    if d.exists():
+        try:
+            os.replace(d, old)
+        except OSError as exc:
+            _remove_tree(new)
+            raise RuntimeError(
+                f"Could not replace {d}: {exc}\n  Close any program that uses it (an "
+                "editor, a terminal whose current folder is inside it), then run this "
+                "again. The installed skill is unchanged.") from exc
+    try:
+        os.replace(new, d)
+    except OSError:
+        if old.exists():
+            os.replace(old, d)
+        _remove_tree(new)
+        raise
+    if old.exists():
+        try:
+            _remove_tree(old)
+        except OSError:
+            print(f"  Note: the old copy could not be deleted. Delete {old} by hand.")
+
+
+def install_skill(agent=_AGENTS, ref: str = "main", quiet: bool = False,
+                  force: bool = False) -> dict:
     """Install the AI4BayesCode skill where the coding agent looks for it.
 
     Puts the skill in ``~/.claude/skills/AI4BayesCode`` for Claude Code
@@ -69,6 +111,8 @@ def install_skill(agent=_AGENTS, ref: str = "main", quiet: bool = False) -> dict
     in ``~/.agents/skills/AI4BayesCode`` for Codex. Run it again to update.
     An existing copy at the destination is replaced; a folder there that does
     not hold the AI4BayesCode skill is never touched, the call raises instead.
+    So does a git checkout of the skill (update that with git), unless
+    ``force=True``.
 
     Parameters
     ----------
@@ -78,6 +122,8 @@ def install_skill(agent=_AGENTS, ref: str = "main", quiet: bool = False) -> dict
         Git branch or tag to install (default ``"main"``).
     quiet:
         Suppress the progress messages.
+    force:
+        Also replace a git checkout of the skill, losing any changes made in it.
 
     Returns
     -------
@@ -91,11 +137,20 @@ def install_skill(agent=_AGENTS, ref: str = "main", quiet: bool = False) -> dict
     if not isinstance(ref, str) or not ref:
         raise ValueError("ref must be a branch or tag name, e.g. 'main'")
     dests = {a: _skill_dest(a) for a in agents}
-    for d in dests.values():
-        if d.is_dir() and not _is_skill_dir(d):
+    # Through a symbolic link (or a Windows junction), the folder it points to
+    # is updated and the link itself left alone.
+    reals = {a: Path(os.path.realpath(d)) for a, d in dests.items()}
+    for d, real in zip(dests.values(), reals.values()):
+        if real.exists() and not (real.is_dir() and _is_skill_dir(real)):
             raise FileExistsError(
                 f"{d} already exists and does not hold the AI4BayesCode skill. "
                 "Move it away, then run this again.")
+        if (real / ".git").exists() and not force:
+            raise FileExistsError(
+                f"{real} is a git checkout of the skill. Update it with git:\n"
+                f'  git -C "{real}" pull --ff-only https://github.com/{_SKILL_REPO}.git {ref}\n'
+                "or pass force=True to replace it with a fresh copy, losing any "
+                "changes made in it.")
 
     url = f"https://github.com/{_SKILL_REPO}/archive/{ref}.zip"
     with tempfile.TemporaryDirectory(prefix="ai4b_skill_") as tmp:
@@ -115,11 +170,8 @@ def install_skill(agent=_AGENTS, ref: str = "main", quiet: bool = False) -> dict
         tops = [p for p in (tmp / "x").iterdir() if p.is_dir()]
         if len(tops) != 1 or not (tops[0] / "SKILL.md").is_file():
             raise RuntimeError(f"The download from {url} does not contain the skill.")
-        for d in dests.values():
-            if d.exists():
-                _remove_tree(d)
-            d.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(tops[0], d)
+        for real in reals.values():
+            _replace_with_copy(tops[0], real)
 
     if not quiet:
         print("Installed the AI4BayesCode skill:")

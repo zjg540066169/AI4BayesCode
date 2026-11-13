@@ -20,9 +20,25 @@
     # C++ and across all projects, so a block installed once is found everywhere.
     # .ai4b_home_dir(), not path.expand("~"): on Windows R's "~" is Documents
     # while Python's is the profile folder, which split the shared store in two.
-    base <- Sys.getenv("AI4BAYESCODE_DATA_HOME",
-                       unset = file.path(.ai4b_home_dir(), ".AI4BayesCode"))
-    file.path(base, "blocks_download")
+    custom <- Sys.getenv("AI4BAYESCODE_DATA_HOME")
+    if (nzchar(custom)) return(file.path(custom, "blocks_download"))
+    d <- file.path(.ai4b_home_dir(), ".AI4BayesCode", "blocks_download")
+    # Earlier versions kept R's blocks under Documents on Windows: move them.
+    legacy <- file.path(path.expand("~"), ".AI4BayesCode", "blocks_download")
+    if (.Platform$OS.type == "windows" && !dir.exists(d) && dir.exists(legacy) &&
+        normalizePath(legacy, winslash = "/") != normalizePath(d, winslash = "/",
+                                                                mustWork = FALSE)) {
+        dir.create(dirname(d), recursive = TRUE, showWarnings = FALSE)
+        if (!isTRUE(suppressWarnings(file.rename(legacy, d)))) {
+            if (is.null(getOption("AI4BayesCode.legacy_blocks_noted"))) {
+                options(AI4BayesCode.legacy_blocks_noted = TRUE)
+                message("Installed blocks are still in ", legacy, ". Move that ",
+                        "folder to ", d, " so that R and Python share them.")
+            }
+            return(legacy)
+        }
+    }
+    d
 }
 
 #' Path to the per-user contributed-block library

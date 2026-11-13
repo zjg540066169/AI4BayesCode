@@ -6,7 +6,11 @@ from __future__ import annotations
 import contextlib
 import importlib
 import io
+import os
+import zipfile
 from pathlib import Path
+
+import pytest
 
 import AI4BayesCode
 from AI4BayesCode._console import glyph, safe_print
@@ -75,3 +79,91 @@ def test_install_skill_rejects_unknown_agents():
         assert "claude" in str(e)
     else:
         raise AssertionError("expected ValueError")
+
+
+# ---- install_skill() against a local archive in place of the GitHub download --
+
+def _fake_download(monkeypatch, tmp_path, version="new"):
+    """Serve install_skill() a zip laid out like GitHub's archive of the repo."""
+    archive = tmp_path / "archive.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("AI4BayesCode-main/SKILL.md", "---\nname: AI4BayesCode\n---\n")
+        zf.writestr("AI4BayesCode-main/VERSION.txt", version)
+    monkeypatch.setattr(inst.urllib.request, "urlopen",
+                        lambda url, timeout=None: open(archive, "rb"))
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    return home / ".claude" / "skills" / "AI4BayesCode"
+
+
+def _old_skill(d: Path) -> None:
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text("---\nname: AI4BayesCode\n---\n", encoding="utf-8")
+    (d / "VERSION.txt").write_text("old", encoding="utf-8")
+
+
+def _leftovers(d: Path) -> list:
+    return sorted(p.name for p in d.parent.parent.glob(".AI4BayesCode-*"))
+
+
+def test_install_skill_replaces_an_old_copy(monkeypatch, tmp_path):
+    d = _fake_download(monkeypatch, tmp_path)
+    _old_skill(d)
+    inst.install_skill("claude", quiet=True)
+    assert (d / "VERSION.txt").read_text(encoding="utf-8") == "new"
+    assert _leftovers(d) == []
+
+
+def test_install_skill_leaves_a_git_checkout_alone(monkeypatch, tmp_path):
+    d = _fake_download(monkeypatch, tmp_path)
+    _old_skill(d)
+    (d / ".git").mkdir()
+    with pytest.raises(FileExistsError, match="git checkout"):
+        inst.install_skill("claude", quiet=True)
+    assert (d / ".git").is_dir() and (d / "VERSION.txt").read_text(encoding="utf-8") == "old"
+    inst.install_skill("claude", quiet=True, force=True)
+    assert not (d / ".git").exists()
+    assert (d / "VERSION.txt").read_text(encoding="utf-8") == "new"
+
+
+def test_install_skill_keeps_the_old_copy_when_it_cannot_be_moved(monkeypatch, tmp_path):
+    d = _fake_download(monkeypatch, tmp_path)
+    _old_skill(d)
+    real_replace = os.replace
+
+    def locked(src, dst):   # what Windows does while a file in the folder is open
+        if Path(src) == d:
+            raise PermissionError(13, "The process cannot access the file", str(src))
+        return real_replace(src, dst)
+    monkeypatch.setattr(inst.os, "replace", locked)
+    with pytest.raises(RuntimeError, match="unchanged"):
+        inst.install_skill("claude", quiet=True)
+    assert (d / "SKILL.md").is_file() and (d / "VERSION.txt").read_text(encoding="utf-8") == "old"
+    assert _leftovers(d) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symbolic links need extra rights on Windows")
+def test_install_skill_updates_the_folder_a_link_points_to(monkeypatch, tmp_path):
+    d = _fake_download(monkeypatch, tmp_path)
+    target = tmp_path / "shared copy" / "AI4BayesCode"
+    _old_skill(target)
+    d.parent.mkdir(parents=True)
+    d.symlink_to(target, target_is_directory=True)
+    inst.install_skill("claude", quiet=True)
+    assert d.is_symlink() and (d / "VERSION.txt").read_text(encoding="utf-8") == "new"
+    assert (target / "VERSION.txt").read_text(encoding="utf-8") == "new"
+    assert _leftovers(target) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symbolic links need extra rights on Windows")
+def test_install_skill_leaves_a_linked_git_checkout_alone(monkeypatch, tmp_path):
+    d = _fake_download(monkeypatch, tmp_path)
+    target = tmp_path / "dev clone"
+    _old_skill(target)
+    (target / ".git").mkdir()
+    d.parent.mkdir(parents=True)
+    d.symlink_to(target, target_is_directory=True)
+    with pytest.raises(FileExistsError, match="git checkout"):
+        inst.install_skill("claude", quiet=True)
+    assert (target / ".git").is_dir() and d.is_symlink()

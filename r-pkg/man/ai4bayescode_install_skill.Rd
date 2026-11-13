@@ -7,7 +7,8 @@
 ai4bayescode_install_skill(
   agent = c("claude", "codex"),
   ref = "main",
-  quiet = FALSE
+  quiet = FALSE,
+  force = FALSE
 )
 }
 \arguments{
@@ -17,6 +18,9 @@ ai4bayescode_install_skill(
 \item{ref}{Git branch or tag to install (default `"main"`).}
 
 \item{quiet}{Suppress the progress messages (default `FALSE`).}
+
+\item{force}{Also replace a git checkout of the skill, losing any changes
+made in it (default `FALSE`).}
 }
 \value{
 Invisibly, the installed folder(s), named by agent.
@@ -33,6 +37,8 @@ to update the skill.
 \details{
 An existing copy at the destination is replaced. A folder there that does
 not hold the AI4BayesCode skill is never touched: the call stops instead.
+So does a git checkout of the skill (update that with git), unless
+`force = TRUE`.
 }
 \examples{
 \dontrun{

@@ -40,6 +40,7 @@ import sys
 import sysconfig
 import tempfile
 import time
+import warnings
 from pathlib import Path
 from typing import Iterable
 
@@ -129,11 +130,27 @@ def _has_armadillo_and_blas(prefix: Path) -> bool:
             and any((prefix / "lib").glob("libopenblas*.a")))
 
 
+@functools.lru_cache(maxsize=None)
+def _targets_mingw(cxx: str) -> bool:
+    """Whether ``cxx`` is a GCC that builds for MinGW-w64."""
+    try:
+        res = subprocess.run([cxx, "-dumpmachine"], capture_output=True,
+                             encoding="utf-8", errors="replace", env=_toolchain_env(cxx))
+    except OSError:
+        return False
+    return res.returncode == 0 and "mingw" in res.stdout
+
+
 def _compiler() -> str:
     cxx = os.environ.get("CXX")
-    if cxx:
+    if cxx and not (_is_windows() and not _targets_mingw(cxx)):
         return cxx
     if _is_windows():
+        if cxx:
+            # A CXX from an MSVC setup (conda's compiler activation sets
+            # cl.exe) cannot build against MinGW's Armadillo and OpenBLAS.
+            warnings.warn(f"CXX={cxx!r} is not a MinGW-w64 g++, so it is ignored "
+                          "and Rtools or MSYS2 is used.", stacklevel=2)
         # clang++ on Windows targets the MSVC toolchain, and the g++ first on
         # PATH (Strawberry Perl, a bare MinGW) usually lacks Armadillo and BLAS,
         # so only toolchains that ship both are used. Rtools comes first: its
@@ -236,14 +253,21 @@ def _arma_blas_64bit(cxx: str, arma_include: str) -> bool:
     MSYS2 patches Armadillo's config.hpp so that it does on 64-bit Windows. The
     OpenBLAS linked in has to use the same integer width: with a 32-bit one,
     det(), log_det() signs and LU pivots come out silently wrong."""
+    # A failed probe raises: assuming 32-bit integers could give wrong numbers,
+    # and lru_cache does not keep an exception, so a repaired toolchain is
+    # probed again.
     try:
         res = subprocess.run(
             [cxx, "-x", "c++", "-std=gnu++17", "-dM", "-E", "-DARMA_DONT_USE_WRAPPER=",
              f"-I{arma_include}", "-"],
             input="#include <armadillo_bits/config.hpp>\n", capture_output=True,
             encoding="utf-8", errors="replace", env=_toolchain_env(cxx))
-    except OSError:
-        return False
+    except OSError as exc:
+        raise RuntimeError(f"Could not read the Armadillo configuration with {cxx}: "
+                           f"{exc}") from exc
+    if res.returncode != 0:
+        raise RuntimeError(f"Could not read the Armadillo configuration with {cxx}:\n"
+                           f"{res.stderr.strip()}")
     return "#define ARMA_BLAS_64BIT_INT" in res.stdout
 
 
@@ -357,7 +381,8 @@ def _compile_flags(include_root: Path, cxx: str | None = None) -> list[str]:
             "samplers against Armadillo, so it has to be installed first:\n"
             "  macOS:          brew install armadillo\n"
             "  Debian/Ubuntu:  apt-get install libarmadillo-dev\n"
-            "  conda:          conda install -c conda-forge armadillo\n"
+            "  conda:          conda install -c conda-forge armadillo, then set\n"
+            "                  ARMADILLO_INCLUDE_DIR to $CONDA_PREFIX/include\n"
             "  Windows:        see below\n"
             "If it is installed somewhere unusual, set ARMADILLO_INCLUDE_DIR "
             "to the directory containing the 'armadillo' header."
@@ -582,7 +607,9 @@ def source(
     loaded = sys.modules.get(module_name)
     loaded_file = Path(getattr(loaded, "__file__", None) or "")
     if loaded is not None and loaded_file.name.startswith(f"{module_name}_"):
-        if loaded_file.parent == cache and loaded_file.name.startswith(f"{module_name}_{sig}"):
+        # The signature covers the code, flags, libraries and compiler, so the
+        # same signature is the same build, whatever folder it was loaded from.
+        if loaded_file.name.startswith(f"{module_name}_{sig}"):
             if rebuild and not quiet:
                 print(f"'{module_name}' is already loaded in this Python session and "
                       "is up to date; a rebuilt copy could not be loaded into it.")

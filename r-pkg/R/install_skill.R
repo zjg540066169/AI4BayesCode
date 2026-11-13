@@ -43,6 +43,55 @@
               readLines(f, n = 5L, warn = FALSE, encoding = "UTF-8")))
 }
 
+# The folder at `d`, through a symbolic link: an update replaces the folder
+# a link points to and leaves the link itself alone.
+#' @keywords internal
+#' @noRd
+.ai4b_real_dest <- function(d) {
+    if (file.exists(d)) normalizePath(d, winslash = "/", mustWork = TRUE) else d
+}
+
+# Put a copy of `entries` (the files of the downloaded skill) at `d` without
+# ever leaving `d` half deleted. The copy is made beside the skills folder,
+# the old folder is moved aside in one step (on Windows that fails as a whole
+# while a file in it is open), the copy is moved in, and only then is the old
+# folder deleted. Working beside the skills folder keeps every move on one
+# volume and out of the folder the agent lists skills from.
+#' @keywords internal
+#' @noRd
+.ai4b_replace_with_copy <- function(entries, d) {
+    dir.create(dirname(d), recursive = TRUE, showWarnings = FALSE)
+    work <- dirname(normalizePath(dirname(d), winslash = "/", mustWork = TRUE))
+    tag  <- paste0(Sys.getpid(), "-", format(as.numeric(Sys.time()) * 1e6, scientific = FALSE))
+    new  <- file.path(work, paste0(".AI4BayesCode-new-", tag))
+    old  <- file.path(work, paste0(".AI4BayesCode-old-", tag))
+    dir.create(new)
+    ok <- file.copy(entries, new, recursive = TRUE, copy.date = TRUE)
+    if (!all(ok) || !file.exists(file.path(new, "SKILL.md"))) {
+        unlink(new, recursive = TRUE, force = TRUE)
+        stop("Copying the skill next to '", d, "' failed.", call. = FALSE)
+    }
+    if (dir.exists(d) && !isTRUE(suppressWarnings(file.rename(d, old)))) {
+        unlink(new, recursive = TRUE, force = TRUE)
+        stop("Could not replace '", d, "'. Close any program that uses it (an ",
+             "editor, a terminal whose current folder is inside it), then run this ",
+             "again. The installed skill is unchanged.", call. = FALSE)
+    }
+    if (!isTRUE(suppressWarnings(file.rename(new, d)))) {
+        if (dir.exists(old)) file.rename(old, d)
+        unlink(new, recursive = TRUE, force = TRUE)
+        stop("Could not move the new copy of the skill to '", d, "'.", call. = FALSE)
+    }
+    if (dir.exists(old)) {
+        # force: git marks pack files read-only, and Windows will not delete a
+        # read-only file otherwise.
+        unlink(old, recursive = TRUE, force = TRUE)
+        if (dir.exists(old))
+            message("  Note: the old copy could not be deleted. Delete ", old, " by hand.")
+    }
+    invisible(d)
+}
+
 #' Install the AI4BayesCode skill for Claude Code or Codex
 #'
 #' Downloads the AI4BayesCode skill from GitHub and puts it where the coding
@@ -55,11 +104,15 @@
 #'
 #' An existing copy at the destination is replaced. A folder there that does
 #' not hold the AI4BayesCode skill is never touched: the call stops instead.
+#' So does a git checkout of the skill (update that with git), unless
+#' `force = TRUE`.
 #'
 #' @param agent Which agent to install for: `"claude"`, `"codex"`, or both
 #'   (the default).
 #' @param ref Git branch or tag to install (default `"main"`).
 #' @param quiet Suppress the progress messages (default `FALSE`).
+#' @param force Also replace a git checkout of the skill, losing any changes
+#'   made in it (default `FALSE`).
 #' @return Invisibly, the installed folder(s), named by agent.
 #' @examples
 #' \dontrun{
@@ -68,15 +121,22 @@
 #' }
 #' @export
 ai4bayescode_install_skill <- function(agent = c("claude", "codex"), ref = "main",
-                                       quiet = FALSE) {
+                                       quiet = FALSE, force = FALSE) {
     agent <- match.arg(agent, several.ok = TRUE)
     if (!is.character(ref) || length(ref) != 1L || is.na(ref) || !nzchar(ref))
         stop("`ref` must be a single branch or tag name, e.g. \"main\".", call. = FALSE)
     dests <- vapply(agent, .ai4b_skill_dest, character(1))
     for (d in dests) {
-        if (dir.exists(d) && !.ai4b_is_skill_dir(d))
+        real <- .ai4b_real_dest(d)
+        if (file.exists(real) && !(dir.exists(real) && .ai4b_is_skill_dir(real)))
             stop("'", d, "' already exists and does not hold the AI4BayesCode ",
                  "skill. Move it away, then run this again.", call. = FALSE)
+        if (file.exists(file.path(real, ".git")) && !isTRUE(force))
+            stop("'", real, "' is a git checkout of the skill. Update it with git:\n",
+                 "  git -C \"", real, "\" pull --ff-only https://github.com/",
+                 .AI4B_SKILL_REPO, ".git ", ref, "\n",
+                 "or pass force = TRUE to replace it with a fresh copy, losing any ",
+                 "changes made in it.", call. = FALSE)
     }
 
     tmp <- tempfile("ai4b_skill_")
@@ -100,20 +160,7 @@ ai4bayescode_install_skill <- function(agent = c("claude", "codex"), ref = "main
         stop("The download from ", url, " does not contain the skill.", call. = FALSE)
     entries <- list.files(top, all.files = TRUE, no.. = TRUE, full.names = TRUE)
 
-    for (d in dests) {
-        if (dir.exists(d)) {
-            # force: git marks pack files read-only, and Windows will not
-            # delete a read-only file otherwise.
-            unlink(d, recursive = TRUE, force = TRUE)
-            if (dir.exists(d))
-                stop("Could not remove the old copy at '", d, "'. Close any ",
-                     "program that uses it, then run this again.", call. = FALSE)
-        }
-        dir.create(d, recursive = TRUE)
-        ok <- file.copy(entries, d, recursive = TRUE, copy.date = TRUE)
-        if (!all(ok) || !file.exists(file.path(d, "SKILL.md")))
-            stop("Copying the skill to '", d, "' failed.", call. = FALSE)
-    }
+    for (d in dests) .ai4b_replace_with_copy(entries, .ai4b_real_dest(d))
 
     if (!quiet) {
         message("Installed the AI4BayesCode skill:")

@@ -63,6 +63,10 @@ for your R version (Rtools44 for R 4.4, Rtools45 for R 4.5 and later).
 ```bash
 pip install "git+https://github.com/zjg540066169/AI4BayesCode.git#subdirectory=python"
 ```
+Without git, install the same code from GitHub's zip archive:
+```bash
+pip install "https://github.com/zjg540066169/AI4BayesCode/archive/refs/heads/main.zip#subdirectory=python"
+```
 Armadillo: `brew install armadillo` on macOS, `apt-get install libarmadillo-dev` on
 Debian/Ubuntu. On Windows, Rtools (above) already holds the compiler, Armadillo and
 OpenBLAS. Without R, use MSYS2 instead, as `python/README.md` describes.

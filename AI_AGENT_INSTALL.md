@@ -80,11 +80,14 @@ git init -q "$HOME/.agents/skills/AI4BayesCode"; git -C "$HOME/.agents/skills/AI
   the upstream history was rewritten. In both cases ask the user, remove the folder and run
   the command again. Removing it in bash: `rm -rf "<target>"`. In PowerShell:
   `Remove-Item -Recurse -Force "<target>"`.
-- Codex: earlier instructions installed into `$HOME/.codex/skills/AI4BayesCode`. Codex still
-  reads that folder, so a copy there makes the skill appear twice. Ask the user, then remove
-  it the same way.
+- Codex: earlier instructions installed into `$CODEX_HOME/skills/AI4BayesCode` (`CODEX_HOME`
+  defaults to `$HOME/.codex`). Codex still reads that folder, so a copy there makes the skill
+  appear twice. Ask the user, then remove it the same way.
 - If Claude Code or Codex runs inside WSL, run the command inside WSL. A copy made from
   Windows PowerShell lands in the Windows profile, which an agent inside WSL never reads.
+- In Git Bash, `$HOME` follows a `HOME` variable the user may have set, while Claude Code and
+  Codex always use the profile folder. If `cygpath -u "$USERPROFILE"` prints a different
+  folder than `echo "$HOME"`, write `$USERPROFILE` in place of `$HOME` in the command.
 
 Afterwards tell the user to restart Claude Code (then type `/AI4BayesCode`) or Codex (then type
 `$AI4BayesCode` or pick it from `/skills`).

@@ -328,7 +328,16 @@ def _compile_check(cpp_path) -> None:
                        env=_utf8_env())
     if p.returncode != 0:
         detail = ((p.stderr or "") + (p.stdout or "")).strip()
-        raise RuntimeError(detail[-12000:] or f"compilation failed (exit {p.returncode})")
+        # The compiler's output follows "stderr:" in source()'s error. Its first
+        # error is usually the cause, so keep the start of it (and its end)
+        # and not the Python traceback and command line before it.
+        mark = detail.find("\nstderr:\n")
+        if mark >= 0:
+            out = detail[mark + len("\nstderr:\n"):]
+            detail = out if len(out) <= 12000 else out[:10000] + "\n...\n" + out[-2000:]
+        else:
+            detail = detail[-12000:]
+        raise RuntimeError(detail or f"compilation failed (exit {p.returncode})")
 
 
 def _validate(cpp_path, runner_path, classname, verbose: bool = False) -> dict:

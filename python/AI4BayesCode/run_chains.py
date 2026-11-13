@@ -29,8 +29,10 @@ so there the chains run one after another by default, as in R. Pass
 ``n_jobs > 1`` to spawn workers instead: each re-imports the calling
 script, so the factory has to be a top-level function, everything it
 uses has to be defined at module top level, and the call has to sit under
-``if __name__ == "__main__":``. When that cannot work (a lambda, a factory
-from ``python -c`` or a notebook) the chains run sequentially.
+``if __name__ == "__main__":``. So does all other work the script does: a
+worker runs whatever is outside the guard before its chain. When that cannot
+work (a lambda, a factory from ``python -c`` or a notebook) the chains run
+sequentially.
 """
 
 from __future__ import annotations
@@ -305,12 +307,19 @@ def run_chains(
                     f"({type(e).__name__}: {e}); running the {len(seeds)} chains "
                     "sequentially instead.")
                 results = None
-            if results is not None and all(r.get("hist") is None for r in results):
-                warnings.warn(
-                    "run_chains: every parallel chain failed in its worker (on "
-                    "Windows the factory and everything it uses must be defined at "
-                    "module top level); running the chains sequentially instead.")
-                results = None
+            if results is not None and all("error" in r for r in results):
+                # Run the first chain here. If it works, the workers could not
+                # rebuild the factory, so run the rest here as well; if it fails
+                # too, the model itself fails and the results stand as they are.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    first = _chain_worker(*args[0])
+                if "error" not in first:
+                    warnings.warn(
+                        "run_chains: every parallel chain failed in its worker (on "
+                        "Windows the factory and everything it uses must be defined at "
+                        "module top level); running the chains sequentially instead.")
+                    results = [first] + [_chain_worker(*a) for a in args[1:]]
 
     if results is None:
         results = _sequential()

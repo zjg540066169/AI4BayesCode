@@ -21,6 +21,9 @@ concurrency:
 
 env:
   BRANCH: ${{ github.head_ref || github.ref_name }}
+  # What the install functions download from this repository. A pull request
+  # from a fork has its branch only in the fork, so they take its base branch.
+  INSTALL_REF: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && github.base_ref || github.head_ref || github.ref_name }}
 
 jobs:
   website:
@@ -40,7 +43,8 @@ jobs:
       run:
         shell: ${{ matrix.shell }}   # the shell under test; other steps name theirs
     env:
-      URL: https://github.com/${{ github.repository }}.git
+      # The repository that holds BRANCH: the fork, for a pull request from one
+      URL: ${{ github.event.pull_request.head.repo.clone_url || format('https://github.com/{0}.git', github.repository) }}
       # main before Windows support: no .gitattributes, so Git for Windows
       # checked it out with CRLF line endings
       OLD_MAIN: 9cd2e8d187b2ba2461e58011f1a8bff6e1172643
@@ -87,7 +91,7 @@ jobs:
           for d in "$HOME/.claude/skills/AI4BayesCode" "$HOME/.agents/skills/AI4BayesCode"; do
             rm -rf "$d"
             git init -q "$d"
-            git -C "$d" fetch -q --depth 1 "$URL" "$OLD_MAIN"
+            git -C "$d" fetch -q --depth 1 "https://github.com/${{ github.repository }}.git" "$OLD_MAIN"
             git -C "$d" checkout -q -b main FETCH_HEAD
           done
       - name: Update the old clone for Claude Code (the same command)
@@ -124,8 +128,8 @@ jobs:
         shell: Rscript {0}
         run: |
           library(AI4BayesCode)
-          ai4bayescode_install_skill(ref = Sys.getenv("BRANCH"))
-          ai4bayescode_install_skill(ref = Sys.getenv("BRANCH"))   # the update path
+          ai4bayescode_install_skill(ref = Sys.getenv("INSTALL_REF"))
+          ai4bayescode_install_skill(ref = Sys.getenv("INSTALL_REF"))   # the update path
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -157,6 +161,6 @@ jobs:
       - name: Install the skill, update it, then check
         shell: bash
         run: |
-          python -c "import os, AI4BayesCode; AI4BayesCode.install_skill(ref=os.environ['BRANCH'])"
-          python -c "import os, AI4BayesCode; AI4BayesCode.install_skill(ref=os.environ['BRANCH'])"
+          python -c "import os, AI4BayesCode; AI4BayesCode.install_skill(ref=os.environ['INSTALL_REF'])"
+          python -c "import os, AI4BayesCode; AI4BayesCode.install_skill(ref=os.environ['INSTALL_REF'])"
           python tools/ci/check_skill_install.py

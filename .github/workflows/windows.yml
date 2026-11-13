@@ -84,7 +84,7 @@ jobs:
           # folder with a space (it refuses to start otherwise), so record
           # whether C: has them.
           fsutil 8dot3name query C: | Out-File -Encoding utf8 ci-logs/8dot3.txt
-          $odd = "x " + [char]0x7EDF + [char]0x8BA1     # "x 统计"
+          $odd = "x " + [char]0x7EDF + [char]0x8BA1     # "x " then two CJK characters
           $lib = Join-Path $env:USERPROFILE "R lib $odd"
           $tmp = Join-Path $env:USERPROFILE "tmp $odd"
           New-Item -ItemType Directory -Force $lib, $tmp | Out-Null
@@ -160,7 +160,7 @@ jobs:
           python tools/ci/py_paths_check.py *>&1 | Tee-Object -FilePath ci-logs/paths.txt
           exit $LASTEXITCODE
       - name: Run the example usage blocks
-        if: always()
+        if: ${{ !cancelled() }}
         shell: bash
         run: python tools/ci/run_examples.py --part ${{ matrix.part }} --n-parts 4 --log-dir ci-logs/examples --timeout 5400 2>&1 | tee ci-logs/summary.txt
       - uses: actions/upload-artifact@v4
@@ -195,7 +195,7 @@ jobs:
           g++ --version | head -1 | tee ci-logs/compiler.txt
           cd tests && make run 2>&1 | tee ../ci-logs/suite.txt
       - name: Every example's built-in main()
-        if: always()
+        if: ${{ !cancelled() }}
         run: bash tools/ci/run_examples_standalone.sh ci-logs/examples 2>&1 | tee ci-logs/examples-summary.txt
       - uses: actions/upload-artifact@v4
         if: always()
