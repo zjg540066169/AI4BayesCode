@@ -12,7 +12,10 @@ set -u
 out=${1:-example-logs}
 mkdir -p "$out"
 inc=r-pkg/inst/include
-flags=(-std=c++17 -O2
+# On Windows the GNU dialect, as R uses: MinGW's math.h hides M_PI and the
+# other M_* constants in strict ISO mode.
+case "$(uname -s)" in MINGW*|MSYS*|UCRT*) std=gnu++17 ;; *) std=c++17 ;; esac
+flags=(-std=$std -O2
        -I"$inc" -I"$inc/mcmclib" -I"$inc/mcmclib/BaseMatrixOps/include"
        -I"$inc/eigen" -I"$inc/celerite/include" -I"$inc/libgp_kernels"
        -DMCMC_ENABLE_ARMA_WRAPPERS -DARMA_DONT_USE_WRAPPER=)

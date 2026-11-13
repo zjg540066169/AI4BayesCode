@@ -17,19 +17,31 @@ for full details.
 ### As an agent skill (Claude Code / Codex / Cursor / ...)
 
 The repository root is the skill package (`SKILL.md` + `start.md` + the C++
-library under `include/`). Clone it into your agent's skills directory, then
-launch it.
+library under `include/`). Clone it into your agent's skills folder, then
+launch it. The commands are the same on macOS, Linux and Windows. On Windows,
+run them in PowerShell. They do not work in Command Prompt. If your agent runs
+inside WSL, run them inside WSL.
 
-**Claude Code** -- clone into `~/.claude/skills`, reload, then type `/AI4BayesCode`:
+**Claude Code** -- clone into `~/.claude/skills`, restart, then type `/AI4BayesCode`:
 ```bash
-git clone https://github.com/zjg540066169/AI4BayesCode.git ~/.claude/skills/AI4BayesCode
+git clone --depth 1 https://github.com/zjg540066169/AI4BayesCode.git "$HOME/.claude/skills/AI4BayesCode"
 ```
 
-**Codex** -- clone into `~/.codex/skills`, restart, then type `/AI4BayesCode`
-(or, if your build has no slash commands, tell it to read `start.md`):
+**Codex** -- clone into `~/.agents/skills`, restart, then type `$AI4BayesCode` or
+pick it from `/skills` (the Codex app also lists it among the slash commands):
 ```bash
-git clone https://github.com/zjg540066169/AI4BayesCode.git ~/.codex/skills/AI4BayesCode
+git clone --depth 1 https://github.com/zjg540066169/AI4BayesCode.git "$HOME/.agents/skills/AI4BayesCode"
 ```
+
+To update later, run the line below (for Codex, write `.agents` in place of
+`.claude`). If it reports an error, delete the folder and clone again.
+```bash
+git -C "$HOME/.claude/skills/AI4BayesCode" pull --ff-only
+```
+
+If you installed with older instructions, delete the old `AI4BayesCode` folder
+before you clone. For Codex, also delete the old copy in `~/.codex/skills`, or
+Codex lists the skill twice.
 
 For Cursor, the AI-assisted install, or letting your agent install it for you,
 see `AI_AGENT_INSTALL.md`.

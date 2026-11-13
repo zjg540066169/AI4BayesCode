@@ -4,7 +4,10 @@ name: Windows
 #   skill-install  the one-line install and update commands from the website,
 #                  in Windows PowerShell 5.1, PowerShell 7 and Git Bash
 #   r-examples     the R package with R + Rtools: every example's R usage block
-#   python         the Python package: unit tests and every example's usage block
+#   r-paths        the R package from a library and temp folder whose paths
+#                  contain a space and non-ASCII characters
+#   python         the Python package with the MSYS2 toolchain: unit tests and
+#                  every example's usage block
 #   cpp            the header library with the MSYS2 MinGW-w64 toolchain: the
 #                  C++ test suite and every example's built-in main()
 
@@ -74,13 +77,13 @@ jobs:
           path: ci-logs
 
   r-examples:
-    name: R examples (${{ matrix.part }}/6)
+    name: R examples (${{ matrix.part }}/8)
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3, 4, 5, 6]
+        part: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v4
       - uses: r-lib/actions/setup-r@v2
@@ -97,7 +100,9 @@ jobs:
           R CMD INSTALL r-pkg 2>&1 | tee ci-logs/install.txt
       - name: Run every example's R usage block
         shell: bash
-        run: Rscript tools/ci/run_examples.R ${{ matrix.part }} 6 ci-logs/examples 2>&1 | tee ci-logs/summary.txt
+        # R has no fork on Windows, so the four chains run one after another;
+        # the nonparametric mixtures need most of an hour that way.
+        run: Rscript tools/ci/run_examples.R ${{ matrix.part }} 8 ci-logs/examples 5400 2>&1 | tee ci-logs/summary.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -106,15 +111,63 @@ jobs:
             ci-logs
             !ci-logs/**/*_wd/**
 
-  python:
-    name: Python
+  r-paths:
+    name: R, unusual paths
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          packages: |
+            any::Rcpp
+            any::RcppArmadillo
+      - name: Library and temp folder with a space and Chinese characters
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ci-logs | Out-Null
+          $odd = "x " + [char]0x7EDF + [char]0x8BA1     # "x 统计"
+          $lib = Join-Path $env:RUNNER_TEMP "R lib $odd"
+          $tmp = Join-Path $env:RUNNER_TEMP "tmp $odd"
+          New-Item -ItemType Directory -Force $lib, $tmp | Out-Null
+          $env:TMP = $tmp; $env:TEMP = $tmp; $env:TMPDIR = $tmp
+          $env:AI4B_LIB = $lib
+          R CMD INSTALL -l "$lib" r-pkg *>&1 | Tee-Object -FilePath ci-logs/install.txt
+          Rscript tools/ci/r_paths_check.R *>&1 | Tee-Object -FilePath ci-logs/check.txt
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-r-paths
+          path: ci-logs
+
+  python:
+    name: Python (${{ matrix.part }}/4)
+    runs-on: windows-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      # The toolchain a Windows user installs: MSYS2 in its default folder,
+      # C:\msys64, with the three UCRT64 packages the error message names.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          release: false
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-armadillo
+            mingw-w64-ucrt-x86_64-openblas
       - name: Install
         shell: bash
         run: |
@@ -122,18 +175,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy pybind11 pytest scipy pyyaml matplotlib networkx arviz
           pip install -e ./python --no-deps 2>&1 | tee ci-logs/install.txt
-          for c in g++ clang++ c++ cl gcc; do echo "$c: $(command -v $c)"; done | tee ci-logs/compilers.txt
+          ls /c/msys64/ucrt64/bin/g++.exe | tee ci-logs/compilers.txt
       - name: Unit tests
+        if: matrix.part == 1
         shell: bash
         run: python -m pytest python/tests -q -p no:cacheprovider 2>&1 | tee ci-logs/pytest.txt
+      - name: Compile from a profile path with a space and Chinese characters
+        if: matrix.part == 1
+        shell: pwsh
+        run: |
+          $odd = "x " + [char]0x7EDF + [char]0x8BA1
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP "app data $odd"
+          $env:TMP = Join-Path $env:RUNNER_TEMP "tmp $odd"; $env:TEMP = $env:TMP
+          New-Item -ItemType Directory -Force $env:LOCALAPPDATA, $env:TMP | Out-Null
+          python tools/ci/py_paths_check.py *>&1 | Tee-Object -FilePath ci-logs/paths.txt
+          exit $LASTEXITCODE
       - name: Run the example usage blocks
         if: always()
         shell: bash
-        run: python tools/ci/run_examples.py --limit 3 --log-dir ci-logs/examples 2>&1 | tee ci-logs/summary.txt
+        run: python tools/ci/run_examples.py --part ${{ matrix.part }} --n-parts 4 --log-dir ci-logs/examples --timeout 5400 2>&1 | tee ci-logs/summary.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: logs-python
+          name: logs-python-${{ matrix.part }}
           path: |
             ci-logs
             !ci-logs/**/*_wd/**
@@ -160,7 +224,7 @@ jobs:
         run: |
           mkdir -p ci-logs
           g++ --version | head -1 | tee ci-logs/compiler.txt
-          cd tests && make run LDLIBS=-lopenblas 2>&1 | tee ../ci-logs/suite.txt
+          cd tests && make run 2>&1 | tee ../ci-logs/suite.txt
       - name: Every example's built-in main()
         if: always()
         run: bash tools/ci/run_examples_standalone.sh ci-logs/examples 2>&1 | tee ci-logs/examples-summary.txt
@@ -175,7 +239,7 @@ jobs:
   publish-logs:
     name: Publish logs
     if: always() && github.event_name == 'push' && github.ref_name == 'windows-support'
-    needs: [skill-install, r-examples, python, cpp]
+    needs: [skill-install, r-examples, r-paths, python, cpp]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -188,7 +252,8 @@ jobs:
         run: |
           printf '%s\n' "run ${{ github.run_id }}" "sha ${{ github.sha }}" \
             "skill-install ${{ needs.skill-install.result }}" "r-examples ${{ needs.r-examples.result }}" \
-            "python ${{ needs.python.result }}" "cpp ${{ needs.cpp.result }}" > RUN.txt
+            "r-paths ${{ needs.r-paths.result }}" "python ${{ needs.python.result }}" \
+            "cpp ${{ needs.cpp.result }}" > RUN.txt
           git init -q -b ci-logs
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"

@@ -18,6 +18,11 @@ Python build needs a standalone Armadillo header tree. It is discovered from
 ``ARMADILLO_INCLUDE_DIR`` or common system/brew locations; if not found, pass
 ``extra_cppflags=["-I/path/to/armadillo/include"]``. This is a documented
 system dependency.
+
+Windows: the module is built with the MinGW-w64 g++ of MSYS2's UCRT64
+environment, which also provides Armadillo and OpenBLAS. ``C:\\msys64`` (and the
+Scoop and Chocolatey install folders) are found automatically; set ``CXX`` to a
+``g++.exe`` to use another MinGW-w64 toolchain.
 """
 
 from __future__ import annotations
@@ -32,6 +37,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import time
 from pathlib import Path
 from typing import Iterable
 
@@ -64,8 +70,56 @@ def _ext_suffix() -> str:
     return sysconfig.get_config_var("EXT_SUFFIX") or ".so"
 
 
+_WINDOWS_TOOLCHAIN_HELP = (
+    "On Windows, AI4BayesCode compiles samplers with the MinGW-w64 toolchain of "
+    "MSYS2, which also provides Armadillo and OpenBLAS:\n"
+    "  1. Install MSYS2 from https://www.msys2.org (keep the default folder "
+    "C:\\msys64).\n"
+    "  2. Open the 'MSYS2 UCRT64' terminal and run:\n"
+    "       pacman -S --needed mingw-w64-ucrt-x86_64-gcc "
+    "mingw-w64-ucrt-x86_64-armadillo mingw-w64-ucrt-x86_64-openblas\n"
+    "AI4BayesCode then finds C:\\msys64\\ucrt64 by itself. For a toolchain in "
+    "another folder, set the CXX environment variable to its g++.exe.")
+
+
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
+def _msys2_ucrt64_prefixes() -> list[Path]:
+    """MSYS2 UCRT64 prefixes that hold a g++: the installer default first, then
+    the Scoop and Chocolatey install folders."""
+    homes = [Path(r"C:\msys64")]
+    if os.environ.get("USERPROFILE"):
+        homes.append(Path(os.environ["USERPROFILE"]) / "scoop" / "apps" / "msys2" / "current")
+    homes.append(Path(r"C:\tools\msys64"))
+    return [h / "ucrt64" for h in homes if (h / "ucrt64" / "bin" / "g++.exe").is_file()]
+
+
+def _toolchain_prefix(cxx: str) -> Path | None:
+    """The prefix (holding bin/, include/ and lib/) of a MinGW-w64 compiler."""
+    found = shutil.which(cxx)
+    if found is None:
+        return None
+    prefix = Path(found).resolve().parent.parent
+    return prefix if (prefix / "lib").is_dir() else None
+
+
 def _compiler() -> str:
-    cxx = os.environ.get("CXX") or shutil.which("clang++") or shutil.which("g++")
+    cxx = os.environ.get("CXX")
+    if cxx:
+        return cxx
+    if _is_windows():
+        # clang++ on Windows targets the MSVC toolchain, so only a MinGW-w64 g++
+        # can build the module without Visual Studio. MSYS2's comes first because
+        # the same environment also supplies Armadillo and OpenBLAS.
+        for prefix in _msys2_ucrt64_prefixes():
+            return str(prefix / "bin" / "g++.exe")
+        cxx = shutil.which("g++")
+        if cxx is None:
+            raise RuntimeError("No MinGW-w64 C++ compiler found.\n" + _WINDOWS_TOOLCHAIN_HELP)
+        return cxx
+    cxx = shutil.which("clang++") or shutil.which("g++")
     if cxx is None:
         raise RuntimeError(
             "No C++ compiler found. Set the CXX environment variable or install "
@@ -84,7 +138,7 @@ def _compiler_id(cxx: str) -> str:
         return cxx
 
 
-def _find_armadillo() -> Path | None:
+def _find_armadillo(cxx: str | None = None) -> Path | None:
     candidates = [
         os.environ.get("ARMADILLO_INCLUDE_DIR"),
         "/opt/homebrew/opt/armadillo/include",   # brew, Apple silicon
@@ -92,6 +146,10 @@ def _find_armadillo() -> Path | None:
         "/usr/include",                          # Linux system
         "/opt/local/include",                    # MacPorts
     ]
+    if _is_windows() and cxx is not None:
+        prefix = _toolchain_prefix(cxx)          # e.g. C:\msys64\ucrt64
+        if prefix is not None:
+            candidates.append(str(prefix / "include"))
     for cand in candidates:
         if cand and (Path(cand) / "armadillo").is_file():
             return Path(cand)
@@ -108,7 +166,7 @@ def _resolve_code(code: str | os.PathLike) -> tuple[Path, str]:
     try:
         p = Path(code)
         if p.is_file():
-            return p.resolve(), p.read_text()
+            return p.resolve(), p.read_text(encoding="utf-8")
     except (TypeError, ValueError, OSError):
         pass
 
@@ -139,7 +197,7 @@ def _resolve_code(code: str | os.PathLike) -> tuple[Path, str]:
     fd, tmp_name = tempfile.mkstemp(prefix="ai4bayes_", suffix=".cpp")
     os.close(fd)
     tmp = Path(tmp_name)
-    tmp.write_text(code)
+    tmp.write_text(code, encoding="utf-8")
     return tmp.resolve(), code
 
 
@@ -163,7 +221,7 @@ def _read_pybind_module_name(text: str, where: str) -> str:
     return text[start:end].strip()
 
 
-def _compile_flags(include_root: Path) -> list[str]:
+def _compile_flags(include_root: Path, cxx: str | None = None) -> list[str]:
     """The -I / -D flags for the *packaged* (vendored) header nesting."""
     inc = include_root
     roots = [
@@ -184,7 +242,7 @@ def _compile_flags(include_root: Path) -> list[str]:
     flags = [f"-I{r}" for r in roots]
     from .install_block import _block_include_flags   # installed contributed blocks
     flags.extend(_block_include_flags())
-    arma = _find_armadillo()
+    arma = _find_armadillo(cxx)
 
     if arma is None:
         # Detected and then ignored: the -I was simply skipped and the
@@ -196,8 +254,10 @@ def _compile_flags(include_root: Path) -> list[str]:
             "  macOS:          brew install armadillo\n"
             "  Debian/Ubuntu:  apt-get install libarmadillo-dev\n"
             "  conda:          conda install -c conda-forge armadillo\n"
+            "  Windows:        see below\n"
             "If it is installed somewhere unusual, set ARMADILLO_INCLUDE_DIR "
-            "to the directory containing the 'armadillo' header.")
+            "to the directory containing the 'armadillo' header."
+            + ("\n\n" + _WINDOWS_TOOLCHAIN_HELP if _is_windows() else ""))
     if arma is not None:
         flags.append(f"-I{arma}")
     flags += [
@@ -208,18 +268,66 @@ def _compile_flags(include_root: Path) -> list[str]:
         # compile then opens with a macro-redefinition warning.
         "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_PYBIND_MODULE",   # the only macro that differs from R
-        "-std=c++17",
+        # MinGW's math.h hides M_PI and the other M_* constants in strict ISO
+        # mode, so Windows builds use the GNU dialect, as R itself does.
+        "-std=gnu++17" if _is_windows() else "-std=c++17",
         "-O2",
-        "-fvisibility=hidden",
     ]
+    if _is_windows():
+        flags += [
+            # Python's pyconfig.h sets MS_WIN64 only for MSVC; without it a
+            # 64-bit GCC build sees a 32-bit Py_ssize_t.
+            "-DMS_WIN64=",
+            # Template-heavy samplers exceed the COFF section limit of 2^15.
+            "-Wa,-mbig-obj",
+        ]
+    else:
+        flags.append("-fvisibility=hidden")
     flags.append(f"-I{pybind11.get_include()}")
     return flags
 
 
-def _link_flags() -> list[str]:
+def _python_link_args() -> list[str]:
+    """Windows only: link the CPython DLL, through its import library when the
+    installation ships one (python.org and conda do), else the DLL itself."""
+    base = Path(sys.base_prefix)
+    name = f"python{sys.version_info.major}{sys.version_info.minor}"
+    if (base / "libs" / f"{name}.lib").is_file():
+        return [f"-L{base / 'libs'}", f"-l{name}"]
+    if (base / f"{name}.dll").is_file():
+        return [str(base / f"{name}.dll")]
+    raise RuntimeError(
+        f"Cannot find {name}.lib or {name}.dll under {base}; the Python "
+        "installation cannot be linked against.")
+
+
+def _link_flags(cxx: str | None = None) -> list[str]:
     if platform.system() == "Darwin":
         return ["-framework", "Accelerate"]
+    if _is_windows():
+        prefix = _toolchain_prefix(cxx) if cxx else None
+        libdir = [f"-L{prefix / 'lib'}"] if prefix is not None else []
+        # OpenBLAS carries LAPACK. libstdc++ and libgcc go in statically, so a
+        # different copy of them already loaded in the process cannot clash.
+        return libdir + ["-lopenblas", "-static-libgcc", "-static-libstdc++"] + _python_link_args()
     return ["-lblas", "-llapack", "-lm"]
+
+
+# Windows: DLL directories added for compiled modules. The handles are kept so
+# the directories stay on the search path for the life of the process.
+_DLL_DIRS: dict[str, object] = {}
+
+
+def _add_dll_directory(cxx: str) -> None:
+    """Windows: let the module find the toolchain's DLLs (OpenBLAS and its
+    Fortran runtime). Python 3.8+ ignores PATH for extension-module
+    dependencies, so the directory has to be registered explicitly."""
+    found = shutil.which(cxx)
+    if found is None:
+        return
+    bindir = str(Path(found).resolve().parent)
+    if bindir not in _DLL_DIRS:
+        _DLL_DIRS[bindir] = os.add_dll_directory(bindir)
 
 
 def _contributed_block_fingerprint(flags: Iterable[str]) -> str:
@@ -325,9 +433,9 @@ def source(
             "looks incomplete -- reinstall AI4BayesCode."
         )
 
-    flags = _compile_flags(inc) + list(extra_cppflags)
-    libs = _link_flags() + list(extra_libs)
     cxx = _compiler()
+    flags = _compile_flags(inc, cxx) + list(extra_cppflags)
+    libs = _link_flags(cxx) + list(extra_libs)
     sig = _signature(text, flags, libs, _compiler_id(cxx))
 
     cache = Path(cache_dir) if cache_dir is not None else _user_cache_dir()
@@ -338,7 +446,18 @@ def source(
         if verbose:
             print(f"[source] using cached {so_path}")
     else:
+        if _is_windows() and so_path.exists():
+            try:
+                so_path.unlink()
+            except PermissionError:
+                # Loaded earlier in this process: Windows locks the file, so the
+                # rebuild goes to a new name.
+                so_path = so_path.with_name(
+                    f"{module_name}_{sig}_{os.getpid()}_{time.time_ns()}{_ext_suffix()}")
         _compile(cpp_path, so_path, flags, libs, cxx, verbose=verbose)
+
+    if _is_windows():
+        _add_dll_directory(cxx)
 
     spec = importlib.util.spec_from_file_location(module_name, so_path)
     if spec is None or spec.loader is None:
@@ -365,6 +484,8 @@ def _compile(cpp_file: Path, so_path: Path, cppflags: list[str], libs: list[str]
     cmd = [cxx, *cppflags, f"-I{py_include}"]
     if platform.system() == "Darwin":
         cmd += ["-bundle", "-undefined", "dynamic_lookup"]
+    elif _is_windows():
+        cmd += ["-shared"]
     else:
         cmd += ["-shared", "-fPIC"]
     cmd += [str(cpp_file), "-o", str(so_path), *libs]

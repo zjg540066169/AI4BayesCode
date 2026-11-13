@@ -47,8 +47,10 @@ namespace libgp {
     static double sign(double x);
 
     // drand48() is not aviable under win
-#if defined(WIN32) || defined(WIN64)
-    inline double drand48()
+    // (static: the static members above call it; _WIN32: MinGW defines the
+    // unprefixed WIN32 only in GNU mode, so the old guard missed -std=c++17.)
+#if defined(_WIN32)
+    static inline double drand48()
     {
       return (rand() / (RAND_MAX + 1.0));
     }
