@@ -11,7 +11,7 @@ name: Install
 
 on:
   push:
-    branches: [main, windows-support, install-skill]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
