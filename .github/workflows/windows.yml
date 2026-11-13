@@ -1,8 +1,6 @@
 name: Windows
 
-# Native Windows support, end to end:
-#   skill-install  the one-line install and update commands from the website,
-#                  in Windows PowerShell 5.1, PowerShell 7 and Git Bash
+# Native Windows support, end to end (install.yml covers installing the skill):
 #   r-examples     the R package with R + Rtools: every example's R usage block
 #   r-paths        the R package from a library and temp folder whose paths
 #                  contain a space and non-ASCII characters
@@ -22,60 +20,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  skill-install:
-    name: Skill install (${{ matrix.shell }})
-    runs-on: windows-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        shell: [powershell, pwsh, bash]
-    defaults:
-      run:
-        shell: ${{ matrix.shell }}   # the shell under test; other steps name theirs
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: repo   # only for the check script; the install clones from GitHub
-      - name: Use the Git for Windows installer defaults
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force ci-logs | Out-Null
-          git --version
-          git config --show-origin --get-all core.autocrlf
-          git config --global core.autocrlf true
-          git config --global pull.rebase false
-          python -m pip install --quiet pyyaml
-      - name: Install and update (PowerShell)
-        if: matrix.shell != 'bash'
-        run: |
-          $ErrorActionPreference = 'Continue'   # the interactive default
-          "PowerShell $($PSVersionTable.PSVersion)  HOME=$HOME" | Out-File -Append -Encoding utf8 ci-logs/install.txt
-          git clone --depth 1 --branch ${{ github.head_ref || github.ref_name }} https://github.com/${{ github.repository }}.git "$HOME/.claude/skills/AI4BayesCode" 2>&1 | Out-File -Append -Encoding utf8 ci-logs/install.txt
-          git clone --depth 1 --branch ${{ github.head_ref || github.ref_name }} https://github.com/${{ github.repository }}.git "$HOME/.agents/skills/AI4BayesCode" 2>&1 | Out-File -Append -Encoding utf8 ci-logs/install.txt
-          git -C "$HOME/.claude/skills/AI4BayesCode" pull --ff-only 2>&1 | Out-File -Append -Encoding utf8 ci-logs/install.txt
-          git -C "$HOME/.agents/skills/AI4BayesCode" pull --ff-only 2>&1 | Out-File -Append -Encoding utf8 ci-logs/install.txt
-          git clone --depth 1 https://github.com/${{ github.repository }}.git "${{ runner.temp }}/published" 2>&1 | Out-File -Append -Encoding utf8 ci-logs/install.txt
-      - name: Install and update (Git Bash)
-        if: matrix.shell == 'bash'
-        run: |
-          echo "bash $BASH_VERSION  HOME=$HOME  ($(cygpath -w "$HOME"))" | tee -a ci-logs/install.txt
-          git clone --depth 1 --branch ${{ github.head_ref || github.ref_name }} https://github.com/${{ github.repository }}.git "$HOME/.claude/skills/AI4BayesCode" 2>&1 | tee -a ci-logs/install.txt
-          git clone --depth 1 --branch ${{ github.head_ref || github.ref_name }} https://github.com/${{ github.repository }}.git "$HOME/.agents/skills/AI4BayesCode" 2>&1 | tee -a ci-logs/install.txt
-          git -C "$HOME/.claude/skills/AI4BayesCode" pull --ff-only 2>&1 | tee -a ci-logs/install.txt
-          git -C "$HOME/.agents/skills/AI4BayesCode" pull --ff-only 2>&1 | tee -a ci-logs/install.txt
-          git clone --depth 1 https://github.com/${{ github.repository }}.git "${{ runner.temp }}/published" 2>&1 | tee -a ci-logs/install.txt
-      - name: Check where the skill landed and that SKILL.md parses
-        shell: pwsh
-        run: |
-          python repo/tools/ci/check_skill_install.py --report-only "${{ runner.temp }}/published" *>&1 | Tee-Object -FilePath ci-logs/check.txt
-          exit $LASTEXITCODE
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: logs-skill-${{ matrix.shell }}
-          path: ci-logs
-
   r-examples:
     name: R examples (${{ matrix.part }}/8)
     runs-on: windows-latest
@@ -239,7 +183,7 @@ jobs:
   publish-logs:
     name: Publish logs
     if: always() && github.event_name == 'push' && github.ref_name == 'windows-support'
-    needs: [skill-install, r-examples, r-paths, python, cpp]
+    needs: [r-examples, r-paths, python, cpp]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -251,7 +195,7 @@ jobs:
         working-directory: logs
         run: |
           printf '%s\n' "run ${{ github.run_id }}" "sha ${{ github.sha }}" \
-            "skill-install ${{ needs.skill-install.result }}" "r-examples ${{ needs.r-examples.result }}" \
+            "r-examples ${{ needs.r-examples.result }}" \
             "r-paths ${{ needs.r-paths.result }}" "python ${{ needs.python.result }}" \
             "cpp ${{ needs.cpp.result }}" > RUN.txt
           git init -q -b ci-logs

@@ -18,8 +18,10 @@
     # User-global, language-agnostic block store SHARED with the Python package
     # (same `$AI4BAYESCODE_DATA_HOME` override). One directory across R / Python /
     # C++ and across all projects, so a block installed once is found everywhere.
+    # .ai4b_home_dir(), not path.expand("~"): on Windows R's "~" is Documents
+    # while Python's is the profile folder, which split the shared store in two.
     base <- Sys.getenv("AI4BAYESCODE_DATA_HOME",
-                       unset = file.path(path.expand("~"), ".AI4BayesCode"))
+                       unset = file.path(.ai4b_home_dir(), ".AI4BayesCode"))
     file.path(base, "blocks_download")
 }
 

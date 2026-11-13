@@ -1,6 +1,7 @@
-"""Check that the one-line skill install landed where Claude Code and Codex look.
+"""Check that a skill install landed where Claude Code and Codex look.
 
-Run on Windows CI after the install commands from the website. For each agent
+Run on CI after the install commands from the website or after
+ai4bayescode_install_skill() / AI4BayesCode.install_skill(). For each agent
 folder it checks that SKILL.md exists, that git checked it out with LF line
 endings, and that the frontmatter parses as strict YAML with the expected
 name and description.
@@ -36,9 +37,10 @@ def check(folder: Path) -> list[str]:
     raw = skill.read_bytes()
     if b"\r\n" in raw:
         problems.append("SKILL.md has CRLF line endings")
-    eol = subprocess.run(["git", "-C", str(folder), "ls-files", "--eol", "SKILL.md"],
-                         capture_output=True, text=True).stdout.strip()
-    print(f"    git ls-files --eol: {eol}")
+    if (folder / ".git").exists():
+        eol = subprocess.run(["git", "-C", str(folder), "ls-files", "--eol", "SKILL.md"],
+                             capture_output=True, text=True).stdout.strip()
+        print(f"    git ls-files --eol: {eol}")
     try:
         meta = yaml.safe_load(frontmatter(raw.decode("utf-8")))
     except Exception as exc:  # noqa: BLE001
@@ -58,7 +60,9 @@ def main(argv: list[str]) -> int:
     report_only = []
     if "--report-only" in argv:
         report_only = [Path(p) for p in argv[argv.index("--report-only") + 1:]]
-    home = Path(os.environ["USERPROFILE"])
+    # The profile folder on Windows (%USERPROFILE%), $HOME elsewhere: where
+    # Claude Code and Codex look.
+    home = Path.home()
     targets = {
         "Claude Code": home / ".claude" / "skills" / "AI4BayesCode",
         "Codex": home / ".agents" / "skills" / "AI4BayesCode",
