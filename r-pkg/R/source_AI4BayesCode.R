@@ -91,12 +91,13 @@ ai4bayescode_source <- function(code,
     }
 
     cpp_file <- .ai4b_resolve_code(code)
-    # Rcpp::sourceCpp() refuses a file whose name contains a space on Windows.
+    # Rcpp::sourceCpp() cannot build a file whose name contains a space: it
+    # refuses one on Windows, and make splits the object name elsewhere.
     # Compile a copy with a space-free name; its original folder stays on the
     # include path, so relative #includes still resolve.
     src_dir <- dirname(cpp_file)
     build_file <- cpp_file
-    if (.Platform$OS.type == "windows" && grepl(" ", basename(cpp_file), fixed = TRUE))
+    if (grepl(" ", basename(cpp_file), fixed = TRUE))
         build_file <- .ai4b_stage_spaced_file(cpp_file)
 
     inc <- system.file("include", package = "AI4BayesCode")
@@ -198,8 +199,17 @@ ai4bayescode_source <- function(code,
     dots <- list(...)
     if (!is.null(short_tmp) && is.null(dots$cacheDir))
         dots$cacheDir <- file.path(short_tmp, "sourceCpp-cache")
-    do.call(Rcpp::sourceCpp,
-            c(list(build_file, rebuild = rebuild, verbose = verbose, env = env), dots))
+    # On Windows Rcpp normalizes "<file's folder>/../inst/include" whether or not
+    # it exists, which warns "The system cannot find the path specified" on
+    # every call for a file outside a package source tree. That one is noise.
+    withCallingHandlers(
+        do.call(Rcpp::sourceCpp,
+                c(list(build_file, rebuild = rebuild, verbose = verbose, env = env), dots)),
+        warning = function(w) {
+            if (.Platform$OS.type == "windows" &&
+                grepl("/inst/include\"", conditionMessage(w), fixed = TRUE))
+                invokeRestart("muffleWarning")
+        })
 
     # Register class -> source for ai4bayescode_doc(), and hint the user.
     cls <- tryCatch(.ai4b_doc_register(cpp_file), error = function(e) character(0))
@@ -325,8 +335,8 @@ ai4bayescode_source <- function(code,
 
 
 # ---------------------------------------------------------------------------
-# Internal (Windows): a copy of `cpp_file` under a space-free name, kept per
-# content so Rcpp's in-session cache still hits on an unchanged file.
+# Internal: a copy of `cpp_file` under a space-free name, kept per content so
+# Rcpp's in-session cache still hits on an unchanged file.
 # ---------------------------------------------------------------------------
 #' @keywords internal
 #' @noRd
