@@ -76,7 +76,10 @@ jobs:
           New-Item -ItemType Directory -Force ci-logs | Out-Null
           $odd = "x " + [char]0x7EDF + [char]0x8BA1     # "x 统计"
           $lib = Join-Path $env:RUNNER_TEMP "R lib $odd"
-          $tmp = Join-Path $env:RUNNER_TEMP "tmp $odd"
+          # No space in the temp folder: R itself refuses to start then unless
+          # Windows can give it a short (8.3) name, which the runner's D: drive
+          # does not. A user's C: drive normally can.
+          $tmp = Join-Path $env:RUNNER_TEMP ("tmp" + [char]0x7EDF + [char]0x8BA1)
           New-Item -ItemType Directory -Force $lib, $tmp | Out-Null
           $env:TMP = $tmp; $env:TEMP = $tmp; $env:TMPDIR = $tmp
           $env:AI4B_LIB = $lib
