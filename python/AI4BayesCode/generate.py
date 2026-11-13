@@ -223,9 +223,10 @@ def prompt(model_description: str, *, backend: str = "both", output_path: str = 
     backend = {"r": "R", "python": "Python", "both": "both"}.get(str(backend).strip().lower(), backend)
     if backend not in ("R", "Python", "both"):
         raise ValueError("backend must be 'R', 'Python', or 'both'")
-    if isinstance(model_description, str) and \
-            model_description.endswith((".txt", ".md")) and \
-            not any(c.isspace() for c in model_description):
+    if isinstance(model_description, str) and "\n" not in model_description and \
+            model_description.lower().endswith((".txt", ".md")) and \
+            (os.path.isfile(model_description)
+             or not any(c.isspace() for c in model_description)):
         # It ends in .txt/.md and has no whitespace, so it was meant as a path.
         # Falling through would silently use the PATH ITSELF as the model
         # description and build a prompt around "/no/such/file.md".
@@ -287,8 +288,10 @@ def _extract_code(text: str) -> list[dict]:
         path = None
         marker_idx = None
         for i, hl in enumerate(lines[:3]):
-            pm = re.search(r"path:\s*(\S+)", hl)
-            if pm:
+            # The rest of the line, not just its first word: a Windows path
+            # often holds a space ("C:/Users/John Smith/...", "OneDrive - Org").
+            pm = re.search(r"path:\s*(.*?)\s*(?:\*/|-->)?\s*$", hl)
+            if pm and pm.group(1):
                 path = pm.group(1)
                 # Strip the routing-marker line so it never leaks into the written
                 # file -- ONLY when it is a comment-style directive (`// path:` or

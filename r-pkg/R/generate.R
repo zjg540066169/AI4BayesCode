@@ -377,16 +377,19 @@ ai4bayescode_prompt <- function(model_description,
     backend <- .ai4b_norm_backend(backend)
     backend <- match.arg(backend)
     if (is.character(model_description) && length(model_description) == 1L &&
-        grepl("\\.(txt|md)$", model_description) &&
-        !grepl("[[:space:]]", model_description)) {
-        # It ends in .txt/.md and has no whitespace, so it was meant as a path.
-        # Falling through would silently use the PATH ITSELF as the model
-        # description and build a prompt around "/no/such/file.md".
+        !grepl("\n", model_description, fixed = TRUE) &&
+        grepl("\\.(txt|md)$", model_description, ignore.case = TRUE) &&
+        (file.exists(model_description) || !grepl("[[:space:]]", model_description))) {
+        # An existing .txt/.md file is read even when its path has a space (a
+        # Windows profile or OneDrive folder). Without whitespace it was meant
+        # as a path either way: falling through would silently use the PATH
+        # ITSELF as the model description, around "/no/such/file.md".
         if (!file.exists(model_description)) {
             stop("`model_description` looks like a file path but no such file ",
                  "exists: ", model_description, call. = FALSE)
         }
-        model_description <- paste(readLines(model_description, warn = FALSE), collapse = "\n")
+        model_description <- paste(readLines(model_description, warn = FALSE,
+                                             encoding = "UTF-8"), collapse = "\n")
     }
     if (!is.character(model_description) || length(model_description) != 1L ||
         !nzchar(model_description)) {
@@ -483,8 +486,10 @@ print.ai4bayescode_generate <- function(x, ...) {
         ph <- NA_character_; marker_idx <- NA_integer_
         for (i in head(seq_along(lines), 3L)) {
             hl <- lines[i]
-            m <- regmatches(hl, regexec("path:\\s*([^[:space:]]+)", hl))[[1]]
-            if (length(m) == 2L) {
+            # The rest of the line, not just its first word: a Windows path
+            # often holds a space ("C:/Users/John Smith/...", "OneDrive - Org").
+            m <- regmatches(hl, regexec("path:\\s*(.*?)\\s*(\\*/|-->)?\\s*$", hl, perl = TRUE))[[1]]
+            if (length(m) >= 2L && nzchar(m[2])) {
                 ph <- m[2]
                 # Strip the routing-marker line so it never leaks into the written
                 # file -- ONLY when it is a comment-style directive (`// path:` or
