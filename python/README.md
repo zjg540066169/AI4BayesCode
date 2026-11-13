@@ -35,7 +35,9 @@ pip install -e .
 pip install ".[viz,diagnostics]"
 ```
 
-Requires Python ≥ 3.11, a C++17 compiler (clang++ or g++), and BLAS/LAPACK.
+Requires Python ≥ 3.11, a C++17 compiler (clang++ or g++), and BLAS/LAPACK. On Windows
+the compiler, Armadillo and OpenBLAS come from Rtools or MSYS2 (see System requirements),
+and `py -m pip install .` works when `pip` is not on PATH.
 
 ## Usage
 
@@ -64,17 +66,21 @@ for j in range(beta_samples.shape[1]):
 # Visualize the model DAG:
 AI4BayesCode.plot_dag(m, out_path="dag.png")
 
-# Run 4 parallel chains from different seeds:
+# Run 4 parallel chains from different seeds. On Windows every worker
+# re-imports this script, so the call sits under the __main__ guard and
+# build() at module top level (without n_jobs, Windows runs the chains one
+# after another):
 def build(seed):
     return mod.MyModel(y, X, rng_seed=seed, keep_history=True)
 
-chains = AI4BayesCode.run_chains(
-    factory=build,
-    seeds=[101, 202, 303, 404],
-    n_burn=5000,
-    n_keep=5000,
-    n_jobs=4,
-)
+if __name__ == "__main__":
+    chains = AI4BayesCode.run_chains(
+        factory=build,
+        seeds=[101, 202, 303, 404],
+        n_burn=5000,
+        n_keep=5000,
+        n_jobs=4,
+    )
 ```
 
 ## Generate a sampler from natural language
@@ -164,7 +170,12 @@ Armadillo headers at compile time.
 |----------|---------|
 | macOS (Homebrew) | `brew install armadillo` |
 | Debian / Ubuntu | `apt-get install libarmadillo-dev` |
-| conda (any OS) | `conda install -c conda-forge armadillo` |
+| conda (macOS, Linux) | `conda install -c conda-forge armadillo` |
+| Windows, with R | [Rtools](https://cran.r-project.org/bin/windows/Rtools/) for your R version (Rtools44 or newer): it already holds the compiler, Armadillo and OpenBLAS |
+| Windows, without R | [MSYS2](https://www.msys2.org) in its default folder `C:\msys64`, then in the "MSYS2 UCRT64" terminal: `pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-armadillo mingw-w64-ucrt-x86_64-openblas64` |
+
+On Windows `source()` finds Rtools and MSYS2 in their default folders by itself; set
+`CXX` to a toolchain's `g++.exe` to choose another one.
 
 ## Files
 

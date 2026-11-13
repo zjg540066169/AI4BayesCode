@@ -60,11 +60,16 @@ see `AI_AGENT_INSTALL.md`.
 ```r
 remotes::install_github("zjg540066169/AI4BayesCode", subdir = "r-pkg")
 ```
+On Windows the compiler is [Rtools](https://cran.r-project.org/bin/windows/Rtools/)
+for your R version (Rtools44 for R 4.4, Rtools45 for R 4.5 and later).
 
-### Python  (>= 3.11; a C++ compiler; `brew install armadillo`)
+### Python  (>= 3.11, a C++17 compiler and Armadillo)
 ```bash
 pip install "git+https://github.com/zjg540066169/AI4BayesCode.git#subdirectory=python"
 ```
+Armadillo: `brew install armadillo` on macOS, `apt-get install libarmadillo-dev` on
+Debian/Ubuntu. On Windows, Rtools (above) already holds the compiler, Armadillo and
+OpenBLAS. Without R, use MSYS2 instead, as `python/README.md` describes.
 
 ## Quick start (R)
 

@@ -251,7 +251,8 @@ move happens once all checks pass, then the final path is reported. A failed exa
 
 - PROPOSE the full tri-module `<Model>.cpp` and STAGE it to the staging dir; show it for review.
 - **SMOKE (automatic):** compile the `int main()` as a plain binary -- NEITHER module macro defined;
-  link `<armadillo>` (`-framework Accelerate` on macOS / `-lblas -llapack` on Linux) -- and run it.
+  link `<armadillo>` (`-framework Accelerate` on macOS / `-lblas -llapack` on Linux / on Windows the
+  Rtools or MSYS2 recipe of `codegen_cpp.md` "The validator runs it") -- and run it.
   The cheapest end-to-end recovery check. Compile recipe = `validate.md Sec.3` minus any Rcpp/R flags.
   (Unchanged by tri-module -- the module blocks are inert without their macro.)
 - **BOTH `@example` TESTED (automatic):** because a contributed block ships for both frontends, BOTH

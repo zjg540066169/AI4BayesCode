@@ -1855,6 +1855,25 @@ c++ -std=c++17 -O2 -I<include> -I<include>/mcmclib \
 "$SCRATCH"/verify_<ClassName>
 ```
 
+On Windows there is no system `c++`, BLAS or `-framework`. Build with the MinGW-w64
+toolchain the R or Python backend already uses, in one line (Git Bash and PowerShell
+both accept it; keep the quotes and the forward slashes, and prefix the run with `&` in
+PowerShell):
+
+- Rtools (default folder `C:/rtools45`, or the one in `RTOOLS45_HOME`; `rtools44` for
+  R 4.4). Its Armadillo and static OpenBLAS sit in `x86_64-w64-mingw32.static.posix`, so
+  the program needs no DLL:
+  ```
+  "C:/rtools45/x86_64-w64-mingw32.static.posix/bin/g++.exe" -std=gnu++17 -O2 -Wa,-mbig-obj -I<include> -I<include>/mcmclib -I<include>/mcmclib/BaseMatrixOps/include -I<include>/eigen -I"C:/rtools45/x86_64-w64-mingw32.static.posix/include" -DMCMC_ENABLE_ARMA_WRAPPERS -DARMA_DONT_USE_WRAPPER "<scratch>/verify_<ClassName>.cpp" -o "<scratch>/verify_<ClassName>.exe" -L"C:/rtools45/x86_64-w64-mingw32.static.posix/lib" -lopenblas -lgfortran -lquadmath -fopenmp
+  ```
+- MSYS2 (`C:/msys64/ucrt64`). Its Armadillo calls BLAS and LAPACK with 64-bit integers,
+  so it must link the 64-bit-integer OpenBLAS (`-lopenblas_64`); a 32-bit one gives
+  silently wrong determinants and pivots. Put `C:/msys64/ucrt64/bin` first on PATH before
+  running the `.exe`, which loads OpenBLAS from there:
+  ```
+  "C:/msys64/ucrt64/bin/g++.exe" -std=gnu++17 -O2 -Wa,-mbig-obj -I<include> -I<include>/mcmclib -I<include>/mcmclib/BaseMatrixOps/include -I<include>/eigen -DMCMC_ENABLE_ARMA_WRAPPERS -DARMA_DONT_USE_WRAPPER -DARMA_DONT_USE_SUPERLU -DARMA_DONT_USE_ARPACK "<scratch>/verify_<ClassName>.cpp" -o "<scratch>/verify_<ClassName>.exe" -lopenblas_64
+  ```
+
 It prints one PASS/FAIL line per block and exits non-zero on failure, so
 the thresholds live in the file (AD-backed < 1e-8, FD-backed < 1e-5)
 rather than in a language-specific driver. On a zero exit status, Check #12
@@ -3023,6 +3042,10 @@ clang++ -std=c++17 -O2 \
     -DMCMC_ENABLE_ARMA_WRAPPERS -DARMA_DONT_USE_WRAPPER \
     MyModel.cpp -o MyModel -framework Accelerate
 ```
+
+On Windows, use one of the two one-line recipes in "The validator runs it" above with
+`MyModel.cpp -o MyModel.exe` (Rtools needs nothing else; with MSYS2, run `MyModel.exe`
+from the "MSYS2 UCRT64" terminal, or with `C:/msys64/ucrt64/bin` first on PATH).
 
 The `int main()` goes in ADDITION to both module blocks, each under its own
 `#ifdef`, exactly as all 42 shipped examples do -- the `#if !defined(...)` fence

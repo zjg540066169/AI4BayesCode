@@ -31,13 +31,16 @@ needed before the first sampler can be validated, not for the install:
 
 - **R backend:** R with `Rcpp` and `RcppArmadillo`. On Windows also Rtools for the installed
   R version (https://cran.r-project.org/bin/windows/Rtools/). The Windows R installer does not
-  put `Rscript.exe` on PATH. If `Rscript --version` fails there, use
-  `C:\Program Files\R\R-<version>\bin\Rscript.exe` (the newest installed version).
+  put `Rscript.exe` on PATH. If `Rscript --version` fails there, use the newest
+  `C:\Program Files\R\R-<version>\bin\Rscript.exe` (a per-user install is under
+  `%LOCALAPPDATA%\Programs\R\`). In PowerShell, run a quoted path with `&`, for example
+  `& "C:\Program Files\R\R-<version>\bin\Rscript.exe" --version`.
 - **Python backend:** Python 3.11 or newer with the AI4BayesCode package, a C++17 compiler and
   the Armadillo headers. macOS: `brew install armadillo`. Debian/Ubuntu:
-  `apt-get install libarmadillo-dev`. Windows: install MSYS2 (https://www.msys2.org, default
-  folder `C:\msys64`), then in the "MSYS2 UCRT64" terminal run
-  `pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-armadillo mingw-w64-ucrt-x86_64-openblas`.
+  `apt-get install libarmadillo-dev`. Windows: Rtools for the installed R version already holds
+  everything. Without R, install MSYS2 (https://www.msys2.org, default folder `C:\msys64`),
+  then in the "MSYS2 UCRT64" terminal run
+  `pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-armadillo mingw-w64-ucrt-x86_64-openblas64`.
 
 ## 2. Choose install target
 
@@ -71,9 +74,11 @@ git clone --depth 1 https://github.com/zjg540066169/AI4BayesCode.git "$HOME/.age
 Before cloning, check the target folder:
 
 - If `CLAUDE_CONFIG_DIR` is set, Claude Code reads skills from `$CLAUDE_CONFIG_DIR/skills`.
-  Clone there instead.
+  Clone there instead. In PowerShell write it `$env:CLAUDE_CONFIG_DIR`: a bare
+  `$CLAUDE_CONFIG_DIR` there is an unset PowerShell variable.
 - If the target folder already exists, find out whether it is a clone of its own:
-  `git -C "<target>" rev-parse --show-toplevel` must print the target folder itself. If it
+  `git -C "<target>" rev-parse --show-toplevel` must print the target folder itself (on Windows
+  git prints `C:/Users/...`: compare ignoring case and `/` versus `\`). If it
   does, update it (section 4) and do not clone. If it does not, it is an older copy made
   without git. Ask the user before removing it, remove it, then clone. Removing it in bash:
   `rm -rf "<target>"`. In PowerShell: `Remove-Item -Recurse -Force "<target>"`.

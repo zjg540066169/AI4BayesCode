@@ -39,7 +39,8 @@ This skill bundles the AI4BayesCode C++ library, not just the guidance:
   live). Treat it as the RESOLVED AI4BayesCode path for the whole session: the codegen flow does
   **NOT** ask "Path to the AI4BayesCode folder" — use this skill root automatically, and substitute
   its absolute path for the bare `AI4BayesCode/` prefix in every compile recipe (so the `-I` points
-  at `<this-skill>/include`). Only ask for a path if the user explicitly wants a DIFFERENT
+  at `<this-skill>/include`; on Windows write it with forward slashes, e.g.
+  `C:/Users/<you>/.claude/skills/AI4BayesCode`). Only ask for a path if the user explicitly wants a DIFFERENT
   AI4BayesCode checkout.
 - **User-GENERATED output** (the new `.cpp` + runner, or a new `blocks_local/<Block>/` bundle)
   goes in the USER's own project (`./generated/...`, the user's chosen folder), **NEVER inside

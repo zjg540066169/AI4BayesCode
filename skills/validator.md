@@ -93,7 +93,8 @@ symbol table, DAG, plus any node added after a Check #6 (E) FAIL) plus the user'
 question that changes the model or block plan (VI/MCMC split and VI
 families, spike family, optional modes such as DART, exposed vs
 hardcoded hyperparameters). (2) The absolute paths of the `.cpp` and the
-runner(s). (3) Backend(s), library include path, output folder.
+runner(s) (on Windows in `C:/Users/...` form: forward slashes, never `C:\...`
+or Git Bash's `/c/...`). (3) Backend(s), library include path, output folder.
 (4) Attempt number. (5) When the `.cpp` changes a sampler setting because
 of an earlier validator report (Check #18), that report.
 
@@ -111,6 +112,11 @@ runner, as a throwaway L3 harness; it is never delivered.
   runner only in L3.
 - MAY write throwaway files (AD-twin, probes, the R1 script) in its OWN
   scratch directory, and deletes them before it returns.
+- On Windows, call R and Python as `start.md` Sec.1b "On Windows" says (the full
+  `Rscript.exe` path, `py -3 -X utf8`, code in script files, forward-slash paths
+  inside code), and build the L2 throwaway files with the Windows recipe in
+  `codegen_cpp.md` "The validator runs it". The `grep` checks in this file run
+  in PowerShell as `Select-String -CaseSensitive -Pattern '<regex>' <file>`.
 - MAY NOT edit, regenerate or "fix" any deliverable (`.cpp`, runner,
   example files), and MAY NOT change a sampler setting, a budget, a seed
   or a threshold to make a check pass.
