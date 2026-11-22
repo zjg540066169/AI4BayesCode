@@ -18,6 +18,14 @@
  *  https://www.R-project.org/Licenses/GPL-2
  */
 
+/*
+ *  Modifications by Jungang Zou, 2026.
+ *  - draw() runs the collapsed change move (cchange.h) on every tree after birth/death.
+ *
+ *  These modifications comply with the terms of the GNU General Public License
+ *  version 2 (GPL-2).
+ */
+
 #ifndef GUARD_heterbart_h
 #define GUARD_heterbart_h
 

@@ -5,13 +5,23 @@
   every internal node by Metropolis-Hastings from its marginal, with the
   cutpoint and the leaf values integrated out, and draws its cutpoint from its
   full conditional. The posterior is unchanged and mixing over split rules
-  improves. The tree update takes about 2 to 3 times as long, and the draws for
-  a given seed differ from earlier versions. `bart_block` stops with an error
-  if `X` has a missing or infinite value.
+  improves. The tree update takes about 1.1 to 2.5 times as long for n of 300
+  or more, about 3 times at n = 200 and about 4 times at n = 80, and the draws
+  for a given seed differ from earlier versions. `bart_block` stops with an
+  error if `X` has a missing or infinite value, or if `set_data()` receives an
+  `X` with another number of columns.
+* `bart_block` no longer copies its stored history in every sweep, so with
+  `keep_tree` the time per sweep no longer grows over the chain; its variable
+  counts stay correct after `set_tree()`.
 * For a model with a `bart_block` or `genbart_block`, the skills forbid `sin`,
   `cos` and `tan` in the simulated data of the examples and the validation
   harness. The BartNoise, GBartPoisson, GBartHeteroscedastic and VCBart
   examples use piecewise-linear terms instead.
+* Generated samplers are validated by a separate validator subagent, which
+  runs the compile (L1), static (L2) and runtime (L3) checks strictly in that
+  order; an edit to the sampler restarts the checks at L1. New checks confirm
+  that the model DAG contains every variable that the model equations make
+  predictable and that `predict_at()` returns each of them.
 * Windows is supported natively. Samplers compile with the Rtools of the
   installed R version, also from a library or temporary folder whose path
   has spaces or non-ASCII characters. On Windows, samplers take `exp()`,

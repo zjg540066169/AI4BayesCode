@@ -662,7 +662,7 @@ PYBIND11_MODULE(GBartHeteroscedastic, m) {
 int main() {
     // ---- Simulate a well-identified heteroscedastic DGP -----------------
     //   log-mean with a kink at x1 = 0: r(x) = 1.0 + 0.8 max(x1, 0) + 0.6 x2
-    //   mean  m(x)  = exp(r(x))   (in roughly [1.2, 6.0], well above 0)
+    //   mean  m(x)  = exp(r(x))   (in roughly [1.5, 11.0], well above 0)
     //   y     ~ Normal(m, phi_true * m),  phi_true = 0.5
     // N >= 400 with well-spread covariates so the identified quantities
     // (phi, and the fitted mean at a grid) converge. genBART's per-point r

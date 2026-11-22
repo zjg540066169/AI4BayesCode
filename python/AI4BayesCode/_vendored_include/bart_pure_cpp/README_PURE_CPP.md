@@ -15,7 +15,8 @@ The original BART code was already written **dual-mode** via `#ifdef NoRcpp`
 (see `src/BART/common.h`, `tree.h`, `rtnorm/rtgamma/lambda`). The MCMC kernels
 (`bartfuns/bd/bart/heterbart/treefuns`, the genBART RJMCMC, the vendored
 SoftBart `Forest`) were already free of Rcpp in their hot paths. **No MCMC math
-was rewritten.** Two things were added/changed:
+was rewritten** in the port; the collapsed change move (`src/BART/cchange.h`) was
+added in 2026. Two things were added/changed:
 
 1. **`src/r_compat.h`** — under `NoRcpp`, supplies pure-C++ replacements for the
    small set of R/Rcpp symbols the vendored numeric code references:

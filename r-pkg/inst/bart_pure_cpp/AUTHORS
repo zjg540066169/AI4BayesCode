@@ -10,6 +10,8 @@
 The BART/ subfolder derives from the BART R package (CRAN), authored by
 Robert McCulloch, Rodney Sparapani, and Charles Spanbauer.  Its files are
 licensed under GPL-2 and have been integrated here under that same license.
+BART/cchange.h (the collapsed change move, 2026) is new code under the same
+license.
 
 The LOGBART/ subfolder implements log-linear BART following Murray (2021,
 JASA).  The original C++ tree code derives from BART (above); the log-linear

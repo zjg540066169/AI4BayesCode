@@ -84,7 +84,8 @@ copyright and license notices in their respective source files.
 ## Provenance
 
 The standard-BART internals (`src/BART/`) derive from the BART CRAN package
-(McCulloch / Sparapani / Spanbauer).  The log-linear augmentation
+(McCulloch / Sparapani / Spanbauer); `src/BART/cchange.h`, the collapsed change
+move (2026), is new code.  The log-linear augmentation
 (`src/LOGBART/`) implements Murray (2021, JASA) on top of the same tree
 code.  The RJMCMC machinery (`src/GENBART/`) follows Linero (2022).  The
 Soft BART vendored sources (`src/SOFTBART_VENDOR/`) are taken verbatim

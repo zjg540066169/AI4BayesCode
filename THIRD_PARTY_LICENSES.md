@@ -94,7 +94,9 @@ those sections).
   Each modified file carries an explicit "Modifications by Jungang
   Zou, 2024 … comply with the terms of GPL-2" notice in addition to
   the original upstream copyright line (hence the dual-copyright
-  header). The core tree-kernel logic is upstream and unchanged.
+  header). The tree-kernel logic is upstream, except for the collapsed
+  change move (2026): `cchange.h` is new code, and `bart::draw` and
+  `heterbart::draw` call it after birth/death.
 - **License-inheritance warning**: any file that `#include`s
   `bart_block.hpp` (directly or transitively) inherits
   GPL-2.0-or-later from this kernel.

@@ -104,11 +104,11 @@ ai4bayescode_generate("Linear regression.", LLM = "gpt-5.5-codex")  # key picked
 e.g. `ai4bayescode_generate("...", API_key = "sk-other")` — without changing what
 `set_key()` configured. Omit it to use the session default.
 
-## What ships in this package (v1.0.0)
+## What ships in this package (v1.1.2)
 
 | Asset | Count | How to access |
 |---|---|---|
-| Block headers (`AI4BayesCode/*_block.hpp`) | 38 | `ai4bayescode_include_path()` |
+| Block headers (`AI4BayesCode/*_block.hpp`) | 40 | `ai4bayescode_include_path()` |
 | Vendored deps (mcmclib, eigen, autodiff, libgp, celerite, bart) | 6 | bundled, auto-linked |
 | Reference examples (`.cpp`) | 43 | `ai4bayescode_list_examples()` |
 | AI codegen skills (markdown) | 14 | `ai4bayescode_list_skills()` |
