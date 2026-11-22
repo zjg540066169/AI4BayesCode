@@ -607,6 +607,17 @@ Rules:
   mutually consistent), design matrix and response with matching N, etc. A
   generic `rnorm` is correct ONLY for a Gaussian response. The whole point is
   copy-paste-runnable: it must actually run and return finite draws.
+- **No trigonometric terms in the DGP of a BART-family model.** If the model
+  contains a `bart_block` or `genbart_block`, the simulated mean, rate or
+  coefficient function must not contain `sin`, `cos`, `tan` or another periodic
+  function. A sum of piecewise-constant trees approximates a periodic function
+  with many splits, so at the sample size and chain length of the example and
+  the Layer-3 harness the recovery checks fail because of the DGP, not because
+  of the sampler. Use continuous terms: piecewise-linear terms (`pmax(x1, 0)`),
+  low-order polynomials (`x2^2`) and interactions (`x1 * x2`). A jump such as
+  `2 * (x1 > 0)` slows the cross-chain mixing of the per-observation fit of a
+  `genbart_block` near the jump. The rule covers the `@example` blocks, the
+  `int main()` demo and the runner, which share this DGP.
 - **Keep it compact** (<= ~8 lines per backend) and **use the installed-package API
   with a RELATIVE path**: R -> `ai4bayescode_source("<ClassName>.cpp")`
   then `new(<ClassName>, ...)`; Python -> `Mod = AI4BayesCode.source("<ClassName>.cpp")`

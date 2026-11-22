@@ -54,8 +54,8 @@
 //   ai4bayescode_example("GBartHeteroscedastic")
 //   set.seed(42); N <- 600L                          # well-identified DGP
 //   X  <- matrix(runif(N * 2L, -1, 1), N, 2L)        # x1,x2 ~ Unif(-1,1)
-//   r  <- 1.0 + 0.8 * sin(2 * X[,1]) + 0.6 * X[,2]   # smooth log-mean
-//   m  <- exp(r)                                      # mean in ~[1.2, 6.0]
+//   r  <- 1.0 + 0.8 * pmax(X[,1], 0) + 0.6 * X[,2]   # log-mean with a kink at x1 = 0
+//   m  <- exp(r)                                      # mean in ~[1.5, 11.0]
 //   y  <- m + sqrt(0.5 * m) * rnorm(N)               # y~N(m, phi*m), phi=0.5
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
@@ -71,8 +71,8 @@
 //   import numpy as np, AI4BayesCode
 //   rng = np.random.default_rng(42); N = 600          # well-identified DGP
 //   X = rng.uniform(-1, 1, size=(N, 2))               # x1,x2 ~ Unif(-1,1)
-//   r = 1.0 + 0.8 * np.sin(2 * X[:,0]) + 0.6 * X[:,1] # smooth log-mean
-//   m = np.exp(r)                                      # mean in ~[1.2, 6.0]
+//   r = 1.0 + 0.8 * np.maximum(X[:,0], 0) + 0.6 * X[:,1]  # log-mean with a kink at x1 = 0
+//   m = np.exp(r)                                      # mean in ~[1.5, 11.0]
 //   y = m + np.sqrt(0.5 * m) * rng.standard_normal(N) # y~N(m, phi*m), phi=0.5
 //   Mod = AI4BayesCode.example("GBartHeteroscedastic")
 //   # ---- Parallel chains + diagnosis (default) ----
@@ -661,7 +661,7 @@ PYBIND11_MODULE(GBartHeteroscedastic, m) {
 
 int main() {
     // ---- Simulate a well-identified heteroscedastic DGP -----------------
-    //   smooth log-mean: r(x) = 1.0 + 0.8 sin(2 x1) + 0.6 x2
+    //   log-mean with a kink at x1 = 0: r(x) = 1.0 + 0.8 max(x1, 0) + 0.6 x2
     //   mean  m(x)  = exp(r(x))   (in roughly [1.2, 6.0], well above 0)
     //   y     ~ Normal(m, phi_true * m),  phi_true = 0.5
     // N >= 400 with well-spread covariates so the identified quantities
@@ -683,7 +683,7 @@ int main() {
         const double x1 = unif(gen);
         const double x2 = unif(gen);
         X(i, 0) = x1; X(i, 1) = x2;
-        const double r = 1.0 + 0.8 * std::sin(2.0 * x1) + 0.6 * x2;
+        const double r = 1.0 + 0.8 * std::max(x1, 0.0) + 0.6 * x2;
         const double m = std::exp(r);
         m_true[i] = m;
         const double sd = std::sqrt(phi_true * m);
