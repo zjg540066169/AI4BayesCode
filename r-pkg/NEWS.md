@@ -1,4 +1,4 @@
-# AI4BayesCode (development version)
+# AI4BayesCode 1.1.2
 
 * `bart_block` has a collapsed CHANGE move, which runs in every sweep and has
   no option. After birth/death, one scan per tree updates the split variable of
@@ -8,6 +8,10 @@
   improves. The tree update takes about 2 to 3 times as long, and the draws for
   a given seed differ from earlier versions. `bart_block` stops with an error
   if `X` has a missing or infinite value.
+* For a model with a `bart_block` or `genbart_block`, the skills forbid `sin`,
+  `cos` and `tan` in the simulated data of the examples and the validation
+  harness. The BartNoise, GBartPoisson, GBartHeteroscedastic and VCBart
+  examples use piecewise-linear terms instead.
 * Windows is supported natively. Samplers compile with the Rtools of the
   installed R version, also from a library or temporary folder whose path
   has spaces or non-ASCII characters. On Windows, samplers take `exp()`,
