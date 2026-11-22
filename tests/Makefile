@@ -458,12 +458,15 @@ test_dag_key_validation: test_dag_key_validation.cpp \
 
 test_bart_prior_recovery: test_bart_prior_recovery.cpp $(INC_DIR)/AI4BayesCode/bart_block.hpp \
                           ../bart_pure_cpp/src/BART/bartfuns.h ../bart_pure_cpp/src/BART/bd.h \
-                          ../bart_pure_cpp/src/BART/bart.h ../bart_pure_cpp/src/BART/heterbd.h
+                          ../bart_pure_cpp/src/BART/bart.h ../bart_pure_cpp/src/BART/heterbd.h \
+                          ../bart_pure_cpp/src/BART/cchange.h ../bart_pure_cpp/src/BART/heterbart.h \
+                          ../bart_pure_cpp/src/bart_model.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 
 test_bart_cchange: test_bart_cchange.cpp $(INC_DIR)/AI4BayesCode/bart_block.hpp \
                    ../bart_pure_cpp/src/BART/cchange.h ../bart_pure_cpp/src/BART/bart.h \
                    ../bart_pure_cpp/src/BART/heterbart.h ../bart_pure_cpp/src/BART/bd.h \
+                   ../bart_pure_cpp/src/BART/heterbd.h ../bart_pure_cpp/src/BART/heterbartfuns.h \
                    ../bart_pure_cpp/src/bart_model.h portable_rng.hpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 

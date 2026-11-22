@@ -54,7 +54,7 @@ void heterbart::draw(double *sigma, rn& gen, int shards)
       }
       if(heterbd(t[j],xi,di,pi,sigma,nv,pv,aug,gen,shards)) i++;
       // collapsed change (cchange.h), one scan per tree: after BIRTH/DEATH and before the leaf draw
-      bart_cchange::cchange_all(t[j],xi,di,pi,nv,pv,cc_kidx_.data(),cc_w_.data(),gen);
+      bart_cchange::cchange_all(t[j],xi,di,pi,nv,pv,cc_kidx_.data(),cc_w_.data(),gen,0,&cc_work_);
       heterdrmu(t[j],xi,di,pi,sigma,gen);
       fit(t[j],xi,p,n,x,ftemp);
       for(size_t k=0;k<n;k++) allfit[k] += ftemp[k];

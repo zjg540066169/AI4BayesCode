@@ -140,25 +140,27 @@ public:
      ftemp = new double[n];
      
      di.n=n; di.p=p; di.x = &x[0]; di.y=r;
-     if(nv.size() > 0){
-       //cout << "nv:"<<nv[0] << std::endl;
-       //cout << "pv:"<<pv[0] << std::endl;
-       /*for(size_t j=0;j<p;j++){
-        nv[j] = (0);
-        pv[j] = (1/(double)p);
-        }*/
-     }else{
-       for(size_t j=0;j<p;j++){
-         nv.push_back(0);
-         pv.push_back(1/(double)p);
-       }
-     }
+     if(pv.size() != p) pv.assign(p, 1/(double)p);
+     // nv = split counts of the forest, which birth/death and the collapsed change update in place; recounted here
+     // because a copied, assigned or loaded forest comes without them (with aug, nv also holds augmented counts)
+     if(!aug || nv.size() != p) recount_nv();
    }
    void setdata(size_t p, size_t n, double *x, double *y, size_t numcut=100){
      int* nc = new int[p];
      for(size_t i=0; i<p; ++i) nc[i]=numcut;
      this->setdata(p, n, x, y, nc);
      delete [] nc;
+   }
+   // Replace y only. allfit and the collapsed change's cutpoint index depend on x alone and are kept; draw computes
+   // the residuals from y.
+   void sety(double *y) { this->y = y; }
+   // nv[j] = number of internal nodes of the forest that split on variable j
+   void recount_nv() {
+     nv.assign(p, 0);
+     for(size_t j=0;j<m;j++) {
+       tree::npv nds; t[j].getnodes(nds);
+       for(size_t k=0;k<nds.size();k++) if(nds[k]->getl() && nds[k]->getv() < p) nv[nds[k]->getv()]++;
+     }
    }
    void setpi(pinfo& pi) {this->pi = pi;}
    void setprior(double alpha, double beta, double tau)
@@ -757,7 +759,7 @@ public:
        if(bd(t[j],xi,di,pi,sigma,nv,pv,aug,gen)) i++;
        // collapsed change (cchange.h), one scan per tree: after BIRTH/DEATH and before the leaf draw, so drmu
        // draws the leaf values for the updated rules
-       bart_cchange::cchange_all(t[j],xi,di,pi,nv,pv,cc_kidx_.data(),cc_w_.data(),gen);
+       bart_cchange::cchange_all(t[j],xi,di,pi,nv,pv,cc_kidx_.data(),cc_w_.data(),gen,0,&cc_work_);
        drmu(t[j],xi,di,pi,sigma,gen);
        fit3(t[j],xi,p,n,x,ftemp);
        for(size_t k=0;k<n;k++) allfit[k] += ftemp[k];
@@ -839,11 +841,14 @@ protected:
    std::vector<int> cc_kidx_;         // cutpoint index of every (variable, observation); rebuilt after setdata/setxinfo
    bool cc_kidx_ok_ = false;
    std::vector<double> cc_w_;         // observation weights 1 / sigma_i^2 of the current draw
+   bart_cchange::Work cc_work_;        // buffers of the scans, kept between draws
    // Called once per draw before the tree loop. sigma_vec = per-observation sigma (heterbart::draw) or null for one
    // sigma; the weights match heterbd (sigma_i^-2 / shards) and bd (1 / sigma^2).
    void cchange_prepare_(const double* sigma_vec, double sigma, int shards) {
      if (aug)
        throw std::invalid_argument("bart: the collapsed change move requires aug = false");
+     if (xi.size() != p || pv.size() != p || nv.size() != p)
+       throw std::invalid_argument("bart: X, the cutpoints and the variable probabilities must have the same number of variables");
      if (!cc_kidx_ok_) { bart_cchange::make_kidx(xi, di, cc_kidx_); cc_kidx_ok_ = true; }
      cc_w_.resize(n);
      if (sigma_vec) { for (size_t k = 0; k < n; k++) cc_w_[k] = pow(sigma_vec[k], -2.) / shards; }

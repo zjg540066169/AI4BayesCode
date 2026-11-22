@@ -289,6 +289,7 @@ public:
     std::string trailing;
     if (is >> trailing)
       throw std::invalid_argument("bart_model::set_tree: unexpected trailing content");
+    bm.recount_nv();   // split counts of the loaded forest
     bm.refresh_allfit();
   }
 
@@ -360,6 +361,8 @@ public:
   void set_data(const arma::mat& x_new, const arma::vec& y_new, bool center_Y = true) {
     if ((long)x_new.n_rows != (long)y_new.n_elem)
       throw std::invalid_argument("bart_model::set_data: nrow(X) != length(Y)");
+    if ((long)x_new.n_cols != p)
+      throw std::invalid_argument("bart_model::set_data: ncol(X) != p");
     n = (long)y_new.n_elem;
     center_y = center_Y;
     this->fmean = center_y ? arma::mean(y_new) : 0.0;
@@ -380,7 +383,7 @@ public:
     if ((long)this->offset_.n_elem != n) this->offset_ = arma::zeros<arma::vec>(n);
     this->stored_y_ = y_new - this->fmean - this->offset_;
     this->iy = this->stored_y_.memptr();
-    bm.setdata(p, n, this->ix, this->iy, numcut_.data());
+    bm.sety(this->iy);   // y only: the tree fits and the cutpoint index depend on X, which is unchanged
   }
 
   // Posterior predictive on new X (N_new x p): returns (n_draws x N_new),
@@ -420,6 +423,7 @@ public:
 
   double get_sigma() const     { return this->sigma; }
   double current_sigma() const { return this->sigma; }
+  double current_fmean() const { return this->fmean; }
   bool   get_usequants() const { return this->usequants; }
   double get_invchi(long n_, double rss) {
     return std::sqrt((nu * lambda + rss) / gen.chi_square((double)(n_ + nu)));
