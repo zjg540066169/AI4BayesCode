@@ -60,7 +60,7 @@
 //   ai4bayescode_example("BartNoise")
 //   set.seed(42); N <- 600L; p <- 3L                      # well-identified DGP (= int main)
 //   X <- matrix(runif(N * p, -1, 1), N, p)                # X ~ Uniform(-1, 1)
-//   f <- sin(3 * X[, 1]) + 0.5 * X[, 2]^2 - X[, 3]        # smooth low-dim mean
+//   f <- 2 * pmax(X[, 1], 0) + 0.5 * X[, 2]^2 - X[, 3]    # piecewise-linear + quadratic + linear mean
 //   y <- f + rnorm(N, 0, 0.5)                             # y ~ N(f, sigma_true^2), sigma_true = 0.5
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
@@ -76,7 +76,7 @@
 //   import numpy as np, AI4BayesCode
 //   rng = np.random.default_rng(42); N, p = 600, 3        # well-identified DGP (= int main)
 //   X = rng.uniform(-1, 1, size=(N, p))                   # X ~ Uniform(-1, 1)
-//   f = np.sin(3 * X[:, 0]) + 0.5 * X[:, 1]**2 - X[:, 2]  # smooth low-dim mean
+//   f = 2 * np.maximum(X[:, 0], 0) + 0.5 * X[:, 1]**2 - X[:, 2]  # piecewise-linear + quadratic + linear mean
 //   y = f + rng.normal(0, 0.5, size=N)                    # y ~ N(f, sigma_true^2), sigma_true = 0.5
 //   Mod = AI4BayesCode.example("BartNoise")
 //   # ---- Parallel chains + diagnosis (default) ----
@@ -805,7 +805,7 @@ PYBIND11_MODULE(BartNoise, m) {
 
 int main() {
     // ---- Simulate a well-identified DGP ---------------------------------
-    //   smooth, low-dimensional mean: f(x) = sin(3 x1) + 0.5 x2^2 - x3
+    //   low-dimensional mean with a kink at x1 = 0: f(x) = 2 max(x1, 0) + 0.5 x2^2 - x3
     //   y = f(x) + N(0, sigma_true^2),  sigma_true = 0.5
     const std::size_t N = 600;
     const std::size_t p = 3;
@@ -823,7 +823,7 @@ int main() {
         const double x2 = unif(gen);
         const double x3 = unif(gen);
         X(i, 0) = x1; X(i, 1) = x2; X(i, 2) = x3;
-        const double f = std::sin(3.0 * x1) + 0.5 * x2 * x2 - x3;
+        const double f = 2.0 * std::max(x1, 0.0) + 0.5 * x2 * x2 - x3;
         f_true[i] = f;
         y[i]      = f + noise(gen);
     }

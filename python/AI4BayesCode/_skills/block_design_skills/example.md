@@ -146,6 +146,8 @@ blocks, and the fence copy as-is.
    -> simulate data from a KNOWN truth -> build the composite/block -> warmup + sample -> compute a
    posterior mean -> compare to truth (or a naive baseline) -> `printf` the result -> `return ok ? 0 : 1;`
    -> `#endif`. (For a prior-only block, check the sampled draws against the prior's known moments.)
+   For a model with a `bart_block` or `genbart_block`, the DGP must not contain `sin`, `cos` or
+   `tan` (`codegen_cpp.md` Sec.5 "Header `@example` block").
 
 ### Constructor -- minimal wiring
 

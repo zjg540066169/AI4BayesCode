@@ -65,7 +65,7 @@
 //   set.seed(1)                                          # reproducible R run
 //   N <- 600L; p <- 3L                                   # well-identified DGP
 //   X <- matrix(runif(N * p, -1.5, 1.5), N, p)           # covariates ~ U(-1.5,1.5)
-//   r <- 0.8 * sin(2 * X[,1]) + 0.6 * X[,2] - 0.4 * X[,3]# true log-rate surface
+//   r <- 0.8 * pmax(X[,1], 0) + 0.6 * X[,2] - 0.4 * X[,3]  # true log-rate surface
 //   y <- rpois(N, exp(r))                                # y ~ Poisson(exp(r))
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
@@ -81,7 +81,7 @@
 //   rng = np.random.default_rng(1)                       # well-identified DGP
 //   N, p = 600, 3
 //   X = rng.uniform(-1.5, 1.5, size=(N, p))              # covariates ~ U(-1.5,1.5)
-//   r = 0.8 * np.sin(2 * X[:,0]) + 0.6 * X[:,1] - 0.4 * X[:,2]  # true log-rate
+//   r = 0.8 * np.maximum(X[:,0], 0) + 0.6 * X[:,1] - 0.4 * X[:,2]  # true log-rate
 //   y = rng.poisson(np.exp(r)).astype(float)             # y ~ Poisson(exp(r))
 //   Mod = AI4BayesCode.example("GBartPoisson")
 //   # ---- Parallel chains + diagnosis (default) ----
@@ -615,7 +615,7 @@ PYBIND11_MODULE(GBartPoisson, m) {
 #endif
 
 // ============================================================================
-//  Standalone demo: simulate Poisson counts with a smooth log-rate, fit,
+//  Standalone demo: simulate Poisson counts with a piecewise-linear log-rate, fit,
 //  print finite recovery of the rate surface.
 // ============================================================================
 
@@ -624,8 +624,8 @@ PYBIND11_MODULE(GBartPoisson, m) {
 
 int main() {
     // ---- Simulate a well-identified Poisson DGP -------------------------
-    //   smooth, low-dimensional log-rate:
-    //       r(x) = 0.8 sin(2 x1) + 0.6 x2 - 0.4 x3
+    //   low-dimensional log-rate with a kink at x1 = 0:
+    //       r(x) = 0.8 max(x1, 0) + 0.6 x2 - 0.4 x3
     //   y_i ~ Poisson(exp(r(x_i)))
     //   N >= 400 with well-spread covariates so the rate surface is
     //   identified (per-point f has intrinsic RJMCMC tree-multimodality;
@@ -644,7 +644,7 @@ int main() {
         const double x2 = unif(gen);
         const double x3 = unif(gen);
         X(i, 0) = x1; X(i, 1) = x2; X(i, 2) = x3;
-        const double rr   = 0.8 * std::sin(2.0 * x1) + 0.6 * x2 - 0.4 * x3;
+        const double rr   = 0.8 * std::max(x1, 0.0) + 0.6 * x2 - 0.4 * x3;
         const double lam  = std::exp(rr);
         rate_true[i] = lam;
         std::poisson_distribution<int> pois(lam);

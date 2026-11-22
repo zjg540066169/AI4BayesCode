@@ -63,17 +63,17 @@
 //   set.seed(1); N <- 600L; p <- 2L
 //   Z  <- runif(N, -1, 1)                                  # single effect modifier
 //   X  <- matrix(runif(N * p, 0.5, 1.5), N, p)             # predictors (bounded away from 0)
-//   b0 <- sin(3 * Z); b1 <- Z^2; b2 <- -Z                  # true coefficient functions of Z
+//   b0 <- 2 * pmax(Z, 0); b1 <- Z^2; b2 <- -Z              # true coefficient functions of Z
 //   y  <- b0 + b1 * X[, 1] + b2 * X[, 2] + rnorm(N, 0, 0.3)
 //   m  <- new(VCBart, X, matrix(Z, N, 1), y, rng_seed = 1L)  # knobs defaulted
 //   m$step(1500L); cur <- m$get_current()                 # $beta_0..$beta_2, $mu, $sigma
-//   cor(cur$beta_0, sin(3 * Z)); cor(cur$beta_1, Z^2)      # recover the coefficient functions
+//   cor(cur$beta_0, pmax(Z, 0)); cor(cur$beta_1, Z^2)      # recover the coefficient functions
 // @example:python
 //   import numpy as np, AI4BayesCode
 //   rng = np.random.default_rng(1); N, p = 600, 2
 //   Z  = rng.uniform(-1, 1, size=N)
 //   X  = rng.uniform(0.5, 1.5, size=(N, p))
-//   b0 = np.sin(3 * Z); b1 = Z**2; b2 = -Z
+//   b0 = 2 * np.maximum(Z, 0); b1 = Z**2; b2 = -Z
 //   y  = b0 + b1 * X[:, 0] + b2 * X[:, 1] + rng.normal(0, 0.3, size=N)
 //   Mod = AI4BayesCode.example("VCBart")
 //   m = Mod.VCBart(X, Z.reshape(-1, 1), y, rng_seed=1)   # every tuning knob defaulted
@@ -496,7 +496,7 @@ int main() {
         const double z = uZ(g);
         Z(i, 0) = z;
         X(i, 0) = uX(g); X(i, 1) = uX(g);
-        b0t[i] = std::sin(3.0 * z);
+        b0t[i] = 2.0 * std::max(z, 0.0);
         b1t[i] = z * z;
         b2t[i] = -z;
         y[i]   = b0t[i] + b1t[i] * X(i, 0) + b2t[i] * X(i, 1) + eps(g);
@@ -524,7 +524,7 @@ int main() {
     };
     const double c0 = corr(b0, b0t), c1 = corr(b1, b1t), c2 = corr(b2, b2t);
     std::printf("VC-BART recovery (correlation of posterior-mean beta_j(Z) with truth):\n");
-    std::printf("  beta_0 (sin 3Z): %.3f\n", c0);
+    std::printf("  beta_0 (2 max(Z,0)): %.3f\n", c0);
     std::printf("  beta_1 (Z^2)   : %.3f\n", c1);
     std::printf("  beta_2 (-Z)    : %.3f\n", c2);
     std::printf("  sigma (true 0.3): %.3f\n", sig);

@@ -2396,6 +2396,9 @@ before any chain. Every runtime test in this section -- and the runtime
 parts of Checks #6, #23 and #26 -- goes in that one script; the runner does
 not repeat them. R1 also runs the `.cpp`'s `@example` block(s) as written;
 an error in one is an R1 FAIL.
+For a model with a `bart_block` or `genbart_block`, a `sin`, `cos` or `tan`
+term in the DGP of the `@example` blocks or the `int main()` demo is also an
+R1 FAIL (`codegen_cpp.md` Sec.5).
 
 **Purpose:** call every built-in method of the wrapper once and catch
 immediate failures -- a missing or broken binding, non-finite values,

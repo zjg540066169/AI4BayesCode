@@ -567,6 +567,8 @@ mod = AI4BayesCode.source("<folder>/<ClassName>.cpp")
 # the sampler. Prior-drawn hyperparameters keep the L3 self-test calibrated
 # (SBC-style). If the model ships a reference simulator (simulate_data(seed)),
 # PREFER it over an invented DGP.
+# For a model with a `bart_block` or `genbart_block`, the DGP must not contain
+# `sin`, `cos` or `tan` (`codegen_cpp.md` Sec.5 "Header `@example` block").
 
 # Per-chain runner helper (with periodic readapt -- see Sec. above).
 # Signature MUST include diagnosis=False; when diagnosis=True, CALL the

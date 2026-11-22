@@ -228,6 +228,8 @@ problem. Prior-drawn hyperparameters keep the generation-time self-test
 calibrated and on the geometry the model actually targets. If the model
 ships its own reference simulator (e.g. a `simulate_data(seed)` in the
 model card), PREFER it over an invented DGP.
+For a model with a `bart_block` or `genbart_block`, the DGP must not contain
+`sin`, `cos` or `tan` (`codegen_cpp.md` Sec.5 "Header `@example` block").
 
 Skeleton (parameterized; mirror this structure, fill placeholders):
 
