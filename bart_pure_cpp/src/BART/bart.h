@@ -35,7 +35,9 @@
 #include "info.h"
 #include "bartfuns.h"
 #include "bd.h"
+#include "cchange.h"
 #include <ctime>
+#include <stdexcept>
 
 class bart {
 public:
@@ -76,7 +78,8 @@ public:
      this->m = t.size();
      
      this->pi = rhs.pi;
-     
+     cc_kidx_.clear(); cc_kidx_ok_ = false;
+
      p=0;n=0;x=0;y=0;
      xi.clear();
      
@@ -124,6 +127,7 @@ public:
    void setdata(size_t p, size_t n, double *x, double *y, int* nc){
      this->p=p; this->n=n; this->x=x; this->y=y;
      if(xi.size()==0) makexinfo_bart(p,n,&x[0],xi,nc);
+     cc_kidx_ok_ = false;   // the collapsed change's cutpoint index depends on x
      
      if(allfit) delete[] allfit;
      allfit = new double[n];
@@ -178,6 +182,7 @@ public:
    xinfo& getxinfo() {return xi;}
    const xinfo& getxinfo() const {return xi;}
    void setxinfo(xinfo& _xi){
+     cc_kidx_ok_ = false;   // the collapsed change's cutpoint index depends on the cutpoints
      size_t p=_xi.size();
      xi.resize(p);
      for(size_t i=0;i<p;i++) {
@@ -741,6 +746,7 @@ public:
    void draw(double sigma, rn& gen)
    {
      size_t i=0;
+     cchange_prepare_(nullptr, sigma, 1);
      for(size_t j=0;j<m;j++) {
        fit3(t[j],xi,p,n,x,ftemp);
        for(size_t k=0;k<n;k++) {
@@ -749,6 +755,9 @@ public:
        }
        //cout << aug << std::endl;
        if(bd(t[j],xi,di,pi,sigma,nv,pv,aug,gen)) i++;
+       // collapsed change (cchange.h), one scan per tree: after BIRTH/DEATH and before the leaf draw, so drmu
+       // draws the leaf values for the updated rules
+       bart_cchange::cchange_all(t[j],xi,di,pi,nv,pv,cc_kidx_.data(),cc_w_.data(),gen);
        drmu(t[j],xi,di,pi,sigma,gen);
        fit3(t[j],xi,p,n,x,ftemp);
        for(size_t k=0;k<n;k++) allfit[k] += ftemp[k];
@@ -826,6 +835,20 @@ protected:
    double *grp;
    std::vector<size_t> nv;
    std::vector<double> pv, lpv;
+   // collapsed change (cchange.h), run once per tree in every draw
+   std::vector<int> cc_kidx_;         // cutpoint index of every (variable, observation); rebuilt after setdata/setxinfo
+   bool cc_kidx_ok_ = false;
+   std::vector<double> cc_w_;         // observation weights 1 / sigma_i^2 of the current draw
+   // Called once per draw before the tree loop. sigma_vec = per-observation sigma (heterbart::draw) or null for one
+   // sigma; the weights match heterbd (sigma_i^-2 / shards) and bd (1 / sigma^2).
+   void cchange_prepare_(const double* sigma_vec, double sigma, int shards) {
+     if (aug)
+       throw std::invalid_argument("bart: the collapsed change move requires aug = false");
+     if (!cc_kidx_ok_) { bart_cchange::make_kidx(xi, di, cc_kidx_); cc_kidx_ok_ = true; }
+     cc_w_.resize(n);
+     if (sigma_vec) { for (size_t k = 0; k < n; k++) cc_w_[k] = pow(sigma_vec[k], -2.) / shards; }
+     else { const double w = 1.0 / (sigma * sigma); for (size_t k = 0; k < n; k++) cc_w_[k] = w; }
+   }
 };
 
 #endif

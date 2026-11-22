@@ -3,8 +3,9 @@
 // ============================================================================
 //  test_bart_prior_recovery.cpp
 //
-//  The BART tree moves are birth and death only, so with a flat likelihood
-//  the tree chain must have the tree PRIOR as its stationary distribution.
+//  The BART tree moves (birth/death, then the collapsed change) leave the tree
+//  posterior invariant, so with a flat likelihood the tree chain must have the
+//  tree PRIOR as its stationary distribution.
 //  Setup: one tree, one covariate, n = 3000 observations on a 100-point cut
 //  grid (each grid interval holds about 30 observations, so the kernel's
 //  minimum-leaf-size rule never binds), sigma fixed at 1e6 so the
@@ -93,7 +94,7 @@ int main() {
     }
     const bool ok = tv < 0.015;
     std::printf("  total variation distance = %.4f (tol 0.015)\n", tv);
-    std::printf("%s BART birth-death chain recovers the tree prior under a flat likelihood\n",
+    std::printf("%s BART tree chain recovers the tree prior under a flat likelihood\n",
                 ok ? "[PASS]" : "[FAIL]");
     std::printf("\n=== SUMMARY: %d passed, %d failed ===\n", ok ? 1 : 0, ok ? 0 : 1);
     return ok ? 0 : 1;

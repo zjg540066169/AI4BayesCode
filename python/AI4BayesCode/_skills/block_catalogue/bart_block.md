@@ -83,6 +83,16 @@ cfg.aug                  = false;   // Linero 2018 Section 4 augmentation
 cfg.binary               = false;   // see "Binary leaf prior" below
 ```
 
+### Collapsed CHANGE move
+
+Every sweep runs one collapsed-change scan per tree after BIRTH/DEATH
+(`bart_pure_cpp/src/BART/cchange.h`): the split variable of every internal node is updated by
+Metropolis-Hastings from its marginal, with the cutpoint and the leaf values integrated out, and its
+cutpoint is then drawn from its full conditional. The move leaves the posterior of BIRTH/DEATH
+invariant (`tests/test_bart_cchange.cpp`), so it changes mixing, not the model. With BIRTH/DEATH
+alone, the rule of an internal node changes only after every split below it has been removed by
+DEATH moves. The move always runs and has no configuration field. `X` must be finite.
+
 ### Binary leaf prior (Albert-Chib probit BART)
 
 `bart_block_config::binary` controls which leaf-prior tau formula
