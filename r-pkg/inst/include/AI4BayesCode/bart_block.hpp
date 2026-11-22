@@ -487,6 +487,13 @@ public:
                 + std::to_string(X_new.n_rows) + " vs "
                 + std::to_string(y_new.n_elem));
         }
+        if (X_new.n_cols != cfg_.x_train.n_cols) {
+            ai4b::stop("bart_block '" + cfg_.name
+                + "': set_data col count "
+                + std::to_string(X_new.n_cols)
+                + " does not match current p = "
+                + std::to_string(cfg_.x_train.n_cols));
+        }
         impl_->set_data(X_new, y_new, /*center_Y=*/true);
         cfg_.x_train = X_new;
         cfg_.y_init  = y_new;
@@ -639,8 +646,7 @@ private:
     }
 
     void refresh_cached_fmean_() {
-        stdbart::BartHistory h = impl_->get_history();
-        cached_fmean_ = h.fmean;
+        cached_fmean_ = impl_->current_fmean();   // not get_history(), which copies every stored forest
     }
 
     // Mirrors genbart_block::refresh_current_r_ — read the kernel's
