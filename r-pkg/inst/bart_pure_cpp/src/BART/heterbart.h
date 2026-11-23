@@ -21,6 +21,7 @@
 /*
  *  Modifications by Jungang Zou, 2026.
  *  - draw() runs the collapsed change move (cchange.h) on every tree after birth/death.
+ *  - draw() keeps the fit of every tree between draws.
  *
  *  These modifications comply with the terms of the GNU General Public License
  *  version 2 (GPL-2).
@@ -54,18 +55,21 @@ void heterbart::draw(double *sigma, rn& gen, int shards)
 {
    size_t i=0;
    cchange_prepare_(sigma, 0.0, shards);
+   tfit_prepare_();
    for(size_t j=0;j<m;j++) {
-      fit(t[j],xi,p,n,x,ftemp);
+      const double* fj = tfit_start_(j);   // t_j(x) before the update of tree j
       for(size_t k=0;k<n;k++) {
-         allfit[k] = allfit[k]-ftemp[k];
+         allfit[k] = allfit[k]-fj[k];
          r[k] = y[k]-allfit[k];
       }
       if(heterbd(t[j],xi,di,pi,sigma,nv,pv,aug,gen,shards)) i++;
       // collapsed change (cchange.h), one scan per tree: after BIRTH/DEATH and before the leaf draw
       bart_cchange::cchange_all(t[j],xi,di,pi,nv,pv,cc_kidx_.data(),cc_w_.data(),gen,0,&cc_work_);
       heterdrmu(t[j],xi,di,pi,sigma,gen);
-      fit(t[j],xi,p,n,x,ftemp);
-      for(size_t k=0;k<n;k++) allfit[k] += ftemp[k];
+      double* fe = tfit_end_(j);
+      fit3(t[j],xi,p,n,x,fe);
+      tfit_keep_(j);
+      for(size_t k=0;k<n;k++) allfit[k] += fe[k];
    }
    accept=i/(double)m;
    if(dartOn) {

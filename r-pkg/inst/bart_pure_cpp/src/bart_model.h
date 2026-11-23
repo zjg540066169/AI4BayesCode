@@ -55,6 +55,7 @@
 #include "BART/lambda.h"
 #include "BART/bart_model_matrix.h"   // pure C++ cutpoint construction
 
+#include <algorithm>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -132,15 +133,18 @@ public:
     // ---- sigma prior calibration ----
     double sigest = (n > 1) ? arma::stddev(y_train) : 1.0;   // R sd: /(n-1)
     if (p < n) {
+      if (!x_train.is_finite())
+        throw std::invalid_argument(
+          "bart_model: x_train must be finite (it has a NaN or infinite value); the sigma prior is calibrated from "
+          "the least-squares fit of y_train on x_train");
       arma::mat xr = x_train;
       bool has_const = false;
       if (!rm_const)
         for (arma::uword j = 0; j < xr.n_cols; ++j)
           if (arma::all(xr.col(j) == 1.0)) { has_const = true; break; }
       if (!has_const) xr.insert_cols(0, arma::ones<arma::vec>(n));
-      arma::vec coef  = arma::solve(xr, y_train);
-      arma::vec resid = y_train - xr * coef;
-      double sig2 = arma::dot(resid, resid) / (double)(n - p);
+      arma::vec yr = y_train;
+      double sig2 = ls_rss_(xr, yr) / (double)(n - p);   // residual sum of squares of the least-squares fit / (n - p)
       if (sig2 > 0) { sigest = std::sqrt(sig2); sigma = sigest; }
     }
     // R::qchisq(1-0.9, nu).  Under the R (Rcpp) build bart_sf (r_compat.h)
@@ -316,6 +320,84 @@ public:
   }
 
 private:
+  // Residual sum of squares of the least-squares fit of r on the columns of A (n x k, column-major; A and r are
+  // overwritten), by Householder reflections in a fixed order of operations: the value depends on the input only, not
+  // on the BLAS / LAPACK library, its threads or the alignment of the data. A column whose norm after the earlier
+  // reflections is at most max(n, k) eps times its initial norm lies in the span of the earlier columns and is skipped.
+  // The columns are taken in panels of nb: the reflections of the panel's earlier columns are applied to column j of
+  // the panel, and then the panel's reflections are applied to every later column, two columns at a time, and to r.
+  // Every column has the same reflections applied in the same order, with the same operations, as when each reflection
+  // is applied to all later columns as soon as it is formed, so the value is the same bit for bit (unless the compiler
+  // may contract multiplications and additions across statements, e.g. -ffp-contract=fast); the passes over the later
+  // columns drop from one per reflection to one per panel.
+  static double ls_rss_(arma::mat& A, arma::vec& r) {
+    const arma::uword n = A.n_rows, k = A.n_cols, nb = 32;
+    const double tol = (double)std::max(n, k) * std::numeric_limits<double>::epsilon();
+    std::vector<double> nrm0(k);
+    for (arma::uword j = 0; j < k; ++j) nrm0[j] = norm2_(A.colptr(j), n);
+    std::vector<const double*> pv(nb);   // reflection a of the current panel: vector pv[a] on rows row0 + a .. n - 1,
+    std::vector<double> ph(nb);          // H = I - v v' / ph[a]
+    arma::uword row = 0;
+    for (arma::uword j0 = 0; j0 < k && row < n; j0 += nb) {
+      const arma::uword j1 = std::min(k, j0 + nb), row0 = row;
+      arma::uword q = 0;
+      for (arma::uword j = j0; j < j1 && row < n; ++j) {
+        double* cj = A.colptr(j);
+        for (arma::uword a = 0; a < q; ++a) reflect_(pv[a], cj + row0 + a, n - row0 - a, ph[a]);
+        double* v = cj + row;
+        const arma::uword len = n - row;
+        const double s = norm2_(v, len);
+        if (!(s > tol * nrm0[j])) continue;
+        const double a0 = v[0];
+        v[0] = a0 + (a0 >= 0.0 ? s : -s);          // v = a + sign(a0) s e1; H = I - v v' / (s (s + |a0|))
+        pv[q] = v; ph[q] = s * (s + std::fabs(a0));
+        ++q; ++row;
+      }
+      if (row < n) {   // the later columns are used by a later panel only if rows remain
+        arma::uword c = j1;
+        for (; c + 2 <= k; c += 2) {
+          double* c0 = A.colptr(c) + row0; double* c1 = A.colptr(c + 1) + row0;
+          for (arma::uword a = 0; a < q; ++a) reflect2_(pv[a], c0 + a, c1 + a, n - row0 - a, ph[a]);
+        }
+        if (c < k) { double* c0 = A.colptr(c) + row0; for (arma::uword a = 0; a < q; ++a) reflect_(pv[a], c0 + a, n - row0 - a, ph[a]); }
+      }
+      for (arma::uword a = 0; a < q; ++a) reflect_(pv[a], r.memptr() + row0 + a, n - row0 - a, ph[a]);
+    }
+    double rss = 0.0;
+    for (arma::uword i = row; i < n; ++i) rss += r[i] * r[i];
+    return rss;
+  }
+  // c -= v (v'c) / h over len entries, v'c summed in four partial sums in a fixed order
+  static void reflect_(const double* v, double* c, arma::uword len, double h) {
+    double d0 = 0.0, d1 = 0.0, d2 = 0.0, d3 = 0.0;
+    arma::uword i = 0;
+    for (; i + 4 <= len; i += 4) { d0 += v[i] * c[i]; d1 += v[i + 1] * c[i + 1]; d2 += v[i + 2] * c[i + 2]; d3 += v[i + 3] * c[i + 3]; }
+    for (; i < len; ++i) d0 += v[i] * c[i];
+    const double f = ((d0 + d1) + (d2 + d3)) / h;
+    for (i = 0; i < len; ++i) c[i] -= f * v[i];
+  }
+  // reflect_ on the two columns c and e in one pass over v, with the operations of reflect_ on each column
+  static void reflect2_(const double* v, double* c, double* e, arma::uword len, double h) {
+    double d0 = 0.0, d1 = 0.0, d2 = 0.0, d3 = 0.0, e0 = 0.0, e1 = 0.0, e2 = 0.0, e3 = 0.0;
+    arma::uword i = 0;
+    for (; i + 4 <= len; i += 4) {
+      d0 += v[i] * c[i]; d1 += v[i + 1] * c[i + 1]; d2 += v[i + 2] * c[i + 2]; d3 += v[i + 3] * c[i + 3];
+      e0 += v[i] * e[i]; e1 += v[i + 1] * e[i + 1]; e2 += v[i + 2] * e[i + 2]; e3 += v[i + 3] * e[i + 3];
+    }
+    for (; i < len; ++i) { d0 += v[i] * c[i]; e0 += v[i] * e[i]; }
+    const double f = ((d0 + d1) + (d2 + d3)) / h, g = ((e0 + e1) + (e2 + e3)) / h;
+    for (i = 0; i < len; ++i) { c[i] -= f * v[i]; e[i] -= g * v[i]; }
+  }
+  // Euclidean norm, computed with the entries divided by the largest absolute entry
+  static double norm2_(const double* a, arma::uword len) {
+    double mx = 0.0;
+    for (arma::uword i = 0; i < len; ++i) { const double t = std::fabs(a[i]); if (t > mx) mx = t; }
+    if (!(mx > 0.0) || !std::isfinite(mx)) return mx;
+    double s = 0.0;
+    for (arma::uword i = 0; i < len; ++i) { const double t = a[i] / mx; s += t * t; }
+    return mx * std::sqrt(s);
+  }
+
   void record_history_() {
     if (!history_recording_) return;
     std::ostringstream os;

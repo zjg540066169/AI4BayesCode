@@ -25,6 +25,7 @@
  *
  *  Modifications by Jungang Zou, 2026.
  *  - draw() runs the collapsed change move (cchange.h) on every tree after birth/death.
+ *  - draw() keeps the fit of every tree between draws.
  *
  *  These modifications comply with the terms of the GNU General Public License 
  *  version 2 (GPL-2).
@@ -33,6 +34,12 @@
 #ifndef GUARD_bart_h
 #define GUARD_bart_h
 
+// The fits t_j(x) of the m trees at the n observations are kept between draws when m n is at most this number of
+// doubles (default 2^22 doubles, 32 MiB per kernel); above it, each fit is recomputed at the start of its tree's update.
+#ifndef AI4BAYESCODE_BART_FIT_STORE_MAX_DOUBLES
+#define AI4BAYESCODE_BART_FIT_STORE_MAX_DOUBLES (size_t(1) << 22)
+#endif
+
 #include "tree.h"
 #include "treefuns.h"
 #include "info.h"
@@ -40,6 +47,9 @@
 #include "bd.h"
 #include "cchange.h"
 #include <ctime>
+#include <cstdint>
+#include <cstring>
+#include <new>
 #include <stdexcept>
 
 class bart {
@@ -82,6 +92,7 @@ public:
      
      this->pi = rhs.pi;
      cc_kidx_.clear(); cc_kidx_ok_ = false;
+     tsig_.clear();
 
      p=0;n=0;x=0;y=0;
      xi.clear();
@@ -99,7 +110,8 @@ public:
      t.resize(m);
      this->m = t.size();
      
-     if(allfit && (xi.size()==p)) predict(p,n,x,allfit);
+     if(allfit && (xi.size()==p)) allfit_rebuild_();
+     else tsig_.clear();
      }};
    
    void makexinfo_bart(size_t p, size_t n, double *x, xinfo& xi, int *nc)
@@ -134,7 +146,7 @@ public:
      
      if(allfit) delete[] allfit;
      allfit = new double[n];
-     predict(p,n,x,allfit);
+     allfit_rebuild_();     // allfit and the kept tree fits at the new x
      
      if(r) delete[] r;
      r = new double[n];
@@ -188,6 +200,7 @@ public:
    const xinfo& getxinfo() const {return xi;}
    void setxinfo(xinfo& _xi){
      cc_kidx_ok_ = false;   // the collapsed change's cutpoint index depends on the cutpoints
+     tsig_.clear();         // so do the stored tree fits
      size_t p=_xi.size();
      xi.resize(p);
      for(size_t i=0;i<p;i++) {
@@ -256,11 +269,11 @@ public:
    // Walks LIVE in-memory trees on currently-stored x to refresh
    // allfit[].  Called after set_tree() (which mutates the live forest
    // externally without touching allfit).  set_X / set_data already
-   // refresh allfit via setdata()->predict().  step() incrementally
+   // refresh allfit via setdata().  step() incrementally
    // maintains it.  set_Y leaves trees(x) unchanged, no refresh needed.
    void refresh_allfit() {
-     if (!allfit || !x) return;
-     predict(p, n, x, allfit);
+     if (!allfit || !x) { tsig_.clear(); return; }   // no data: the kept tree fits are dropped
+     allfit_rebuild_();
    }
    
    bool cansplit_bart(tree::tree_p n, xinfo& xi)
@@ -752,10 +765,11 @@ public:
    {
      size_t i=0;
      cchange_prepare_(nullptr, sigma, 1);
+     tfit_prepare_();
      for(size_t j=0;j<m;j++) {
-       fit3(t[j],xi,p,n,x,ftemp);
+       const double* fj = tfit_start_(j);   // t_j(x) before the update of tree j
        for(size_t k=0;k<n;k++) {
-         allfit[k] = allfit[k]-ftemp[k];
+         allfit[k] = allfit[k]-fj[k];
          r[k] = y[k]-allfit[k];
        }
        //cout << aug << std::endl;
@@ -764,8 +778,10 @@ public:
        // draws the leaf values for the updated rules
        bart_cchange::cchange_all(t[j],xi,di,pi,nv,pv,cc_kidx_.data(),cc_w_.data(),gen,0,&cc_work_);
        drmu(t[j],xi,di,pi,sigma,gen);
-       fit3(t[j],xi,p,n,x,ftemp);
-       for(size_t k=0;k<n;k++) allfit[k] += ftemp[k];
+       double* fe = tfit_end_(j);
+       fit3(t[j],xi,p,n,x,fe);
+       tfit_keep_(j);
+       for(size_t k=0;k<n;k++) allfit[k] += fe[k];
      }
      accept=i/(double)m;
      if(dartOn) {
@@ -857,6 +873,63 @@ protected:
      if (sigma_vec) { for (size_t k = 0; k < n; k++) cc_w_[k] = pow(sigma_vec[k], -2.) / shards; }
      else { const double w = 1.0 / (sigma * sigma); for (size_t k = 0; k < n; k++) cc_w_[k] = w; }
    }
+   // Fits of the trees at x kept between draws when m n <= tfit_cap_: row j of tfit_ (tfit_[j n + k] = t_j(x_k)) is
+   // written by the fit at the end of tree j's update and by the rebuild of allfit (setdata, setm, refresh_allfit), and
+   // tsig_[j] holds the pre-order rules and leaf values of tree j that determine it. At the start of the next update of
+   // tree j the row replaces the fit when tree j still has those rules and leaf values, and is recomputed otherwise.
+   // setxinfo and operator= drop the rows; when m n > tfit_cap_ (or the rows cannot be allocated), no row is kept and
+   // every fit is recomputed.
+   std::vector<double> tfit_;
+   std::vector<std::vector<std::uint64_t> > tsig_;
+   std::vector<std::uint64_t> tsig_cur_;
+   tree::npv tsig_nodes_;
+   bool tfit_on_ = false;
+   size_t tfit_cap_ = (size_t)(AI4BAYESCODE_BART_FIT_STORE_MAX_DOUBLES);
+   static void tsig_of_(tree& tr, tree::npv& nds, std::vector<std::uint64_t>& s) {
+     nds.clear(); tr.getnodes(nds); s.clear();
+     for (size_t a = 0; a < nds.size(); a++) {
+       if (nds[a]->getl()) { s.push_back(1); s.push_back(nds[a]->getv()); s.push_back(nds[a]->getc()); }
+       else { const double th = nds[a]->gettheta(); std::uint64_t b; std::memcpy(&b, &th, sizeof b); s.push_back(0); s.push_back(b); }
+     }
+   }
+   // Sizes the kept fits for the current m and n, once per draw before the tree loop and in every rebuild of allfit;
+   // returns whether they are kept.
+   bool tfit_prepare_() {
+     tfit_on_ = (n > 0 && m <= tfit_cap_ / n);
+     if (tfit_on_ && tfit_.size() != m * n) {
+       tsig_.clear();
+       try { tfit_.resize(m * n); } catch (const std::bad_alloc&) { tfit_on_ = false; }   // then the fits are recomputed
+     }
+     if (!tfit_on_) { std::vector<double>().swap(tfit_); tsig_.clear(); return false; }
+     if (tsig_.size() != m) { tsig_.clear(); tsig_.resize(m); }
+     return true;
+   }
+   // allfit = sum of t_j(x) over the trees in tree order, as predict(p, n, x, allfit) computes it. When the fits are
+   // kept, t_j(x) is written to row j of tfit_ and the rules and leaf values of tree j to tsig_[j], so the next draw
+   // uses these rows in place of recomputing the fits; otherwise the kept fits are dropped.
+   void allfit_rebuild_() {
+     if (!tfit_prepare_()) { predict(p,n,x,allfit); return; }
+     for(size_t j=0;j<m;j++) tsig_[j].clear();   // a row becomes valid when its tree's record is written below
+     for(size_t k=0;k<n;k++) allfit[k]=0.0;
+     for(size_t j=0;j<m;j++) {
+       double* row = &tfit_[j * n];
+       fit2(t[j],xi,p,n,x,row);
+       for(size_t k=0;k<n;k++) allfit[k] += row[k];
+       tsig_of_(t[j], tsig_nodes_, tsig_[j]);
+     }
+   }
+   // t_j(x) at the start of tree j's update: the stored row, recomputed when tree j has changed since it was written
+   const double* tfit_start_(size_t j) {
+     if (!tfit_on_) { fit3(t[j],xi,p,n,x,ftemp); return ftemp; }
+     double* row = &tfit_[j * n];
+     tsig_of_(t[j], tsig_nodes_, tsig_cur_);
+     if (tsig_cur_ != tsig_[j]) fit3(t[j],xi,p,n,x,row);
+     tsig_[j].clear();   // the row is valid again once tfit_keep_ has run at the end of the update
+     return row;
+   }
+   // the buffer for t_j(x) at the end of tree j's update, then the record of the tree it was computed for
+   double* tfit_end_(size_t j) { return tfit_on_ ? &tfit_[j * n] : ftemp; }
+   void tfit_keep_(size_t j) { if (tfit_on_) tsig_of_(t[j], tsig_nodes_, tsig_[j]); }
 };
 
 #endif

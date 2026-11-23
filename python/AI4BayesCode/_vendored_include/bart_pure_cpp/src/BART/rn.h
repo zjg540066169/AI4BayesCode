@@ -23,6 +23,10 @@
  *  Modifications by Jungang Zou, 2024.
  *  - To make sure the random seeds set in R function work, we deleted two implementation of arn.
  *
+ *  Modifications by Jungang Zou, 2026.
+ *  - set_wts keeps the normalised weights, and discrete() keeps the binomial parameters of the categorical draw
+ *    while the weights are unchanged.
+ *
  *  These modifications comply with the terms of the GNU General Public License 
  *  version 2 (GPL-2).
  */
@@ -32,6 +36,8 @@
 #define GUARD_rn_h
 
 #include <cmath>
+#include <cstring>
+#include <vector>
 
 // Pure-C++ (R-free) build: pull in the standalone R-API shim so that
 // arn's R::norm_rand() / R::rgamma() / R::rmultinom() etc. resolve to
@@ -113,6 +119,9 @@ class arn: public rn
   } 
  virtual size_t discrete() {
     size_t p=wts.size(), x=0;
+#ifdef NoRcpp
+    if(p>0) return discrete_table_();
+#endif
     std::vector<int> vOut (p,0);
     R::rmultinom(1,&wts[0],p,&vOut[0]); 
     if(vOut[0]==0) for(size_t j=1;j<p;j++) x += j*vOut[j]; 
@@ -129,10 +138,17 @@ class arn: public rn
 */
   virtual size_t geometric(double p) {return R::rgeom(p);}
   virtual void set_wts(std::vector<double>& _wts) {
+    // wts and the draw table depend on _wts only: kept when _wts equals, bit for bit, the previous input
+    if(wts_in_.size()==_wts.size() &&
+       (_wts.empty() || std::memcmp(wts_in_.data(), _wts.data(), _wts.size()*sizeof(double))==0)) return;
     double smw=0.;
     wts.clear();
     for(size_t j=0;j<_wts.size();j++) smw+=_wts[j];
     for(size_t j=0;j<_wts.size();j++) wts.push_back(_wts[j]/smw);
+    wts_in_.assign(_wts.begin(), _wts.end());
+#ifdef NoRcpp
+    tab_.clear(); tab_ok_=false;
+#endif
   }
   virtual std::vector<double> log_dirichlet(std::vector<double>& alpha){
     size_t k=alpha.size();
@@ -153,6 +169,37 @@ class arn: public rn
   }
  private:
   std::vector<double> wts;
+  std::vector<double> wts_in_;   // the weights last passed to set_wts
+#ifdef NoRcpp
+  // The draw of R::rmultinom(1, &wts[0], p, .) (bart_rng::rmultinom) followed by the scan in discrete(), with the same
+  // engine calls: category j is tried with binomial(1, wts[j] / rem_j), rem_j = sum of wts minus wts[0..j-1], in
+  // order until the first success; none tried once rem_j <= 0; category p-1 otherwise. tab_[j] holds the binomial
+  // parameters of category j, built in order up to the last category reached and kept until set_wts changes wts.
+  std::vector<std::binomial_distribution<int>::param_type> tab_;
+  double tab_rem_ = 0.0;         // rem_j for j = tab_.size()
+  bool tab_ok_ = false;
+  size_t discrete_table_() {
+    const size_t p=wts.size();
+    if(!tab_ok_) {
+      double norm=0.0;
+      for(size_t j=0;j<p;j++) norm+=wts[j];
+      tab_.clear(); tab_rem_=norm; tab_ok_=true;
+    }
+    for(size_t j=0;j+1<p;j++) {
+      if(j==tab_.size()) {
+        if(tab_rem_<=0.0) break;
+        double pj=wts[j]/tab_rem_;
+        if(pj>1.0) pj=1.0;
+        if(pj<0.0) pj=0.0;
+        tab_.push_back(std::binomial_distribution<int>::param_type(1, pj));
+        tab_rem_-=wts[j];
+      }
+      std::binomial_distribution<int> d(tab_[j]);
+      if(d(bart_rng::engine())!=0) return j;
+    }
+    return p-1;
+  }
+#endif
 #ifndef NoRcpp
   Rcpp::RNGScope RNGstate;   // R-build only; the pure-C++ RNG (r_compat.h)
                              // manages its own thread-local engine state.

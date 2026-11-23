@@ -59,6 +59,7 @@
 #include "rn.h"
 #include <vector>
 #include <cmath>
+#include <cstring>
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
@@ -156,12 +157,14 @@ struct Work {
   tree::npv all, bl, br, sub, desc, dv, leaves;
   std::vector<size_t> reg, cv, cc, ccc, row, w1, w2, lnw;
   std::vector<double> lw, lwc, ew, rk, sk, l1pg, lcache, H, Hr, Hs, pn, pr, ps, tn, tr, ts, cum;
+  std::vector<double> cum_pv;   // the pv whose cumulative sums cum holds
   std::vector<int> la, ra, lid, L, U;
   std::vector<char> only, dirty, occ;
 };
 
 // Unnormalised log full conditional of the rule of internal node eta over every admissible (v, c), for the variables
-// flagged in `only` (all variables when only is null): lw[k] is the weight of rule (cv[k], cc[k]) and carries log s_v.
+// flagged in `only` (all variables when only is null), or for the nvars variables in vars (ascending) when vars is not
+// null: lw[k] is the weight of rule (cv[k], cc[k]) and carries log s_v.
 // R = the observations of eta's region, w = the observation weights 1 / sigma_i^2, di.y = the partial residuals.
 // la/ra/leaves are returned for the re-routing after a draw. eta holds its entry rule on return. ws supplies the
 // buffers (a local Work when null); lw, cv, cc, la, ra and leaves must not be members of *ws other than the ones
@@ -170,7 +173,8 @@ inline void rule_weights(tree::tree_p eta, const std::vector<size_t>& R, xinfo& 
                          std::vector<double>& pv, const int* kidx, const double* w,
                          std::vector<double>& lw, std::vector<size_t>& cv, std::vector<size_t>& cc,
                          std::vector<int>& la, std::vector<int>& ra, std::vector<tree::tree_p>& leaves,
-                         const std::vector<char>* only = nullptr, int ctl = 0, Work* ws = nullptr)
+                         const std::vector<char>* only = nullptr, int ctl = 0, Work* ws = nullptr,
+                         const size_t* vars = nullptr, size_t nvars = 0)
 {
   Work local; Work& W = ws ? *ws : local;
   const size_t MINLEAF = 5;   // bd.h / heterbd.h accept a birth only if both new leaves hold >= 5 observations
@@ -204,8 +208,14 @@ inline void rule_weights(tree::tree_p eta, const std::vector<size_t>& R, xinfo& 
   for (size_t a = 0; a < nb; a++) l1pg[a] = std::log1p(-psplit(pi, leaves[a]->depth()));
   std::vector<double>& lcache = W.lcache; lcache.resize(nb);
   std::vector<char>& dirty = W.dirty; dirty.resize(nb);
-  std::vector<int>& L = W.L; std::vector<int>& U = W.U; L.assign(p, 0); U.assign(p, -1);
-  for (size_t u = 0; u < p; u++) if (!only || (*only)[u]) range(eta, u, xi, L[u], U[u]);
+  std::vector<int>& L = W.L; std::vector<int>& U = W.U;
+  if (vars) {   // only the entries of the listed variables are read below
+    if (L.size() != p || U.size() != p) { L.assign(p, 0); U.assign(p, -1); }
+    for (size_t t = 0; t < nvars; t++) range(eta, vars[t], xi, L[vars[t]], U[vars[t]]);
+  } else {
+    L.assign(p, 0); U.assign(p, -1);
+    for (size_t u = 0; u < p; u++) if (!only || (*only)[u]) range(eta, u, xi, L[u], U[u]);
+  }
   // Witnesses: with eta on v, a variable u != v is not constrained by eta, so a leaf's range for u is its range with
   // eta ignored (eta's variable set to the out-of-range index p, which no tree::rg comparison matches). A leaf can
   // split under eta = v iff some u != v has a cutpoint there; the first TWO such variables (w1 < w2, p = none) decide
@@ -222,8 +232,10 @@ inline void rule_weights(tree::tree_p eta, const std::vector<size_t>& R, xinfo& 
   std::vector<double>& tn = W.tn; std::vector<double>& tr = W.tr; std::vector<double>& ts = W.ts;
   pn.resize(nb); pr.resize(nb); ps.resize(nb); tn.resize(nb); tr.resize(nb); ts.resize(nb);
   tree::npv& dv = W.dv; std::vector<size_t>& lnw = W.lnw; std::vector<char>& occ = W.occ;
-  for (size_t v = 0; v < p; v++) {
-    if (only && !(*only)[v]) continue;
+  const size_t nloop = vars ? nvars : p;
+  for (size_t t = 0; t < nloop; t++) {
+    const size_t v = vars ? vars[t] : t;
+    if (!vars && only && !(*only)[v]) continue;
     if (U[v] < L[v]) continue;                         // no admissible cutpoint at eta: prior mass 0
     if (!(pv[v] > 0.0)) continue;                      // s_v = 0: prior mass 0
     const size_t nc1 = xi[v].size() + 1;
@@ -346,9 +358,15 @@ inline int cchange_all(tree& x, xinfo& xi, dinfo& di, pinfo& pi, std::vector<siz
   std::vector<size_t>& reg = W.reg; std::vector<size_t>& cv = W.cv; std::vector<size_t>& cc = W.cc;
   std::vector<double>& lw = W.lw; std::vector<int>& la = W.la; std::vector<int>& ra = W.ra;
   tree::npv& leaves = W.leaves;
-  std::vector<char>& only = W.only; only.assign(p, 0);
-  std::vector<double>& cum = W.cum; cum.resize(p);   // cum[q] = pv[0] + ... + pv[q]
-  double ssum = 0.0; for (size_t u = 0; u < p; u++) { ssum += pv[u]; cum[u] = ssum; }
+  // cum[q] = pv[0] + ... + pv[q]; recomputed only when pv differs, bit for bit, from the pv it was computed for
+  std::vector<double>& cum = W.cum;
+  if (W.cum_pv.size() != p || cum.size() != p ||
+      (p > 0 && std::memcmp(W.cum_pv.data(), pv.data(), p * sizeof(double)) != 0)) {
+    cum.resize(p);
+    double s = 0.0; for (size_t u = 0; u < p; u++) { s += pv[u]; cum[u] = s; }
+    W.cum_pv.assign(pv.begin(), pv.end());
+  }
+  const double ssum = (p > 0) ? cum[p - 1] : 0.0;
   int changed = 0;
   for (size_t a = 0; a < all.size(); a++) {
     tree::tree_p eta = all[a];
@@ -359,9 +377,9 @@ inline int cchange_all(tree& x, xinfo& xi, dinfo& di, pinfo& pi, std::vector<siz
     { const double u = gen.uniform() * ssum;
       const size_t q = (size_t)(std::upper_bound(cum.begin(), cum.end(), u) - cum.begin()); if (q < p) vp = q; }
     Rt.region_of(eta, reg);
-    only[v] = 1; only[vp] = 1;
-    rule_weights(eta, reg, xi, di, pi, pv, kidx, w, lw, cv, cc, la, ra, leaves, &only, ctl, &W);
-    only[v] = 0; only[vp] = 0;
+    // the current and the proposed variable, in ascending order
+    const size_t vars[2] = { std::min(v, vp), std::max(v, vp) };
+    rule_weights(eta, reg, xi, di, pi, pv, kidx, w, lw, cv, cc, la, ra, leaves, nullptr, ctl, &W, vars, vp != v ? 2 : 1);
     // 2. Metropolis-Hastings on the variable
     size_t vn = v;
     if (vp != v) {

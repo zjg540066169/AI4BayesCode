@@ -163,12 +163,15 @@ All other BART hyperparameters (`ntrees`, `k`, `power`, `base`, `nu`,
 **You do NOT need to compute hat_sigma in R or in AI-generated code.**
 The `bart_model` constructor automatically:
 
-1. Fits OLS internally (`arma::solve(X, y)`) when `p < n`
+1. Fits OLS internally when `p < n`: the residual sum of squares (RSS) comes
+   from a deterministic Householder QR (plain C++, no BLAS / LAPACK)
 2. Computes `sigest = sqrt(RSS / (n - p))` from OLS residuals
-3. Falls back to `sd(y)` only when `p >= n` (high-dimensional case)
+3. Falls back to `sd(y)` when `p >= n` (high-dimensional case) or when the
+   RSS is 0 (e.g. a saturated design, `p = n - 1`)
 4. Sets `lambda = sigest^2 * qchisq(0.1, nu) / nu` for the conjugate
    sigma prior (using a pure C++ lookup table, no R function calls)
-5. Uses `sigest` as the initial sigma value
+5. Uses `sigest` as the initial sigma value (with the `sd(y)` fallback the
+   initial sigma is 1)
 
 `cfg.sigma_init` is NOT used to override this -- `bart_block` does not
 call `set_sigma` after construction. The internal OLS-based estimate
