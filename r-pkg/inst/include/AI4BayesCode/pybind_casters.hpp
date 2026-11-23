@@ -192,7 +192,8 @@ inline void register_ai4bayescode_types(py::module& m) {
         .def_readwrite("adapt_iter", &adaptation_info::adapt_iter)
         .def_readwrite("precond_mat", &adaptation_info::precond_mat)
         .def_readwrite("precond_diag", &adaptation_info::precond_diag)
-        .def_readwrite("metric_kind", &adaptation_info::metric_kind);
+        .def_readwrite("metric_kind", &adaptation_info::metric_kind)
+        .def_readwrite("warmup_done", &adaptation_info::warmup_done);
 }
 
 } // namespace AI4BayesCode

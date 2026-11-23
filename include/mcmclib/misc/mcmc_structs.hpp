@@ -131,17 +131,25 @@ struct nuts_settings_t
     // -------------------------------------------------------------------
     // FORK MARKER (2026-07-26, JZ): SAFE-SPEEDUP SUBSET, Fix #2 setup cache.
     //
-    // Cache the precomputed inverse and lower-Cholesky of precond_mat across
-    // successive nuts() calls that reuse the SAME mass matrix (identity or
-    // adapted). nuts_impl checks precond_cache_valid on entry; if true, reuses
-    // the cached inv/sqrt; else rebuilds and stamps precond_cache_valid=true.
+    // Cache the metric setup that nuts_impl builds from precond_mat across
+    // successive nuts() calls that reuse the SAME non-identity mass matrix:
+    // for a dense metric the inverse and lower-Cholesky as n x n matrices, for
+    // a diagonal metric (off-diagonal entries exactly 0) 1/diag(M) and
+    // sqrt(diag(M)) as n x 1 columns. The identity metric (precond_mat not
+    // n x n) uses no cache. nuts_impl checks precond_cache_valid and
+    // precond_cache_n_vals on entry: if they match, it uses the cached arrays
+    // in place; else it rebuilds them and stamps precond_cache_valid=true.
+    // Because of the in-place use, the settings object must not be modified
+    // while a nuts() call that uses it runs.
     //
     // CACHE COHERENCE CONTRACT: any code that MUTATES nuts_settings_t::precond_mat
     // (this file's field + all AI4BayesCode wiring) MUST set precond_cache_valid
-    // = false before the next nuts() call. joint_nuts_block.hpp wires this at
-    // the constructor, set_precond_matrix, set_adaptation, adapt_dense_metric_
-    // install, three_phase Phase-I save/restore, three_phase Phase-II install,
-    // and the escape-guard fallback.
+    // = false before the next nuts() call, for a diagonal precond_mat as well.
+    // joint_nuts_block.hpp wires this at the constructor, set_precond_matrix,
+    // set_adaptation, adapt_dense_metric_ install, three_phase Phase-I
+    // save/restore, three_phase Phase-II install, and the escape-guard
+    // fallback; nuts_block.hpp at the constructor, set_precond_matrix and
+    // set_adaptation.
     //
     // BYTE-PRESERVED to no-cache when precond_cache_valid == false at entry
     // (the rebuild path takes the same code — including the identical

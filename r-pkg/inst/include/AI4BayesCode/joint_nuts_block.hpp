@@ -524,6 +524,9 @@ public:
 
         auto& ns = cfg_.nuts_settings.nuts_settings;
         ns.use_persistent_adapt = true;
+        // The metric setup cache in ns is rebuilt by the first mcmc::nuts
+        // call; a cache passed in with the config is marked invalid.
+        ns.precond_cache_valid  = false;
         ns.max_tree_depth       = cfg_.max_tree_depth;   // first-class knob (default 10)
         // FORK MARKER (2026-07-26 restore) [target_accept API expose, default=0.55]
         // Forward wrapper-level cfg_.target_accept_rate into the nested mcmclib
@@ -910,7 +913,8 @@ public:
     }
 
     /// T13: snapshot of joint NUTS adaptation state (step size + DA
-    /// accumulators + preconditioner). Complement get_adaptation() on
+    /// accumulators + preconditioner + warmup_done, true once the first
+    /// step() has completed). Complement get_adaptation() on
     /// nuts_block. For dense-metric enabled joint blocks, precond_mat
     /// is the learned precision matrix Σ⁻¹.
     adaptation_info get_adaptation() const {
@@ -921,6 +925,7 @@ public:
         out.h_val        = ns.h_val_persist;
         out.mu_val       = ns.mu_val_persist;
         out.adapt_iter   = static_cast<std::size_t>(ns.adapt_iter_persist);
+        out.warmup_done  = !first_call_;
         if (static_cast<std::size_t>(ns.precond_mat.n_elem) ==
             total_unc_dim_ * total_unc_dim_) {
             out.precond_mat = ns.precond_mat;
@@ -941,6 +946,12 @@ public:
 
     /// T13: restore a previously-captured adaptation snapshot for
     /// checkpoint/restart.
+    /// ad.warmup_done == true (a snapshot taken after the source block's
+    /// first step()) makes the next step() continue from the restored state
+    /// without the first-call metric pilot and warmup, which would replace
+    /// it. ad.warmup_done == false leaves the first-call state of this block
+    /// unchanged: a block that has not stepped still runs them, and a block
+    /// that has stepped does not run them again.
     void set_adaptation(const adaptation_info& ad) {
         auto& ns = cfg_.nuts_settings.nuts_settings;
         ns.step_size            = ad.step_size;
@@ -977,6 +988,9 @@ public:
             // the pilot and overwrite the precond_mat that was just restored.
             dense_metric_adapted_ = (ad.metric_kind != "identity");
         }
+        // After the size check above, so a call that throws leaves
+        // first_call_ unchanged.
+        if (ad.warmup_done) first_call_ = false;
     }
 
     // ---- Kernel-control freeze API (slot-level, interface.md Sec.1) -----

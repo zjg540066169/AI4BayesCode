@@ -84,6 +84,13 @@
   ##       constructions per nuts() call at max_tree_depth=10. See top of
   ##       file for the build_tree_scratch_t struct and alias-safety
   ##       argument. Byte-identical to the pre-pool version.
+  ##     - (2026-11-23) nuts_find_initial_step_size and nuts_build_tree take
+  ##       their log-density, gradient and leapfrog std::function parameters
+  ##       by const reference instead of by value, which copied the closures
+  ##       at every tree node. The inv_diag parameter of diag_quad_form,
+  ##       nuts_find_initial_step_size and nuts_build_tree is a const Mat_t&,
+  ##       so the n x 1 diagonal-metric columns cached in nuts_settings_t are
+  ##       used without a copy. No arithmetic changed.
   ##
   ################################################################################*/
 
@@ -181,9 +188,10 @@ mat_is_exactly_diagonal(const Mat_t& M, const size_t n)
 // (the elementwise w equals the alpha=1 gemv result bit-for-bit, and the
 // dot is the SAME reduction). w_scratch is caller-owned to avoid per-call
 // allocation on the hot path; a set_size to the same length is a no-op.
+// inv_diag is any n-element column (a ColVec_t or an n x 1 Mat_t).
 inline
 fp_t
-diag_quad_form(const ColVec_t& v, const ColVec_t& inv_diag, ColVec_t& w_scratch)
+diag_quad_form(const ColVec_t& v, const Mat_t& inv_diag, ColVec_t& w_scratch)
 {
     const size_t n = BMO_MATOPS_SIZE(v);
     w_scratch.set_size(n);
@@ -243,10 +251,10 @@ nuts_find_initial_step_size(
     // its diagonal. When set, the O(n^2) K matvecs use the O(n) elementwise
     // quadratic form (bit-identical to the dense dot(p, inv*p)).
     const bool metric_is_diag,
-    const ColVec_t& inv_diag,
-    std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data)> box_log_kernel_fn,
-    std::function<fp_t (const ColVec_t& pos_inp, ColVec_t& raw_grad_out, void* target_data)> raw_grad_fn,
-    std::function<void (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data)> leap_frog_fn,
+    const Mat_t& inv_diag,
+    const std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data)>& box_log_kernel_fn,
+    const std::function<fp_t (const ColVec_t& pos_inp, ColVec_t& raw_grad_out, void* target_data)>& raw_grad_fn,
+    const std::function<void (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data)>& leap_frog_fn,
     void* target_data
 )
 {
@@ -374,8 +382,10 @@ nuts_build_tree(
     const ColVec_t& draw_vec,
     const ColVec_t& mntm_vec,
     const Mat_t& inv_precond_matrix,
-    std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data)> box_log_kernel_fn,
-    std::function<void (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data)> leap_frog_fn,
+    // Both closures are taken by reference: they are fixed for the whole
+    // trajectory, and a by-value parameter copied them at every tree node.
+    const std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data)>& box_log_kernel_fn,
+    const std::function<void (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data)>& leap_frog_fn,
     const size_t tree_depth,
     ColVec_t& new_draw,
     ColVec_t& new_draw_pos,
@@ -416,7 +426,7 @@ nuts_build_tree(
     // its diagonal. When set, the leaf's prop_K uses the O(n) elementwise
     // quadratic form (bit-identical to dense dot(p, inv*p)). Rebase: drop.
     const bool metric_is_diag,
-    const ColVec_t& inv_diag
+    const Mat_t& inv_diag
 )
 {
     const fp_t max_tuning_par = 1000;

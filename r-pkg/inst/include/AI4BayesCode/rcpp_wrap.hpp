@@ -118,6 +118,8 @@ inline SEXP wrap(const AI4BayesCode::adaptation_info& a) {
     if (!a.precond_diag.empty()) {
         out["precond_diag"] = Rcpp::wrap(a.precond_diag);
     }
+    // Last element, so the positions of the elements above are unchanged.
+    out["warmup_done"]  = a.warmup_done;
     return out;
 }
 
@@ -138,6 +140,9 @@ inline AI4BayesCode::adaptation_info as(SEXP x) {
     if (L.containsElementNamed("precond_diag")) {
         a.precond_diag = Rcpp::as<std::vector<double>>(L["precond_diag"]);
     }
+    // A list without warmup_done (e.g. one saved by an earlier version)
+    // gives false.
+    if (L.containsElementNamed("warmup_done"))  a.warmup_done = Rcpp::as<bool>(L["warmup_done"]);
     return a;
 }
 

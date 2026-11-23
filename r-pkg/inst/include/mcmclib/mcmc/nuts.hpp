@@ -55,6 +55,17 @@
   ##     - SAFE-SPEEDUP (2026-07-26, JZ) Fix #2: cache inv+chol of precond_mat
   ##       across nuts() calls when the mass matrix is unchanged (byte-preserved
   ##       when the cache miss branch runs; see mcmc_structs.hpp contract).
+  ##     - (2026-11-23) nuts_impl uses the caller's algo_settings_t through a
+  ##       const reference instead of copying it in every call; the caller's
+  ##       settings object must therefore not be modified while nuts() runs.
+  ##       The diagonal-metric setup, 1/diag(M) and sqrt(diag(M)), is cached
+  ##       across calls as n x 1 columns in precond_inv_cache /
+  ##       precond_sqrt_cache under the same precond_cache_valid contract (the
+  ##       dense metric keeps its n x n inverse and Cholesky there); on a cache
+  ##       hit the n^2 diagonal check is skipped and the cached arrays are used
+  ##       in place. The log-density, gradient and leapfrog closures capture
+  ##       their inputs by reference. Draws are bit-identical to the previous
+  ##       version.
   ##
   ################################################################################*/
 
@@ -144,13 +155,15 @@ internal::nuts_impl(
 
     const size_t n_vals = BMO_MATOPS_SIZE(initial_vals);
 
-    // settings
+    // settings: the caller's object is used in place, without a copy (a
+    // default object is built only when none is given); the write-back at the
+    // end goes through settings_inp. The caller's settings object, in
+    // particular nuts_settings.precond_inv_cache and precond_sqrt_cache, must
+    // not be modified while nuts() runs, e.g. from target_log_kernel: on a
+    // metric cache hit these arrays are used in place for the whole call.
 
-    algo_settings_t settings;
-
-    if (settings_inp) {
-        settings = *settings_inp;
-    }
+    std::vector<algo_settings_t> settings_default(settings_inp ? 0 : 1);
+    const algo_settings_t& settings = settings_inp ? *settings_inp : settings_default[0];
 
     const size_t n_burnin_draws = settings.nuts_settings.n_burnin_draws;
     const size_t n_keep_draws   = settings.nuts_settings.n_keep_draws;
@@ -200,19 +213,49 @@ internal::nuts_impl(
     // by ~1 ULP and is mixing-verified. REBASE NOTE: delete this block + the
     // metric_is_diag branch in the setup + the diag branches at the leapfrog/K/
     // momentum sites to restore the pre-fork dense-only path.
+    //
+    // Metric setup cache. The quantities built from precond_mat are stored in
+    // precond_inv_cache / precond_sqrt_cache and reused while
+    // precond_cache_valid is true and precond_cache_n_vals == n_vals (every
+    // writer of precond_mat resets precond_cache_valid):
+    //   diagonal metric: 1/diag(M) and sqrt(diag(M)) as n x 1 columns;
+    //   dense metric:    inv(M) and chol_lower(M) as n x n matrices.
+    // For n == 1 a 1 x 1 precond_mat is always diagonal, so the two shapes
+    // cannot be confused. On a miss the code below runs as before and stamps
+    // the cache at the end; on a hit the cached values are used in place.
+    nuts_settings_t* const cache_ns =
+        (settings_inp && !is_identity_metric
+         && settings_inp->nuts_settings.precond_cache_valid
+         && settings_inp->nuts_settings.precond_cache_n_vals == n_vals)
+        ? &settings_inp->nuts_settings : nullptr;
+    const bool diag_cache_hit = cache_ns
+        && cache_ns->precond_inv_cache.n_rows  == n_vals && cache_ns->precond_inv_cache.n_cols  == 1
+        && cache_ns->precond_sqrt_cache.n_rows == n_vals && cache_ns->precond_sqrt_cache.n_cols == 1;
+    const bool dense_cache_hit = cache_ns && !diag_cache_hit
+        && static_cast<size_t>(BMO_MATOPS_SIZE(cache_ns->precond_inv_cache)) == n_vals * n_vals
+        && static_cast<size_t>(BMO_MATOPS_SIZE(cache_ns->precond_sqrt_cache)) == n_vals * n_vals;
+
     bool metric_is_diag = false;
-    ColVec_t inv_diag, sqrt_diag;
-    if (!is_identity_metric
+    ColVec_t inv_diag_built, sqrt_diag_built;
+    const Mat_t* inv_diag_src  = &inv_diag_built;
+    const Mat_t* sqrt_diag_src = &sqrt_diag_built;
+    if (diag_cache_hit) {
+        metric_is_diag = true;
+        inv_diag_src  = &cache_ns->precond_inv_cache;
+        sqrt_diag_src = &cache_ns->precond_sqrt_cache;
+    } else if (!is_identity_metric && !dense_cache_hit
         && mat_is_exactly_diagonal(settings.nuts_settings.precond_mat, n_vals)) {
         metric_is_diag = true;
-        inv_diag  = BMO_MATOPS_EXTRACT_DIAG(settings.nuts_settings.precond_mat);
-        sqrt_diag = inv_diag;
+        inv_diag_built  = BMO_MATOPS_EXTRACT_DIAG(settings.nuts_settings.precond_mat);
+        sqrt_diag_built = inv_diag_built;
         for (size_t i = 0; i < n_vals; ++i) {
-            const fp_t m_ii = inv_diag[i];
-            inv_diag[i]  = fp_t(1) / m_ii;
-            sqrt_diag[i] = std::sqrt(m_ii);
+            const fp_t m_ii = inv_diag_built[i];
+            inv_diag_built[i]  = fp_t(1) / m_ii;
+            sqrt_diag_built[i] = std::sqrt(m_ii);
         }
     }
+    const Mat_t& inv_diag  = *inv_diag_src;
+    const Mat_t& sqrt_diag = *sqrt_diag_src;
     // FORK MARKER (2026-07-26, JZ): SAFE-SPEEDUP Fix #2, setup cache.
     // The original code recomputes inv(precond_mat) + chol_lower(precond_mat)
     // EVERY nuts() call; the cache reuses them across calls (see write-back
@@ -220,9 +263,10 @@ internal::nuts_impl(
     // skips the dense inv/chol (and its 20MB memmoves) ENTIRELY -- a diagonal
     // metric only ever needs inv_diag/sqrt_diag, built above in O(n).
     Mat_t precond_matrix;
-    Mat_t inv_precond_matrix;
-    Mat_t sqrt_precond_matrix;
-    bool cache_hit = false;
+    Mat_t inv_precond_built;
+    Mat_t sqrt_precond_built;
+    const Mat_t* inv_precond_src  = &inv_precond_built;
+    const Mat_t* sqrt_precond_src = &sqrt_precond_built;
     if (metric_is_diag || is_identity_metric) {
         // Diagonal OR identity metric: every leapfrog / K / momentum / drift
         // site uses an O(n) fast path (inv_diag/sqrt_diag for diagonal; raw
@@ -230,20 +274,18 @@ internal::nuts_impl(
         // matrices, so skip building them. Identity previously still built
         // EYE(n) and its dense inv/chol -- pure O(n^3) + 20MB waste at high dim
         // (the slow early-warmup phase before the metric adapts).
-    } else if (settings_inp && settings_inp->nuts_settings.precond_cache_valid
-        && settings_inp->nuts_settings.precond_cache_n_vals == n_vals
-        && static_cast<size_t>(BMO_MATOPS_SIZE(settings_inp->nuts_settings.precond_inv_cache)) == n_vals * n_vals
-        && static_cast<size_t>(BMO_MATOPS_SIZE(settings_inp->nuts_settings.precond_sqrt_cache)) == n_vals * n_vals) {
-        // Reuse cached inv/sqrt. Skip precond_matrix rebuild too; only
-        // inv_precond and sqrt_precond are actually used downstream.
-        inv_precond_matrix  = settings_inp->nuts_settings.precond_inv_cache;
-        sqrt_precond_matrix = settings_inp->nuts_settings.precond_sqrt_cache;
-        cache_hit = true;
+    } else if (dense_cache_hit) {
+        // Use the cached inv/sqrt in place. Skip precond_matrix rebuild too;
+        // only inv_precond and sqrt_precond are actually used downstream.
+        inv_precond_src  = &cache_ns->precond_inv_cache;
+        sqrt_precond_src = &cache_ns->precond_sqrt_cache;
     } else {
         precond_matrix = (BMO_MATOPS_SIZE(settings.nuts_settings.precond_mat) == n_vals*n_vals) ? settings.nuts_settings.precond_mat : BMO_MATOPS_EYE(n_vals);
-        inv_precond_matrix = BMO_MATOPS_INV(precond_matrix);
-        sqrt_precond_matrix = BMO_MATOPS_CHOL_LOWER(precond_matrix);
+        inv_precond_built = BMO_MATOPS_INV(precond_matrix);
+        sqrt_precond_built = BMO_MATOPS_CHOL_LOWER(precond_matrix);
     }
+    const Mat_t& inv_precond_matrix  = *inv_precond_src;
+    const Mat_t& sqrt_precond_matrix = *sqrt_precond_src;
 
     const bool vals_bound = settings.vals_bound;
     
@@ -298,8 +340,13 @@ internal::nuts_impl(
     //   analysis.
     // ----------------------------------------------------------------
 
+    // The three closures below capture by reference the locals of this
+    // function, among them inv_diag and inv_precond_matrix, which on a metric
+    // cache hit refer to the caller's precond_inv_cache (see the requirement
+    // on the settings object at the top of this function). The closures are
+    // used only while this function runs.
     std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* box_data)> box_log_kernel_fn \
-    = [target_log_kernel, vals_bound, bounds_type, lower_bounds, upper_bounds] (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data) \
+    = [&target_log_kernel, vals_bound, &bounds_type, &lower_bounds, &upper_bounds] (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data) \
     -> fp_t
     {
         if (vals_bound) {
@@ -320,7 +367,7 @@ internal::nuts_impl(
     // same leaf — eliminating one full target eval per leaf (the dominant NUTS
     // cost). Bit-equivalent: same value, just not recomputed.
     std::function<fp_t (const ColVec_t& pos_inp, ColVec_t& raw_grad_out, void* target_data)> raw_grad_fn \
-    = [target_log_kernel, vals_bound, bounds_type, lower_bounds, upper_bounds] (const ColVec_t& pos_inp, ColVec_t& raw_grad_out, void* target_data) \
+    = [&target_log_kernel, vals_bound, &bounds_type, &lower_bounds, &upper_bounds] (const ColVec_t& pos_inp, ColVec_t& raw_grad_out, void* target_data) \
     -> fp_t
     {
         const size_t n_vals_local = BMO_MATOPS_SIZE(pos_inp);
@@ -342,7 +389,7 @@ internal::nuts_impl(
     // The caller (nuts_build_tree base case) uses this instead of a separate
     // box_log_kernel_fn(new_draw, nullptr) re-evaluation. Bit-equivalent.
     std::function<void (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data)> leap_frog_fn \
-    = [target_log_kernel, raw_grad_fn, inv_precond_matrix, is_identity_metric, metric_is_diag, inv_diag, vals_bound, bounds_type, lower_bounds, upper_bounds] (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data) \
+    = [target_log_kernel, &raw_grad_fn, &inv_precond_matrix, is_identity_metric, metric_is_diag, &inv_diag, vals_bound, &bounds_type, &lower_bounds, &upper_bounds] (const fp_t step_size, const size_t n_leap_steps, ColVec_t& new_draw, ColVec_t& new_mntm, ColVec_t& cached_raw_grad, fp_t& cached_box_U_out, void* target_data) \
     -> void
     {
         fp_t nat_U_final = fp_t(0);   // natural-scale log-density at final pos
@@ -790,17 +837,17 @@ internal::nuts_impl(
         }
 
         // FORK MARKER (2026-07-26, JZ): SAFE-SPEEDUP Fix #2, cache write-back.
-        // Stamp the cache with what we just computed / reused. Only write
-        // matrices back when we actually rebuilt (cache_hit==false), else the
-        // cached ones are already stored. Always update the flag+n_vals.
-        // DIAG-vector Fix v2: for a diagonal metric we never built the dense
-        // inv/sqrt (inv_diag/sqrt_diag are rebuilt in O(n) each call), so leave
-        // the cache untouched -- caching empty matrices would fail the size
-        // guard on the next call anyway.
-        if (!metric_is_diag && !is_identity_metric) {
-            if (!cache_hit) {
-                settings_inp->nuts_settings.precond_inv_cache  = inv_precond_matrix;
-                settings_inp->nuts_settings.precond_sqrt_cache = sqrt_precond_matrix;
+        // Stamp the cache after a miss: n x 1 columns for a diagonal metric,
+        // n x n matrices for a dense one (see the metric setup above). After a
+        // hit the cache already holds these values. The identity metric uses
+        // no cache.
+        if (!is_identity_metric) {
+            if (metric_is_diag && !diag_cache_hit) {
+                settings_inp->nuts_settings.precond_inv_cache  = inv_diag_built;
+                settings_inp->nuts_settings.precond_sqrt_cache = sqrt_diag_built;
+            } else if (!metric_is_diag && !dense_cache_hit) {
+                settings_inp->nuts_settings.precond_inv_cache  = inv_precond_built;
+                settings_inp->nuts_settings.precond_sqrt_cache = sqrt_precond_built;
             }
             settings_inp->nuts_settings.precond_cache_n_vals = n_vals;
             settings_inp->nuts_settings.precond_cache_valid  = true;
