@@ -58,9 +58,11 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <random>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace AI4BayesCode {
@@ -92,7 +94,9 @@ struct cached_family {
 
 /**
  * @brief Family-score cache with FK §4.2 candidate top-C, family top-F,
- *        γ-prune. Single-threaded; not thread-safe.
+ *        γ-prune. Single-threaded; not thread-safe: the const node-score and
+ *        parent-set queries store their last results per node (keyed by the
+ *        exact masks), so one object must not be queried from two threads.
  */
 class score_cache {
 public:
@@ -136,6 +140,27 @@ public:
                 [cutoff](const cached_family& f) { return f.log_score < cutoff; }),
                 v.end());
         }
+
+        // Empty-parent scores, and the cached scores sorted by parent mask
+        // for the family_score lookups of cached_scorer().
+        empty_score_.resize(n_);
+        lookup_.base_ = scorer_.get();
+        lookup_.by_mask_.assign(n_, {});
+        for (std::size_t i = 0; i < n_; ++i) {
+            empty_score_[i] = scorer_->family_score(i, 0ULL);
+            auto& t = lookup_.by_mask_[i];
+            t.reserve(cache_[i].size());
+            for (const auto& f : cache_[i]) t.emplace_back(f.parents_mask, f.log_score);
+            std::sort(t.begin(), t.end(),
+                      [](const std::pair<std::uint64_t, double>& a,
+                         const std::pair<std::uint64_t, double>& b) {
+                          return a.first < b.first;
+                      });
+        }
+        order_score_memo_.assign(n_, score_memo{});
+        part_score_memo_.assign(n_, score_memo{});
+        order_draw_memo_.assign(n_, draw_table{});
+        part_draw_memo_.assign(n_, draw_table{});
     }
 
     std::size_t n() const noexcept { return n_; }
@@ -159,29 +184,30 @@ public:
     double order_node_score(const std::vector<std::size_t>& order,
                               std::size_t i) const {
         // Build predecessor bitmask: bit j set ⇔ j is a predecessor of i.
-        std::uint64_t pred_mask = predecessors_mask_(order, i);
-
-        // Iterate cache, filter by parents ⊆ predecessors.
-        double m = -std::numeric_limits<double>::infinity();
-        // First pass: find max for numerical stability.
-        for (const auto& f : cache_[i]) {
-            if ((f.parents_mask & ~pred_mask) == 0ULL) {
-                if (f.log_score > m) m = f.log_score;
+        const std::uint64_t pred_mask = predecessors_mask_(order, i);
+        return memo_lookup_(order_score_memo_[i], pred_mask, 0ULL, [&] {
+            // Iterate cache, filter by parents ⊆ predecessors.
+            double m = -std::numeric_limits<double>::infinity();
+            // First pass: find max for numerical stability.
+            for (const auto& f : cache_[i]) {
+                if ((f.parents_mask & ~pred_mask) == 0ULL) {
+                    if (f.log_score > m) m = f.log_score;
+                }
             }
-        }
-        if (m == -std::numeric_limits<double>::infinity()) {
-            // No candidate family (shouldn't normally happen since empty
-            // parent set is always valid). Return scorer's empty-parent
-            // score as fallback.
-            return scorer_->family_score(i, 0ULL);
-        }
-        double sum = 0.0;
-        for (const auto& f : cache_[i]) {
-            if ((f.parents_mask & ~pred_mask) == 0ULL) {
-                sum += std::exp(f.log_score - m);
+            if (m == -std::numeric_limits<double>::infinity()) {
+                // No candidate family (shouldn't normally happen since empty
+                // parent set is always valid). Return the empty-parent score
+                // as fallback.
+                return empty_score_[i];
             }
-        }
-        return m + std::log(sum);
+            double sum = 0.0;
+            for (const auto& f : cache_[i]) {
+                if ((f.parents_mask & ~pred_mask) == 0ULL) {
+                    sum += std::exp(f.log_score - m);
+                }
+            }
+            return m + std::log(sum);
+        });
     }
 
     /// Total order log-score: Σ_i order_node_score(order, i).
@@ -201,33 +227,30 @@ public:
                                        const std::vector<std::size_t>& order,
                                        std::size_t i) const {
         const std::uint64_t pred_mask = predecessors_mask_(order, i);
-        // Gather feasible families.
-        std::vector<const cached_family*> feasible;
-        feasible.reserve(cache_[i].size());
-        double m = -std::numeric_limits<double>::infinity();
-        for (const auto& f : cache_[i]) {
-            if ((f.parents_mask & ~pred_mask) == 0ULL) {
-                feasible.push_back(&f);
-                if (f.log_score > m) m = f.log_score;
+        draw_table& d = order_draw_memo_[i];
+        if (!d.used || d.a != pred_mask) {
+            // Feasible families in cache order, w = exp(score - max),
+            // normalised by Z, and the running sums of the normalised w.
+            d.used = true; d.a = pred_mask; d.b = 0ULL;
+            d.masks.clear(); d.cum.clear();
+            double m = -std::numeric_limits<double>::infinity();
+            for (const auto& f : cache_[i]) {
+                if ((f.parents_mask & ~pred_mask) == 0ULL) {
+                    d.masks.push_back(f.parents_mask);
+                    d.cum.push_back(f.log_score);
+                    if (f.log_score > m) m = f.log_score;
+                }
             }
+            double Z = 0.0;
+            for (double& w : d.cum) { w = std::exp(w - m); Z += w; }
+            double acc = 0.0;
+            for (double& w : d.cum) { w /= Z; acc += w; w = acc; }
+            d.Z = Z;
         }
-        if (feasible.empty()) return 0ULL;
-        // Convert to probabilities.
-        std::vector<double> w(feasible.size());
-        double Z = 0.0;
-        for (std::size_t k = 0; k < feasible.size(); ++k) {
-            w[k] = std::exp(feasible[k]->log_score - m);
-            Z += w[k];
-        }
-        for (auto& v : w) v /= Z;
+        if (d.masks.empty()) return 0ULL;
         std::uniform_real_distribution<double> U01(0.0, 1.0);
         const double u = U01(rng);
-        double acc = 0.0;
-        for (std::size_t k = 0; k < feasible.size(); ++k) {
-            acc += w[k];
-            if (u <= acc) return feasible[k]->parents_mask;
-        }
-        return feasible.back()->parents_mask;
+        return pick_(d, u);
     }
 
     /**
@@ -265,26 +288,28 @@ public:
                                 std::uint64_t allowed_mask,
                                 std::uint64_t required_mask) const {
         if (required_mask == 0ULL) {
-            return scorer_->family_score(i, 0ULL);   // last element: no parents
+            return empty_score_[i];   // last element: no parents
         }
-        double m = -std::numeric_limits<double>::infinity();
-        for (const auto& f : cache_[i]) {
-            if ((f.parents_mask & ~allowed_mask) == 0ULL &&
-                (f.parents_mask & required_mask) != 0ULL) {
-                if (f.log_score > m) m = f.log_score;
+        return memo_lookup_(part_score_memo_[i], allowed_mask, required_mask, [&] {
+            double m = -std::numeric_limits<double>::infinity();
+            for (const auto& f : cache_[i]) {
+                if ((f.parents_mask & ~allowed_mask) == 0ULL &&
+                    (f.parents_mask & required_mask) != 0ULL) {
+                    if (f.log_score > m) m = f.log_score;
+                }
             }
-        }
-        if (m == -std::numeric_limits<double>::infinity()) {
-            return -std::numeric_limits<double>::infinity();  // no permissible family
-        }
-        double sum = 0.0;
-        for (const auto& f : cache_[i]) {
-            if ((f.parents_mask & ~allowed_mask) == 0ULL &&
-                (f.parents_mask & required_mask) != 0ULL) {
-                sum += std::exp(f.log_score - m);
+            if (m == -std::numeric_limits<double>::infinity()) {
+                return -std::numeric_limits<double>::infinity();  // no permissible family
             }
-        }
-        return m + std::log(sum);
+            double sum = 0.0;
+            for (const auto& f : cache_[i]) {
+                if ((f.parents_mask & ~allowed_mask) == 0ULL &&
+                    (f.parents_mask & required_mask) != 0ULL) {
+                    sum += std::exp(f.log_score - m);
+                }
+            }
+            return m + std::log(sum);
+        });
     }
 
     /// Sample a parent set for node i under the partition constraint,
@@ -294,35 +319,42 @@ public:
                                               std::uint64_t allowed_mask,
                                               std::uint64_t required_mask) const {
         if (required_mask == 0ULL) return 0ULL;   // last element: empty parents
-        std::vector<const cached_family*> feasible;
-        feasible.reserve(cache_[i].size());
-        double m = -std::numeric_limits<double>::infinity();
-        for (const auto& f : cache_[i]) {
-            if ((f.parents_mask & ~allowed_mask) == 0ULL &&
-                (f.parents_mask & required_mask) != 0ULL) {
-                feasible.push_back(&f);
-                if (f.log_score > m) m = f.log_score;
+        draw_table& d = part_draw_memo_[i];
+        if (!d.used || d.a != allowed_mask || d.b != required_mask) {
+            // Permissible families in cache order, w = exp(score - max), Z
+            // and the running sums of w.
+            d.used = true; d.a = allowed_mask; d.b = required_mask;
+            d.masks.clear(); d.cum.clear();
+            double m = -std::numeric_limits<double>::infinity();
+            for (const auto& f : cache_[i]) {
+                if ((f.parents_mask & ~allowed_mask) == 0ULL &&
+                    (f.parents_mask & required_mask) != 0ULL) {
+                    d.masks.push_back(f.parents_mask);
+                    d.cum.push_back(f.log_score);
+                    if (f.log_score > m) m = f.log_score;
+                }
             }
+            double Z = 0.0;
+            for (double& w : d.cum) { w = std::exp(w - m); Z += w; }
+            double acc = 0.0;
+            for (double& w : d.cum) { acc += w; w = acc; }
+            d.Z = Z;
         }
-        if (feasible.empty()) return 0ULL;
-        std::vector<double> w(feasible.size());
-        double Z = 0.0;
-        for (std::size_t k = 0; k < feasible.size(); ++k) {
-            w[k] = std::exp(feasible[k]->log_score - m);
-            Z += w[k];
-        }
+        if (d.masks.empty()) return 0ULL;
         std::uniform_real_distribution<double> U01(0.0, 1.0);
-        const double u = U01(rng) * Z;
-        double acc = 0.0;
-        for (std::size_t k = 0; k < feasible.size(); ++k) {
-            acc += w[k];
-            if (u <= acc) return feasible[k]->parents_mask;
-        }
-        return feasible.back()->parents_mask;
+        const double u = U01(rng) * d.Z;
+        return pick_(d, u);
     }
 
-    /// Get the scorer (for callers needing direct family_score access).
+    /// Get the scorer (for callers needing direct family_score access): the
+    /// scorer passed to the constructor.
     const i_scorer& scorer() const noexcept { return *scorer_; }
+
+    /// An i_scorer over the cached family scores: family_score of a cached
+    /// family returns the cached value (the value scorer() returned when the
+    /// cache was built), and family_score of any other mask returns
+    /// scorer().family_score. The object is a member of this score_cache.
+    const i_scorer& cached_scorer() const noexcept { return lookup_; }
 
     /// Diagnostic: number of cached families per node.
     std::vector<std::size_t> cache_sizes() const {
@@ -390,6 +422,86 @@ private:
         return mask;
     }
 
+    /// Last two (mask pair -> node score) results of one node; entry 0 is
+    /// the most recent. The score depends only on the masks and cache_[i].
+    struct score_memo {
+        std::uint64_t a[2] = {0ULL, 0ULL};
+        std::uint64_t b[2] = {0ULL, 0ULL};
+        double        v[2] = {0.0, 0.0};
+        int           size = 0;
+    };
+
+    template <class Compute>
+    static double memo_lookup_(score_memo& memo, std::uint64_t a,
+                               std::uint64_t b, Compute&& compute) {
+        for (int k = 0; k < memo.size; ++k) {
+            if (memo.a[k] == a && memo.b[k] == b) {
+                const double v = memo.v[k];
+                if (k == 1) {
+                    std::swap(memo.a[0], memo.a[1]);
+                    std::swap(memo.b[0], memo.b[1]);
+                    std::swap(memo.v[0], memo.v[1]);
+                }
+                return v;
+            }
+        }
+        const double v = compute();
+        memo.a[1] = memo.a[0]; memo.b[1] = memo.b[0]; memo.v[1] = memo.v[0];
+        memo.a[0] = a; memo.b[0] = b; memo.v[0] = v;
+        if (memo.size < 2) ++memo.size;
+        return v;
+    }
+
+    /// Feasible families of one node for the mask pair (a, b), in cache
+    /// order, with the running sums of their weights and the weight total Z.
+    struct draw_table {
+        bool                       used = false;
+        std::uint64_t              a = 0ULL;
+        std::uint64_t              b = 0ULL;
+        std::vector<std::uint64_t> masks;
+        std::vector<double>        cum;
+        double                     Z = 0.0;
+    };
+
+    /// The first family whose running sum is >= u, else the last family (as
+    /// the linear scan; a NaN total makes every comparison false).
+    static std::uint64_t pick_(const draw_table& d, double u) {
+        if (!std::isnan(d.Z)) {
+            const auto it = std::lower_bound(d.cum.begin(), d.cum.end(), u);
+            if (it != d.cum.end())
+                return d.masks[static_cast<std::size_t>(it - d.cum.begin())];
+        }
+        return d.masks.back();
+    }
+
+    /// i_scorer returned by cached_scorer(): family_score of a cached family
+    /// comes from by_mask_, any other mask from the wrapped scorer.
+    class family_lookup final : public i_scorer {
+    public:
+        std::size_t n() const noexcept override { return base_->n(); }
+        double family_score(std::size_t i,
+                            std::uint64_t parent_mask) const override {
+            if (i < by_mask_.size()) {
+                const auto& t = by_mask_[i];
+                const auto it = std::lower_bound(t.begin(), t.end(), parent_mask,
+                    [](const std::pair<std::uint64_t, double>& e, std::uint64_t m) {
+                        return e.first < m;
+                    });
+                if (it != t.end() && it->first == parent_mask) return it->second;
+            }
+            return base_->family_score(i, parent_mask);
+        }
+        std::vector<std::size_t> top_candidate_parents(
+            std::size_t i, std::size_t C) const override {
+            return base_->top_candidate_parents(i, C);
+        }
+
+    private:
+        friend class score_cache;
+        const i_scorer* base_ = nullptr;   // the scorer owned by scorer_
+        std::vector<std::vector<std::pair<std::uint64_t, double>>> by_mask_;
+    };
+
 private:
     std::unique_ptr<i_scorer>                        scorer_;
     score_cache_config                               cfg_;
@@ -397,6 +509,12 @@ private:
     std::vector<std::vector<std::size_t>>            candidate_parents_;  // n × C
     std::vector<std::vector<cached_family>>          cache_;              // n × F
     std::vector<double>                              max_log_score_;       // n
+    std::vector<double>                              empty_score_;         // n
+    family_lookup                                    lookup_;
+    mutable std::vector<score_memo>                  order_score_memo_;    // n
+    mutable std::vector<score_memo>                  part_score_memo_;     // n
+    mutable std::vector<draw_table>                  order_draw_memo_;     // n
+    mutable std::vector<draw_table>                  part_draw_memo_;      // n
 };
 
 } // namespace AI4BayesCode

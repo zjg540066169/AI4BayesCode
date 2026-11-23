@@ -354,11 +354,17 @@ single_node_neighbours(const partition_state& s) {
 }
 
 /// A partition-MCMC chain: the current state + cached log-score + split/join
-/// neighbourhood size (kept in sync so each step is cheap).
+/// neighbourhood size (kept in sync so each step is cheap), and the
+/// single-node neighbourhood sn_nbrs of the partition sn_state.
+/// partition_mcmc_step uses sn_nbrs only when sn_state equals state (permy
+/// and party) and enumerates the neighbourhood of state otherwise, so an
+/// assignment to state (with log_score and sj_nbhd) needs no other update.
 struct partition_chain {
     partition_state state;
     double          log_score = 0.0;
     double          sj_nbhd   = 0.0;
+    partition_state              sn_state;   ///< partition of sn_nbrs
+    std::vector<partition_state> sn_nbrs;    ///< single_node_neighbours(sn_state)
 };
 
 inline partition_chain partition_chain_init(const score_cache& cache,
@@ -434,7 +440,7 @@ inline void partition_edge_reversal_step(partition_chain& c,
     Gp[b] &= ~(1ULL << a);      // remove a->b
     Gp[a] |=  (1ULL << b);      // add    b->a
 
-    const i_scorer& sc = cache.scorer();
+    const i_scorer& sc = cache.cached_scorer();
     const double delta = (sc.family_score(a, Gp[a]) + sc.family_score(b, Gp[b]))
                        - (sc.family_score(a, G[a])  + sc.family_score(b, G[b]));
     const std::size_t RG  = arcs.size();
@@ -455,6 +461,12 @@ inline void partition_edge_reversal_step(partition_chain& c,
 /// small stay-still probability for aperiodicity. All three preserve the target
 /// P(Lambda|D) (proven by exact enumeration in
 /// tests/test_partition_mcmc_diagnostics.cpp), so the mixture does too.
+/// The single-node move takes the neighbourhood of c.state from c.sn_nbrs
+/// when c.sn_state equals c.state, and enumerates and stores it otherwise; an
+/// accepted single-node move stores the neighbourhood of the new state, which
+/// the move enumerates for its Hastings term. The stored neighbourhood equals
+/// the enumerated one, so the draws equal those of enumerating the
+/// neighbourhood at every single-node move.
 inline void partition_mcmc_step(partition_chain& c, const score_cache& cache,
                                 std::mt19937_64& rng,
                                 double p_stay = 0.01,
@@ -491,18 +503,24 @@ inline void partition_mcmc_step(partition_chain& c, const score_cache& cache,
             c.sj_nbhd = splitjoin_nbhd(c.state);
         }
     } else {                                                  // single-node move
-        std::vector<partition_state> nbrs = single_node_neighbours(c.state);
-        if (nbrs.empty()) return;
-        std::uniform_int_distribution<std::size_t> pick(0, nbrs.size() - 1);
-        partition_state prop = nbrs[pick(rng)];
+        if (c.sn_state.permy != c.state.permy ||
+            c.sn_state.party != c.state.party) {
+            c.sn_nbrs = single_node_neighbours(c.state);
+            c.sn_state = c.state;
+        }
+        if (c.sn_nbrs.empty()) return;
+        std::uniform_int_distribution<std::size_t> pick(0, c.sn_nbrs.size() - 1);
+        partition_state prop = c.sn_nbrs[pick(rng)];
         const double ls_p = partition_log_score(cache, prop);
-        const std::size_t nbd_p = single_node_neighbours(prop).size();
+        std::vector<partition_state> nbrs_p = single_node_neighbours(prop);
         const double log_acc = (ls_p - c.log_score)
-            + std::log(static_cast<double>(nbrs.size()))
-            - std::log(static_cast<double>(nbd_p));
+            + std::log(static_cast<double>(c.sn_nbrs.size()))
+            - std::log(static_cast<double>(nbrs_p.size()));
         if (std::log(U(rng)) < log_acc) {
             c.state = std::move(prop); c.log_score = ls_p;
             c.sj_nbhd = splitjoin_nbhd(c.state);
+            c.sn_nbrs = std::move(nbrs_p);
+            c.sn_state = c.state;
         }
     }
 }

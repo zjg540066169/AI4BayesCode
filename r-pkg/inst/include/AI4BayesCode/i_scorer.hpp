@@ -14,9 +14,13 @@
  *      - bde_scorer : discrete data, BDeu score (Heckerman-Geiger-Chickering 1995).
  *      - bge_scorer : continuous Gaussian data, BGe score (Geiger-Heckerman 2002).
  *
- *  family_score(i, U) and top_candidate_parents(i, C) are called only during
- *  score_cache construction (results are cached thereafter), so the virtual-
- *  dispatch cost is one-time and negligible.
+ *  family_score(i, U) and top_candidate_parents(i, C) are called during
+ *  score_cache construction, which caches the family scores. After that,
+ *  score_cache::cached_scorer() returns the cached score of a cached family
+ *  and calls family_score only for a family that is not cached (in
+ *  order_mcmc_block: the reversed family of a partition-MCMC edge reversal
+ *  when it has max_parents + 1 parents). score_cache::scorer() returns the
+ *  scorer itself.
  *================================================================================*/
 
 #ifndef AI4BAYESCODE_I_SCORER_HPP

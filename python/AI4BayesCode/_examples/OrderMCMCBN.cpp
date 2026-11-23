@@ -4,29 +4,34 @@
 // ============================================================================
 //  OrderMCMCBN.cpp
 //
-//  Bayesian-network structure learning by order MCMC (order_mcmc_block).
+//  Bayesian-network structure learning by partition MCMC (order_mcmc_block,
+//  default method).
 //
 //  Model
 //  -----
-//  Bayesian network structure learning via Friedman-Koller 2003 order
-//  MCMC. Given a categorical dataset D, samples from the posterior
-//  P(≺ | D) over orderings ≺ of n variables, with closed-form marginal
+//  Bayesian network structure learning with order_mcmc_block in its default
+//  method, Kuipers-Moffa 2017 partition MCMC. Given a categorical dataset D,
+//  samples from the posterior P(Λ | D) over labelled partitions Λ of the n
+//  variables (an ordered sequence of elements; a node's parents lie in later
+//  elements, at least one in the next element), with closed-form marginal
 //  likelihood
 //
-//      P(D | ≺) = ∏_i Σ_{U ⊆ pred_i(≺), |U| <= k} score(X_i, U | D)
+//      P(D | Λ) = ∏_i Σ_{U permissible for i in Λ, |U| <= k} score(X_i, U | D)
 //
 //  Score is BDe (Heckerman-Geiger-Chickering 1995 Eq 28) with BDeu
 //  pseudocounts (Buntine 1991): N'_ijk = α / (r_i × q_i). Per-family
-//  structure prior is the FK Eq 2 uniform over |U|.
+//  structure prior: the structure_prior argument ("uniform" or "fk_eq2").
 //
-//  MH proposal: mixture of any-pair swap + adjacent swap (symmetric;
-//  see order_mcmc_block.hpp).
+//  MH proposal: mixture of split/join, swap, single-node and edge-reversal
+//  moves (see partition_state.hpp). The order method (Friedman-Koller 2003,
+//  P(≺ | D) over orders ≺) is a block option that this wrapper does not set.
 //
 //  Per-step outputs (via current_named_outputs()):
-//    "order"             length-n permutation
+//    "order"             length-n partition node sequence, element 0 first
+//    "order_party"       element sizes of the partition
 //    "order_sampled_DAG" length-n² flattened adjacency (row-major,
 //                        A[i*n+j]=1 ⇔ j is parent of i)
-//    "order_log_score"   length-1 log P(D | ≺)
+//    "order_log_score"   length-1 log P(D | Λ)
 //
 //  NAMING CLASH WARNING
 //  --------------------
@@ -38,8 +43,9 @@
 //  -------------------------
 //  Order MCMC's induced structure prior is NOT hypothesis-equivalent
 //  (Markov-equivalent DAGs receive different prior weights). Fix is
-//  Kuipers-Moffa 2017 partition MCMC, available here as
-//  cfg.method = order_mcmc_block_config::method_t::partition.
+//  Kuipers-Moffa 2017 partition MCMC,
+//  cfg.method = order_mcmc_block_config::method_t::partition, the block's
+//  default and the method this wrapper runs.
 //
 //  Sampling note: Discrete latent (BN structure) with
 //  combinatorial state space. system_design.md Sec.11.2(b) lists this as
@@ -48,14 +54,42 @@
 //  DUAL-BACKEND (R + Python)
 //  -------------------------
 //  Backend-neutral state I/O via AI4BayesCode::state_map / history_map:
-//    * get_current()  -> state_map { "order" (1-based, flat arma::vec),
+//    * get_current()  -> state_map { "order" (the partition node sequence,
+//                                    1-based, flat arma::vec; element 0
+//                                    first, so children come before parents
+//                                    and rev(order) lists parents first),
+//                                    "order_party" (the element sizes,
+//                                    summing to n),
 //                                    "sampled_DAG" (n*n flattened, COLUMN-
 //                                    major arma::vec; element (i,j) at index
 //                                    i + j*n; A[i,j]=1 ⇔ j is parent of i),
-//                                    "log_score" (length-1) }.
-//    * set_current(const state_map&) reads "order" (1-based length-n) via
-//                                    .find(); sampled_DAG / log_score are
-//                                    derived and rejected if passed.
+//                                    "log_score" (length-1, log P(D | Λ)) }.
+//    * set_current(const state_map&) with "order" and "order_party" loads
+//                                    that partition exactly
+//                                    (order_mcmc_block::set_partition; nodes
+//                                    are sorted within each element). "order"
+//                                    alone loads nothing: it is accepted only
+//                                    when it equals the current node sequence
+//                                    of a partition with two or more
+//                                    elements, and raises an error otherwise,
+//                                    including on a new model (the
+//                                    one-element partition). sampled_DAG /
+//                                    log_score are derived and rejected if
+//                                    passed. After a load, get_current(),
+//                                    predict_at() and the shared data keys
+//                                    order / order_party / order_sampled_DAG
+//                                    / order_log_score describe the loaded
+//                                    partition; sampled_DAG is a DAG of it
+//                                    (a load that changes the partition
+//                                    draws it from a generator seeded by
+//                                    rng_seed, not from the step generator).
+//    * freeze / unfreeze accept "order_party" as a name of the "order"
+//                                    block, so ai4bayescode_new_frozen(...,
+//                                    fixed = list(order = ..., order_party =
+//                                    ...)) (Python: new_frozen(..., fixed =
+//                                    {"order": ..., "order_party": ...}))
+//                                    loads the partition and freezes the
+//                                    block at it.
 //    * predict_at(const state_map&) -> history_map { "sampled_DAG" } : v1
 //                                    stub returning the current sampled DAG
 //                                    as a 1 x n² matrix (column-major). Full
@@ -63,10 +97,12 @@
 //                                    to v1.2.1 per spec Sec.5.5.
 //  Constructor takes arma::mat data (N x n, integer-valued, rounded to
 //  category indices 0..r-1), arma::vec cardinalities (length n), and an
-//  arma::vec initial_order (EMPTY = random init; otherwise a 1-based length-n
-//  permutation). This replaces the Rcpp-only IntegerMatrix / IntegerVector /
-//  Nullable signature so the SAME class compiles under both RCPP_MODULE and
-//  PYBIND11_MODULE.
+//  arma::vec initial_order that must be EMPTY: partition MCMC starts from the
+//  one-element partition, and a node sequence does not give the element
+//  sizes; a non-empty initial_order raises an error that points to
+//  set_current(list(order = ..., order_party = ...)). This replaces the
+//  Rcpp-only IntegerMatrix / IntegerVector / Nullable signature so the SAME
+//  class compiles under both RCPP_MODULE and PYBIND11_MODULE.
 // ============================================================================
 
 // @example:R
@@ -138,7 +174,9 @@
 #include <cstdint>
 #include <memory>
 #include <random>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -163,7 +201,7 @@ public:
                 int family_cache_F = 4000,
                 double gamma_prune_nats = 10.0,
                 double prob_adjacent_swap = 0.5,
-                const arma::vec& initial_order = arma::vec(),    // EMPTY = random; else 1-based
+                const arma::vec& initial_order = arma::vec(),    // must be EMPTY (see below)
                 int rng_seed = 1,
                 bool keep_history = false)
         : rng_(rng_seed == 0
@@ -244,20 +282,22 @@ public:
                        structure_prior.c_str());
         }
         cfg.init_rng_seed = static_cast<std::uint64_t>(rng_seed);
-        // EMPTY initial_order = random init; otherwise it is a 1-based
-        // (R/Python-style) length-n permutation converted to 0-based.
-        if (initial_order.n_elem > 0) {
-            if (static_cast<int>(initial_order.n_elem) != n)
-                ai4b::stop("initial_order length must equal ncol(data)");
-            cfg.initial_order = arma::uvec(n);
-            for (int i = 0; i < n; ++i) {
-                const long long v = std::llround(initial_order[i]);
-                if (v < 1 || v > n)
-                    ai4b::stop("initial_order entries must be in 1..n "
-                               "(1-based)");
-                cfg.initial_order[i] = static_cast<arma::uword>(v - 1);
-            }
-        }
+        // The block runs its default method, partition MCMC, which starts
+        // from the one-element partition. A node sequence does not give the
+        // element sizes of a partition, so a non-empty initial_order is
+        // rejected; set_current(list(order = ..., order_party = ...)) loads a
+        // partition after construction.
+        if (initial_order.n_elem > 0)
+            ai4b::stop(std::string(
+                "OrderMCMCBN: initial_order must be empty (numeric(0) in R, "
+                "np.zeros(0) in Python). The sampler is partition MCMC, which "
+                "starts from the one-element partition, and a node sequence "
+                "does not give the element sizes of a partition. To start "
+                "from another partition, construct the model with an empty "
+                "initial_order and call set_current(list(order = ..., "
+                "order_party = ...)) (Python: set_current({'order': ..., "
+                "'order_party': ...})) with values as get_current() returns "
+                "them."));
 
         // ---- shared_data setup -----------------------------------------
         // No upstream data dependencies for the block.
@@ -285,12 +325,20 @@ public:
 
         AI4BayesCode::state_map out;
 
-        // Order (1-based, flat length-n arma::vec).
+        // Partition node sequence (1-based, flat length-n arma::vec),
+        // element 0 first: a node's parents lie in later elements.
         const arma::uvec& order = blk->order();
         arma::vec order_v(order.n_elem);
         for (std::size_t i = 0; i < order.n_elem; ++i)
             order_v[i] = static_cast<double>(order[i]) + 1.0;  // 1-based
         out["order"] = std::move(order_v);
+
+        // Element sizes of the partition (they sum to n).
+        const std::vector<std::size_t>& party = blk->partition().party;
+        arma::vec party_v(party.size());
+        for (std::size_t t = 0; t < party.size(); ++t)
+            party_v[t] = static_cast<double>(party[t]);
+        out["order_party"] = std::move(party_v);
 
         // Sampled DAG (n x n adjacency, FLATTENED COLUMN-MAJOR: element
         // (i,j) is stored at index i + j*n; A[i,j]=1 ⇔ j is parent of i;
@@ -302,35 +350,91 @@ public:
                 dag_v[i + j * n_] = (dag[i] & (1ULL << j)) ? 1.0 : 0.0;
         out["sampled_DAG"] = std::move(dag_v);
 
-        // Log score (length-1).
+        // Log score (length-1): log P(D | partition).
         out["log_score"] = arma::vec{blk->current_log_score()};
         return out;
     }
 
+    // "order" + "order_party": load that partition (set_partition).
+    // "order" alone: order_mcmc_block::set_current, which loads nothing; it
+    // returns when "order" equals the current node sequence of a partition
+    // with two or more elements and throws otherwise.
     void set_current(const AI4BayesCode::state_map& params) {
         auto* blk = dynamic_cast<order_mcmc_block*>(&impl_->child(0));
         if (!blk) ai4b::stop("internal: child 0 is not order_mcmc_block");
 
         // sampled_DAG and log_score are derived; reject set on them.
         if (params.count("sampled_DAG"))
-            ai4b::stop("set_current: 'sampled_DAG' is derived from order; "
-                       "pass 'order' to update state");
+            ai4b::stop("set_current: 'sampled_DAG' is derived from the "
+                       "partition; pass 'order' and 'order_party' to update "
+                       "state");
         if (params.count("log_score"))
-            ai4b::stop("set_current: 'log_score' is derived; pass 'order'");
+            ai4b::stop("set_current: 'log_score' is derived; pass 'order' "
+                       "and 'order_party'");
 
         auto it_order = params.find("order");
-        if (it_order != params.end()) {
-            const arma::vec& ord = it_order->second;
-            if (ord.n_elem != n_)
-                ai4b::stop("set_current: order length must equal n");
-            arma::vec order_arma(n_);
-            for (std::size_t i = 0; i < n_; ++i)
-                order_arma[i] =
-                    static_cast<double>(std::llround(ord[i]) - 1);  // 1->0 based
-            blk->set_current(order_arma);
-            impl_->data().set("order",
-                arma::conv_to<arma::vec>::from(blk->order()));
+        auto it_party = params.find("order_party");
+        if (it_order == params.end()) {
+            if (it_party != params.end())
+                ai4b::stop("set_current: 'order_party' needs 'order', the "
+                           "node sequence of the same partition");
+            return;
         }
+        const arma::vec& ord = it_order->second;
+        if (ord.n_elem != n_)
+            ai4b::stop("set_current: order length must equal n");
+        arma::uvec permy(n_);
+        std::vector<char> seen(n_, 0);
+        for (std::size_t i = 0; i < n_; ++i) {
+            const double d = ord[i];
+            // d in [0.5, n + 0.5) <=> llround(d) in 1..n (1-based)
+            if (!(d >= 0.5 && d < static_cast<double>(n_) + 0.5))
+                ai4b::stop("set_current: 'order' must be a permutation of "
+                           "1..n (1-based)");
+            const std::size_t v = static_cast<std::size_t>(std::llround(d)) - 1;
+            if (seen[v])
+                ai4b::stop("set_current: 'order' must be a permutation of "
+                           "1..n (1-based)");
+            seen[v] = 1;
+            permy[i] = v;
+        }
+
+        if (it_party != params.end()) {
+            const arma::vec& pv = it_party->second;
+            arma::uvec party(pv.n_elem);
+            std::size_t total = 0;
+            for (std::size_t t = 0; t < pv.n_elem; ++t) {
+                const double d = pv[t];
+                if (!(d >= 0.5 && d < static_cast<double>(n_ - total) + 0.5))
+                    ai4b::stop("set_current: 'order_party' must hold element "
+                               "sizes >= 1 that sum to n");
+                party[t] = static_cast<arma::uword>(std::llround(d));
+                total += party[t];
+            }
+            if (total != n_)
+                ai4b::stop("set_current: 'order_party' must hold element "
+                           "sizes >= 1 that sum to n");
+            try {
+                blk->set_partition(permy, party);
+            } catch (const std::invalid_argument& e) {
+                ai4b::stop(std::string("set_current: ") + e.what());
+            }
+        } else {
+            try {
+                blk->set_current(arma::conv_to<arma::vec>::from(permy));
+            } catch (const std::invalid_argument&) {
+                ai4b::stop(std::string(
+                    "set_current: a node sequence does not give the element "
+                    "sizes of a partition, so 'order' alone is accepted only "
+                    "when it equals the current node sequence of a partition "
+                    "with two or more elements (nothing changes). To load a "
+                    "partition, pass 'order' and 'order_party' together, as "
+                    "get_current() returns them: set_current(list(order = "
+                    "..., order_party = ...)) (Python: set_current({'order': "
+                    "..., 'order_party': ...}))."));
+            }
+        }
+        write_shared_outputs_(*blk);
     }
 
     AI4BayesCode::history_map predict_at(
@@ -361,7 +465,81 @@ public:
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag(); }
     AI4BayesCode::history_map  get_history() const { return impl_->get_history(); }
 
+    // freeze / unfreeze: "order_party" names the "order" block (the node
+    // sequence and the element sizes are one block state), so
+    // freeze(c("order", "order_party")), as ai4bayescode_new_frozen /
+    // new_frozen call it, freezes that block once.
+#ifdef AI4BAYESCODE_RCPP_MODULE
+    void freeze_names(const Rcpp::CharacterVector& names) {
+        mixin_::freeze_names(block_names_(names));
+    }
+    void freeze_names_quiet(const Rcpp::CharacterVector& names, bool quiet) {
+        mixin_::freeze_names_quiet(block_names_(names), quiet);
+    }
+    void unfreeze_names(Rcpp::Nullable<Rcpp::CharacterVector> names) {
+        if (names.isNull()) { mixin_::unfreeze_names(names); return; }
+        mixin_::unfreeze_names(Rcpp::Nullable<Rcpp::CharacterVector>(
+            block_names_(Rcpp::CharacterVector(names.get()))));
+    }
+#endif
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+    void py_freeze(const std::vector<std::string>& names, bool quiet) {
+        mixin_::py_freeze(block_names_(names), quiet);
+    }
+    void py_unfreeze(pybind11::object names) {
+        if (names.is_none()) { mixin_::py_unfreeze(names); return; }
+        mixin_::py_unfreeze(pybind11::cast(
+            block_names_(names.cast<std::vector<std::string>>())));
+    }
+#endif
+
 private:
+    using mixin_ = AI4BayesCode::kernel_control_mixin<OrderMCMCBN>;
+
+    // Freeze names with "order_party" replaced by "order"; the replacement
+    // is dropped when "order" is also given or was already added.
+    static std::vector<std::string> block_names_(
+            const std::vector<std::string>& names) {
+        bool has_order = false;
+        for (const auto& s : names) if (s == "order") has_order = true;
+        std::vector<std::string> out;
+        for (const auto& s : names) {
+            if (s != "order_party") { out.push_back(s); continue; }
+            if (has_order) continue;
+            out.push_back("order");
+            has_order = true;
+        }
+        return out;
+    }
+#ifdef AI4BAYESCODE_RCPP_MODULE
+    static Rcpp::CharacterVector block_names_(const Rcpp::CharacterVector& names) {
+        return Rcpp::CharacterVector(Rcpp::wrap(block_names_(
+            Rcpp::as<std::vector<std::string>>(names))));
+    }
+#endif
+
+    // Writes the block's state to the shared data keys that a sweep writes
+    // ("order", "order_party", "order_sampled_DAG", "order_log_score"; the
+    // formats of order_mcmc_block::current_named_outputs, with the block's
+    // sampled_dag() as the DAG), so that they describe a loaded partition
+    // before the next sweep.
+    void write_shared_outputs_(const order_mcmc_block& blk) {
+        const std::vector<std::size_t>& party = blk.partition().party;
+        arma::vec party_v(party.size());
+        for (std::size_t t = 0; t < party.size(); ++t)
+            party_v[t] = static_cast<double>(party[t]);
+        const auto& dag = blk.sampled_dag();
+        arma::vec dag_v(n_ * n_, arma::fill::zeros);
+        for (std::size_t i = 0; i < n_; ++i)
+            for (std::size_t j = 0; j < n_; ++j)
+                if (dag[i] & (1ULL << j)) dag_v[i * n_ + j] = 1.0;
+        auto& d = impl_->data();
+        d.set("order", arma::conv_to<arma::vec>::from(blk.order()));
+        d.set("order_party", std::move(party_v));
+        d.set("order_sampled_DAG", std::move(dag_v));
+        d.set("order_log_score", arma::vec{blk.current_log_score()});
+    }
+
     std::mt19937_64                  rng_;
     mutable std::mt19937_64          predict_rng_;
     std::unique_ptr<composite_block> impl_;
@@ -382,24 +560,37 @@ RCPP_MODULE(OrderMCMCBN_module) {
         .constructor<arma::mat, arma::vec, std::string, double, int,
                       int, int, double, double,
                       arma::vec, int, bool>(
-            "Bayesian-network structure learning via Friedman-Koller 2003 "
-            "order MCMC with BDeu scoring. Args: data (N x n integer 0..r-1), "
-            "cardinalities (length n, r_i for each variable), bdeu_alpha "
+            "Bayesian-network structure learning via Kuipers-Moffa 2017 "
+            "partition MCMC (order_mcmc_block, default method) with BDeu "
+            "scoring. Args: data (N x n integer 0..r-1), "
+            "cardinalities (length n, r_i for each variable), structure_prior "
+            "(\"uniform\" | \"fk_eq2\"), bdeu_alpha "
             "(default 1), max_parents (default 5), candidate_top_C (default "
             "20), family_cache_F (default 4000), gamma_prune_nats (default "
-            "10), prob_adjacent_swap (default 0.5), initial_order (EMPTY "
-            "numeric(0) -> random; else 1-based length-n permutation), "
-            "rng_seed, keep_history.")
+            "10), prob_adjacent_swap (default 0.5), initial_order (must be "
+            "EMPTY numeric(0); load a partition with set_current(list(order "
+            "= ..., order_party = ...))), rng_seed, keep_history.")
         .method("step", (void (OrderMCMCBN::*)())    &OrderMCMCBN::step, "Run one sweep.")
         .method("step", (void (OrderMCMCBN::*)(int)) &OrderMCMCBN::step, "Run n sweeps.")
         .method("get_current", &OrderMCMCBN::get_current,
-                "Returns list(order = length-n 1-based permutation, "
+                "Returns list(order = partition node sequence, 1-based, "
+                "element 0 first (children before parents; rev(order) lists "
+                "parents first), order_party = element sizes, "
                 "sampled_DAG = n*n flattened COLUMN-MAJOR adjacency "
                 "(A[i,j]=1 ⇔ j is parent of i; 1-based indices), "
-                "log_score = log P(D|order)).")
+                "log_score = log P(D | partition)).")
         .method("set_current", &OrderMCMCBN::set_current,
-                "Overwrite the order (1-based length-n permutation). "
-                "sampled_DAG and log_score are derived — must pass 'order'.")
+                "set_current(list(order = ..., order_party = ...)) loads that "
+                "partition exactly (values as get_current() returns them; "
+                "nodes are sorted within each element). 'order' alone loads "
+                "nothing: it is accepted only when it equals the current node "
+                "sequence of a partition with two or more elements, and is an "
+                "error otherwise, including on a new model. sampled_DAG and "
+                "log_score are derived and rejected. freeze() and unfreeze() "
+                "accept 'order_party' as a name of the 'order' block, so "
+                "ai4bayescode_new_frozen(..., fixed = list(order = ..., "
+                "order_party = ...)) loads the partition and freezes the "
+                "block at it.")
         .method("predict_at",  &OrderMCMCBN::predict_at,
                 "v1: stub returning current sampled_DAG (1 x n² matrix). "
                 "Full posterior-predictive simulation deferred to v1.2.1.")
@@ -431,11 +622,31 @@ PYBIND11_MODULE(OrderMCMCBN, m) {
              pybind11::arg("prob_adjacent_swap")= 0.5,
              pybind11::arg("initial_order")     = arma::vec(),
              pybind11::arg("rng_seed")          = 1,
-             pybind11::arg("keep_history")      = false)
+             pybind11::arg("keep_history")      = false,
+             "Bayesian-network structure learning via Kuipers-Moffa 2017 "
+             "partition MCMC (order_mcmc_block, default method) with BDeu "
+             "scoring. initial_order must be empty (np.zeros(0)): load a "
+             "partition with set_current({'order': ..., 'order_party': ...}) "
+             "after construction.")
         .def("step", (void (OrderMCMCBN::*)())    &OrderMCMCBN::step, "Run one sweep.")
         .def("step", (void (OrderMCMCBN::*)(int)) &OrderMCMCBN::step,        pybind11::arg("n_steps"))
-        .def("get_current", &OrderMCMCBN::get_current)
-        .def("set_current", &OrderMCMCBN::set_current, pybind11::arg("params"))
+        .def("get_current", &OrderMCMCBN::get_current,
+             "Returns {'order': partition node sequence, 1-based, element 0 "
+             "first (children before parents; order[::-1] lists parents "
+             "first), 'order_party': element sizes, 'sampled_DAG': n*n "
+             "flattened COLUMN-MAJOR adjacency (A[i,j]=1 <=> j is parent of "
+             "i), 'log_score': log P(D | partition)}.")
+        .def("set_current", &OrderMCMCBN::set_current, pybind11::arg("params"),
+             "set_current({'order': ..., 'order_party': ...}) loads that "
+             "partition exactly (values as get_current() returns them; nodes "
+             "are sorted within each element). 'order' alone loads nothing: "
+             "it is accepted only when it equals the current node sequence "
+             "of a partition with two or more elements, and is an error "
+             "otherwise, including on a new model. 'sampled_DAG' and "
+             "'log_score' are derived and rejected. freeze() and unfreeze() "
+             "accept 'order_party' as a name of the 'order' block, so "
+             "new_frozen(..., fixed={'order': ..., 'order_party': ...}) "
+             "loads the partition and freezes the block at it.")
         .def("predict_at",  &OrderMCMCBN::predict_at,  pybind11::arg("new_data"))
         .def("get_dag",     &OrderMCMCBN::get_dag)
         .def("get_history", &OrderMCMCBN::get_history)
@@ -456,11 +667,12 @@ PYBIND11_MODULE(OrderMCMCBN, m) {
 //  chain links {0-1, 1-2, 2-3}; the three non-adjacent pairs {0-2, 0-3,
 //  1-3} are NON-edges.
 //
-//  We run order MCMC, sample one DAG per kept step, accumulate the posterior
-//  SKELETON marginal P(i~j | D) for every unordered pair, and PASS iff every
-//  true-edge marginal clears every non-edge marginal by a clear gap. State is
-//  read via the FULL contract: get_current()["sampled_DAG"] (n*n flattened,
-//  COLUMN-MAJOR, element (i,j) at index i + j*n; A[i,j]=1 ⇔ j is parent of i).
+//  We run partition MCMC, sample one DAG per kept step, accumulate the
+//  posterior SKELETON marginal P(i~j | D) for every unordered pair, and PASS
+//  iff every true-edge marginal clears every non-edge marginal by a clear gap.
+//  State is read via the FULL contract: get_current()["sampled_DAG"] (n*n
+//  flattened, COLUMN-MAJOR, element (i,j) at index i + j*n; A[i,j]=1 ⇔ j is
+//  parent of i).
 // ============================================================================
 #if !defined(AI4BAYESCODE_RCPP_MODULE) && !defined(AI4BAYESCODE_PYBIND_MODULE)
 #include <cstdio>
@@ -489,7 +701,7 @@ int main() {
     arma::vec cards(n);
     cards.fill(2.0);   // all binary
 
-    // ---- Fit order MCMC --------------------------------------------------
+    // ---- Fit partition MCMC ----------------------------------------------
     OrderMCMCBN model(data, cards,
                       // The DAG prior is a required argument -- there is no
                       // default, because the two priors give different
@@ -503,7 +715,7 @@ int main() {
                       /*family_cache_F=*/4000,
                       /*gamma_prune_nats=*/10.0,
                       /*prob_adjacent_swap=*/0.5,
-                      /*initial_order=*/arma::vec(),   // empty = random init
+                      /*initial_order=*/arma::vec(),   // must be empty
                       /*rng_seed=*/7,
                       /*keep_history=*/false);
 

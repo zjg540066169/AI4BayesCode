@@ -156,10 +156,30 @@ cfg.family_cache_F    = 200;           // FK Sec.4.2 top-F cached families
 cfg.gamma_prune_nats  = 10.0;          // gamma-prune sum in nats
 cfg.prob_adjacent_swap = 0.5;          // 0.5 = balanced any-pair /
                                        //   adjacent-swap mixture
-cfg.initial_order     = arma::uvec();  // empty = random; otherwise
-                                       //   a permutation of 0..n-1
+cfg.initial_order     = arma::uvec();  // method = order: empty = random,
+                                       //   otherwise a permutation of
+                                       //   0..n-1. method = partition (the
+                                       //   default): must be empty (the
+                                       //   constructor throws otherwise);
+                                       //   the chain starts from the
+                                       //   one-element partition
 cfg.init_rng_seed     = 42;
 ```
+
+**Block state and loaders.** `cfg.method = method_t::partition` (the
+default): the state is a labelled partition. `current()` / the `<name>`
+output is its node sequence, element 0 first (a node's parents lie in later
+elements, so children come before parents and the reversed sequence lists
+parents first); `<name>_party` holds the element sizes; `<name>_log_score`
+is log P(D | partition). `set_partition(permy, party)` loads a partition
+(nodes are sorted within each element; it throws for invalid input or a
+partition with log-score -inf). `set_current(v)` loads nothing: it returns
+without a change when `v` equals `current()` on a partition with two or
+more elements (the element sizes are those of the current partition) and
+throws `std::invalid_argument` otherwise, also whenever the current
+partition is the one-element partition. `cfg.method = method_t::order`:
+the state is an order, `set_current(v)` loads it, and `<name>_log_score` is
+log P(D | order).
 
 **Tier C kernels:**
 - `include/AI4BayesCode/bde_scorer.hpp` -- BDe / BDeu family-score
@@ -171,13 +191,26 @@ cfg.init_rng_seed     = 42;
   `sample_parent_set(i, order, rng)` draws a parent set from the
   same posterior.
 
-**Six-method R contract** (Tier A `OrderMCMCBN`):
-- `step(M)` -- M MH order-swap steps.
-- `get_current()` -- `list(order = 1:n permutation, sampled_DAG =
-  n x n {0, 1} matrix, log_score = scalar)`.
-- `set_current(list(order = ...))` -- only `order` is settable;
-  derived `sampled_DAG` / `log_score` are read-only (rejected
-  on input).
+**Six-method R contract** (Tier A `OrderMCMCBN`, which runs the default
+partition method):
+- `step(M)` -- M sweeps (one partition-MCMC move each).
+- `get_current()` -- `list(order = partition node sequence (1-based,
+  element 0 first: children before parents, so rev(order) lists parents
+  first), order_party = element sizes, sampled_DAG = n*n {0, 1} vector
+  (column-major), log_score = log P(D | partition))`.
+- `set_current(list(order = ..., order_party = ...))` -- loads that
+  partition exactly (values as `get_current()` returns them). `order`
+  alone loads nothing: it is accepted only when it equals the current
+  node sequence of a partition with two or more elements, and is an
+  error otherwise (always on a new model). Derived `sampled_DAG` /
+  `log_score` are read-only (rejected on input).
+- `initial_order` must be `numeric(0)`; a non-empty value is an error
+  that points to `set_current(list(order = ..., order_party = ...))`.
+- `freeze()` / `unfreeze()` accept `"order_party"` as a name of the
+  `"order"` block, so `ai4bayescode_new_frozen(OrderMCMCBN, ..., fixed =
+  list(order = ..., order_party = ...))` (Python: `new_frozen(...,
+  fixed={"order": ..., "order_party": ...})`) loads the partition and
+  freezes the block at it.
 - `predict_at(list())` -- v1 stub returning the current
   `sampled_DAG`.
 - `get_dag()` -- sampling DAG topology (block-level).
