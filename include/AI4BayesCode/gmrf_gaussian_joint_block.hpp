@@ -175,7 +175,6 @@ public:
         b_eigen_.resize(static_cast<Eigen::Index>(cfg_.n));
         const double inv_s2 = 1.0 / cfg_.sigma2;
         for (std::size_t i = 0; i < cfg_.n; ++i) b_eigen_[i] = inv_s2 * cfg_.y[i];
-        symbolic_analyzed_ = false;
     }
 
     // ---- block_sampler interface ------------------------------------------
@@ -189,33 +188,37 @@ public:
         const double log_kappa_prop = log_kappa + jump(rng);
         const double kappa_prop = std::exp(log_kappa_prop);
 
-        double bmu_cur = 0.0, bmu_prop = 0.0;
-        const double g_cur  = marginal_g_(kappa_,     bmu_cur);
-        const double g_prop = marginal_g_(kappa_prop, bmu_prop);
+        // solver_[cur_], g_cur_ and mu_cur_ hold the factor of Q(kappa_),
+        // g(kappa_) and mu(kappa_); they depend on kappa_ only and are set
+        // on the first step and whenever kappa_ changes (on acceptance).
+        if (!cur_valid_) {
+            g_cur_ = marginal_g_(cur_, kappa_, mu_cur_);
+            cur_valid_ = true;
+        }
+        Eigen::VectorXd mu_prop;
+        const double g_prop = marginal_g_(1 - cur_, kappa_prop, mu_prop);
 
         // log target on the log-kappa scale = log pi(kappa) + g(kappa) + log kappa
         // (the trailing +log kappa is the Jacobian d kappa / d log kappa).
-        const double lt_cur  = gamma_logprior_(kappa_)     + g_cur  + log_kappa;
+        const double lt_cur  = gamma_logprior_(kappa_)     + g_cur_ + log_kappa;
         const double lt_prop = gamma_logprior_(kappa_prop) + g_prop + log_kappa_prop;
 
         std::uniform_real_distribution<double> u01(0.0, 1.0);
-        double bmu_use;
-        if (std::log(u01(rng)) < (lt_prop - lt_cur)) { kappa_ = kappa_prop; bmu_use = bmu_prop; }
-        else                                          { bmu_use = bmu_cur; }
+        if (std::log(u01(rng)) < (lt_prop - lt_cur)) {
+            kappa_ = kappa_prop;
+            cur_   = 1 - cur_;
+            g_cur_ = g_prop;
+            mu_cur_.swap(mu_prop);
+        }
 
-        // (2) Draw x | kappa, y from the (already-factorised) full conditional.
-        //     marginal_g_ leaves solver_ holding the Cholesky of Q(kappa_use);
-        //     re-factorise for the accepted kappa to be safe.
-        (void)bmu_use;
-        factorise_Q_(kappa_);
-        Eigen::VectorXd mu = solver_.solve(b_eigen_);
-
+        // (2) Draw x | kappa, y from the factor of Q(kappa_).
+        const solver_t& solver = solver_[cur_];
         std::normal_distribution<double> nd(0.0, 1.0);
         Eigen::VectorXd z(static_cast<Eigen::Index>(cfg_.n));
         for (std::size_t i = 0; i < cfg_.n; ++i) z[i] = nd(rng);
-        Eigen::VectorXd y_perm     = solver_.matrixU().solve(z);
-        Eigen::VectorXd x_centered = solver_.permutationPinv() * y_perm;
-        Eigen::VectorXd result     = mu + x_centered;
+        Eigen::VectorXd y_perm     = solver.matrixU().solve(z);
+        Eigen::VectorXd x_centered = solver.permutationPinv() * y_perm;
+        Eigen::VectorXd result     = mu_cur_ + x_centered;
 
         if (cfg_.sum_to_zero) {
             const double m = result.mean();
@@ -280,34 +283,40 @@ public:
     void clear_history() override { history_buf_.clear(); kappa_hist_.clear(); }
 
 private:
-    // Factorise Q(kappa) = kappa R + sigma2^{-1} I (+ ridge). Leaves solver_.
-    void factorise_Q_(double kappa) {
+    using solver_t = Eigen::SimplicialLLT<Eigen::SparseMatrix<double>, Eigen::Lower,
+                                          Eigen::AMDOrdering<int>>;
+
+    // Factorise Q(kappa) = kappa R + sigma2^{-1} I (+ ridge) into solver_[s].
+    // Q's pattern (that of R plus the diagonal) is the same for every kappa.
+    void factorise_Q_(int s, double kappa) {
         Eigen::SparseMatrix<double> Q =
             kappa * R_eigen_ + (1.0 / cfg_.sigma2) * I_eigen_;
         if (cfg_.ridge_epsilon > 0.0) Q += cfg_.ridge_epsilon * I_eigen_;
-        if (!symbolic_analyzed_) {
-            solver_.analyzePattern(Q);
-            if (solver_.info() != Eigen::Success)
+        if (!symbolic_analyzed_[s]) {
+            solver_[s].analyzePattern(Q);
+            if (solver_[s].info() != Eigen::Success)
                 throw std::runtime_error("gmrf_gaussian_joint_block '" + cfg_.name +
                     "': symbolic analysis failed");
-            symbolic_analyzed_ = true;
+            symbolic_analyzed_[s] = true;
         }
-        solver_.factorize(Q);
-        if (solver_.info() != Eigen::Success)
+        solver_[s].factorize(Q);
+        if (solver_[s].info() != Eigen::Success)
             throw std::runtime_error("gmrf_gaussian_joint_block '" + cfg_.name +
                 "': Cholesky factorisation failed (Q not PD)");
     }
 
-    // g(kappa) = 0.5 r log kappa - 0.5 log|Q| + 0.5 b^T mu ; sets bmu = b^T mu.
-    double marginal_g_(double kappa, double& bmu) {
-        factorise_Q_(kappa);
-        // log|Q| = 2 sum log L_ii.
-        Eigen::SparseMatrix<double> L = solver_.matrixL();
+    // g(kappa) = 0.5 r log kappa - 0.5 log|Q| + 0.5 b^T mu, with mu = Q^{-1} b;
+    // leaves solver_[s] holding the factor of Q(kappa).
+    double marginal_g_(int s, double kappa, Eigen::VectorXd& mu) {
+        factorise_Q_(s, kappa);
+        // log|Q| = 2 sum log L_ii; L_ii is the first stored entry of column i.
+        const Eigen::SparseMatrix<double>& L = solver_[s].matrixL().nestedExpression();
+        const double* Lx = L.valuePtr();
+        const auto*   Lp = L.outerIndexPtr();
         double logdetQ = 0.0;
-        Eigen::VectorXd d = L.diagonal();
-        for (Eigen::Index i = 0; i < d.size(); ++i) logdetQ += 2.0 * std::log(d[i]);
-        Eigen::VectorXd mu = solver_.solve(b_eigen_);
-        bmu = b_eigen_.dot(mu);
+        for (Eigen::Index i = 0; i < L.outerSize(); ++i) logdetQ += 2.0 * std::log(Lx[Lp[i]]);
+        mu = solver_[s].solve(b_eigen_);
+        const double bmu = b_eigen_.dot(mu);
         return 0.5 * r_rank_ * std::log(kappa) - 0.5 * logdetQ + 0.5 * bmu;
     }
 
@@ -326,9 +335,12 @@ private:
     Eigen::SparseMatrix<double> R_eigen_;
     Eigen::SparseMatrix<double> I_eigen_;
     Eigen::VectorXd             b_eigen_;
-    Eigen::SimplicialLLT<Eigen::SparseMatrix<double>, Eigen::Lower,
-                         Eigen::AMDOrdering<int>> solver_;
-    bool symbolic_analyzed_ = false;
+    solver_t solver_[2];                 // factors of Q(kappa_) and Q(kappa_prop)
+    bool     symbolic_analyzed_[2] = { false, false };
+    int      cur_ = 0;                   // solver_[cur_] holds Q(kappa_)
+    bool     cur_valid_ = false;         // solver_[cur_], g_cur_, mu_cur_ are set
+    double   g_cur_ = 0.0;               // g(kappa_)
+    Eigen::VectorXd mu_cur_;             // Q(kappa_)^{-1} b
 };
 
 } // namespace AI4BayesCode

@@ -23,9 +23,11 @@
 //  Algorithm — Murray 2010 ESS applied to GMRF prior:
 //
 //      Per step:
-//        1. Build sparse Q = Q_fn(ctx); refactorize sparse Cholesky.
+//        1. Build sparse Q = Q_fn(ctx); refactorize sparse Cholesky when
+//           Q differs from the last factorized Q (the symbolic analysis
+//           is redone only when the stored pattern of Q changes).
 //        2. Sample nu ~ N(0, Q^{-1}) using the same Rue-2001 backsolve as
-//           gmrf_precision_block (re-use cached symbolic factorization).
+//           gmrf_precision_block.
 //        3. Compute log_lik_cur = log_lik(x_cur, ctx).
 //        4. Slice threshold: log_y = log_lik_cur + log(Uniform(0,1)).
 //        5. Sample θ ~ Uniform(0, 2π), bracket [θ-2π, θ].
@@ -82,6 +84,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <random>
 #include <stdexcept>
@@ -132,8 +135,9 @@ struct gmrf_whitened_ess_block_config {
 
     /// Required: builder for the precision matrix Q. Called every step()
     /// with the current block_context. Must return a symmetric n×n
-    /// positive-(semi)definite sparse matrix. ASSUMES sparsity pattern
-    /// of Q is fixed across steps (numerical values may vary).
+    /// positive-(semi)definite sparse matrix. The symbolic factorisation
+    /// is cached and recomputed whenever the stored pattern of Q changes;
+    /// a pattern that stays fixed across steps avoids that cost.
     std::function<arma::sp_mat(const block_context&)> Q_fn;
 
     /// Required: user-supplied log-likelihood on the natural-scale latent.
@@ -197,6 +201,10 @@ public:
         if (cfg_.sum_to_zero && cfg_.ridge_epsilon == 0.0) {
             cfg_.ridge_epsilon = 1e-8;
         }
+        if (cfg_.ridge_epsilon > 0.0) {
+            ridge_I_ = cfg_.ridge_epsilon *
+                       arma::speye<arma::sp_mat>(cfg_.n, cfg_.n);
+        }
 
         x_.set_size(cfg_.n);
         if (cfg_.initial_x.n_elem == cfg_.n) {
@@ -234,31 +242,11 @@ public:
                 ")");
         }
         if (cfg_.ridge_epsilon > 0.0) {
-            Q_arma += cfg_.ridge_epsilon *
-                      arma::speye<arma::sp_mat>(cfg_.n, cfg_.n);
+            Q_arma += ridge_I_;
         }
 
-        // (2) Sparse Cholesky factorise (cached symbolic).
-        Eigen::SparseMatrix<double> Q_eigen =
-            detail_gmrf_whitened_ess::arma_to_eigen_sparse(Q_arma);
-
-        if (!symbolic_analyzed_) {
-            solver_.analyzePattern(Q_eigen);
-            if (solver_.info() != Eigen::Success) {
-                throw std::runtime_error(
-                    "gmrf_whitened_ess_block '" + cfg_.name +
-                    "': symbolic analysis (analyzePattern) failed");
-            }
-            symbolic_analyzed_ = true;
-        }
-        solver_.factorize(Q_eigen);
-        if (solver_.info() != Eigen::Success) {
-            throw std::runtime_error(
-                "gmrf_whitened_ess_block '" + cfg_.name +
-                "': sparse Cholesky factorisation failed. Q may not be "
-                "positive-definite. If this is an IGMRF, set "
-                "sum_to_zero=true (auto-bumps ridge_epsilon to 1e-8).");
-        }
+        // (2) Cholesky factor of Q in solver_.
+        factorize_Q_(Q_arma);
 
         // (3) Sample nu ~ N(0, Q^{-1}) using Rue 2001 backsolve.
         std::normal_distribution<double>       std_norm(0.0, 1.0);
@@ -361,6 +349,55 @@ public:
     void clear_history() override { history_buf_.clear(); }
 
 private:
+    // Leaves solver_ holding the Cholesky factor of Q. Q_eigen_ keeps the
+    // stored pattern passed to analyzePattern and the values of the last
+    // factorize call. A Q with another stored pattern is re-analysed before
+    // factorize; a Q whose values equal Q_eigen_'s bit for bit after a
+    // successful factorize is not factorised again.
+    void factorize_Q_(const arma::sp_mat& Q) {
+        Q.sync();
+        const std::size_t nnz = static_cast<std::size_t>(Q.n_nonzero);
+        bool same_pattern = symbolic_analyzed_ &&
+            static_cast<std::size_t>(Q_eigen_.nonZeros()) == nnz;
+        const auto* outer = Q_eigen_.outerIndexPtr();
+        const auto* inner = Q_eigen_.innerIndexPtr();
+        for (std::size_t j = 0; same_pattern && j <= cfg_.n; ++j)
+            same_pattern = Q.col_ptrs[j] == static_cast<arma::uword>(outer[j]);
+        for (std::size_t k = 0; same_pattern && k < nnz; ++k)
+            same_pattern = Q.row_indices[k] == static_cast<arma::uword>(inner[k]);
+
+        if (!same_pattern) {
+            symbolic_analyzed_ = false;
+            factor_ok_ = false;
+            Q_eigen_ = detail_gmrf_whitened_ess::arma_to_eigen_sparse(Q);
+            Q_eigen_.makeCompressed();   // in-place value copies need compressed storage
+            solver_.analyzePattern(Q_eigen_);
+            if (solver_.info() != Eigen::Success) {
+                throw std::runtime_error(
+                    "gmrf_whitened_ess_block '" + cfg_.name +
+                    "': symbolic analysis (analyzePattern) failed");
+            }
+            symbolic_analyzed_ = true;
+        } else if (nnz > 0) {
+            double* v = Q_eigen_.valuePtr();
+            if (factor_ok_ &&
+                std::memcmp(v, Q.values, nnz * sizeof(double)) == 0) {
+                return;
+            }
+            factor_ok_ = false;
+            std::memcpy(v, Q.values, nnz * sizeof(double));
+        }
+        solver_.factorize(Q_eigen_);
+        if (solver_.info() != Eigen::Success) {
+            throw std::runtime_error(
+                "gmrf_whitened_ess_block '" + cfg_.name +
+                "': sparse Cholesky factorisation failed. Q may not be "
+                "positive-definite. If this is an IGMRF, set "
+                "sum_to_zero=true (auto-bumps ridge_epsilon to 1e-8).");
+        }
+        factor_ok_ = true;
+    }
+
     // Sample nu ~ N(0, Q^{-1}) using the cached SimplicialLLT factorisation:
     //   Q = P^T L L^T P  (with permutation P)
     //   Σ = Q^{-1} = P^T L^{-T} L^{-1} P
@@ -388,11 +425,14 @@ private:
     gmrf_whitened_ess_block_config cfg_;
     arma::vec      x_;
     block_context  context_;
+    arma::sp_mat   ridge_I_;   // ridge_epsilon * I (if > 0)
 
     Eigen::SimplicialLLT<Eigen::SparseMatrix<double>,
                          Eigen::Lower,
                          Eigen::AMDOrdering<int>> solver_;
-    bool symbolic_analyzed_ = false;
+    Eigen::SparseMatrix<double> Q_eigen_;  // analysed pattern, last values
+    bool symbolic_analyzed_ = false;       // solver_ analysed Q_eigen_'s pattern
+    bool factor_ok_ = false;               // solver_ holds the factor of Q_eigen_
 
     std::vector<arma::vec> history_buf_;
 };

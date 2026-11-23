@@ -96,9 +96,9 @@ MPL-2.0). Same `-I include/eigen` build flag as
 `gmrf_precision_block`.
 
 **Scope (v1.2 ship):**
-- Symbolic factorisation cached once (assumes Q's sparsity pattern is
-  fixed across steps; numerical values may vary -- typical for
-  `Q = kappa * R` decompositions)
+- Symbolic factorisation cached; the analysis is redone when the stored
+  pattern of Q changes (a fixed pattern avoids that cost; numerical
+  values may vary -- typical for `Q = kappa * R` decompositions)
 - Single sum-to-zero constraint via post-hoc projection on `nu`
 - Universal `log_lik(x, ctx) -> double` user callback (any non-Gaussian
   likelihood family)

@@ -12,7 +12,8 @@ SimplicialLLT) -> solve `L^T y_perm = z`, `z ~ N(0, I)` -> apply inverse
 permutation. Mean shift `mu = Q^{-1} b` via the cached factorisation.
 Per-sweep cost O(n * b_w^2) for the numerical re-factorisation
 (b_w = bandwidth ~= O(sqrt(n)) for typical 2D lattice GMRFs); the symbolic
-factorisation + AMD ordering are computed once and amortised.
+factorisation + AMD ordering are redone only when the stored pattern of Q
+changes and are otherwise amortised.
 
 **JUSTIFICATION (Check #16):** Fixed-dim continuous Gaussian with
 sparse precision (`system_design.md` Sec.11.1 class 1, specialised
@@ -38,9 +39,9 @@ dependency.
   separate nuts_block instances for Intercept / tau / sigma).
 
 **Scope (v1.2 ship):**
-- Symbolic factorisation cached once (assumes Q's sparsity pattern
-  is fixed across steps; numerical values may vary -- typical for
-  `Q = kappa * R` decompositions)
+- Symbolic factorisation cached; the analysis is redone when the stored
+  pattern of Q changes (a fixed pattern avoids that cost; numerical
+  values may vary -- typical for `Q = kappa * R` decompositions)
 - Single sum-to-zero constraint via post-hoc projection on a
   ridge-regularised Q (simplified Rue Sec.3.1.3, the spam / R-INLA
   approach)
