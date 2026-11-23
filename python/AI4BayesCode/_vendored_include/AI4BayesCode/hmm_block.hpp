@@ -51,7 +51,9 @@
  *    z_{t-1}     ~ Categorical( softmax(alpha_{t-1} + log A[:, z_t]) )
  *                  for t = T, T-1, ..., 2
  *
- *  Complexity per sweep: O(T * K^2). Exact conditional draw.
+ *  Complexity per sweep: O(T * K^2). Exact conditional draw. While the
+ *  context is bitwise unchanged, the stored forward filter is reused and
+ *  a sweep costs O(T * K).
  *
  *  VALIDATOR
  *  =========
@@ -67,6 +69,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <limits>
 #include <random>
@@ -108,7 +111,8 @@ struct hmm_block_config {
     /// Emission log-density evaluator: log p(y_t | z_t = k, theta).
     /// The function receives the timestep t and state k, plus the full
     /// block_context (where theta / y are stored by sibling blocks).
-    /// Must return a finite log-density for legal (t, k).
+    /// Must return a finite log-density for legal (t, k), and depend only
+    /// on (t, k, ctx): the forward filter is reused while ctx is unchanged.
     std::function<double(std::size_t t, std::size_t k,
                          const block_context& ctx)> emission_logp;
 
@@ -157,7 +161,12 @@ public:
     }
 
     void set_context(const block_context& ctx) override {
-        context_ = ctx;
+        // The stored forward filter belongs to context_; drop it when any
+        // key, length or bit of the context changes.
+        if (!same_context_(ctx)) {
+            alpha_.clear();
+            context_ = ctx;
+        }
     }
 
     // Fetch a REQUIRED context key by name. Bare context_.at() throws
@@ -195,42 +204,56 @@ public:
                 "': initial distribution length mismatch");
         }
 
-        // Precompute log A[j, k] and log pi for stability.
-        std::vector<double> logA(K * K);
-        for (std::size_t i = 0; i < K * K; ++i) {
-            logA[i] = (A_flat[i] > 0.0) ? std::log(A_flat[i])
-                                        : -std::numeric_limits<double>::infinity();
-        }
-        std::vector<double> logpi(K);
-        for (std::size_t k = 0; k < K; ++k) {
-            logpi[k] = (pi_flat[k] > 0.0) ? std::log(pi_flat[k])
-                                          : -std::numeric_limits<double>::infinity();
-        }
-
-        // Forward filter: alpha[t, k] in log space.
-        std::vector<double> alpha(T * K);
-
-        // t = 0
-        for (std::size_t k = 0; k < K; ++k) {
-            const double loglik =
-                cfg_.emission_logp(0, k, context_);
-            alpha[0 * K + k] = logpi[k] + loglik;
-        }
-        // t = 1 .. T-1
-        std::vector<double> tmp(K);
-        for (std::size_t t = 1; t < T; ++t) {
-            for (std::size_t k = 0; k < K; ++k) {
-                // alpha[t, k] = logsumexp_{j} [ alpha[t-1, j] + logA[j, k] ]
-                //               + emission
-                for (std::size_t j = 0; j < K; ++j) {
-                    tmp[j] = alpha[(t - 1) * K + j] + logA[j * K + k];
+        // Forward pass into logA_ and alpha_, run only when alpha_ is empty:
+        // at the first step and after set_context received a different
+        // context. If the pass throws, alpha_ is left empty.
+        if (alpha_.empty()) {
+            try {
+                // Precompute log A[j, k] and log pi for stability.
+                logA_.resize(K * K);
+                double* const logA = logA_.data();
+                for (std::size_t i = 0; i < K * K; ++i) {
+                    logA[i] = (A_flat[i] > 0.0) ? std::log(A_flat[i])
+                                                : -std::numeric_limits<double>::infinity();
                 }
-                const double lse = logsumexp(tmp.data(), K);
-                const double loglik =
-                    cfg_.emission_logp(t, k, context_);
-                alpha[t * K + k] = lse + loglik;
+                std::vector<double> logpi(K);
+                for (std::size_t k = 0; k < K; ++k) {
+                    logpi[k] = (pi_flat[k] > 0.0) ? std::log(pi_flat[k])
+                                                  : -std::numeric_limits<double>::infinity();
+                }
+
+                // Forward filter: alpha[t, k] in log space.
+                alpha_.resize(T * K);
+                double* const alpha = alpha_.data();
+
+                // t = 0
+                for (std::size_t k = 0; k < K; ++k) {
+                    const double loglik =
+                        cfg_.emission_logp(0, k, context_);
+                    alpha[0 * K + k] = logpi[k] + loglik;
+                }
+                // t = 1 .. T-1
+                std::vector<double> tmp(K);
+                for (std::size_t t = 1; t < T; ++t) {
+                    for (std::size_t k = 0; k < K; ++k) {
+                        // alpha[t, k] = logsumexp_{j} [ alpha[t-1, j] + logA[j, k] ]
+                        //               + emission
+                        for (std::size_t j = 0; j < K; ++j) {
+                            tmp[j] = alpha[(t - 1) * K + j] + logA[j * K + k];
+                        }
+                        const double lse = logsumexp(tmp.data(), K);
+                        const double loglik =
+                            cfg_.emission_logp(t, k, context_);
+                        alpha[t * K + k] = lse + loglik;
+                    }
+                }
+            } catch (...) {
+                alpha_.clear();
+                throw;
             }
         }
+        const double* const alpha = alpha_.data();
+        const double* const logA  = logA_.data();
 
         // Backward sample.
         std::uniform_real_distribution<double> unif(0.0, 1.0);
@@ -329,10 +352,31 @@ public:
     void clear_history() override { history_buf_.clear(); }
 
 private:
+    // True when ctx has the same keys as context_, with values of the same
+    // length and bit pattern.
+    bool same_context_(const block_context& ctx) const {
+        if (ctx.size() != context_.size()) return false;
+        for (const auto& kv : ctx) {
+            auto it = context_.find(kv.first);
+            if (it == context_.end() || it->second.n_elem != kv.second.n_elem)
+                return false;
+            if (kv.second.n_elem != 0 &&
+                std::memcmp(it->second.memptr(), kv.second.memptr(),
+                            kv.second.n_elem * sizeof(double)) != 0)
+                return false;
+        }
+        return true;
+    }
+
     hmm_block_config       cfg_;
     arma::vec              z_;         // length T, entries in {0..K-1}
     block_context          context_;
     std::vector<arma::vec> history_buf_;
+    // Forward filter of context_ (T x K, row-major, log space) and log A.
+    // alpha_ is empty until the first forward pass, after a context change
+    // and after a failed pass; copies and moves carry it with context_.
+    std::vector<double>    alpha_;
+    std::vector<double>    logA_;
 };
 
 } // namespace AI4BayesCode

@@ -7,6 +7,8 @@ sampling. K and T fixed per construction; A (K*K row-major), pi
 (length K), and emission log-density are read from context each
 sweep (typically sampled by sibling `dirichlet_gibbs_block` for A
 and pi, and `nuts_block` / `beta_gibbs_block` for emission theta).
+`emission_logp` must depend only on (t, k, ctx); the forward filter is
+reused while the context is bitwise unchanged.
 
 **JUSTIFICATION (Check #16): Exception 1** (discrete state
 sequence; NUTS cannot target). Algorithm is Baum-Welch / Fruhwirth-
