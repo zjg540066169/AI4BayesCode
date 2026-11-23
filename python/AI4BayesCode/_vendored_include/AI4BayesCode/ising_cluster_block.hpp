@@ -392,7 +392,7 @@ public:
             cfg_.beta_edge, cfg_.beta_edge_key, n_edges, "beta_edge_key");
         const arma::vec* delta_edge = resolve_edge_vec_(
             cfg_.delta_edge, cfg_.delta_key, n_edges, "delta_key");
-        const arma::mat* field = resolve_field_(n, Q);
+        const double* field = resolve_field_(n, Q);   // column-major n x Q
         const bool has_field = (field != nullptr);
 
         auto beta_e = [&](std::size_t e) -> double {
@@ -408,8 +408,22 @@ public:
         // (3) Bond augmentation + union pass. Bond prob = 1 - exp(-δ_e·β_e).
         //     Residual coupling w_e = (1-δ_e)·β_e stays for the recolour; if
         //     any survives we must recolour clusters conditionally (Case C).
+        //     Scalar β and δ: one bond prob for all edges, computed once per
+        //     sweep. Per-edge β or δ from cfg: stored per-edge values
+        //     (edge_bond_prob_). Per-edge β or δ from ctx: computed per edge.
         std::uniform_real_distribution<double> uniform01(0.0, 1.0);
         bool has_residual = false;
+        const bool scalar_bond = (beta_edge == nullptr && delta_edge == nullptr);
+        const bool stored_bond = !scalar_bond &&
+            (beta_edge == nullptr || beta_edge == &cfg_.beta_edge) &&
+            (delta_edge == nullptr || delta_edge == &cfg_.delta_edge);
+        const double p_bond_scalar =
+            scalar_bond ? -std::expm1(-cfg_.delta_default * beta_scalar) : 0.0;
+        if (stored_bond &&
+            (bond_x_.size() != n_edges || bond_p_.size() != n_edges)) {
+            bond_x_.assign(n_edges, 0.0);   // x = 0 gives p = 1 - exp(-0) = 0
+            bond_p_.assign(n_edges, 0.0);
+        }
         for (std::size_t e = 0; e < n_edges; ++e) {
             const std::size_t i = static_cast<std::size_t>(cfg_.edges(0, e));
             const std::size_t j = static_cast<std::size_t>(cfg_.edges(1, e));
@@ -417,7 +431,10 @@ public:
             const double de = delta_e(e);
             if ((1.0 - de) * be > 0.0) has_residual = true;
             if (x_[i] == x_[j]) {
-                const double p_bond = -std::expm1(-de * be);
+                const double p_bond =
+                    scalar_bond ? p_bond_scalar
+                    : stored_bond ? edge_bond_prob_(e, de * be)
+                    : -std::expm1(-de * be);
                 if (uniform01(rng) < p_bond) union_sets_(i, j);
             }
         }
@@ -436,7 +453,7 @@ public:
         } else if (!has_residual) {
             // Case B — external field, full decoupling (δ = 1): clusters are
             //          conditionally independent; draw each ∝ exp{Σ_{i∈C} α_i(k)}.
-            recolour_field_independent_(*field, Q, rng);
+            recolour_field_independent_(field, Q, rng);
         } else {
             // Case C — partial decoupling (δ < 1): residual (1-δ)β couples
             //          neighbouring clusters. One systematic-scan Gibbs sweep
@@ -572,8 +589,19 @@ private:
         return fixed.empty() ? nullptr : &fixed;
     }
 
-    // External field (n x Q): ctx `field_key` (flattened) overrides cfg field.
-    const arma::mat* resolve_field_(std::size_t n, std::size_t Q) {
+    // Bond prob 1 - exp(-x) of edge e for x = δ_e·β_e; recomputed only when x
+    // differs from the x stored with it.
+    double edge_bond_prob_(std::size_t e, double x) {
+        if (bond_x_[e] != x) {
+            bond_x_[e] = x;
+            bond_p_[e] = -std::expm1(-x);
+        }
+        return bond_p_[e];
+    }
+
+    // External field, column-major (n x Q): ctx `field_key` (flattened)
+    // overrides cfg field; nullptr if neither. Read in place during step().
+    const double* resolve_field_(std::size_t n, std::size_t Q) {
         if (!cfg_.field_key.empty()) {
             auto it = context_.find(cfg_.field_key);
             if (it == context_.end()) {
@@ -590,19 +618,19 @@ private:
                         cfg_.field_key +
                         "' must have length n_vertices*n_states");
                 }
-                field_scratch_ = arma::reshape(it->second, n, Q);
-                return &field_scratch_;
+                return it->second.memptr();
             }
         }
-        return cfg_.field.empty() ? nullptr : &cfg_.field;
+        return cfg_.field.empty() ? nullptr : cfg_.field.memptr();
     }
 
     // Accumulate per-cluster field sums into field_sum_(root, k).
-    void accumulate_field_sums_(const arma::mat& field, std::size_t Q) {
+    void accumulate_field_sums_(const double* field, std::size_t Q) {
+        const std::size_t n = cfg_.n_vertices;
         field_sum_.zeros();
-        for (std::size_t i = 0; i < cfg_.n_vertices; ++i)
+        for (std::size_t i = 0; i < n; ++i)
             for (std::size_t k = 0; k < Q; ++k)
-                field_sum_(uf_parent_[i], k) += field(i, k);
+                field_sum_(uf_parent_[i], k) += field[i + k * n];
     }
 
     // Sample category k ~ softmax(logw_scratch_[0..Q-1]). Overwrites scratch.
@@ -626,7 +654,7 @@ private:
     }
 
     // Case B: field, full decoupling — independent cluster draw ∝ exp{Σ α}.
-    void recolour_field_independent_(const arma::mat& field, std::size_t Q,
+    void recolour_field_independent_(const double* field, std::size_t Q,
                                      std::mt19937_64& rng) {
         accumulate_field_sums_(field, Q);
         for (std::size_t r = 0; r < cfg_.n_vertices; ++r) {
@@ -639,11 +667,11 @@ private:
     // Case C: partial decoupling — one systematic Gibbs sweep over clusters,
     // conditional on current neighbour-cluster colours (Higdon §2.3).
     template <class BetaFn, class DeltaFn>
-    void recolour_cluster_gibbs_(const arma::mat* field, BetaFn beta_e,
+    void recolour_cluster_gibbs_(const double* field, BetaFn beta_e,
                                  DeltaFn delta_e, std::size_t n_edges,
                                  std::size_t Q, std::mt19937_64& rng) {
         const std::size_t n = cfg_.n_vertices;
-        if (field) accumulate_field_sums_(*field, Q);
+        if (field) accumulate_field_sums_(field, Q);
         else       field_sum_.zeros();
 
         // Residual inter-cluster adjacency (weight w_e = (1-δ_e)·β_e).
@@ -682,9 +710,11 @@ private:
     std::vector<double>        scratch_color_;
     // v1.2.1 recolour scratch.
     arma::mat                  field_sum_;     // (n x Q) cluster field sums
-    arma::mat                  field_scratch_; // (n x Q) reshaped ctx field
     std::vector<std::vector<std::pair<std::size_t, double>>> cluster_adj_;
     std::vector<double>        logw_scratch_;  // (Q) categorical-draw scratch
+    // Per-edge β or δ from cfg: bond_p_[e] = 1 - exp(-bond_x_[e]) (n_edges).
+    std::vector<double>        bond_x_;
+    std::vector<double>        bond_p_;
 };
 
 } // namespace AI4BayesCode
