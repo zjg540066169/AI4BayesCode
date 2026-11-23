@@ -12,6 +12,19 @@
 #include <RcppArmadillo.h>
 #endif
 #include "functions.h"
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
+// Forest::do_gibbs_fit stores the fit of every tree at the training X
+// (ntrees x N doubles) only while ntrees * N <= this bound, in doubles
+// (default 2^22 doubles, 32 MiB). Above the bound the fit of each tree before
+// its update is computed from the tree, as in do_gibbs. The draws are the
+// same in both cases. A definition before the first include of this header
+// replaces the default.
+#ifndef AI4BAYESCODE_SOFTBART_FIT_STORE_MAX_DOUBLES
+#define AI4BAYESCODE_SOFTBART_FIT_STORE_MAX_DOUBLES 4194304
+#endif
 
 #ifdef NoRcpp
 #define RCPP_CHECK_INTERRUPT() ((void)0)
@@ -181,6 +194,20 @@ class Forest {
 
   arma::umat tree_counts;
 
+  // Kept by do_gibbs_fit: fit_ = the sum in tree order of predict(trees[t], X)
+  // (= predict(trees, X)) and, while fit_store_allowed(trees.size(), N),
+  // tree_fit_[t] = predict(trees[t], X) (otherwise tree_fit_ is empty), for
+  // the tree parameters listed in fit_params_ and the X identified by
+  // fit_x_key_ and its dimensions.
+  std::vector<arma::vec> tree_fit_;
+  arma::vec fit_;
+  std::vector<double> fit_params_;
+  std::uint64_t fit_x_key_ = 0;
+  arma::uword fit_n_rows_ = 0, fit_n_cols_ = 0;
+  bool fit_kept_ = false;
+  static void append_fit_params(const Node* n, std::vector<double>& out);
+  void fit_params(std::vector<double>& out) const;
+
  public:
 
   /* Forest(Rcpp::List hypers_); */
@@ -208,6 +235,28 @@ class Forest {
   double get_sigma_mu();
   void clear_trees();
   void rollback();
+
+  // One iteration of do_gibbs(X, Y, X_test, 1) without the X_test prediction.
+  // predict(trees, X) and, while fit_store_allowed(trees.size(), X.n_rows),
+  // the per-tree fits at X are kept between calls and reused while the tree
+  // parameters and x_key are unchanged; the caller changes x_key whenever the
+  // content of X changes. Returns predict(trees, X) after the iteration.
+  const arma::vec& do_gibbs_fit(const arma::mat& X, const arma::vec& Y,
+                                std::uint64_t x_key);
+  // predict(trees, X) kept by the last do_gibbs_fit, or NULL when the trees
+  // or (X, x_key) differ from those it was computed for.
+  const arma::vec* kept_fit(const arma::mat& X, std::uint64_t x_key) const;
+  // True when num_tree * n_rows <= AI4BAYESCODE_SOFTBART_FIT_STORE_MAX_DOUBLES,
+  // the condition under which do_gibbs_fit stores the per-tree fits.
+  static bool fit_store_allowed(std::size_t num_tree, std::size_t n_rows) {
+    const unsigned long long max_doubles =
+        static_cast<unsigned long long>(AI4BAYESCODE_SOFTBART_FIT_STORE_MAX_DOUBLES);
+    return n_rows == 0 ||
+           static_cast<unsigned long long>(num_tree) <= max_doubles / n_rows;
+  }
+  // Number of per-tree fits stored by the last do_gibbs_fit: trees.size()
+  // when fit_store_allowed held at its end, 0 otherwise.
+  std::size_t tree_fit_store_size() const { return tree_fit_.size(); }
 
   // BART_unified additions: const accessors for tree serialization.
   const std::vector<Node*>& get_trees()   const { return trees; }
@@ -259,6 +308,9 @@ arma::vec predict(const std::vector<Node*>& forest,
 arma::vec predict(Node* node,
                   const arma::mat& X,
                   const Hypers& hypers);
+// predict(node, X, hypers) written into out (resized to X.n_rows).
+void predict_into(Node* node, const arma::mat& X, const Hypers& hypers,
+                  arma::vec& out);
 
 bool is_left(Node* n);
 
@@ -291,6 +343,26 @@ void TreeBackfit(std::vector<Node*>& forest, arma::vec& Y_hat,
                  const arma::vec& weights,
                  Hypers& hypers, const arma::mat& X, const arma::vec& Y,
                  const Opts& opts);
+// tree_fit: NULL, or on entry empty or predict(forest[t], X) for every tree;
+// on exit empty (after update_num_tree) or predict(forest[t], X) for every
+// tree.
+// fit_sum: NULL, or on exit the sum in tree order of predict(forest[t], X)
+// over the updated trees (= predict(forest, X)); empty after update_num_tree
+// or when hypers.num_tree != forest.size().
+void IterateGibbsWithS(std::vector<Node*>& forest, arma::vec& Y_hat, const arma::vec& weights,
+                       Hypers& hypers, const arma::mat& X, const arma::vec& Y,
+                       const Opts& opts, std::vector<arma::vec>* tree_fit,
+                       arma::vec* fit_sum);
+void IterateGibbsNoS(std::vector<Node*>& forest, arma::vec& Y_hat,
+                     const arma::vec& weights,
+                     Hypers& hypers, const arma::mat& X, const arma::vec& Y,
+                     const Opts& opts, std::vector<arma::vec>* tree_fit,
+                     arma::vec* fit_sum);
+void TreeBackfit(std::vector<Node*>& forest, arma::vec& Y_hat,
+                 const arma::vec& weights,
+                 Hypers& hypers, const arma::mat& X, const arma::vec& Y,
+                 const Opts& opts, std::vector<arma::vec>* tree_fit,
+                 arma::vec* fit_sum);
 double activation(double x, double c, double tau);
 void birth_death(Node* tree, const arma::mat& X, const arma::vec& Y,
                  const arma::vec& weights, Hypers& hypers);

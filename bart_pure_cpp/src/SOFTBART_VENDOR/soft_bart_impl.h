@@ -3,6 +3,7 @@
 // Vendored into AI4BayesCode.
 
 #include "soft_bart.h"
+#include <cstring>
 
 #ifndef NoRcpp
 using namespace Rcpp;
@@ -403,10 +404,20 @@ arma::vec predict(const std::vector<Node*>& forest,
 
 arma::vec predict(Node* n, const arma::mat& X, const Hypers& hypers) {
 
+  vec out;
+  predict_into(n, X, hypers, out);
+  return out;
+
+}
+
+// predict(n, X, hypers) written into out; out keeps its memory when it
+// already has X.n_rows elements.
+void predict_into(Node* n, const arma::mat& X, const Hypers& hypers, arma::vec& out) {
+
   std::vector<Node*> leafs = leaves(n);
   int num_leaves = leafs.size();
   int N = X.n_rows;
-  vec out = zeros<vec>(N);
+  out.zeros(N);
 
   for(int i = 0; i < N; i++) {
     n->GetW(X,i);
@@ -414,8 +425,6 @@ arma::vec predict(Node* n, const arma::mat& X, const Hypers& hypers) {
       out(i) = out(i) + leafs[j]->current_weight * leafs[j]->mu;
     }
   }
-
-  return out;
 
 }
 
@@ -612,20 +621,40 @@ Rcpp::List do_soft_bart(const arma::mat& X,
 void IterateGibbsWithS(std::vector<Node*>& forest, arma::vec& Y_hat, const arma::vec& weights,
                        Hypers& hypers, const arma::mat& X, const arma::vec& Y,
                        const Opts& opts) {
-  IterateGibbsNoS(forest, Y_hat, weights, hypers, X, Y, opts);
+  IterateGibbsWithS(forest, Y_hat, weights, hypers, X, Y, opts, NULL, NULL);
+}
+
+void IterateGibbsWithS(std::vector<Node*>& forest, arma::vec& Y_hat, const arma::vec& weights,
+                       Hypers& hypers, const arma::mat& X, const arma::vec& Y,
+                       const Opts& opts, std::vector<arma::vec>* tree_fit,
+                       arma::vec* fit_sum) {
+  IterateGibbsNoS(forest, Y_hat, weights, hypers, X, Y, opts, tree_fit, fit_sum);
   if(opts.update_s) UpdateS(forest, hypers);
   if(opts.update_alpha) hypers.UpdateAlpha();
-  if(opts.update_num_tree) update_num_tree(forest, hypers, opts, Y, Y - Y_hat, X);
+  if(opts.update_num_tree) {
+    update_num_tree(forest, hypers, opts, Y, Y - Y_hat, X);
+    // The forest changed (a tree added or removed, leaf values rescaled).
+    if(tree_fit != NULL) tree_fit->clear();
+    if(fit_sum != NULL) fit_sum->reset();
+  }
 }
 
 void IterateGibbsNoS(std::vector<Node*>& forest, arma::vec& Y_hat,
                      const arma::vec& weights,
                      Hypers& hypers, const arma::mat& X, const arma::vec& Y,
                      const Opts& opts) {
+  IterateGibbsNoS(forest, Y_hat, weights, hypers, X, Y, opts, NULL, NULL);
+}
+
+void IterateGibbsNoS(std::vector<Node*>& forest, arma::vec& Y_hat,
+                     const arma::vec& weights,
+                     Hypers& hypers, const arma::mat& X, const arma::vec& Y,
+                     const Opts& opts, std::vector<arma::vec>* tree_fit,
+                     arma::vec* fit_sum) {
 
 
   // Rcout << "Backfitting trees";
-  TreeBackfit(forest, Y_hat, weights, hypers, X, Y, opts);
+  TreeBackfit(forest, Y_hat, weights, hypers, X, Y, opts, tree_fit, fit_sum);
   arma::vec res = Y - Y_hat;
   arma::vec means = get_means(forest);
 
@@ -643,14 +672,43 @@ void TreeBackfit(std::vector<Node*>& forest, arma::vec& Y_hat,
                  const arma::vec& weights, Hypers& hypers, const arma::mat& X,
                  const arma::vec& Y,
                  const Opts& opts) {
+  TreeBackfit(forest, Y_hat, weights, hypers, X, Y, opts, NULL, NULL);
+}
+
+// With tree_fit holding predict(forest[t], X) for every tree, the fit of tree
+// t before its update is taken from tree_fit[t]; after its update tree_fit[t]
+// is set to its new fit. An empty tree_fit is filled. Without tree_fit the fit
+// of tree t before its update is computed from the tree.
+// fit_sum, when not NULL, is set to the sum of the new fits in tree order,
+// starting from zeros as predict(forest, X) does; when hypers.num_tree differs
+// from forest.size() it is left empty.
+void TreeBackfit(std::vector<Node*>& forest, arma::vec& Y_hat,
+                 const arma::vec& weights, Hypers& hypers, const arma::mat& X,
+                 const arma::vec& Y,
+                 const Opts& opts, std::vector<arma::vec>* tree_fit,
+                 arma::vec* fit_sum) {
 
   double MH_BD = 0.7;
   double MH_PRIOR = 0.4;
 
   int num_tree = hypers.num_tree;
+  const bool have_fit = tree_fit != NULL && tree_fit->size() == (std::size_t)num_tree;
+  if(tree_fit != NULL && !have_fit) tree_fit->assign(num_tree, arma::vec());
+  if(fit_sum != NULL) {
+    if((std::size_t)num_tree == forest.size()) {
+      *fit_sum = zeros<vec>(X.n_rows);
+    }
+    else {
+      fit_sum->reset();
+      fit_sum = NULL;
+    }
+  }
+  arma::vec fit_t;   // fit of tree t after its update, without tree_fit
   for(int t = 0; t < num_tree; t++) {
     // Rcout << "Getting backfit quantities";
-    arma::vec Y_star = Y_hat - predict(forest[t], X, hypers);
+    arma::vec Y_star;
+    if(have_fit) Y_star = Y_hat - (*tree_fit)[t];
+    else Y_star = Y_hat - predict(forest[t], X, hypers);
     arma::vec res = Y - Y_star;
 
     if(unif_rand() < MH_PRIOR) {
@@ -668,7 +726,19 @@ void TreeBackfit(std::vector<Node*>& forest, arma::vec& Y_hat,
     }
     if(opts.update_tau) forest[t]->UpdateTau(res, weights, X, hypers);
     forest[t]->UpdateMu(res, weights, X, hypers);
-    Y_hat = Y_star + predict(forest[t], X, hypers);
+    if(tree_fit != NULL) {
+      predict_into(forest[t], X, hypers, (*tree_fit)[t]);
+      Y_hat = Y_star + (*tree_fit)[t];
+      if(fit_sum != NULL) *fit_sum = *fit_sum + (*tree_fit)[t];
+    }
+    else if(fit_sum != NULL) {
+      predict_into(forest[t], X, hypers, fit_t);
+      Y_hat = Y_star + fit_t;
+      *fit_sum = *fit_sum + fit_t;
+    }
+    else {
+      Y_hat = Y_star + predict(forest[t], X, hypers);
+    }
   }
 }
 
@@ -1901,6 +1971,117 @@ arma::umat Forest::get_tree_counts() {
 
 arma::vec Forest::do_predict(const arma::mat& X) {
   return predict(trees, X, hypers);
+}
+
+// Appends, in pre-order, every node field that predict(n, X, hypers) reads
+// (root weight excluded): is_leaf, then mu (leaf) or var, val, tau (branch).
+void Forest::append_fit_params(const Node* n, std::vector<double>& out) {
+  if(n->is_leaf) {
+    out.push_back(0.0);
+    out.push_back(n->mu);
+    return;
+  }
+  out.push_back(1.0);
+  out.push_back((double)n->var);
+  out.push_back(n->val);
+  out.push_back(n->tau);
+  append_fit_params(n->left, out);
+  append_fit_params(n->right, out);
+}
+
+void Forest::fit_params(std::vector<double>& out) const {
+  out.clear();
+  out.push_back((double)trees.size());
+  for(std::size_t t = 0; t < trees.size(); t++) {
+    out.push_back(trees[t]->current_weight);
+    append_fit_params(trees[t], out);
+  }
+}
+
+const arma::vec* Forest::kept_fit(const arma::mat& X, std::uint64_t x_key) const {
+  if(!fit_kept_ || x_key != fit_x_key_ || X.n_rows != fit_n_rows_ ||
+     X.n_cols != fit_n_cols_) return NULL;
+  std::vector<double> params;
+  fit_params(params);
+  // Bitwise comparison: equal bits give equal predictions.
+  if(params.size() != fit_params_.size() ||
+     std::memcmp(params.data(), fit_params_.data(), params.size() * sizeof(double)) != 0)
+    return NULL;
+  return &fit_;
+}
+
+const arma::vec& Forest::do_gibbs_fit(const arma::mat& X, const arma::vec& Y,
+                                      std::uint64_t x_key) {
+
+  // fit_ = predict(trees, X, hypers), the value do_gibbs starts from. While
+  // ntrees * N is within the store bound, tree_fit_ holds the per-tree fits
+  // (TreeBackfit fills an empty tree_fit_) and fit_ is their sum in tree
+  // order; above the bound tree_fit_ is released and the fit of each tree
+  // before its update is computed from the tree.
+  const bool store = fit_store_allowed(trees.size(), X.n_rows);
+  if(!store) std::vector<arma::vec>().swap(tree_fit_);
+  if(kept_fit(X, x_key) == NULL) {
+    if(store) {
+      tree_fit_.resize(trees.size());
+      for(std::size_t t = 0; t < trees.size(); t++) predict_into(trees[t], X, hypers, tree_fit_[t]);
+      fit_ = zeros<vec>(X.n_rows);
+      for(std::size_t t = 0; t < trees.size(); t++) fit_ = fit_ + tree_fit_[t];
+    }
+    else {
+      fit_ = predict(trees, X, hypers);
+    }
+  }
+  fit_kept_ = false;   // until the iteration below has completed
+  vec Y_hat = fit_;
+  arma::vec weights = arma::ones<arma::vec>(Y.n_elem);
+  std::vector<arma::vec>* tree_fit = store ? &tree_fit_ : NULL;
+
+  int num_warmup = floor(opts.num_burn / 2.0);
+
+  // On return fit_ is the sum of the updated trees' fits in tree order.
+  if(opts.update_s && (num_gibbs > num_warmup)) {
+    IterateGibbsWithS(trees, Y_hat, weights, hypers, X, Y, opts, tree_fit, &fit_);
+  }
+  else {
+    IterateGibbsNoS(trees, Y_hat, weights, hypers, X, Y, opts, tree_fit, &fit_);
+  }
+  num_gibbs++;
+  if(num_gibbs % opts.num_print == 0) {
+    Rcout << "Finishing iteration " << num_gibbs
+          // << ": num_trees = " << hypers.num_tree
+          << std::endl;
+  }
+  if(opts.cache_trees) {
+    saved_forests.push_back(copy_forest(trees, hypers));
+  }
+
+  // update_num_tree leaves fit_ and tree_fit_ empty (fit_ is also empty when
+  // hypers.num_tree != trees.size()); they are then computed for the current
+  // trees. The number of trees may have changed, so the bound is evaluated
+  // again.
+  const bool store_end = fit_store_allowed(trees.size(), X.n_rows);
+  if(!store_end) {
+    std::vector<arma::vec>().swap(tree_fit_);
+  }
+  else if(tree_fit_.size() != trees.size()) {
+    tree_fit_.resize(trees.size());
+    for(std::size_t t = 0; t < trees.size(); t++) predict_into(trees[t], X, hypers, tree_fit_[t]);
+  }
+  if(fit_.n_elem != X.n_rows) {
+    if(store_end) {
+      fit_ = zeros<vec>(X.n_rows);
+      for(std::size_t t = 0; t < trees.size(); t++) fit_ = fit_ + tree_fit_[t];
+    }
+    else {
+      fit_ = predict(trees, X, hypers);
+    }
+  }
+  fit_params(fit_params_);
+  fit_x_key_ = x_key;
+  fit_n_rows_ = X.n_rows;
+  fit_n_cols_ = X.n_cols;
+  fit_kept_ = true;
+  return fit_;
 }
 
 double Forest::get_sigma_mu() {

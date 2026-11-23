@@ -87,6 +87,7 @@
 #include "AI4BayesCode/backend_neutral.hpp"   // ai4b::stop / ai4b::warning
 
 #include <cmath>
+#include <cstdint>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -166,6 +167,7 @@ public:
             cfg_.width, cfg_.shape, cfg_.tau_rate,
             cfg_.alpha_scale, cfg_.alpha_shape_1, cfg_.alpha_shape_2,
             cfg_.dart, cfg_.verbose);
+        model_x_key_ = impl_->x_key();
 
         // Honour cfg_.center_Y: re-set Y after construction with the
         // requested centering. (softbart_model's constructor copies Y
@@ -300,6 +302,7 @@ public:
         }
         impl_->set_X(X_new);
         cfg_.x_train = X_new;
+        model_x_key_ = impl_->x_key();
         refresh_current_fit_();
     }
 
@@ -314,6 +317,7 @@ public:
         impl_->set_data(X_new, y_new, cfg_.center_Y);
         cfg_.x_train = X_new;
         cfg_.y_init  = y_new;
+        model_x_key_ = impl_->x_key();
         refresh_current_fit_();
     }
 
@@ -450,9 +454,12 @@ public:
 
 private:
     void refresh_current_fit_() {
-        // SoftBart's predict() walks the live forest at X_train and
-        // returns an arma::vec directly (kernel is pure-arma).
-        current_fit_ = impl_->predict(cfg_.x_train);
+        // f(cfg_.x_train) at the live forest. The kernel keeps f at its own
+        // X after each sweep; that X equals cfg_.x_train while the kernel's
+        // X key is the one recorded when this block last set it.
+        const arma::vec* kept = (impl_->x_key() == model_x_key_)
+                                    ? impl_->train_fit() : nullptr;
+        current_fit_ = kept ? *kept : impl_->predict(cfg_.x_train);
         if (keep_history_) {
             history_fit_buf_.push_back(current_fit_);
         }
@@ -462,6 +469,7 @@ private:
     std::unique_ptr<softbart::softbart_model> impl_;
     arma::vec                                current_fit_;
     std::vector<arma::vec>                   history_fit_buf_;
+    std::uint64_t                            model_x_key_ = 0;
 
     double sigma_override_ = -1.0;
 };

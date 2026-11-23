@@ -20,6 +20,8 @@
 #define SOFTBART_MODEL_H_
 
 #include <armadillo>
+#include <cctype>
+#include <cstdint>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -53,17 +55,41 @@ inline ::Node* deserialize_node_(std::istream& is) {
   }
   return nullptr;
 }
+// A stump is written "L mu tau": its tau is not on any branch line.
 inline std::string serialize_forest_to_str(const std::vector<::Node*>& trees) {
   std::ostringstream os; os << trees.size() << "\n";
-  for (auto* t : trees) { serialize_node_(os, t); os << "---\n"; }
+  for (auto* t : trees) {
+    if (t != nullptr && t->is_leaf)
+      os << "L " << std::setprecision(17) << t->mu << " " << std::setprecision(17) << t->tau << "\n";
+    else serialize_node_(os, t);
+    os << "---\n";
+  }
   return os.str();
+}
+// Reads the tau after the mu of a stump; false (tau unchanged) when the next
+// token does not start a number, as in strings that have no stump tau.
+inline bool read_stump_tau_(std::istream& is, double& tau) {
+  if (!(is >> std::ws)) return false;
+  const int c = is.peek();
+  if (!(std::isdigit(c) || c == '.' || c == '+')) return false;
+  return static_cast<bool>(is >> tau);
+}
+// Sets the node fields a tree string does not carry: [lower, upper] of every
+// branch (GetLimits in pre-order, the values BirthLeaves and
+// perturb_decision_rule keep) and the tau of every leaf (its parent's tau, as
+// AddLeaves sets it).
+inline void restore_derived_fields_(::Node* n) {
+  if (n->is_leaf) return;
+  n->GetLimits();
+  if (n->left->is_leaf) n->left->tau = n->tau; else restore_derived_fields_(n->left);
+  if (n->right->is_leaf) n->right->tau = n->tau; else restore_derived_fields_(n->right);
 }
 inline std::vector<::Node*> deserialize_forest_from_str(const std::string& s) {
   std::istringstream is(s); std::size_t n_trees=0; is >> n_trees;
   std::vector<::Node*> trees; trees.reserve(n_trees);
   for (std::size_t t=0;t<n_trees;++t) {
     ::Node* root = deserialize_node_(is);
-    if (root) { root->is_root=true; root->parent=nullptr; }
+    if (root) { root->is_root=true; root->parent=nullptr; if (root->is_leaf) read_stump_tau_(is, root->tau); }
     trees.push_back(root); std::string sep; is >> sep;
   }
   return trees;
@@ -152,6 +178,7 @@ class softbart_model {
     if ((std::size_t)X_new.n_cols != p_) throw std::invalid_argument("softbart::set_X: ncol != p");
     if ((std::size_t)X_new.n_rows != N_) throw std::invalid_argument("softbart::set_X: nrow != N");
     X_arma_ = X_new;
+    ++x_key_;
   }
   void set_Y(const arma::vec& Y_new, bool center_Y=false) {
     if ((std::size_t)Y_new.n_elem != N_) throw std::invalid_argument("softbart::set_Y: length != N");
@@ -171,17 +198,22 @@ class softbart_model {
   void startdart() { /* DART set at construction */ }
 
   void update_step() {
-    arma::mat X_dummy(0, p_); arma::vec Y_work = Y_arma_ - offset_arma_;
-    forest_->do_gibbs(X_arma_, Y_work, X_dummy, 1);
+    arma::vec Y_work = Y_arma_ - offset_arma_;
+    forest_->do_gibbs_fit(X_arma_, Y_work, x_key_);
     record_history_();
   }
   void update_step(double sigma_external) {
     forest_->set_sigma(sigma_external);
-    arma::mat X_dummy(0, p_); arma::vec Y_work = Y_arma_ - offset_arma_;
-    forest_->do_gibbs(X_arma_, Y_work, X_dummy, 1);
+    arma::vec Y_work = Y_arma_ - offset_arma_;
+    forest_->do_gibbs_fit(X_arma_, Y_work, x_key_);
     forest_->set_sigma(sigma_external);
     record_history_();
   }
+  // f(X) at the training X for the current forest as kept by the last
+  // update_step; nullptr when the forest or X changed after it.
+  const arma::vec* train_fit() const { return forest_->kept_fit(X_arma_, x_key_); }
+  // Changes whenever set_X or set_data replaces the training X.
+  std::uint64_t x_key() const { return x_key_; }
 
   void set_history(bool on) { history_recording_ = on; }
   bool history_recording() const { return history_recording_; }
@@ -220,21 +252,25 @@ class softbart_model {
       ::Node* root = deserialize_node_(is);
       if (!root) { cleanup(); throw std::invalid_argument("softbart::set_tree: failed to parse a tree"); }
       root->is_root=true; root->parent=nullptr; root->current_weight=1.0;
+      // A stump without a tau (older strings) gets the tau of a new root.
+      if (root->is_leaf && !read_stump_tau_(is, root->tau)) root->tau = forest_->get_hypers().width;
       std::string sep;
       if (!(is>>sep)||sep!="---") { delete root; cleanup(); throw std::invalid_argument("softbart::set_tree: expected '---'"); }
       new_trees.push_back(root);
     }
     const int depth_max=50; const double tau_max=1e10;
     for (std::size_t t=0;t<T;++t) { std::string msg;
-      if (!validate_soft_node_(new_trees[t],(int)p_,0,depth_max,tau_max,msg)) { cleanup(); throw std::invalid_argument("softbart::set_tree: invalid tree -- "+msg); } }
+      if (!validate_soft_node_(new_trees[t],(int)p_,0,depth_max,tau_max,msg)) { cleanup(); throw std::invalid_argument("softbart::set_tree: invalid tree -- "+msg); }
+      const double tau=new_trees[t]->tau;
+      if (new_trees[t]->is_leaf && (!std::isfinite(tau)||!(tau>0.0)||!(tau<=tau_max))) { cleanup(); throw std::invalid_argument("softbart::set_tree: invalid tree -- tau out of range"); } }
     std::string trailing;
     if (is>>trailing) { cleanup(); throw std::invalid_argument("softbart::set_tree: unexpected trailing content"); }
+    for (auto* t : new_trees) restore_derived_fields_(t);
     forest_->set_trees(std::move(new_trees));
   }
   arma::vec predict(const arma::mat& X_test) const {
     if ((std::size_t)X_test.n_cols != p_) throw std::invalid_argument("softbart::predict: ncol != p");
-    arma::mat Xt = X_test;
-    return forest_->do_predict(Xt);
+    return forest_->do_predict(X_test);
   }
   double current_sigma() const    { return forest_->get_sigma(); }
   double current_sigma_mu() const { return forest_->get_sigma_mu(); }
@@ -261,6 +297,7 @@ class softbart_model {
   int ntrees_; bool dart_;
   std::unique_ptr<::Forest> forest_;
   arma::mat X_arma_; arma::vec Y_arma_; arma::vec offset_arma_;
+  std::uint64_t x_key_ = 0;   // incremented on every write of X_arma_
   bool history_recording_;
   std::vector<std::string> tree_history_;
   std::vector<double> sigma_history_, sigma_mu_history_;
