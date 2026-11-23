@@ -184,6 +184,33 @@ namespace {
 // likelihood, not prior -- see skills/codegen.md Sec.2a).
 // ===========================================================================
 
+// Derived key "sse": SSE = ||y - X*beta||^2 via armadillo / BLAS (skill
+// Sec.6.1). sigma's slice sampler evaluates its density several times per
+// sweep with beta fixed, so SSE is computed once per sweep instead: after the
+// rjmcmc block writes beta, and before the first sweep after construction or
+// set_current.
+arma::vec spike_slab_sse(const AI4BayesCode::shared_data_t& d) {
+    const arma::vec& y      = d.get("y");
+    const arma::vec& X_flat = d.get("X");
+    const arma::vec& beta   = d.get("beta");
+    const std::size_t N = y.n_elem;
+    const std::size_t p = beta.n_elem;
+    // set_current(X) with a new row count and no y leaves X and y of
+    // different lengths until y is set. The N x p view below requires
+    // exactly N * p elements of X: with fewer it extends past the end of X,
+    // with more its columns are misaligned.
+    if (static_cast<std::size_t>(X_flat.n_elem) != N * p)
+        ai4b::stop("X has %zu rows but y has length %zu; set X and y "
+                   "together before step()",
+                   p > 0 ? static_cast<std::size_t>(X_flat.n_elem) / p
+                         : static_cast<std::size_t>(0),
+                   N);
+    const arma::mat X(const_cast<double*>(X_flat.memptr()),
+                      N, p, /*copy_aux_mem=*/false, /*strict=*/true);
+    arma::vec res = y - X * beta;                                  // length N
+    return arma::vec{arma::dot(res, res)};
+}
+
 // p(sigma | y, X, beta, tau, gamma) -- natural-scale, sigma-scaled slab.
 //
 // Pieces, in sigma:
@@ -207,18 +234,12 @@ double sigma_natural_log_density(const arma::vec& sigma_nat,
                                  arma::vec* grad_nat) {
     const double sigma = sigma_nat[0];
     const arma::vec& y      = ctx.at("y");
-    const arma::vec& X_flat = ctx.at("X");
     const arma::vec& beta   = ctx.at("beta");
     const arma::vec& gamma  = ctx.at("gamma");
     const double     tau    = ctx.at("tau")[0];
+    const double     sse    = ctx.at("sse")[0];   // spike_slab_sse()
     const std::size_t N = y.n_elem;
     const std::size_t p = beta.n_elem;
-
-    // SSE = ||y - X*beta||^2 via armadillo / BLAS (skill Sec.6.1).
-    const arma::mat X(const_cast<double*>(X_flat.memptr()),
-                      N, p, /*copy_aux_mem=*/false, /*strict=*/true);
-    arma::vec res = y - X * beta;                                  // length N
-    const double sse = arma::dot(res, res);
 
     // Active-set count and ||beta_active||^2: irregular index pattern
     // (mask by gamma); scalar loop is correct.
@@ -565,10 +586,15 @@ public:
         // Dependency DAG.
         // Under sigma-scaled slab, sigma's conditional depends on tau, gamma,
         // beta (slab prior contributes to sigma's density). Similarly for tau.
+        // sigma's density depends on X only through the derived key
+        // "sse" = ||y - X beta||^2, recomputed after gamma_beta_rj writes beta
+        // (and by step() after construction or set_current).
+        impl_->data().register_refresher("sse", &spike_slab_sse);
+        impl_->data().declare_invalidates("gamma_beta_rj", {"sse"});
         impl_->data().declare_dependencies(
             "pi",    {"gamma", "a_pi", "b_pi", "p"});
         impl_->data().declare_dependencies(
-            "sigma", {"y", "X", "beta", "gamma", "tau"});
+            "sigma", {"y", "sse", "beta", "gamma", "tau"});
         impl_->data().declare_dependencies(
             "tau",   {"beta", "gamma", "sigma"});
         impl_->data().declare_dependencies(
@@ -755,6 +781,22 @@ public:
     void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
         if (n_steps < 0) ai4b::stop("n_steps must be >= 0");
+        // Within a sweep "sse" is refreshed after gamma_beta_rj; recompute it
+        // here when construction or set_current may have changed y, X or beta.
+        // It is recomputed here, before the first sweep, and not inside
+        // set_current, for two reasons: a check in set_current can throw
+        // after beta has been written, which would skip a refresh at the end
+        // of the call; and X and y can be set in separate set_current calls,
+        // so an SSE computed between them would combine X and y of different
+        // lengths (spike_slab_sse raises an error on that state). step(0)
+        // computes nothing and can run between the two calls. This deferral
+        // is valid only for keys used inside step(), as "sse" is (by sigma's
+        // density only); a key used by get_current() or predict_at() has to
+        // be refreshed inside set_current.
+        if (n_steps > 0 && sse_stale_) {
+            impl_->data().refresh_key("sse");
+            sse_stale_ = false;
+        }
         for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
     }
 
@@ -772,6 +814,7 @@ public:
     }
 
     void set_current(const AI4BayesCode::state_map& params) {
+        sse_stale_ = true;   // y, X or beta may change below, even if a check throws
         // Backend-neutral I/O: every value is an arma::vec (frontend already
         // converted R list / Python dict). X arrives as a VECTORISED N*p
         // arma::vec, column-major (element (i,j) at index i + j*N), matching
@@ -1031,6 +1074,7 @@ private:
     mutable std::mt19937_64          predict_rng_;
     std::unique_ptr<composite_block> impl_;
     bool                             keep_history_ = false;
+    bool                             sse_stale_ = true;   // step() recomputes "sse" first
     std::size_t                      N_ = 0;
     std::size_t                      p_ = 0;
 };
