@@ -26,6 +26,8 @@
  *  Modifications by Jungang Zou, 2026.
  *  - draw() runs the collapsed change move (cchange.h) on every tree after birth/death.
  *  - draw() keeps the fit of every tree between draws.
+ *  - The birth proposal (bprop_bart) tests whether the parent of the chosen node is a nog with isnog().
+ *  - setdata() recounts the split counts from the forest, and sety() replaces y only.
  *
  *  These modifications comply with the terms of the GNU General Public License 
  *  version 2 (GPL-2).

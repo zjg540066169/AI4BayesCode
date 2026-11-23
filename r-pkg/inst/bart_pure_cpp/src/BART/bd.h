@@ -18,6 +18,20 @@
  *  https://www.R-project.org/Licenses/GPL-2
  */
 
+/*
+ *  Modifications by Jungang Zou, 2024.
+ *  - To make it easier to compile, I move the function definitions in the separate
+ *  .cpp file to this file, and merge them with declaration. The helper functions of
+ *  bd() are defined in this file with the suffix _bd (cansplit_bd, drawnodemu_bd,
+ *  lh_bd, getgoodvars_bd, getsuff_bd, bprop_bd, pgrow_bd, dprop_bd, getpb_bd).
+ *
+ *  Modifications by Jungang Zou, 2026.
+ *  - The birth proposal (bprop_bd) tests whether the parent of the chosen node is a nog with isnog().
+ *
+ *  These modifications comply with the terms of the GNU General Public License
+ *  version 2 (GPL-2).
+ */
+
 #ifndef GUARD_bd_h
 #define GUARD_bd_h
 

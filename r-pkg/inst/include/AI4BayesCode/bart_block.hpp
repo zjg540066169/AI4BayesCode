@@ -62,7 +62,8 @@
  *    Trigger                Kernel refresh path                   Cost
  *    ---------------------  ------------------------------------  -----
  *    step()                 heterbart::draw incremental update    O(1)
- *    set_X / set_data       bm.setdata() -> predict(allfit)       O(N*T*d)
+ *    set_X / set_data       bm.setdata() rebuilds allfit (and     O(N*T*d)
+ *                           the kept tree fits)
  *    set_Y                  trees(x) unchanged, fmean updated     O(1)
  *    set_tree(s)            bm.refresh_allfit() in-memory walk    O(N*T*d)
  *
@@ -210,14 +211,14 @@ struct bart_block_config {
     long   numcut   = 100;
     bool   usequants = false;
     bool   cont     = false;
-    bool   rm_const = false;
+    bool   rm_const = false;   // no effect; kept for source compatibility
     double k        = 2.0;
     double power    = 2.0;
     double base     = 0.95;
     double nu       = 3.0;
     /// Reserved for future use; the new bart_model constructor ignores
-    /// it (it derives sigest from OLS residuals when p<n, else from
-    /// sd(y_init)).
+    /// it (it derives sigest from OLS residuals, sqrt(RSS / (n - rank)),
+    /// when p<n and RSS > 0, else from sd(y_init)).
     double sigma_init = 1.0;
 
     /// Request DART (Linero 2018). The new stdbart::bart_model hardcodes
@@ -287,7 +288,8 @@ public:
 
         // Initial fit is fmean for every row (empty stumps at
         // construction; bm.allfit[] was initialized by bm.setdata() in
-        // the kernel ctor via predict(p, n, x, allfit)). Read it via
+        // the kernel ctor, which rebuilds allfit (and the kept tree
+        // fits)). Read it via
         // the same in-memory accessor used by refresh_current_fit_()
         // — never round-trip through serialize on the internal path.
         current_fit_ = impl_->current_fit_train();
@@ -525,6 +527,13 @@ public:
 
     /// Current sigma inside the internal bart_model.
     double current_sigma() const { return impl_->current_sigma(); }
+
+    /// sigest and lambda of the calibrated sigma prior, as computed by the
+    /// bart_model constructor: lambda = sigest^2 qchisq(0.1, nu) / nu, with
+    /// sigest from the OLS residuals, or sd(y_init) in the fallbacks (where
+    /// current_sigma() starts at 1).
+    double prior_sigest() const { return impl_->get_sigest(); }
+    double prior_lambda() const { return impl_->get_lambda(); }
 
     /// Current split-variable probabilities (length p).
     arma::vec current_var_probs() const {

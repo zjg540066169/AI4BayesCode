@@ -23,6 +23,9 @@
  *  - To make it easier to compile, I move the function definitions in the separate 
  *  .cpp file to this file, and merge them with declaration.
  *
+ *  Modifications by Jungang Zou, 2026.
+ *  - The birth proposal (bprop) tests whether the parent of the chosen node is a nog with isnog().
+ *
  *  These modifications comply with the terms of the GNU General Public License 
  *  version 2 (GPL-2).
  */

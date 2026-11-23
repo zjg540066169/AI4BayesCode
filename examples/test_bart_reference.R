@@ -18,10 +18,12 @@
 #
 # WHAT WE COMPARE
 # ---------------
-# Note: AI4BayesCode's BartNoise uses a Half-Normal(0, 10) prior on sigma,
-# while BART::wbart uses a data-dependent scaled-chi2 prior (nu=3, with
-# lambda set from data). These priors are NOT equivalent, so we do
-# not expect identical posteriors for sigma. The primary check is
+# Note: AI4BayesCode's BartNoise and BART::wbart use the same
+# data-dependent scaled-chi2 prior on sigma (nu=3, with lambda set from
+# the same sigest), but the sigma draws are strongly autocorrelated (in
+# this setting wbart's 1000 draws have an effective size (coda's
+# effectiveSize) of about 15, and of 4 to 83 with 20 other seeds), so
+# the sigma means differ by Monte Carlo error. The primary check is
 # therefore on the SHAPES of the posterior fit and prediction: if both
 # samplers are computing correct posteriors, the posterior mean fits
 # should be strongly linearly correlated across training points even
@@ -33,11 +35,11 @@
 #         posterior structure. A correlation near 1.0 is strong
 #         independent validation of the AI4BayesCode tree sampler.
 #   (b) Loose bounds on absolute differences
-#         Mean absolute difference in fit < 0.30 * sigma. This is
-#         loose because of the sigma prior mismatch.
+#         Mean absolute difference in fit < 0.10 * sd(y). This is
+#         loose because of the Monte Carlo error.
 #
 # We DO NOT use sigma mean agreement as a primary criterion because
-# the priors differ. We report the sigma summaries for context only.
+# of that Monte Carlo error. We report the sigma summaries for context only.
 # ----------------------------------------------------------------------------
 
 suppressPackageStartupMessages({
@@ -155,14 +157,14 @@ fit_corr  <- cor(bmc_fit_mean,  ref_fit_mean)
 pred_corr <- cor(bmc_pred_mean, ref_pred_mean)
 
 # Normalize by observation sd (not by sigma, which differs between
-# the two samplers due to the prior mismatch and makes the normalized
+# the two samplers by Monte Carlo error and makes the normalized
 # numbers hard to interpret).
 sd_y <- sd(y_train)
 
 cat("Posterior summary comparison:\n")
 cat(sprintf("                    %-14s  %-14s\n",
             "AI4BayesCode", "BART::wbart"))
-cat(sprintf("  sigma mean        %-14.4f  %-14.4f   (priors differ;\n",
+cat(sprintf("  sigma mean        %-14.4f  %-14.4f   (same prior;\n",
             bmc_sigma_mean, ref_sigma_mean))
 cat(sprintf("  sigma sd          %-14.4f  %-14.4f    not compared)\n",
             bmc_sigma_sd, ref_sigma_sd))

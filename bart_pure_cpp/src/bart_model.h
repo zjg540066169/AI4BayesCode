@@ -131,6 +131,13 @@ public:
     p = (long)this->stored_x_.n_rows;
 
     // ---- sigma prior calibration ----
+    // With p < n, sigest = sqrt(RSS / (n - rank)): RSS and rank of the least-squares fit of y - mean(y) on an
+    // intercept (first column) and the columns of x_train, rank counted as lm() in R counts it (see ls_rss_), so
+    // sigest equals summary(lm(y ~ ., data.frame(x, y)))$sigma, the sigest of BART::wbart, up to rounding. A constant
+    // column is linearly dependent on the intercept and is not counted in the rank; rm_const has no effect (the
+    // argument is kept for source compatibility).
+    // sigest = sd(y) when p >= n, when RSS <= 0 (RSS is 0 for a saturated design, rank = n) or when n - rank <= 0.
+    // The initial sigma is sigest, or 1 when sigest = sd(y). get_sigest() and get_lambda() return sigest and lambda.
     double sigest = (n > 1) ? arma::stddev(y_train) : 1.0;   // R sd: /(n-1)
     if (p < n) {
       if (!x_train.is_finite())
@@ -138,18 +145,18 @@ public:
           "bart_model: x_train must be finite (it has a NaN or infinite value); the sigma prior is calibrated from "
           "the least-squares fit of y_train on x_train");
       arma::mat xr = x_train;
-      bool has_const = false;
-      if (!rm_const)
-        for (arma::uword j = 0; j < xr.n_cols; ++j)
-          if (arma::all(xr.col(j) == 1.0)) { has_const = true; break; }
-      if (!has_const) xr.insert_cols(0, arma::ones<arma::vec>(n));
-      arma::vec yr = y_train;
-      double sig2 = ls_rss_(xr, yr) / (double)(n - p);   // residual sum of squares of the least-squares fit / (n - p)
-      if (sig2 > 0) { sigest = std::sqrt(sig2); sigma = sigest; }
+      xr.insert_cols(0, arma::ones<arma::vec>(n));
+      arma::vec yr = y_train - arma::mean(y_train);
+      arma::uword rank = 0;
+      const double rss = ls_rss_(xr, yr, rank);   // residual sum of squares of the least-squares fit
+      if (rss > 0 && (long)rank < n) { sigest = std::sqrt(rss / (double)(n - (long)rank)); sigma = sigest; }
     }
-    // R::qchisq(1-0.9, nu).  Under the R (Rcpp) build bart_sf (r_compat.h)
+    (void)rm_const;
+    this->sigest_ = sigest;
+    // qchisq(0.1, nu).  Under the R (Rcpp) build bart_sf (r_compat.h)
     // is compiled out, so use Rcpp's R::qchisq (= ::Rf_qchisq) directly;
-    // under NoRcpp use the pure-C++ bart_sf shim.  Same value either way.
+    // under NoRcpp use the pure-C++ bart_sf shim.  The two can differ in
+    // the last bits (1 ulp at nu = 3).
 #if defined(NoRcpp)
     double qchi  = bart_sf::qchisq(0.1, nu);
 #else
@@ -321,20 +328,21 @@ public:
 
 private:
   // Residual sum of squares of the least-squares fit of r on the columns of A (n x k, column-major; A and r are
-  // overwritten), by Householder reflections in a fixed order of operations: the value depends on the input only, not
-  // on the BLAS / LAPACK library, its threads or the alignment of the data. A column whose norm after the earlier
-  // reflections is at most max(n, k) eps times its initial norm lies in the span of the earlier columns and is skipped.
+  // overwritten), and in rank the number of columns used, by Householder reflections in a fixed order of operations:
+  // the value depends on the input only, not on the BLAS / LAPACK library, its threads or the alignment of the data.
+  // A column whose norm after the earlier reflections is below 1e-7 times its initial norm (below 1e-7 for a zero
+  // column) is skipped and not counted in rank, the rank rule of lm() in R (tol = 1e-7, columns in the order of A).
   // The columns are taken in panels of nb: the reflections of the panel's earlier columns are applied to column j of
   // the panel, and then the panel's reflections are applied to every later column, two columns at a time, and to r.
   // Every column has the same reflections applied in the same order, with the same operations, as when each reflection
-  // is applied to all later columns as soon as it is formed, so the value is the same bit for bit (unless the compiler
-  // may contract multiplications and additions across statements, e.g. -ffp-contract=fast); the passes over the later
-  // columns drop from one per reflection to one per panel.
-  static double ls_rss_(arma::mat& A, arma::vec& r) {
+  // is applied to all later columns as soon as it is formed, so the value is the same bit for bit when the compiler
+  // fuses the multiply-adds of reflect_ and reflect2_ alike (Apple clang and GCC at -O1 to -O3; not with
+  // -ffp-contract=fast); the passes over the later columns drop from one per reflection to one per panel.
+  static double ls_rss_(arma::mat& A, arma::vec& r, arma::uword& rank) {
     const arma::uword n = A.n_rows, k = A.n_cols, nb = 32;
-    const double tol = (double)std::max(n, k) * std::numeric_limits<double>::epsilon();
+    const double tol = 1e-7;
     std::vector<double> nrm0(k);
-    for (arma::uword j = 0; j < k; ++j) nrm0[j] = norm2_(A.colptr(j), n);
+    for (arma::uword j = 0; j < k; ++j) { const double s0 = norm2_(A.colptr(j), n); nrm0[j] = s0 > 0.0 ? s0 : 1.0; }
     std::vector<const double*> pv(nb);   // reflection a of the current panel: vector pv[a] on rows row0 + a .. n - 1,
     std::vector<double> ph(nb);          // H = I - v v' / ph[a]
     arma::uword row = 0;
@@ -347,7 +355,7 @@ private:
         double* v = cj + row;
         const arma::uword len = n - row;
         const double s = norm2_(v, len);
-        if (!(s > tol * nrm0[j])) continue;
+        if (!(s >= tol * nrm0[j])) continue;
         const double a0 = v[0];
         v[0] = a0 + (a0 >= 0.0 ? s : -s);          // v = a + sign(a0) s e1; H = I - v v' / (s (s + |a0|))
         pv[q] = v; ph[q] = s * (s + std::fabs(a0));
@@ -365,6 +373,7 @@ private:
     }
     double rss = 0.0;
     for (arma::uword i = row; i < n; ++i) rss += r[i] * r[i];
+    rank = row;
     return rss;
   }
   // c -= v (v'c) / h over len entries, v'c summed in four partial sums in a fixed order
@@ -512,6 +521,7 @@ public:
   }
   double get_lambda() const { return lambda; }
   double get_nu()     const { return nu; }
+  double get_sigest() const { return sigest_; }   // sigest of the sigma prior (constructor)
 
   // Live cached fit on stored x_train (O(n)); mu added back.
   arma::vec current_fit_train() const {
@@ -673,7 +683,7 @@ private:
   double sigmaf = 0.0, tau = 0.0;
   double *ix = nullptr, *iy = nullptr;
   double alpha = 0.95, mybeta = 2.0, fmean = 0.0, sigma = 1.0,
-         nu = 3.0, lambda = 1.0;
+         nu = 3.0, lambda = 1.0, sigest_ = 1.0;
   bool center_y = true;
 
   arn gen;            // R-named RNG, backed by r_compat.h (pure C++)

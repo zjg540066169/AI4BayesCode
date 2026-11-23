@@ -163,19 +163,32 @@ All other BART hyperparameters (`ntrees`, `k`, `power`, `base`, `nu`,
 **You do NOT need to compute hat_sigma in R or in AI-generated code.**
 The `bart_model` constructor automatically:
 
-1. Fits OLS internally when `p < n`: the residual sum of squares (RSS) comes
-   from a deterministic Householder QR (plain C++, no BLAS / LAPACK)
-2. Computes `sigest = sqrt(RSS / (n - p))` from OLS residuals
+1. Fits OLS of `y - mean(y)` on an intercept and `X` internally when `p < n`:
+   the residual sum of squares (RSS) and the rank come from a deterministic
+   Householder QR (plain C++, no BLAS / LAPACK)
+2. Computes `sigest = sqrt(RSS / (n - rank))` from OLS residuals, with the
+   rank counted as R's `lm` counts it (intercept first; a column that is
+   zero, or whose norm after the earlier Householder steps is below `1e-7`
+   times its original norm, is not counted)
 3. Falls back to `sd(y)` when `p >= n` (high-dimensional case) or when the
-   RSS is 0 (e.g. a saturated design, `p = n - 1`)
+   RSS or `n - rank` is 0 (e.g. a saturated design, `p = n - 1`)
 4. Sets `lambda = sigest^2 * qchisq(0.1, nu) / nu` for the conjugate
-   sigma prior (using a pure C++ lookup table, no R function calls)
+   sigma prior (qchisq from R in the R build, from a C++ implementation
+   otherwise; no lookup table)
 5. Uses `sigest` as the initial sigma value (with the `sd(y)` fallback the
    initial sigma is 1)
 
 `cfg.sigma_init` is NOT used to override this -- `bart_block` does not
-call `set_sigma` after construction. The internal OLS-based estimate
-matches `BART::wbart`'s `sigest` default exactly.
+call `set_sigma` after construction. With `p < n` and RSS > 0 the internal
+OLS-based estimate matches `BART::wbart`'s `sigest` default
+(`summary(lm(y ~ ., data.frame(x, y)))$sigma`, the same rank) up to
+rounding, except that the rank can differ when a column's norm after the
+earlier steps is within a few percent of `1e-7` times its original norm
+(`lm` compares a downdated norm, whose error there can reach a few percent).
+In the fallbacks wbart differs: its initial sigma is its `sigest`, which is
+`sd(y)` when `p >= n` with `p` counted after its default `rm.const = TRUE`
+removes constant columns, and the `lm` value otherwise (0 or NaN when the
+RSS or `n - rank` is 0).
 
 ### Recommended sigma prior for BART-structured models
 
@@ -191,8 +204,10 @@ inverse-gamma** prior (Chipman, George & McCulloch 2010):
     nu = 3 (default)
 
 `sigest` is the OLS residual SD, computed automatically by `bart_model`
-and retrievable via `bart_block::current_sigma()` after the BART child
-has been added to the composite.
+and retrievable via `bart_block::prior_sigest()` (and `lambda` via
+`bart_block::prior_lambda()`) after the BART child has been added to the
+composite (`current_sigma()` equals `sigest` before the first step, except
+with the `sd(y)` fallback, where it is 1).
 
 **Decision-flow recipe** (follow `skills/codegen.md` Section 2):
 - When parsing a user model with a BART mean and no explicit sigma prior,
@@ -204,7 +219,8 @@ has been added to the composite.
 - Offer `HalfNormal(0, 10)` or a user-specified alternative as option (c).
 - Still accept an explicit user-supplied prior verbatim.
 
-**Sampling stays uniform:** sigma is still a standard `nuts_block` -- only
+**Sampling stays uniform:** sigma is still a standard
+`univariate_slice_sampling_block` (or part of a `joint_nuts_block`) -- only
 the prior term in the log-density changes. Do NOT introduce a custom
 conjugate-Gibbs block for sigma; mixing closed-form conjugate draws with
 a NUTS-first generator is explicitly prohibited (see
@@ -214,5 +230,5 @@ use are the `*_gibbs_block` headers already shipped in
 for the current roster.
 
 See `examples/BartNoise.cpp` for the reference template -- both the
-`R::qchisq` calibration in the constructor and the IG log-density in the
-`nuts_block` lambda.
+`sigma_nu` / `sigma_lambda` entries set in the constructor and the IG
+log-density in the `univariate_slice_sampling_block` lambda.

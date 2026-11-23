@@ -2,16 +2,14 @@
 // Licensed under the GNU General Public License v2.0 or later.
 // ============================================================================
 //  test_fix_bart_lambda.cpp -- the sigma prior that bart_model's constructor calibrates from the residual variance
-//  of the least-squares fit of y on X: sigest = sqrt(RSS / (n - p)), lambda = sigest^2 qchisq(0.1, nu) / nu.
+//  of the least-squares fit of y on X: sigest = sqrt(RSS / (n - rank)), lambda = sigest^2 qchisq(0.1, nu) / nu.
 //
 //   1. RSS is the residual sum of squares of the least-squares fit, also for designs whose columns are linearly
-//      dependent: lambda equals the value computed from a reference RSS (closed form, or the fit on the design with
-//      the dependent columns removed). For a saturated design (p = n - 1) RSS is 0, so lambda comes from sd(y) and
+//      dependent: lambda equals the value computed from a reference RSS and rank (closed form, or the fit on the design
+//      with the dependent columns removed). For a saturated design (p = n - 1) RSS is 0, so lambda comes from sd(y) and
 //      the initial sigma is 1.
-//   2. lambda is the same, bit for bit, in the first construction in each of several freshly started processes (this
-//      program run again with the argument --first-lambda; n 1000, p 500) and in a second construction in each of
-//      them. When the least-squares fit used LAPACK, the first construction in a process could give another value than
-//      the later ones.
+//   2. The bits of lambda are equal in the first construction in every freshly started process (this program run
+//      again with the argument --first-lambda; n 1000, p 500) and in a later construction in the same process.
 //   3. With p < n, a NaN or infinite value in x_train makes the constructor throw std::invalid_argument.
 // ============================================================================
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
@@ -40,8 +38,8 @@ static int g_fail = 0;
 static void check(bool ok, const char* what) { std::printf("  %-104s %s\n", what, ok ? "ok" : "FAILED"); if (!ok) g_fail++; }
 static std::uint64_t bits(double d) { std::uint64_t b; std::memcpy(&b, &d, sizeof b); return b; }
 
-static double lambda_of(double rss, long n, long p, double nu) {
-  const double s = std::sqrt(rss / (double)(n - p));
+static double lambda_of(double rss, long n, long rank, double nu) {
+  const double s = std::sqrt(rss / (double)(n - rank));
   return s * s * bart_sf::qchisq(0.1, nu) / nu;
 }
 // RSS of a full-rank least-squares fit with an intercept, as a reference: y minus its projection on the columns of the
@@ -68,7 +66,7 @@ static void part1()
     for (arma::uword i = 0; i < X.n_elem; i++) X(i) = U(g);
     for (long i = 0; i < n; i++) y[i] = 2.0 * X(i, 0) - X(i, 3) + 0.5 * Z(g);
     stdbart::bart_model m(X, y, 100L, false, false, false, 20);
-    const double r = rel(m.get_lambda(), lambda_of(rss_ref(X, y), n, p, nu));
+    const double r = rel(m.get_lambda(), lambda_of(rss_ref(X, y), n, p + 1, nu));
     std::snprintf(msg, sizeof msg, "full-rank design (n 400, p 6): relative difference %.1e", r); check(r < 1e-10, msg);
   }
   {   // three indicator columns that sum to the intercept: RSS = within-group sum of squares
@@ -80,7 +78,7 @@ static void part1()
       for (long i = k; i < n; i += 3) rss += (y[i] - mu) * (y[i] - mu);
     }
     stdbart::bart_model m(X, y, 100L, false, false, false, 20);
-    const double r = rel(m.get_lambda(), lambda_of(rss, n, p, nu));
+    const double r = rel(m.get_lambda(), lambda_of(rss, n, p, nu));   // rank 3: the intercept is their sum
     std::snprintf(msg, sizeof msg, "indicators summing to the intercept, RSS = within-group sum of squares: rel. diff. %.1e", r);
     check(r < 1e-12, msg);
   }
@@ -90,7 +88,7 @@ static void part1()
     for (long i = 0; i < n; i++) { X(i, 0) = U(g); X(i, 1) = X(i, 0); X(i, 2) = U(g); X(i, 3) = U(g); y[i] = X(i, 0) + X(i, 2) + 0.3 * Z(g); }
     const arma::mat Xr = arma::join_rows(X.col(0), X.cols(2, 3));
     stdbart::bart_model m(X, y, 100L, false, false, false, 20);
-    const double r1 = rel(m.get_lambda(), lambda_of(rss_ref(Xr, y), n, 4, nu));
+    const double r1 = rel(m.get_lambda(), lambda_of(rss_ref(Xr, y), n, 4, nu));   // rank 4: intercept and Xr
     std::snprintf(msg, sizeof msg, "duplicated column: relative difference %.1e", r1); check(r1 < 1e-10, msg);
     arma::mat Xc = X; Xc.col(1).fill(1.0);
     const arma::mat Xcr = arma::join_rows(Xc.col(0), Xc.cols(2, 3));
