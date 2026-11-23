@@ -119,9 +119,13 @@
 
 #include "block_sampler.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include "math_constants.hpp"   // M_PI etc. under MinGW -std=c++17
+#include <cstdint>
+#include <cstring>
 #include <functional>
+#include <iterator>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -204,7 +208,39 @@ public:
     void set_context(const block_context& ctx) override {
         // Copy the context for step() to use. Per the design contract
         // (block_sampler.hpp), we must not retain pointers into ctx.
+        // With an unchanged key set the entries are assigned in place (no
+        // reallocation), and an identity L_chol is not copied over the
+        // identity already held: both have the same bits.
+        if (ctx.size() == context_.size()) {
+            // Each key of ctx is first compared with the held entry at the
+            // same position of the iteration order, then looked up. A key
+            // that is not held ends the loop; the full copy below then
+            // replaces every entry, including those already assigned.
+            auto next_held = context_.begin();
+            bool same_keys = true;
+            for (const auto& kv : ctx) {
+                block_context::iterator it = next_held;
+                if (it == context_.end() || it->first != kv.first) {
+                    it = context_.find(kv.first);
+                    if (it == context_.end()) { same_keys = false; break; }
+                }
+                next_held = std::next(it);
+                if (kv.first != cfg_.L_chol_key) {
+                    it->second = kv.second;
+                    continue;
+                }
+                const bool id = is_identity_(kv.second);
+                if (id && L_identity_) continue;
+                L_identity_ = false;
+                it->second = kv.second;
+                L_identity_ = id;
+            }
+            if (same_keys) return;
+        }
+        L_identity_ = false;
         context_ = ctx;
+        auto lit = context_.find(cfg_.L_chol_key);
+        if (lit != context_.end()) L_identity_ = is_identity_(lit->second);
     }
 
     void step(std::mt19937_64& rng) override {
@@ -231,10 +267,17 @@ public:
         std::normal_distribution<double>       std_norm(0.0, 1.0);
         std::uniform_real_distribution<double> unif(0.0, 1.0);
 
-        // 1. Prior sample nu = L z
+        // 1. Prior sample nu = L z. For an exact identity L, L z equals z
+        //    bit for bit when no z_i is zero, so the product is skipped.
         arma::vec z(cfg_.N);
-        for (std::size_t i = 0; i < cfg_.N; ++i) z[i] = std_norm(rng);
-        arma::vec nu = L * z;
+        bool z_has_zero = false;
+        for (std::size_t i = 0; i < cfg_.N; ++i) {
+            z[i] = std_norm(rng);
+            if (z[i] == 0.0) z_has_zero = true;
+        }
+        arma::vec nu;
+        if (L_identity_ && !z_has_zero) nu = z;
+        else                            nu = L * z;
 
         // 2. Slice threshold
         double log_lik_cur = cfg_.log_lik(f_, context_);
@@ -323,10 +366,56 @@ private:
         if (keep_history_) history_.push_back(f_);
     }
 
+    // True when entry k of an N x N column-major matrix has the bits of
+    // the identity's entry k.
+    bool identity_entry_(const double* p, std::size_t k) const {
+        const double want = (k % (cfg_.N + 1) == 0) ? 1.0 : 0.0;
+        return std::memcmp(p + k, &want, sizeof want) == 0;
+    }
+
+    // Bitwise OR of p[0..n), each entry taken as a 64-bit word.
+    static std::uint64_t bits_or_(const double* p, std::size_t n) {
+        std::uint64_t a0 = 0, a1 = 0, a2 = 0, a3 = 0, u;
+        std::size_t i = 0;
+        for (; i + 4 <= n; i += 4) {
+            std::memcpy(&u, p + i, sizeof u);     a0 |= u;
+            std::memcpy(&u, p + i + 1, sizeof u); a1 |= u;
+            std::memcpy(&u, p + i + 2, sizeof u); a2 |= u;
+            std::memcpy(&u, p + i + 3, sizeof u); a3 |= u;
+        }
+        for (; i < n; ++i) { std::memcpy(&u, p + i, sizeof u); a0 |= u; }
+        return a0 | a1 | a2 | a3;
+    }
+
+    // True when v has the bits of the N x N identity (column-major). The
+    // entry at L_probe_, where the last non-identity input differed, is
+    // checked first.
+    bool is_identity_(const arma::vec& v) {
+        const std::size_t N = cfg_.N, NN = N * N;
+        if (v.n_elem != NN) return false;
+        const double* p = v.memptr();
+        if (L_probe_ < NN && !identity_entry_(p, L_probe_)) return false;
+        // Diagonal entry j is at k = j (N + 1); the N entries after it
+        // (none after the last) are off-diagonal.
+        for (std::size_t k = 0; k < NN; k += N + 1) {
+            const std::size_t end = std::min(NN, k + N + 1);
+            if (identity_entry_(p, k) && bits_or_(p + k + 1, end - k - 1) == 0)
+                continue;
+            for (std::size_t i = k; i < end; ++i) {
+                if (!identity_entry_(p, i)) { L_probe_ = i; break; }
+            }
+            return false;
+        }
+        return true;
+    }
+
     elliptical_slice_sampling_block_config cfg_;
     arma::vec                              f_;
     block_context                          context_;
     std::vector<arma::vec>                 history_;
+    // context_[L_chol_key] has the bits of the identity; set in set_context.
+    bool                                   L_identity_ = false;
+    std::size_t                            L_probe_    = 0;
 };
 
 } // namespace AI4BayesCode
