@@ -56,7 +56,7 @@ static bool same_bits(const arma::vec& a, const arma::vec& b) {
 }
 
 // ------------------------------------------------------------------ data
-// Left truncation, edges[0] > 0, times on edges, t in (0, edges[0]], v == t,
+// Left truncation, times on edges, t in the first bin, v == t,
 // entry times on edges.
 struct Data { arma::vec t, delta, v, z, edges; std::size_t K = 0, G = 0; };
 
@@ -64,13 +64,13 @@ static Data make_data(std::size_t n, std::size_t K, std::size_t G, std::uint64_t
     Data d; d.K = K; d.G = G;
     std::mt19937_64 g(seed);
     std::uniform_real_distribution<double> u(0.0, 1.0);
-    d.edges.set_size(K + 1); d.edges[0] = 0.3;
+    d.edges.set_size(K + 1); d.edges[0] = 0.0;
     for (std::size_t k = 1; k <= K; ++k) d.edges[k] = d.edges[k - 1] + 0.2 + u(g);
     d.t.set_size(n); d.delta.set_size(n); d.v.set_size(n); d.z.set_size(n);
     for (std::size_t i = 0; i < n; ++i) {
         d.t[i] = 0.01 + u(g) * (d.edges[K] - 0.01);
         if (i % 17 == 0) d.t[i] = d.edges[1 + i % K];
-        if (i % 19 == 0) d.t[i] = 0.5 * d.edges[0];
+        if (i % 19 == 0) d.t[i] = 0.5 * d.edges[1];
         d.v[i] = (i % 3 == 0) ? 0.0 : u(g) * d.t[i];
         if (i % 23 == 0) d.v[i] = d.t[i];
         if (i % 29 == 1) d.v[i] = std::min(d.edges[(i / 29) % (K + 1)], d.t[i]);
@@ -381,6 +381,36 @@ static void test_copy_move() {
     }
 }
 
+// edges[0] must be 0 in all three blocks (the bins start at time 0); a
+// config with edges[0] > 0 throws std::invalid_argument at construction.
+template <class Block, class Cfg>
+static bool throws_invalid(const Cfg& c) {
+    try { Block b(c); } catch (const std::invalid_argument&) { return true; } catch (...) { return false; }
+    return false;
+}
+
+static void test_edges0() {
+    const Data d = make_data(40, 4, 4, 21);
+    const ICData di = make_ic(40, 22);
+    arma::vec shifted = d.edges; shifted[0] = 0.5 * d.edges[1];   // still strictly increasing
+    arma::vec shifted_ic = di.edges; shifted_ic[0] = 0.5 * di.edges[1];
+    piecewise_exponential_gibbs_block_config pc = peh_cfg(d, false, false);
+    frailty_gamma_gibbs_block_config fc = fr_cfg(d, false, false);
+    interval_censored_survival_augmentation_block_config ic;
+    ic.name = "t"; ic.edges = di.edges; ic.initial_times = di.t;
+    check(!throws_invalid<piecewise_exponential_gibbs_block>(pc)
+          && !throws_invalid<frailty_gamma_gibbs_block>(fc)
+          && !throws_invalid<interval_censored_survival_augmentation_block>(ic),
+          "edges[0] = 0: the three blocks are constructed");
+    pc.edges = shifted; fc.edges = shifted; ic.edges = shifted_ic;
+    check(throws_invalid<piecewise_exponential_gibbs_block>(pc),
+          "edges[0] = edges[1] / 2: piecewise_exponential_gibbs_block throws std::invalid_argument");
+    check(throws_invalid<frailty_gamma_gibbs_block>(fc),
+          "edges[0] = edges[1] / 2: frailty_gamma_gibbs_block throws std::invalid_argument");
+    check(throws_invalid<interval_censored_survival_augmentation_block>(ic),
+          "edges[0] = edges[1] / 2: interval_censored_survival_augmentation_block throws std::invalid_argument");
+}
+
 int main() {
     std::printf("=== test_fix_survival ===\n");
     for (int o = 0; o < 2; ++o)
@@ -390,6 +420,7 @@ int main() {
     test_composite();
     test_invalid_data();
     test_copy_move();
+    test_edges0();
     std::printf("test_fix_survival: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -131,7 +131,8 @@ struct piecewise_exponential_gibbs_block_config {
     /// key under which this block writes its length-K lambda vector.
     std::string name;
 
-    /// Bin edges, length K+1, strictly increasing, edges[0] >= 0.
+    /// Bin edges, length K+1, strictly increasing, edges[0] = 0 (the bins
+    /// start at time 0, as in the model 0 = e_0 < e_1 < ... < e_K).
     /// Bin k covers [edges[k-1], edges[k]) for k = 1..K; bin K also holds t = edges[K].
     /// edges[K] must be at least the max observed follow-up time t_i (a t_i > edges[K] throws).
     arma::vec edges;
@@ -180,9 +181,9 @@ public:
                 "piecewise_exponential_gibbs_block: edges must have length >= 2 (K >= 1)");
         }
         K_ = cfg_.edges.n_elem - 1;
-        if (!(cfg_.edges[0] >= 0.0)) {
+        if (!(cfg_.edges[0] == 0.0)) {
             throw std::invalid_argument(
-                "piecewise_exponential_gibbs_block: edges[0] must be >= 0");
+                "piecewise_exponential_gibbs_block: edges[0] must be 0 (the bins start at time 0)");
         }
         for (std::size_t k = 0; k < K_; ++k) {
             if (!(cfg_.edges[k + 1] > cfg_.edges[k])) {
@@ -364,10 +365,7 @@ public:
                 const auto ub = std::upper_bound(edges_.begin(), edges_.end(), ti);
                 std::size_t k_i;
                 if (ub == edges_.begin()) {
-                    // ti < edges[0] -- since we required ti > 0 and edges[0] >= 0,
-                    // this can only happen if edges[0] > 0 and ti in (0, edges[0]).
-                    // We treat that as bin 0 (the first bin) for E_k; the time before
-                    // edges[0] adds no exposure to R_k.
+                    // ti <= edges[0] = 0; not reached, since ti > 0 is required.
                     k_i = 0;
                 } else if (ub == edges_.end()) {
                     // ti == edges[K] exactly (we already threw on ti > edges[K]).

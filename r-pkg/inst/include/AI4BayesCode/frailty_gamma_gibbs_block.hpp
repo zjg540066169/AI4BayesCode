@@ -114,7 +114,8 @@ struct frailty_gamma_gibbs_block_config {
     /// integers in {0..G-1}.
     std::size_t G = 0;
 
-    /// Bin edges, length K+1, strictly increasing, edges[0] >= 0.
+    /// Bin edges, length K+1, strictly increasing, edges[0] = 0 (the bins
+    /// start at time 0, as in the model 0 = e_0 < e_1 < ... < e_K).
     /// MUST match the sibling piecewise_exponential_gibbs_block's edges.
     arma::vec edges;
 
@@ -172,9 +173,9 @@ public:
                 "frailty_gamma_gibbs_block: edges must have length >= 2");
         }
         K_ = cfg_.edges.n_elem - 1;
-        if (!(cfg_.edges[0] >= 0.0)) {
+        if (!(cfg_.edges[0] == 0.0)) {
             throw std::invalid_argument(
-                "frailty_gamma_gibbs_block: edges[0] must be >= 0");
+                "frailty_gamma_gibbs_block: edges[0] must be 0 (the bins start at time 0)");
         }
         for (std::size_t k = 0; k < K_; ++k) {
             if (!(cfg_.edges[k + 1] > cfg_.edges[k])) {

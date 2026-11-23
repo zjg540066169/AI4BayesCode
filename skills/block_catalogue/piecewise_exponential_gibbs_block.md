@@ -61,7 +61,9 @@ the call site.
 **Bin convention**: bins are `[e_{k-1}, e_k)`, k = 1..K (1-based math, 0-based
 storage), and bin K also holds `t = e_K`, so an event at an interior edge
 `t_i = e_k` is counted in bin `k + 1`, where that subject has zero exposure.
-`edges[K]` must be at least `max(t_i)` observed follow-up (throws otherwise).
+`edges[0]` must be 0 and `edges[K]` at least `max(t_i)` observed follow-up (throws
+otherwise; the same `edges[0] = 0` rule holds for `frailty_gamma_gibbs_block` and
+`interval_censored_survival_augmentation_block`).
 
 **USAGE (PEH + Cox linear log-hazard-ratio beta):**
 
