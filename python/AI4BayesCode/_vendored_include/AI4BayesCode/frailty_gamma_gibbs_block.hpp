@@ -41,7 +41,12 @@
  *  So each w_g's full conditional is EXACTLY Gamma:
  *      w_g | rest  ~  Gamma( theta + D_g,  theta + H_g )
  *
- *  One exact Gibbs step draws all G frailties. O(n + G) per step.
+ *  One exact Gibbs step draws all G frailties. Cost per step, for n subjects
+ *  and K bins: O(nK + G) on the first step and on any step whose t or
+ *  entry_time differ from those of the last completed step; otherwise
+ *  O(n + P + G), P = sum over subjects of the number of bins with positive
+ *  exposure (the first such step also computes each subject's run of those
+ *  bins, O(n log K + P)).
  *
  *  ROLE IN THE COMPOSITE
  *  =====================
@@ -90,6 +95,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -290,6 +296,19 @@ public:
         }
 
         // ---- accumulate D_g (events per group) and H_g (weighted at-risk) ----
+        // The checks on t and entry_time, and each subject's range of bins with
+        // positive duration, depend only on t and entry_time: the checks run and
+        // all K bins are visited only when these differ from the copies stored
+        // after the loop last completed.
+        const bool reuse = data_valid_ && same_values_(t, t_copy_)
+            && (entry_ptr ? (entry_copied_ && same_values_(*entry_ptr, entry_copy_))
+                          : !entry_copied_);
+        if (!reuse) {
+            data_valid_ = false;
+            bins_valid_ = false;
+        } else if (!bins_valid_) {
+            build_bins_(t, entry_ptr);
+        }
         const double eK = edges_[K_];
         std::vector<double> D(cfg_.G, 0.0);
         std::vector<double> H(cfg_.G, 0.0);
@@ -300,13 +319,15 @@ public:
             const double wi = offset_ptr ? (*offset_ptr)[i] : 1.0;
             const std::size_t gi = static_cast<std::size_t>(z[i]);
 
-            if (!(ti > 0.0) || !std::isfinite(ti) || ti > eK) {
-                throw std::runtime_error("frailty_gamma_gibbs_block '" + cfg_.name
-                    + "': t[" + std::to_string(i) + "] out of (0, edges[K]]");
-            }
-            if (vi < 0.0 || vi > ti) {
-                throw std::runtime_error("frailty_gamma_gibbs_block '" + cfg_.name
-                    + "': entry_time[" + std::to_string(i) + "] must satisfy 0 <= v <= t");
+            if (!reuse) {
+                if (!(ti > 0.0) || !std::isfinite(ti) || ti > eK) {
+                    throw std::runtime_error("frailty_gamma_gibbs_block '" + cfg_.name
+                        + "': t[" + std::to_string(i) + "] out of (0, edges[K]]");
+                }
+                if (vi < 0.0 || vi > ti) {
+                    throw std::runtime_error("frailty_gamma_gibbs_block '" + cfg_.name
+                        + "': entry_time[" + std::to_string(i) + "] must satisfy 0 <= v <= t");
+                }
             }
             if (gi >= cfg_.G) {
                 throw std::runtime_error("frailty_gamma_gibbs_block '" + cfg_.name
@@ -317,13 +338,25 @@ public:
 
             if (di == 1.0) D[gi] += 1.0;
 
-            // H_0(t_i, v_i) contribution per bin (same integral as PEH block).
-            for (std::size_t k = 0; k < K_; ++k) {
+            // H_0(t_i, v_i) contribution per bin (same integral as PEH block);
+            // bins outside [bin_lo_[i], bin_hi_[i]) have no positive duration.
+            const std::size_t k_begin = reuse ? bin_lo_[i] : 0;
+            const std::size_t k_end   = reuse ? bin_hi_[i] : K_;
+            double h = H[gi];
+            for (std::size_t k = k_begin; k < k_end; ++k) {
                 const double lo = std::max(vi, edges_[k]);
                 const double hi = std::min(ti, edges_[k + 1]);
                 const double dur = hi - lo;
-                if (dur > 0.0) H[gi] += wi * lambda[k] * dur;
+                if (dur > 0.0) h += wi * lambda[k] * dur;
             }
+            H[gi] = h;
+        }
+        if (!reuse) {
+            t_copy_.assign(t.begin(), t.end());
+            entry_copied_ = (entry_ptr != nullptr);
+            if (entry_ptr) entry_copy_.assign(entry_ptr->begin(), entry_ptr->end());
+            else           entry_copy_.clear();
+            data_valid_ = true;
         }
 
         // ---- sample w_g ~ Gamma(theta + D_g, theta + H_g) ----
@@ -383,12 +416,59 @@ public:
     void clear_history() override { history_buf_.clear(); }
 
 private:
+    // True when x holds exactly the values stored in c (bitwise).
+    static bool same_values_(const arma::vec& x, const std::vector<double>& c) {
+        return x.n_elem == c.size()
+            && (c.empty()
+                || std::memcmp(x.memptr(), c.data(), c.size() * sizeof(double)) == 0);
+    }
+
+    // [bin_lo_[i], bin_hi_[i]) is the smallest range of bins that contains
+    // every k with min(t_i, e_{k+1}) - max(v_i, e_k) > 0 (empty if none).
+    // Such a k has e_{k+1} > v_i and e_k < t_i, so the scan starts at the
+    // first bin with e_{k+1} > v_i (bin 0 when v_i < e_1, else found by
+    // binary search) and ends at the first bin with e_{k+1} >= t_i.
+    void build_bins_(const arma::vec& t, const arma::vec* entry_ptr) {
+        const std::size_t n = t.n_elem;
+        bin_lo_.resize(n);   // every entry is written below
+        bin_hi_.resize(n);
+        for (std::size_t i = 0; i < n; ++i) {
+            const double ti = t[i];
+            const double vi = entry_ptr ? (*entry_ptr)[i] : 0.0;
+            std::size_t k = 0;
+            if (!(vi < edges_[1])) {
+                k = static_cast<std::size_t>(
+                    std::upper_bound(edges_.begin(), edges_.end(), vi) - edges_.begin()) - 1;
+            }
+            std::size_t k_lo = 0, k_hi = 0;
+            for (; k < K_; ++k) {
+                const double dur = std::min(ti, edges_[k + 1]) - std::max(vi, edges_[k]);
+                if (dur > 0.0) {
+                    if (k_hi == 0) k_lo = k;
+                    k_hi = k + 1;
+                }
+                if (!(edges_[k + 1] < ti)) break;
+            }
+            bin_lo_[i] = k_lo;
+            bin_hi_[i] = k_hi;
+        }
+        bins_valid_ = true;
+    }
+
     frailty_gamma_gibbs_block_config cfg_;
     std::size_t                      K_ = 0;
     std::vector<double>              edges_;
     arma::vec                        values_;
     block_context                    context_;
     std::vector<arma::vec>           history_buf_;
+
+    // Copies of the t and entry_time that passed the checks in step() (valid
+    // when data_valid_), and the bin ranges computed from them (bins_valid_).
+    std::vector<double>              t_copy_, entry_copy_;
+    bool                             entry_copied_ = false;
+    bool                             data_valid_   = false;
+    std::vector<std::size_t>         bin_lo_, bin_hi_;
+    bool                             bins_valid_   = false;
 };
 
 }  // namespace AI4BayesCode

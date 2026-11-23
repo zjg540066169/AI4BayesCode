@@ -92,6 +92,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <random>
 #include <stdexcept>
@@ -262,6 +263,20 @@ public:
             cumH[k + 1] = cumH[k] + lambda[k] * (edges_[k + 1] - edges_[k]);
         }
 
+        // ---- bins of L_i and U_i in edges_, recomputed when L or U change ----
+        if (!(bins_valid_ && same_values_(L, L_copy_) && same_values_(U, U_copy_))) {
+            bins_valid_ = false;
+            bin_L_.resize(n);
+            bin_U_.resize(n);
+            for (std::size_t i = 0; i < n; ++i) {
+                bin_L_[i] = H0_bin(L[i]);
+                bin_U_[i] = std::isfinite(U[i]) ? H0_bin(U[i]) : no_bin;
+            }
+            L_copy_.assign(L.begin(), L.end());
+            U_copy_.assign(U.begin(), U.end());
+            bins_valid_ = true;
+        }
+
         // ---- per-subject truncated PEH sample via inverse CDF ----
         std::uniform_real_distribution<double> unif(0.0, 1.0);
         const double eps = 1e-300;
@@ -272,9 +287,9 @@ public:
             if (!(wi > 0.0) || !std::isfinite(wi)) continue;  // skip subject silently
 
             // H_0(L) and H_0(U); if U = +inf, H_0(U) = +inf, S(U) = 0.
-            const double HL = piecewise_H0(Li, cumH, lambda);
+            const double HL = piecewise_H0(Li, bin_L_[i], cumH, lambda);
             const bool U_finite = std::isfinite(Ui);
-            const double HU = U_finite ? piecewise_H0(Ui, cumH, lambda)
+            const double HU = U_finite ? piecewise_H0(Ui, bin_U_[i], cumH, lambda)
                                        : std::numeric_limits<double>::infinity();
 
             // S(L) = exp(-wi * HL); S(U) = exp(-wi * HU) or 0.
@@ -359,19 +374,35 @@ public:
     void clear_history() override { history_buf_.clear(); }
 
 private:
-    // Piecewise cumulative hazard at time t.
-    double piecewise_H0(double t,
-                        const std::vector<double>& cumH,
-                        const arma::vec& lambda) const
+    static constexpr std::size_t no_bin = static_cast<std::size_t>(-1);
+
+    // Bin of edges_ in which piecewise_H0 evaluates t; no_bin when t <= 0.
+    std::size_t H0_bin(double t) const
     {
-        if (!(t > 0.0)) return 0.0;
+        if (!(t > 0.0)) return no_bin;
         // Bin containing t.
         const auto ub = std::upper_bound(edges_.begin(), edges_.end(), t);
         std::size_t k;
         if (ub == edges_.begin())      k = 0;
         else if (ub == edges_.end())   k = K_ - 1;
         else                            k = static_cast<std::size_t>(ub - edges_.begin()) - 1;
+        return k;
+    }
+
+    // Piecewise cumulative hazard at time t, given k = H0_bin(t).
+    double piecewise_H0(double t, std::size_t k,
+                        const std::vector<double>& cumH,
+                        const arma::vec& lambda) const
+    {
+        if (k == no_bin) return 0.0;
         return cumH[k] + lambda[k] * (t - edges_[k]);
+    }
+
+    // True when x holds exactly the values stored in c (bitwise).
+    static bool same_values_(const arma::vec& x, const std::vector<double>& c) {
+        return x.n_elem == c.size()
+            && (c.empty()
+                || std::memcmp(x.memptr(), c.data(), c.size() * sizeof(double)) == 0);
     }
 
     interval_censored_survival_augmentation_block_config cfg_;
@@ -381,6 +412,12 @@ private:
     block_context                                        context_;
     std::vector<arma::vec>                               history_buf_;
     bool                                                 first_step_ = true;
+
+    // H0_bin of each L_i and finite U_i (no_bin where U_i is not finite),
+    // computed from the copies L_copy_ and U_copy_ (valid when bins_valid_).
+    std::vector<std::size_t>                             bin_L_, bin_U_;
+    std::vector<double>                                  L_copy_, U_copy_;
+    bool                                                 bins_valid_ = false;
 };
 
 }  // namespace AI4BayesCode

@@ -42,7 +42,14 @@
  *      lambda_k | rest ~ Gamma(a0 + E_k,  b0 + R_k)    (independent across k)
  *
  *  This block draws all K rates in one exact Gibbs step -- no NUTS, no
- *  gradient, no warmup. K=10..500 is comfortable at O(n + K) per step.
+ *  gradient, no warmup. Cost per step, for n subjects (k_i = bin of t_i):
+ *    - first step, and any step whose t, delta or entry_time differ from
+ *      those of the last completed step: O(n log K + sum_i (k_i + 1) + K);
+ *    - otherwise, without an offset: O(n + K) (comparison with the stored
+ *      data, then the K Gamma draws);
+ *    - otherwise, with an offset: O(n + P + K), P = sum over subjects of the
+ *      number of bins with positive exposure; the first such step computes
+ *      each subject's run of those bins in the same pass, O(n log K + P + K).
  *
  *  WHY THIS BLOCK EXISTS
  *  =====================
@@ -102,6 +109,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -291,83 +299,170 @@ public:
         }
 
         // ---- accumulate E_k (events in bin k) and R_k (weighted at-risk time) ----
-        std::vector<double> E(K_, 0.0);
-        std::vector<double> R(K_, 0.0);
+        // E_k, R_k without an offset, and the checks on t, entry_time and delta
+        // depend only on t, delta and entry_time: the loop below runs only when
+        // these differ from the copies stored after it last completed.
+        const bool reuse = data_valid_
+            && same_values_(t, t_copy_) && same_values_(delta, delta_copy_)
+            && (entry_ptr ? (entry_copied_ && same_values_(*entry_ptr, entry_copy_))
+                          : !entry_copied_)
+            && (offset_ptr != nullptr || R_unweighted_);
+        if (!reuse) {
+            data_valid_ = false;
+            bins_valid_ = false;
+            std::vector<double> E(K_, 0.0);
+            std::vector<double> R(K_, 0.0);
 
-        const double eK = edges_[K_];   // right edge of last bin
-        for (std::size_t i = 0; i < n; ++i) {
-            const double ti = t[i];
-            const double vi = entry_ptr ? (*entry_ptr)[i] : 0.0;
-            const double di = delta[i];
-            const double wi = offset_ptr ? (*offset_ptr)[i] : 1.0;
+            const double eK = edges_[K_];   // right edge of last bin
+            for (std::size_t i = 0; i < n; ++i) {
+                const double ti = t[i];
+                const double vi = entry_ptr ? (*entry_ptr)[i] : 0.0;
+                const double di = delta[i];
+                const double wi = offset_ptr ? (*offset_ptr)[i] : 1.0;
 
-            if (!(ti > 0.0) || !std::isfinite(ti)) {
-                throw std::runtime_error(
-                    "piecewise_exponential_gibbs_block '" + cfg_.name
-                    + "': t[" + std::to_string(i) + "] must be > 0 (got " + std::to_string(ti) + ")");
-            }
-            if (ti > eK) {
-                throw std::runtime_error(
-                    "piecewise_exponential_gibbs_block '" + cfg_.name
-                    + "': t[" + std::to_string(i) + "] = " + std::to_string(ti)
-                    + " exceeds last edge edges[K] = " + std::to_string(eK)
-                    + " (raise edges[K] to cover the full follow-up time)");
-            }
-            if (vi < 0.0 || vi > ti) {
-                throw std::runtime_error(
-                    "piecewise_exponential_gibbs_block '" + cfg_.name
-                    + "': entry_time[" + std::to_string(i) + "] must satisfy 0 <= v <= t");
-            }
-            if (!(wi >= 0.0) || !std::isfinite(wi)) {
-                throw std::runtime_error(
-                    "piecewise_exponential_gibbs_block '" + cfg_.name
-                    + "': offset[" + std::to_string(i) + "] must be finite and >= 0");
-            }
-            if (!(di == 0.0 || di == 1.0)) {
-                throw std::runtime_error(
-                    "piecewise_exponential_gibbs_block '" + cfg_.name
-                    + "': delta[" + std::to_string(i) + "] must be 0 or 1 (got "
-                    + std::to_string(di) + ")");
+                if (!(ti > 0.0) || !std::isfinite(ti)) {
+                    throw std::runtime_error(
+                        "piecewise_exponential_gibbs_block '" + cfg_.name
+                        + "': t[" + std::to_string(i) + "] must be > 0 (got " + std::to_string(ti) + ")");
+                }
+                if (ti > eK) {
+                    throw std::runtime_error(
+                        "piecewise_exponential_gibbs_block '" + cfg_.name
+                        + "': t[" + std::to_string(i) + "] = " + std::to_string(ti)
+                        + " exceeds last edge edges[K] = " + std::to_string(eK)
+                        + " (raise edges[K] to cover the full follow-up time)");
+                }
+                if (vi < 0.0 || vi > ti) {
+                    throw std::runtime_error(
+                        "piecewise_exponential_gibbs_block '" + cfg_.name
+                        + "': entry_time[" + std::to_string(i) + "] must satisfy 0 <= v <= t");
+                }
+                if (!(wi >= 0.0) || !std::isfinite(wi)) {
+                    throw std::runtime_error(
+                        "piecewise_exponential_gibbs_block '" + cfg_.name
+                        + "': offset[" + std::to_string(i) + "] must be finite and >= 0");
+                }
+                if (!(di == 0.0 || di == 1.0)) {
+                    throw std::runtime_error(
+                        "piecewise_exponential_gibbs_block '" + cfg_.name
+                        + "': delta[" + std::to_string(i) + "] must be 0 or 1 (got "
+                        + std::to_string(di) + ")");
+                }
+
+                // Bin index k_i containing t_i (1-based math, 0-based storage).
+                // Bins are (e_{k-1}, e_k]; find smallest k such that edges[k] >= t_i and edges[k-1] < t_i.
+                // std::upper_bound returns first index with edges[index] > t_i, so
+                // k_i (0-based) = upper_bound(...) - begin() - 1. For t_i = edges[k] exactly
+                // (measure zero), t_i lands in bin k (0-based k-1).
+                const auto ub = std::upper_bound(edges_.begin(), edges_.end(), ti);
+                std::size_t k_i;
+                if (ub == edges_.begin()) {
+                    // ti <= edges[0] -- since we required ti > 0 and edges[0] >= 0,
+                    // this can only happen if edges[0] > 0 and ti in (0, edges[0]].
+                    // We treat that as bin 0 (the first bin, implicitly extending to 0).
+                    k_i = 0;
+                } else if (ub == edges_.end()) {
+                    // ti == edges[K] exactly (we already threw on ti > edges[K]).
+                    k_i = K_ - 1;
+                } else {
+                    k_i = static_cast<std::size_t>(ub - edges_.begin()) - 1;
+                }
+
+                // Contribution to E_k
+                if (di == 1.0) E[k_i] += 1.0;
+
+                // Contribution to R_k: for each bin k, subject at-risk time is
+                //   Delta_k = max(0, min(ti, edges[k+1]) - max(vi, edges[k])).
+                // Since intervals are (edges[k], edges[k+1]], we allow subject to
+                // accumulate risk time on this interval only where [vi, ti] overlaps it.
+                for (std::size_t k = 0; k <= k_i; ++k) {
+                    const double lo = std::max(vi, edges_[k]);
+                    const double hi = std::min(ti, edges_[k + 1]);
+                    const double dur = hi - lo;
+                    if (dur > 0.0) R[k] += wi * dur;
+                }
             }
 
-            // Bin index k_i containing t_i (1-based math, 0-based storage).
-            // Bins are (e_{k-1}, e_k]; find smallest k such that edges[k] >= t_i and edges[k-1] < t_i.
-            // std::upper_bound returns first index with edges[index] > t_i, so
-            // k_i (0-based) = upper_bound(...) - begin() - 1. For t_i = edges[k] exactly
-            // (measure zero), t_i lands in bin k (0-based k-1).
-            const auto ub = std::upper_bound(edges_.begin(), edges_.end(), ti);
-            std::size_t k_i;
-            if (ub == edges_.begin()) {
-                // ti <= edges[0] -- since we required ti > 0 and edges[0] >= 0,
-                // this can only happen if edges[0] > 0 and ti in (0, edges[0]].
-                // We treat that as bin 0 (the first bin, implicitly extending to 0).
-                k_i = 0;
-            } else if (ub == edges_.end()) {
-                // ti == edges[K] exactly (we already threw on ti > edges[K]).
-                k_i = K_ - 1;
-            } else {
-                k_i = static_cast<std::size_t>(ub - edges_.begin()) - 1;
+            E_ = std::move(E);
+            R_ = std::move(R);
+            t_copy_.assign(t.begin(), t.end());
+            delta_copy_.assign(delta.begin(), delta.end());
+            entry_copied_ = (entry_ptr != nullptr);
+            if (entry_ptr) entry_copy_.assign(entry_ptr->begin(), entry_ptr->end());
+            else           entry_copy_.clear();
+            R_unweighted_ = (offset_ptr == nullptr);
+            data_valid_ = true;
+        } else if (offset_ptr && bins_valid_) {
+            // Same accumulation of R_k, over each subject's bins with positive duration.
+            R_unweighted_ = false;
+            std::vector<double> R(K_, 0.0);
+            for (std::size_t i = 0; i < n; ++i) {
+                const double ti = t[i];
+                const double vi = entry_ptr ? (*entry_ptr)[i] : 0.0;
+                const double wi = (*offset_ptr)[i];
+                if (!(wi >= 0.0) || !std::isfinite(wi)) {
+                    throw std::runtime_error(
+                        "piecewise_exponential_gibbs_block '" + cfg_.name
+                        + "': offset[" + std::to_string(i) + "] must be finite and >= 0");
+                }
+                for (std::size_t k = bin_lo_[i]; k < bin_hi_[i]; ++k) {
+                    const double lo = std::max(vi, edges_[k]);
+                    const double hi = std::min(ti, edges_[k + 1]);
+                    const double dur = hi - lo;
+                    if (dur > 0.0) R[k] += wi * dur;
+                }
             }
-
-            // Contribution to E_k
-            if (di == 1.0) E[k_i] += 1.0;
-
-            // Contribution to R_k: for each bin k, subject at-risk time is
-            //   Delta_k = max(0, min(ti, edges[k+1]) - max(vi, edges[k])).
-            // Since intervals are (edges[k], edges[k+1]], we allow subject to
-            // accumulate risk time on this interval only where [vi, ti] overlaps it.
-            for (std::size_t k = 0; k <= k_i; ++k) {
-                const double lo = std::max(vi, edges_[k]);
-                const double hi = std::min(ti, edges_[k + 1]);
-                const double dur = hi - lo;
-                if (dur > 0.0) R[k] += wi * dur;
+            R_ = std::move(R);
+        } else if (offset_ptr) {
+            // The same accumulation on the first step that reuses the data,
+            // which also stores each subject's range of bins with positive
+            // duration, [bin_lo_[i], bin_hi_[i]) (empty if none); the ranges
+            // depend only on t and entry_time. A bin k with positive duration
+            // has e_{k+1} > v_i and e_k < t_i, so the scan starts at the first
+            // bin with e_{k+1} > v_i (bin 0 when v_i < e_1, else found by
+            // binary search) and ends at the first bin with e_{k+1} >= t_i.
+            // The terms of each R[k] are added in the order of i, as above.
+            R_unweighted_ = false;
+            std::vector<double> R(K_, 0.0);
+            bin_lo_.resize(n);   // every entry is written below
+            bin_hi_.resize(n);
+            for (std::size_t i = 0; i < n; ++i) {
+                const double ti = t[i];
+                const double vi = entry_ptr ? (*entry_ptr)[i] : 0.0;
+                const double wi = (*offset_ptr)[i];
+                if (!(wi >= 0.0) || !std::isfinite(wi)) {
+                    throw std::runtime_error(
+                        "piecewise_exponential_gibbs_block '" + cfg_.name
+                        + "': offset[" + std::to_string(i) + "] must be finite and >= 0");
+                }
+                std::size_t k = 0;
+                if (!(vi < edges_[1])) {
+                    k = static_cast<std::size_t>(
+                        std::upper_bound(edges_.begin(), edges_.end(), vi) - edges_.begin()) - 1;
+                }
+                std::size_t k_lo = 0, k_hi = 0;
+                for (; k < K_; ++k) {
+                    const double lo = std::max(vi, edges_[k]);
+                    const double hi = std::min(ti, edges_[k + 1]);
+                    const double dur = hi - lo;
+                    if (dur > 0.0) {
+                        R[k] += wi * dur;
+                        if (k_hi == 0) k_lo = k;
+                        k_hi = k + 1;
+                    }
+                    if (!(edges_[k + 1] < ti)) break;
+                }
+                bin_lo_[i] = k_lo;
+                bin_hi_[i] = k_hi;
             }
+            bins_valid_ = true;   // not reached when an offset check throws
+            R_ = std::move(R);
         }
 
         // ---- sample lambda_k ~ Gamma(a0 + E_k, b0 + R_k) ----
         for (std::size_t k = 0; k < K_; ++k) {
-            const double shape_post = cfg_.a0 + E[k];
-            const double rate_post  = cfg_.b0 + R[k];
+            const double shape_post = cfg_.a0 + E_[k];
+            const double rate_post  = cfg_.b0 + R_[k];
             // COMMENTED PARAMETERISATION (gamma_gibbs_block style):
             //   Gamma(shape, RATE=rate). std::gamma_distribution takes (shape, SCALE),
             //   so pass scale = 1/rate. E[X] = shape / rate.
@@ -426,12 +521,30 @@ public:
     void clear_history() override { history_buf_.clear(); }
 
 private:
+    // True when x holds exactly the values stored in c (bitwise).
+    static bool same_values_(const arma::vec& x, const std::vector<double>& c) {
+        return x.n_elem == c.size()
+            && (c.empty()
+                || std::memcmp(x.memptr(), c.data(), c.size() * sizeof(double)) == 0);
+    }
+
     piecewise_exponential_gibbs_block_config cfg_;
     std::size_t                              K_ = 0;
     std::vector<double>                      edges_;
     arma::vec                                values_;
     block_context                            context_;
     std::vector<arma::vec>                   history_buf_;
+
+    // E_k and R_k of the last step, and the t, delta and entry_time they were
+    // computed from (valid when data_valid_); R_unweighted_ is true when R_
+    // was computed without an offset. bin_lo_/bin_hi_ are valid when bins_valid_.
+    std::vector<double>                      E_, R_;
+    std::vector<double>                      t_copy_, delta_copy_, entry_copy_;
+    bool                                     entry_copied_ = false;
+    bool                                     R_unweighted_ = false;
+    bool                                     data_valid_   = false;
+    std::vector<std::size_t>                 bin_lo_, bin_hi_;
+    bool                                     bins_valid_   = false;
 };
 
 }  // namespace AI4BayesCode
