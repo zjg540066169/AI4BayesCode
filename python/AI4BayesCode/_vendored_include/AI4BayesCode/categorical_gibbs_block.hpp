@@ -86,6 +86,18 @@ namespace AI4BayesCode {
  *
  * The block normalises each row via a numerically-stable softmax, so
  * additive per-row constants are harmless.
+ *
+ * If the context installed by set_context has no entry under the block's
+ * name, the oracle is called once per step(); otherwise once per
+ * observation, each time after the previous label has been written into
+ * that entry. It must be pure (no hidden state).
+ *
+ * An entry under the block's name is the starting state of the step: its
+ * labels, snapped as in set_current, replace the block's labels before the
+ * first oracle call, so a value written there by another block (e.g. a
+ * split_merge_block that writes the same key) is where the sweep starts. An
+ * entry whose length is not n_obs makes step() throw without changing the
+ * block's state.
  */
 using categorical_log_probs_fn =
     std::function<arma::mat(const block_context& ctx)>;
@@ -162,18 +174,34 @@ public:
         // to a DIFFERENT stationary distribution when z_i's are not
         // conditionally independent given the rest (e.g. mixture labels
         // with component-count-dependent priors).
+        //
+        // If the context has no entry under this block's name, the oracle
+        // input is the same at every site, so log_probs is computed once
+        // and each row is drawn from it with the same uniforms, in the
+        // same order, as in the sequential scan.
+        //
+        // If it has one, that entry is the shared value of these labels,
+        // which another block writing the same key (split_merge_block,
+        // stick_label_swap_block, ...) may have changed since this block's
+        // last step, and the sweep starts from it.
+        const auto own_it = context_.find(cfg_.name);
+        const bool sequential = own_it != context_.end();
+        if (sequential) load_own_entry_(own_it->second);
         std::vector<double> probs(cfg_.n_categories);
         std::uniform_real_distribution<double> uniform(0.0, 1.0);
+        arma::mat log_probs;
 
         for (std::size_t i = 0; i < cfg_.n_obs; ++i) {
             // Recompute log_probs from current context (reflects all
             // previously sampled z's in this sweep).
-            const arma::mat log_probs = cfg_.log_probs_fn(context_);
-            if (log_probs.n_rows != cfg_.n_obs ||
-                log_probs.n_cols != cfg_.n_categories) {
-                throw std::runtime_error(
-                    "categorical_gibbs_block '" + cfg_.name
-                    + "': log_probs_fn returned wrong shape");
+            if (i == 0 || sequential) {
+                log_probs = cfg_.log_probs_fn(context_);
+                if (log_probs.n_rows != cfg_.n_obs ||
+                    log_probs.n_cols != cfg_.n_categories) {
+                    throw std::runtime_error(
+                        "categorical_gibbs_block '" + cfg_.name
+                        + "': log_probs_fn returned wrong shape");
+                }
             }
 
             // Numerically stable softmax for row i.
@@ -211,9 +239,10 @@ public:
             }
             values_[i] = static_cast<double>(chosen + 1); // 1-indexed
 
-            // Write updated label back into context so the next
-            // observation sees the freshly sampled value.
-            context_[cfg_.name] = values_;
+            // Write updated label back into context, so that log_probs for
+            // the next observation is computed from it. The entry equals
+            // values_ at every other site since the load above.
+            if (sequential) own_it->second[i] = values_[i];
         }
 
         // Append to history if enabled
@@ -241,6 +270,10 @@ public:
         for (std::size_t i = 0; i < cfg_.n_obs; ++i) {
             values_[i] = snap_label_(theta[i]);
         }
+        // A context entry under this block's name is the oracle input for
+        // these labels at the next step(), so it is set to the loaded values.
+        auto it = context_.find(cfg_.name);
+        if (it != context_.end()) it->second = values_;
     }
 
     const std::string& name() const noexcept override { return cfg_.name; }
@@ -262,6 +295,24 @@ public:
     }
 
 private:
+    /// Starting state of a step whose context holds the block's own key:
+    /// the labels in that entry, snapped as in set_current, replace values_,
+    /// and the snapped labels are written back into the entry. A length
+    /// other than n_obs throws before anything is written.
+    void load_own_entry_(arma::vec& own) {
+        if (own.n_elem != cfg_.n_obs) {
+            throw std::runtime_error(
+                "categorical_gibbs_block '" + cfg_.name + "': context key '"
+                + cfg_.name + "' (the block's own labels) has length "
+                + std::to_string(own.n_elem) + ", expected n_obs = "
+                + std::to_string(cfg_.n_obs));
+        }
+        for (std::size_t i = 0; i < cfg_.n_obs; ++i) {
+            values_[i] = snap_label_(own[i]);
+            own[i] = values_[i];
+        }
+    }
+
     double snap_label_(double raw) const {
         // Round to nearest integer, clamp into {1, ..., K}.
         long v = static_cast<long>(std::llround(raw));

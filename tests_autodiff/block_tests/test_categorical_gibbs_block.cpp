@@ -10,10 +10,13 @@
 // -------------------
 // The user supplies log_probs_fn(ctx) -> (n_obs x n_categories) matrix whose
 // (i, k) entry is log p(z_i = k | everything else), up to a per-row additive
-// constant. step() performs one SYSTEMATIC-SCAN sweep: for i = 1..n_obs it
-// recomputes the whole matrix from the block's current context, softmaxes row
-// i, draws z_i by inverse CDF, writes z_i back into the context under the
-// block's own name, and moves on. Labels are stored 1-indexed in {1, ..., K}.
+// constant. When the context holds an entry under the block's own name (as in
+// parts A, B and C below), step() performs one SYSTEMATIC-SCAN sweep that
+// starts from the labels in that entry: for i = 1..n_obs it recomputes the
+// whole matrix from the block's current context, softmaxes row i, draws z_i
+// by inverse CDF, writes z_i back into the context under the block's own
+// name, and moves on. Without that entry the matrix is computed once per step.
+// Labels are stored 1-indexed in {1, ..., K}.
 //
 // Three properties are worth verifying, and each needs a different target.
 // They are checked here as parts A, B and C.

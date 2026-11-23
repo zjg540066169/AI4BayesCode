@@ -9,13 +9,17 @@
 // What the block claims
 // ---------------------
 // binary_gibbs_block samples a vector z in {0,1}^n by a DETERMINISTIC-SCAN
-// component-wise Gibbs sweep. For component i it evaluates the user's
-// log_odds_fn on the CURRENT context, reads element i,
+// component-wise Gibbs sweep. When the context holds an entry under the
+// block's own name (Target 2 below), the sweep starts from the values in that
+// entry, and for component i it evaluates the user's log_odds_fn on the
+// CURRENT context, takes element i,
 //
 //     lo_i = log [ P(z_i = 1 | z_{-i}) / P(z_i = 0 | z_{-i}) ],
 //
 // draws z_i ~ Bernoulli(sigmoid(lo_i)), and writes the updated z back into
-// its own context before moving on to component i+1. Two separate claims
+// its own context before moving on to component i+1. Without that entry
+// (Target 1 below) log_odds_fn is evaluated once per step and component i
+// takes element i of that one vector. Two separate claims
 // are being made there, and this file checks both.
 //
 // Target 1 -- the Bernoulli draw itself (exact, i.i.d.)

@@ -29,3 +29,17 @@ cfg.n_categories = K;
 cfg.initial_labels = arma::vec(N, arma::fill::ones);
 cfg.log_probs_fn = [](const block_context& ctx) -> arma::mat { ... };
 ```
+
+**Oracle calls and the block's own labels.** If `log_probs_fn` uses the
+block's own labels (count-dependent or CRP conditionals, Potts couplings),
+list the block's own name in its dependency list, e.g.
+`impl_->data().declare_dependencies("z", {"z", ...})`; `step()` then calls
+the oracle once per observation, each time after writing the previous label
+into that context entry. Otherwise the context has no entry under the block's
+name and the oracle is called once per `step()` for all rows, so it must not
+keep per-call state (a call counter, a test for its own key). When the own
+key is in the context, each step starts from its shared value: labels written
+there by another block (`split_merge_block`, `stick_label_swap_block`) are
+the starting state of the sweep, so a restore of this block must also write
+the shared key (`data().set`) or go through `composite_block::set_current`,
+and an entry whose length is not `n_obs` makes `step()` throw.

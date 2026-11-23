@@ -31,3 +31,17 @@ cfg.n_binary = p;
 cfg.initial_values = arma::vec(p, arma::fill::zeros);
 cfg.log_odds_fn = [](const block_context& ctx) -> arma::vec { ... };
 ```
+
+**Oracle calls and the block's own indicators.** If `log_odds_fn` uses the
+block's own indicators (Ising / MRF couplings, a prior on their count), list
+the block's own name in its dependency list, e.g.
+`impl_->data().declare_dependencies("gamma", {"gamma", ...})`; `step()` then
+calls the oracle once per component, each time after writing the previous
+indicator into that context entry. Otherwise the context has no entry under
+the block's name and the oracle is called once per `step()` for all
+components, so it must not keep per-call state (a call counter, a test for
+its own key). When the own key is in the context, each step starts from its
+shared value: indicators written there by another block are the starting
+state of the sweep, so a restore of this block must also write the shared key
+(`data().set`) or go through `composite_block::set_current`, and an entry
+whose length is not `n_binary` makes `step()` throw.

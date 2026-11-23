@@ -81,9 +81,18 @@ namespace AI4BayesCode {
  *
  *     log_odds[i] = log [ P(z_i = 1 | others) / P(z_i = 0 | others) ]
  *
- * The returned vector must have length `n_binary` (the constructor
- * validates this on every call). The function is called once per
- * `step()` and must be pure (no hidden global state).
+ * The returned vector must have length `n_binary` (step() checks this
+ * on every call). The function must be pure (no hidden global state).
+ * If the context installed by set_context has no entry under the block's
+ * name, it is called once per `step()`; otherwise once per component,
+ * each time after the previous component has been written into that
+ * entry.
+ *
+ * An entry under the block's name is the starting state of the step: its
+ * values, snapped to 0 / 1 as in set_current, replace the block's values
+ * before the first oracle call, so a value written there by another block
+ * that writes the same key is where the sweep starts. An entry whose length
+ * is not n_binary makes step() throw without changing the block's state.
  */
 using binary_log_odds_fn =
     std::function<arma::vec(const block_context& ctx)>;
@@ -150,15 +159,30 @@ public:
         // log-odds at once, then flipping all at once) converges to a
         // DIFFERENT stationary distribution when gamma_j's are not
         // conditionally independent given the rest.
+        //
+        // If the context has no entry under this block's name, the oracle
+        // input is the same for every component, so the log-odds are
+        // computed once and each component is drawn from them with the
+        // same uniforms, in the same order, as in the sequential scan.
+        //
+        // If it has one, that entry is the shared value of these indicators,
+        // which another block writing the same key may have changed since
+        // this block's last step, and the sweep starts from it.
+        const auto own_it = context_.find(cfg_.name);
+        const bool sequential = own_it != context_.end();
+        if (sequential) load_own_entry_(own_it->second);
         std::uniform_real_distribution<double> uniform(0.0, 1.0);
+        arma::vec log_odds;
         for (std::size_t i = 0; i < cfg_.n_binary; ++i) {
             // Recompute log-odds from current context (which reflects
             // all previously flipped gammas in this sweep).
-            const arma::vec log_odds = cfg_.log_odds_fn(context_);
-            if (log_odds.n_elem != cfg_.n_binary) {
-                throw std::runtime_error(
-                    "binary_gibbs_block '" + cfg_.name
-                    + "': log_odds_fn returned wrong length");
+            if (i == 0 || sequential) {
+                log_odds = cfg_.log_odds_fn(context_);
+                if (log_odds.n_elem != cfg_.n_binary) {
+                    throw std::runtime_error(
+                        "binary_gibbs_block '" + cfg_.name
+                        + "': log_odds_fn returned wrong length");
+                }
             }
 
             // Numerically stable sigmoid.
@@ -173,9 +197,10 @@ public:
             }
             values_[i] = (uniform(rng) < p1) ? 1.0 : 0.0;
 
-            // Write updated gamma back into context so the next
-            // component sees the freshly flipped value.
-            context_[cfg_.name] = values_;
+            // Write updated gamma back into context, so that the log-odds
+            // of the next component are computed from it. The entry equals
+            // values_ at every other component since the load above.
+            if (sequential) own_it->second[i] = values_[i];
         }
 
         // Append to history if enabled
@@ -203,6 +228,10 @@ public:
         for (std::size_t i = 0; i < cfg_.n_binary; ++i) {
             values_[i] = (theta[i] >= 0.5) ? 1.0 : 0.0;
         }
+        // A context entry under this block's name is the oracle input for
+        // these values at the next step(), so it is set to the loaded ones.
+        auto it = context_.find(cfg_.name);
+        if (it != context_.end()) it->second = values_;
     }
 
     const std::string& name() const noexcept override { return cfg_.name; }
@@ -224,6 +253,24 @@ public:
     }
 
 private:
+    /// Starting state of a step whose context holds the block's own key:
+    /// the values in that entry, snapped to 0 / 1 as in set_current, replace
+    /// values_, and the snapped values are written back into the entry. A
+    /// length other than n_binary throws before anything is written.
+    void load_own_entry_(arma::vec& own) {
+        if (own.n_elem != cfg_.n_binary) {
+            throw std::runtime_error(
+                "binary_gibbs_block '" + cfg_.name + "': context key '"
+                + cfg_.name + "' (the block's own values) has length "
+                + std::to_string(own.n_elem) + ", expected n_binary = "
+                + std::to_string(cfg_.n_binary));
+        }
+        for (std::size_t i = 0; i < cfg_.n_binary; ++i) {
+            values_[i] = (own[i] >= 0.5) ? 1.0 : 0.0;
+            own[i] = values_[i];
+        }
+    }
+
     binary_gibbs_block_config cfg_;
     arma::vec                 values_;
     block_context             context_;
