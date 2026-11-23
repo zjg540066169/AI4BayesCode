@@ -71,6 +71,14 @@ endif
 
 TARGETS  := test_portable_rng test_constraints test_binary_gibbs test_dirichlet_gibbs test_categorical_gibbs test_gaussian_linear test_simplex_dirichlet test_nuts_variance test_vi_mean_field_gaussian test_vi_correlated_gaussian test_vi_hybrid_composition test_vi_glmm_logistic test_vi_bnn_regression test_vi_full_rank_correlated test_vi_bnn_full_rank test_readapt_NUTS test_target_accept_config test_joint_nuts_block_stress test_cluster_atom_block test_bde_scorer test_score_cache test_order_mcmc_block test_order_mcmc_block_stress test_order_mcmc_block_diagnostics test_bge_scorer test_partition_geometry test_partition_mcmc_diagnostics test_partition_mcmc_rhat test_order_mcmc_block_partition test_freeze_predict_history test_freeze_element test_freeze_dense_pilot test_freeze_joint_nuts_slot test_ode_rk45_inplace test_ode_linear test_dag_key_validation test_genbart_slice_mstep test_bart_prior_recovery test_bart_cchange test_predict_dag_depth test_predict_withheld_cone test_history_alignment test_wiring_guards test_composite_bare_name_slot_fallback test_freeze_normal_gamma_cluster test_freeze_rjmcmc_subkey test_joint_nuts_block_constraints test_joint_nuts_dimchanging test_vi_publish_and_history test_split_merge_exact test_stick_label_swap_exact test_pg_truncation test_nuts_small_step_invariance
 
+# Tests of the 1.1.2 block fixes (every test_fix_*.cpp). The compiler writes
+# each test's header dependencies to test_fix_*.d (-MMD -MP), so an edit to
+# any header a test includes, directly or through an example, rebuilds it.
+# The GP examples also need the libgp_kernels and celerite headers.
+FIX112_TESTS := $(sort $(basename $(wildcard test_fix_*.cpp)))
+FIX112_INC   := -I../libgp_kernels -I../celerite/include
+TARGETS      += $(FIX112_TESTS)
+
 # The VI publish/history regression guards four VI headers plus the composite
 # freeze path -- a header-only edit otherwise leaves a stale binary in place.
 # The .cpp has to be the FIRST prerequisite and the recipe explicit: with only
@@ -274,6 +282,8 @@ run: build
 	@echo
 	@echo "=== Running test_nuts_small_step_invariance ==="
 	./test_nuts_small_step_invariance
+	@echo
+	@for t in $(FIX112_TESTS); do echo "=== Running $$t ==="; ./$$t || exit 1; echo; done
 
 # These three had no rule, so make's built-in %: %.cpp applied and a
 # header-only edit left the previous binary in place, still reporting PASS.
@@ -475,7 +485,12 @@ test_genbart_slice_mstep: test_genbart_slice_mstep.cpp \
                           ../bart_pure_cpp/src/GENBART/rjmcmc_bd.h
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 
+$(FIX112_TESTS): %: %.cpp
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(FIX112_INC) -MMD -MP -o $@ $< $(LDFLAGS) $(LDLIBS)
+
+-include $(addsuffix .d,$(FIX112_TESTS))
+
 clean:
 	# The build also leaves .rebuilt / .rb / .new / .builderr / .be markers;
 	# without these a stale one can outlive the binary it describes.
-	rm -f $(TARGETS) *.rebuilt *.rb *.new *.builderr *.be
+	rm -f $(TARGETS) *.rebuilt *.rb *.new *.builderr *.be $(addsuffix .d,$(FIX112_TESTS))

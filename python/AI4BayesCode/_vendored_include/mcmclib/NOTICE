@@ -32,4 +32,21 @@ its own changes in detail):
       of step_size to [1e-10, 1e10]) inside nuts_find_initial_step_size
       to prevent infinite loops / NaN step sizes under extreme curvature.
 
+Modifications Copyright (C) 2026 Jungang Zou, also licensed under the
+Apache License, Version 2.0:
+
+  misc/mcmc_structs.hpp
+    - Cache fields for the metric setup (precond_inv_cache,
+      precond_sqrt_cache, precond_cache_valid).
+
+  mcmc/nuts.hpp
+    - Identity / diagonal-metric fast paths, a leapfrog gradient cache, the
+      metric setup cache, and use of the caller's settings object in place.
+
+  mcmc/nuts.ipp
+    - Initial step-size search that can halve as well as double (Hoffman
+      and Gelman 2014, Algorithm 4); the new_draw_pos / new_draw_neg output
+      slots of nuts_build_tree's second recursive call in the correct order;
+      a scratch pool and closures that capture their inputs by reference.
+
 All other files in this directory are unmodified from upstream MCMClib.

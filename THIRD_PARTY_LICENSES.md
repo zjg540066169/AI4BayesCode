@@ -46,21 +46,33 @@ those sections).
 ## mcmclib (NUTS backend)
 
 - Upstream: https://github.com/kthohr/mcmc
-- License: Apache-2.0 — see `include/mcmclib/` upstream license file.
-- What we vendored: the `include/mcmclib/mcmc/` header tree.
+- License: Apache-2.0 — see `include/mcmclib/LICENSE`.
+- What we vendored: `include/mcmclib/{mcmc.hpp, mcmc/, misc/, stats/}`, with
+  the upstream `LICENSE` and a `NOTICE` (`include/mcmclib/BaseMatrixOps/` is
+  listed separately below).
 - Modifications: YES — see the header comments in
-  `include/mcmclib/mcmc/nuts.hpp` and `include/mcmclib/mcmc/nuts.ipp`.
+  `include/mcmclib/mcmc/nuts.hpp`, `include/mcmclib/mcmc/nuts.ipp` and
+  `include/mcmclib/misc/mcmc_structs.hpp`.
   The modifications enable persistent adaptation (needed for stateful
-  Gibbs-wise NUTS), add identity/diagonal-metric fast paths and a leapfrog
-  gradient cache, and fix TWO correctness bugs that are present upstream:
-  the tree-doubling endpoint bug, and (2026-08-17) a transposition of the
-  `new_draw_pos` / `new_draw_neg` output slots in `nuts_build_tree`'s second
-  recursive call. The second one made the sampler converge to the wrong
-  stationary distribution whenever trajectories reached tree depth 2 — about
-  +3% on a Dirichlet mean at a step size of 0.1 — and is guarded by
+  Gibbs-wise NUTS), add identity/diagonal-metric fast paths, a leapfrog
+  gradient cache and a cache of the metric setup across calls (the inverse
+  and Cholesky factor of a dense mass matrix, or 1/diag and sqrt(diag) of a
+  diagonal one, stored in `nuts_settings_t`; code that changes `precond_mat`
+  must reset `precond_cache_valid`), make `nuts()` use the caller's settings
+  object in place instead of copying it in every call (the object must not be
+  modified while `nuts()` runs), and fix TWO correctness bugs that are present
+  upstream: the tree-doubling endpoint bug, and (2026-08-17) a transposition
+  of the `new_draw_pos` / `new_draw_neg` output slots in `nuts_build_tree`'s
+  second recursive call. The second one made the sampler converge to the
+  wrong stationary distribution whenever trajectories reached tree depth 2 —
+  +3.5% on a Dirichlet mean at a step size of 0.1 — and is guarded by
   `tests/test_nuts_small_step_invariance.cpp`. Anyone syncing this tree
   against upstream must carry both fixes forward; they are semantic, not
-  performance, divergences.
+  performance, divergences. The step-size adaptation also differs from
+  upstream: the initial step-size search can halve as well as double
+  (Hoffman and Gelman 2014, Algorithm 4) and stops after 50 steps, and the
+  dual-averaging acceptance statistic uses the fixed start of the trajectory
+  (Algorithm 6).
 
 ## BaseMatrixOps (linear-algebra helpers for the NUTS backend)
 
@@ -68,7 +80,8 @@ those sections).
   mcmclib).
 - Version: vendored alongside mcmclib.
 - License: Apache-2.0.
-- What we vendored: `include/mcmclib/BaseMatrixOps/`.
+- What we vendored: `include/mcmclib/BaseMatrixOps/`, and a copy without
+  `.github/`, `.gitignore` and `tests/` at `include/BaseMatrixOps/`.
 - Modifications: none.
 - Note: being Apache-2.0, this component (with mcmclib) is what forces
   the combined-work license to the GPL **v3** branch — see
@@ -90,13 +103,40 @@ those sections).
   `bart_pure_cpp/src/bart_kernel_unity.h`. The composing block header is
   `include/AI4BayesCode/bart_block.hpp`.
 - Modifications: YES — the upstream `.cpp` definitions were merged into
-  the corresponding headers so the kernel is header-only includable.
-  Each modified file carries an explicit "Modifications by Jungang
-  Zou, 2024 … comply with the terms of GPL-2" notice in addition to
-  the original upstream copyright line (hence the dual-copyright
-  header). The tree-kernel logic is upstream, except for the collapsed
-  change move (2026): `cchange.h` is new code, and `bart::draw` and
-  `heterbart::draw` call it after birth/death.
+  the corresponding headers so the kernel is header-only includable
+  (2024; `bartfuns.h`, `bart.h`, `bd.h`, `tree.h`, `heterbart.h`,
+  `heterbd.h` and `heterbartfuns.h` carry a "Modifications by Jungang
+  Zou, 2024" notice for it, and `bd.h` defines the helper functions of
+  `bd()` with the suffix `_bd`). `bartfuns.cpp` carries the same 2024
+  notice, and `rn.h` and `cwbart.cpp` carry 2024 notices for other
+  changes: two implementations of `arn` were removed so that the seed set
+  in R determines the draws, and an output statement with `%zu` was
+  commented out. The kernel files changed in 2026 (`bd.h`, `bartfuns.h`,
+  `bart.h`, `heterbart.h`, `rn.h`) carry a "Modifications by Jungang Zou,
+  2026 … comply with the terms of GPL-2" notice that lists the changes, in
+  addition to the original upstream copyright line (hence the
+  dual-copyright header). The tree-kernel logic is upstream, except for
+  these 2026 changes:
+  - the birth proposal tests whether the parent of the chosen node is a
+    nog with `isnog()` (`bd.h`, `bartfuns.h`, `bart.h`); `ntype()` gives
+    't' for the root, so a birth at a tree with two leaves had a
+    reverse-death probability of 1/2 instead of 1;
+  - the collapsed change move: `cchange.h` is new code, and `bart::draw`
+    and `heterbart::draw` call it after birth/death (`bart.h`,
+    `heterbart.h`);
+  - `bart::setdata` recounts the split counts from the forest, and
+    `bart::sety` replaces y only (`bart.h`);
+  - `bart::draw` and `heterbart::draw` keep the fit of every tree between
+    draws (`bart.h`, `heterbart.h`);
+  - `arn::set_wts` keeps the normalised weights, and `arn::discrete` keeps
+    the binomial parameters of the categorical draw while the weights are
+    unchanged (`rn.h`).
+  The kept values give the same draws as recomputing them. The wrapper
+  `bart_model.h` computes the sigma prior's `sigest` as `BART::wbart`
+  does, sqrt(RSS / (n - rank)) with the rank counted as `lm()` counts it
+  and `sd(y)` when `X` has `n` or more non-constant columns, by a
+  Householder QR in plain C++ (until 1.1.1: RSS / (n - p) from a LAPACK
+  least-squares solve), and returns it with `get_sigest()`.
 - **License-inheritance warning**: any file that `#include`s
   `bart_block.hpp` (directly or transitively) inherits
   GPL-2.0-or-later from this kernel.
@@ -225,8 +265,8 @@ those sections).
   - BART (CRAN BART R package) kernel `bart_pure_cpp/src/BART/` — GPL-2.0-or-later
   - genBART kernel `bart_pure_cpp/src/GENBART/` — GPL-2.0-or-later
   - SoftBART kernel `bart_pure_cpp/src/SOFTBART_VENDOR/` — GPL-2.0-or-later
-  - mcmclib `include/mcmclib/mcmc/` — Apache-2.0
-  - BaseMatrixOps `include/mcmclib/BaseMatrixOps/` — Apache-2.0
+  - mcmclib `include/mcmclib/{mcmc.hpp, mcmc/, misc/, stats/}` — Apache-2.0
+  - BaseMatrixOps `include/mcmclib/BaseMatrixOps/` and `include/BaseMatrixOps/` — Apache-2.0
   - autodiff `include/autodiff/` — MIT
   - Eigen `include/eigen/` — MPL-2.0
   - celerite `celerite/` — MIT
