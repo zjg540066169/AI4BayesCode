@@ -139,9 +139,10 @@ inline history_map make_history_map(const std::string& name,
  * @brief Key-value bundle passed into block_sampler::set_context.
  *
  * Keys are human-readable strings. Values are column vectors; scalars are
- * stored as length-1 vectors. A context is always a complete snapshot of
- * everything a particular block depends on at the moment set_context is
- * called; it is constructed fresh by the composite driver before each step.
+ * stored as length-1 vectors. A context is a complete snapshot of everything
+ * a particular block depends on at the moment set_context is called: either
+ * a fresh copy or read-only views of the composite's stored values. It is
+ * valid only during that set_context call.
  */
 using block_context = state_map;
 

@@ -16,7 +16,8 @@
  *  sweep is:
  *
  *      for each child block B in gibbs_order:
- *          1. ctx = shared.build_context_for(B.name())
+ *          1. ctx = shared.context_view_for(B.name()), or the same keys
+ *             and values copied by shared.build_context_for(B.name())
  *          2. B.set_context(ctx)
  *          3. B.step(rng)
  *          4. shared.write_back(B.name(), B.current())
@@ -56,13 +57,16 @@
 #include "block_sampler.hpp"   // for block_context alias
 
 #include <algorithm>
+#include <cstdint>
 #include <functional>
 #include <iosfwd>
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #ifndef MCMC_USE_RCPP_ARMADILLO
@@ -237,6 +241,60 @@ public:
             ctx[key] = vit->second; // copy
         }
         return ctx;
+    }
+
+    /**
+     * The context build_context_for(block_name) returns, with the same keys,
+     * values and iteration order, but without copying the values: each entry
+     * is a read-only view of the stored value. The views are made again when
+     * the block's dependency list changes or when a stored value has another
+     * address or length than when its view was made, so every call refers to
+     * the current values. The returned map is valid until this object is next
+     * modified; copy from it before that (set_context does).
+     */
+    const block_context& context_view_for(const std::string& block_name) {
+        context_views_t::entry& e = views_.blocks[block_name];
+        const auto dit = dependencies_.find(block_name);
+        bool ok = e.valid && (dit == dependencies_.end()
+                                  ? e.keys.empty() : e.keys == dit->second);
+        for (std::size_t i = 0; ok && i < e.keys.size(); ++i) {
+            const auto vit = values_.find(e.keys[i]);
+            ok = vit != values_.end()
+                 && e.addr[i] == context_views_t::address(vit->second)
+                 && e.n_elem[i] == vit->second.n_elem;
+        }
+        if (ok) return e.ctx;
+
+        // Make the views again, inserted in dependency order as in
+        // build_context_for, so the iteration order is the same.
+        e.valid = false;
+        std::vector<std::string> keys;
+        if (dit != dependencies_.end()) keys = dit->second;
+        std::vector<std::uintptr_t> addr(keys.size());
+        std::vector<arma::uword> n_elem(keys.size());
+        block_context ctx;
+        for (std::size_t i = 0; i < keys.size(); ++i) {
+            const auto vit = values_.find(keys[i]);
+            if (vit == values_.end()) {
+                throw std::out_of_range(
+                    "shared_data_t::build_context_for: block '" + block_name
+                    + "' depends on missing key '" + keys[i] + "'");
+            }
+            arma::vec& v = vit->second;
+            ctx.emplace(std::piecewise_construct,
+                        std::forward_as_tuple(keys[i]),
+                        std::forward_as_tuple(v.memptr(), v.n_elem,
+                                              /*copy_aux_mem=*/false,
+                                              /*strict=*/true));
+            addr[i] = context_views_t::address(v);
+            n_elem[i] = v.n_elem;
+        }
+        e.ctx.swap(ctx);
+        e.keys.swap(keys);
+        e.addr.swap(addr);
+        e.n_elem.swap(n_elem);
+        e.valid = true;
+        return e.ctx;
     }
 
     /**
@@ -773,6 +831,43 @@ public:
     invalidates() const noexcept { return invalidates_; }
 
 private:
+    // Views made by context_view_for(), per block. Copying or moving a
+    // shared_data_t does not copy or move them: the target has none and a
+    // moved-from object is emptied, so every view refers to values_ of the
+    // object that holds it. A view map is only swapped or cleared, never
+    // assigned to: assigning to a view would write into values_.
+    struct context_views_t {
+        struct entry {
+            std::vector<std::string>    keys;    // dependency list of the views
+            std::vector<std::uintptr_t> addr;    // address of each value's storage
+            std::vector<arma::uword>    n_elem;  // length of each value
+            block_context               ctx;     // the views
+            bool                        valid = false;
+            entry() = default;
+            entry(const entry&) = delete;
+            entry& operator=(const entry&) = delete;
+        };
+        static std::uintptr_t address(const arma::vec& v) {
+            return reinterpret_cast<std::uintptr_t>(v.memptr());
+        }
+        std::unordered_map<std::string, entry> blocks;
+
+        context_views_t() = default;
+        context_views_t(const context_views_t&) {}
+        context_views_t(context_views_t&& o) noexcept { o.blocks.clear(); }
+        context_views_t& operator=(const context_views_t&) {
+            blocks.clear();
+            return *this;
+        }
+        context_views_t& operator=(context_views_t&& o) noexcept {
+            blocks.clear();
+            o.blocks.clear();
+            return *this;
+        }
+    };
+
+    // Declared first: cleared before values_ is assigned, destroyed after it.
+    context_views_t views_;
     std::unordered_map<std::string, arma::vec> values_;
     std::unordered_map<std::string, std::vector<std::string>> dependencies_;
     std::unordered_map<std::string, std::vector<std::string>> invalidates_;

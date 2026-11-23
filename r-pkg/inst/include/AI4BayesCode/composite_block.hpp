@@ -58,6 +58,8 @@
 #include "shared_data.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstddef>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -161,6 +163,21 @@ public:
     block_sampler&       child(std::size_t i)       { return *children_.at(i); }
     const block_sampler& child(std::size_t i) const { return *children_.at(i); }
 
+    /**
+     * Bring the shared data in line with child i after a loader was called on
+     * that child directly: child(i).set_current(theta), or a loader of the
+     * child's own class such as order_mcmc_block::set_partition. Writes every
+     * named output of child i into the shared data (the overload without an
+     * RNG, as set_current does), refreshes the derived keys that child i
+     * invalidates, and marks current() for rebuild. This is the per-child
+     * part of set_current(theta), without the call to the child's
+     * set_current. Throws std::out_of_range if i >= n_children().
+     */
+    void sync_child(std::size_t i) {
+        sync_child_(*children_.at(i));
+        current_dirty_ = true;
+    }
+
     // ---- block_sampler interface ---------------------------------------
 
     /**
@@ -195,15 +212,17 @@ public:
         // the Gibbs-DAG maps (dependencies_ / invalidates_) MUST name a
         // direct child. A key that does not -- e.g. a joint block's
         // sub-parameter name mistaken for the block name -- is otherwise a
-        // silent no-op: build_context_for / refresh_derived_for return
-        // without doing anything, the derived key freezes at its initial
-        // value, and the sampler converges to the wrong posterior with no
-        // exception, no NaN, healthy R-hat and ESS. Fail loudly instead.
+        // silent no-op: build_context_for / context_view_for /
+        // refresh_derived_for return without doing anything, the derived
+        // key freezes at its initial value, and the sampler converges to the
+        // wrong posterior with no exception, no NaN, healthy R-hat and ESS.
+        // Fail loudly instead.
         if (!dag_checked_) {
             validate_dag_keys_();
             dag_checked_ = true;
         }
-        for (auto& child : children_) {
+        for (std::size_t ci = 0; ci < children_.size(); ++ci) {
+            auto& child = children_[ci];
             const std::string& cname = child->name();
 
             // Kernel-control freeze (interface.md Sec.1):
@@ -227,36 +246,36 @@ public:
                 continue;
             }
 
-            // 1. Project shared_data into the child's context.
-            block_context ctx = data_.build_context_for(cname);
+            // 1-2. Project shared_data into the child's context and push it
+            //      (views or a copy, see pass_context_). Steps 3-5 run inside
+            //      pass_context_, so a copy exists until the write-back and
+            //      the refresh are done.
+            pass_context_(ci, *child, [&]() {
+                // 3. Sample.
+                child->step(rng);
 
-            // 2. Push.
-            child->set_context(ctx);
+                // 4. Write back EVERY named output the child exposes. For a
+                //    standard MCMC block this is a single {name -> current()};
+                //    for a joint block it is one entry per sub-parameter. For
+                //    a VI block (engine_kind() == VI) the rng overload routes
+                //    to current_sample(rng), writing a fresh q-sample (NOT
+                //    the q-mean) — preserving the VI block's uncertainty for
+                //    any MCMC sibling that reads it next iteration. See
+                //    system_design.md §18.4 for the hybrid-correctness
+                //    invariant.
+                auto outputs = child->current_named_outputs(rng);
+                for (const auto& kv : outputs) {
+                    data_.write_back(kv.first, kv.second);
+                }
 
-            // 3. Sample.
-            child->step(rng);
-
-            // 4. Write back EVERY named output the child exposes. For a
-            //    standard MCMC block this is a single {name -> current()};
-            //    for a joint block it is one entry per sub-parameter. For
-            //    a VI block (engine_kind() == VI) the rng overload routes
-            //    to current_sample(rng), writing a fresh q-sample (NOT
-            //    the q-mean) — preserving the VI block's uncertainty for
-            //    any MCMC sibling that reads it next iteration. See
-            //    system_design.md §18.4 for the hybrid-correctness
-            //    invariant.
-            auto outputs = child->current_named_outputs(rng);
-            for (const auto& kv : outputs) {
-                data_.write_back(kv.first, kv.second);
-            }
-
-            // 5. Refresh derived keys invalidated by this block. The
-            //    invalidation map is keyed by the BLOCK name (cname), not
-            //    by individual sub-parameter names, so joint blocks
-            //    declare their invalidates once under cname.
-            if (!cname.empty()) {
-                data_.refresh_derived_for(cname);
-            }
+                // 5. Refresh derived keys invalidated by this block. The
+                //    invalidation map is keyed by the BLOCK name (cname), not
+                //    by individual sub-parameter names, so joint blocks
+                //    declare their invalidates once under cname.
+                if (!cname.empty()) {
+                    data_.refresh_derived_for(cname);
+                }
+            });
         }
         current_dirty_ = true;
     }
@@ -291,24 +310,9 @@ public:
             }
             child->set_current(theta.subvec(offset, offset + d - 1));
 
-            // Write back the child's NAMED OUTPUTS, exactly as step() does.
-            // Writing only child->name() is wrong for any multi-output block:
-            // a joint_nuts_block's name() is not a shared_data key at all
-            // (see joint_nuts_block's docs), so that path would store a junk
-            // entry while the real sub-parameter keys -- beta, sigma, ... --
-            // kept their PRE-restore values, and the next sweep would run
-            // against stale state. Use the no-rng overload here: this is a
-            // restore, not a sweep, so a VI child must not burn a q-draw.
-            for (const auto& kv : child->current_named_outputs()) {
-                data_.write_back(kv.first, kv.second);
-            }
-
-            // ...and refresh whatever those keys invalidate, again as step()
-            // does; otherwise the restored state coexists with derived values
-            // computed from the state it replaced.
-            if (!child->name().empty()) {
-                data_.refresh_derived_for(child->name());
-            }
+            // Write back the child's named outputs and refresh the derived
+            // keys they invalidate (see sync_child_).
+            sync_child_(*child);
             offset += d;
         }
         if (offset != theta.n_elem) {
@@ -370,8 +374,7 @@ public:
             // Project current shared_data into the child's context, so
             // the n adaptation iterations evaluate log p AT the current
             // composite state.
-            block_context ctx = data_.build_context_for(child->name());
-            child->set_context(ctx);
+            child->set_context(data_.context_view_for(child->name()));
             child->readapt(n, reset, rng, max_tree_depth_override,
                            target_accept_override);
             // No write-back: child's state was restored at the end of
@@ -1063,6 +1066,124 @@ public:
     }
 
 private:
+    // How child i gets its context in step(): views of the stored values
+    // (shared_data_t::context_view_for) or a fresh copy (build_context_for).
+    // Both give the same keys, values and iteration order. Which one makes
+    // the child's set_context faster depends on the child and the machine:
+    // copying from the stored value can take longer than copying from a
+    // buffer written just before (measured on Apple Silicon when the child's
+    // copy is an operand of Accelerate BLAS calls). So the child's first
+    // update passes a copy and its second update views, both untimed; the
+    // next 2 * n_timed updates are timed, with views and copies in the order
+    // view, copy, copy, view, .... From then on views are passed if their
+    // median time is below view_ratio times the median time of copies, and
+    // copies otherwise. All of this starts again when the number of elements
+    // n in the context and the number n0 at the first update satisfy
+    // max(n, n0) > 2 * min(n, n0) + 1024.
+    struct context_pass_t {
+        static constexpr unsigned n_untimed  = 2;    // a copy, then views
+        static constexpr unsigned n_timed    = 9;    // per way
+        static constexpr double   view_ratio = 0.9;
+        unsigned            calls = 0;               // updates since (re)start
+        std::size_t         n_elem = 0;              // context size at (re)start
+        std::vector<double> t_view, t_copy;          // seconds
+        bool                decided = false;
+        bool                use_view = false;
+    };
+
+    using steady_clock_ = std::chrono::steady_clock;
+
+    // Passes child i its context (views or a copy, as described above) and
+    // then calls then(), which runs the rest of the child's update. A copy is
+    // destroyed after then() returns. The timed interval is the projection
+    // and the child's set_context.
+    template <class Then>
+    void pass_context_(std::size_t i, block_sampler& child, Then&& then) {
+        if (context_pass_.size() < children_.size()) {
+            context_pass_.resize(children_.size());
+        }
+        context_pass_t& m = context_pass_[i];
+        const bool timed = !m.decided && m.calls >= context_pass_t::n_untimed;
+        const unsigned j = timed ? m.calls - context_pass_t::n_untimed : 0;
+        const bool view = m.decided ? m.use_view
+                        : timed     ? (j % 4 == 0 || j % 4 == 3)
+                                    : m.calls == 1;
+        const steady_clock_::time_point t0 =
+            timed ? steady_clock_::now() : steady_clock_::time_point();
+        if (view) {
+            const block_context& ctx = data_.context_view_for(child.name());
+            child.set_context(ctx);
+            record_pass_(m, view, timed, t0, n_elem_(ctx));
+            then();
+        } else {
+            const block_context ctx = data_.build_context_for(child.name());
+            child.set_context(ctx);
+            record_pass_(m, view, timed, t0, n_elem_(ctx));
+            then();
+        }
+    }
+
+    // Bookkeeping of pass_context_ after the child's set_context: n is the
+    // number of elements in the context that was passed.
+    static void record_pass_(context_pass_t& m, bool view, bool timed,
+                             steady_clock_::time_point t0, std::size_t n) {
+        const double dt = timed
+            ? std::chrono::duration<double>(steady_clock_::now() - t0).count()
+            : 0.0;
+
+        if (!m.decided && m.calls == 0) m.n_elem = n;
+        if (std::max(n, m.n_elem) > 2 * std::min(n, m.n_elem) + 1024) {
+            m = context_pass_t();  // start again with the next update
+            return;
+        }
+        if (m.decided) return;
+        ++m.calls;
+        if (!timed) return;
+        (view ? m.t_view : m.t_copy).push_back(dt);
+        if (m.t_view.size() < context_pass_t::n_timed
+            || m.t_copy.size() < context_pass_t::n_timed) return;
+        m.use_view = median_(m.t_view)
+                     < context_pass_t::view_ratio * median_(m.t_copy);
+        m.decided = true;
+        std::vector<double>().swap(m.t_view);
+        std::vector<double>().swap(m.t_copy);
+    }
+
+    static std::size_t n_elem_(const block_context& ctx) {
+        std::size_t n = 0;
+        for (const auto& kv : ctx) n += kv.second.n_elem;
+        return n;
+    }
+
+    static double median_(std::vector<double> v) {
+        const auto mid = v.begin() + static_cast<std::ptrdiff_t>(v.size() / 2);
+        std::nth_element(v.begin(), mid, v.end());
+        return *mid;
+    }
+
+    // The per-child part of set_current(theta) after the child's own
+    // set_current; also sync_child(i).
+    void sync_child_(block_sampler& child) {
+        // Write back the child's NAMED OUTPUTS, exactly as step() does.
+        // Writing only child.name() is wrong for any multi-output block:
+        // a joint_nuts_block's name() is not a shared_data key at all
+        // (see joint_nuts_block's docs), so that path would store a junk
+        // entry while the real sub-parameter keys -- beta, sigma, ... --
+        // kept their PRE-restore values, and the next sweep would run
+        // against stale state. Use the no-rng overload here: this is a
+        // restore, not a sweep, so a VI child must not burn a q-draw.
+        for (const auto& kv : child.current_named_outputs()) {
+            data_.write_back(kv.first, kv.second);
+        }
+
+        // ...and refresh whatever those keys invalidate, again as step()
+        // does; otherwise the restored state coexists with derived values
+        // computed from the state it replaced.
+        if (!child.name().empty()) {
+            data_.refresh_derived_for(child.name());
+        }
+    }
+
     void rebuild_current_() const {
         current_cache_.set_size(dim());
         std::size_t offset = 0;
@@ -1077,12 +1198,13 @@ private:
 
     // Assembly-time DAG validation: assert every key declared in the Gibbs
     // DAG (declare_dependencies / declare_invalidates) names a direct child.
-    // Both maps are only ever queried by child name -- build_context_for and
-    // refresh_derived_for are called with child->name() -- so any other key
-    // is dead. The dangerous case is a joint block's sub-parameter name
-    // passed where the block name was meant: it silently freezes a derived
-    // key. Called once from the first step(); throws std::invalid_argument
-    // listing the unmatched names alongside the valid child names.
+    // Both maps are only ever queried by child name -- build_context_for,
+    // context_view_for and refresh_derived_for are called with
+    // child->name() -- so any other key is dead. The dangerous case is a
+    // joint block's sub-parameter name passed where the block name was
+    // meant: it silently freezes a derived key. Called once from the first
+    // step(); throws std::invalid_argument listing the unmatched names
+    // alongside the valid child names.
     void validate_dag_keys_() const {
         std::unordered_set<std::string> child_names;
         for (const auto& c : children_) child_names.insert(c->name());
@@ -1130,6 +1252,9 @@ private:
     // Set once the first step() has run validate_dag_keys_(). Mutable so the
     // one-time check can fire from the non-const step() without re-running.
     bool              dag_checked_ = false;
+
+    // Per child, in children_ order; see pass_context_.
+    std::vector<context_pass_t>                 context_pass_;
 };
 
 } // namespace AI4BayesCode
