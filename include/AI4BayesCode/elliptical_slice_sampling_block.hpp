@@ -212,10 +212,12 @@ public:
         // reallocation), and an identity L_chol is not copied over the
         // identity already held: both have the same bits.
         if (ctx.size() == context_.size()) {
-            // Each key of ctx is first compared with the held entry at the
-            // same position of the iteration order, then looked up. A key
-            // that is not held ends the loop; the full copy below then
-            // replaces every entry, including those already assigned.
+            // Each key of ctx is compared with the held entry that follows
+            // the last matched one in the iteration order (the first held
+            // entry for the first key), and looked up with find only when
+            // there is no such entry or the two keys differ. A key that is
+            // not held ends the loop; the full copy below then replaces
+            // every entry, including those already assigned.
             auto next_held = context_.begin();
             bool same_keys = true;
             for (const auto& kv : ctx) {

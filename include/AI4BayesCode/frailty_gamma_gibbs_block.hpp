@@ -42,11 +42,12 @@
  *      w_g | rest  ~  Gamma( theta + D_g,  theta + H_g )
  *
  *  One exact Gibbs step draws all G frailties. Cost per step, for n subjects
- *  and K bins: O(nK + G) on the first step and on any step whose t or
- *  entry_time differ from those of the last completed step; otherwise
- *  O(n + P + G), P = sum over subjects of the number of bins with positive
- *  exposure (the first such step also computes each subject's run of those
- *  bins, O(n log K + P)).
+ *  and K bins: O(nK + G) on the first step, on any step whose t or
+ *  entry_time differ from those of the last completed step, and on any step
+ *  after an error raised on t, entry_time or a group label in this computation
+ *  with no completed step in between; otherwise O(n + P + G), P = sum over
+ *  subjects of the number of bins with positive exposure (the first such
+ *  step also computes each subject's run of those bins, O(n log K + P)).
  *
  *  ROLE IN THE COMPOSITE
  *  =====================
@@ -139,11 +140,13 @@ struct frailty_gamma_gibbs_block_config {
     std::string lambda_key = "lambda";
 
     /// shared_data key for length-n covariate offset exp(f_i).
-    /// OPTIONAL: empty or missing => all exp(f_i) = 1.
+    /// OPTIONAL: empty => all exp(f_i) = 1; a non-empty key missing from the
+    /// context throws in step().
     std::string offset_key = "";
 
     /// shared_data key for length-n left-truncation entry times v_i in [0, t_i].
-    /// OPTIONAL: empty or missing => all v_i = 0.
+    /// OPTIONAL: empty => all v_i = 0; a non-empty key missing from the
+    /// context throws in step().
     std::string entry_time_key = "";
 
     /// Initial frailties w_1..w_G, length G, each > 0.

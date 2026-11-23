@@ -10,7 +10,7 @@ per-subject log-relative-hazard `f_i` (Cox-style proportional-hazards structure)
 
 **Model** (Ibrahim, Chen & Sinha 2001 Sec.3.2; Kalbfleisch 1978; Prentice & Gloeckler
 1978): time axis is partitioned into `K` bins by edges `0 = e_0 < e_1 < ... < e_K`.
-Baseline hazard is piecewise constant `h_0(t) = lambda_k` for `t in (e_{k-1}, e_k]`.
+Baseline hazard is piecewise constant `h_0(t) = lambda_k` for `t in [e_{k-1}, e_k)`.
 Per-subject hazard multiplies by `exp(f_i)` from another block (linear predictor
 `x_i^T beta`, BART, GP, spline, ... -- this block does NOT know or care):
 
@@ -32,7 +32,11 @@ Delta_k(t_i, v_i) = max(0, min(t_i, e_k) - max(v_i, e_{k-1}))
 lambda_k | rest ~ Gamma(a0 + E_k,  b0 + R_k)           (independent across k)
 ```
 
-One exact Gibbs step draws all K rates. O(n + K) per step. K=10..500 comfortable.
+One exact Gibbs step draws all K rates. Per step: O(n log K + sum_i (k_i + 1) + K)
+(k_i = bin of t_i) on the first step and when t, delta or entry_time changed;
+otherwise O(n + K) without an offset and O(n + P + K) with one (P = number of
+subject-bin pairs with positive exposure; the first such step costs
+O(n log K + P + K)). K=10..500 comfortable.
 
 ```cpp
 #include "AI4BayesCode/piecewise_exponential_gibbs_block.hpp"
@@ -44,7 +48,7 @@ cfg.a0    = 0.01;                                  // Gamma(a0, b0) prior on eac
 cfg.b0    = 0.01;                                  // (0.01, 0.01) weakly informative
 // time_key="t", event_key="delta" (defaults) -- must be in shared_data.
 // offset_key: OPTIONAL -- sibling block writes exp(x_i^T beta) each sweep here.
-cfg.offset_key = "exp_lp";                         // "" or key-missing => baseline-only PEH
+cfg.offset_key = "exp_lp";                         // "" => baseline-only PEH; key-missing => step() throws
 // entry_time_key: OPTIONAL for left-truncation.
 composite->add_child(std::make_unique<piecewise_exponential_gibbs_block>(std::move(cfg)));
 ```
@@ -54,15 +58,16 @@ composite->add_child(std::make_unique<piecewise_exponential_gibbs_block>(std::mo
 Internal `std::gamma_distribution` is shape-SCALE; conversion is commented at
 the call site.
 
-**Bin convention**: bins are `(e_{k-1}, e_k]`, k = 1..K (1-based math, 0-based
-storage). A time `t_i = e_k` exactly lands in bin `k`. `edges[K]` must exceed
-`max(t_i)` observed follow-up (throws otherwise).
+**Bin convention**: bins are `[e_{k-1}, e_k)`, k = 1..K (1-based math, 0-based
+storage), and bin K also holds `t = e_K`, so an event at an interior edge
+`t_i = e_k` is counted in bin `k + 1`, where that subject has zero exposure.
+`edges[K]` must be at least `max(t_i)` observed follow-up (throws otherwise).
 
 **USAGE (PEH + Cox linear log-hazard-ratio beta):**
 
 ```cpp
 // Sibling block that samples beta and writes exp(x_i^T beta) each sweep.
-// See examples/PehSurvival.cpp for the wired-up template.
+// See examples/PehSharedFrailty.cpp for a wired-up offset (offset_key = "expanded_w").
 ```
 
 **JUSTIFICATION (Check #16): Exception 3** (textbook multivariate conjugate

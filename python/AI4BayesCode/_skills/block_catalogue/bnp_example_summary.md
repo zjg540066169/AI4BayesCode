@@ -16,6 +16,7 @@
 | (mu, lambda) | `normal_gamma_cluster_gibbs_block` | Per-(k,d) Normal-Gamma conjugate; empty clusters draw from prior |
 | alpha (scalar) | `univariate_slice_sampling_block` on the Antoniak (1974) (k, n) marginal | Reads `cluster_counts` (k = occupied clusters, n = observations), NOT the empty-tail sticks `stick_V` -- those Beta(1, alpha) draws are chain-specific and broke mixing (rank-R-hat ~ 1.42). Slice keeps the prior swappable too, and needs no gradient at all. See `DPGaussianMixture.cpp`. |
 | (alpha derived) | `register_refresher("alpha", ...)` | Pattern shown in `DPGaussianMixture_DerivedAlpha.cpp` |
+| slot labels (z, atoms, pi, stick_V) | `stick_label_swap_block`, last child | Relabels whole clusters so the slot weights mix; with `cluster_atom_block`, list the atom keys in its `declare_dependencies` (see both cards) |
 
 Truncation choice: default `K_trunc = max(20, ceil(N / 5))`. The
 truncation error decays exponentially in K_trunc for moderate alpha

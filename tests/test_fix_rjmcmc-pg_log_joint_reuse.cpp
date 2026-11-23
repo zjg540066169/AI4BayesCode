@@ -22,9 +22,10 @@
  *
  *  Scenarios: continuous_update, RW and neither, without a transform;
  *  continuous_update and RW with diagonal_linear_transform_1d, and with the
- *  degenerate-edge hooks; a continuous_update that often returns the current
- *  value of beta_j unchanged (as an update with its own accept / reject step
- *  does on rejection) or a zero of the other sign, with a log_joint that
+ *  degenerate-edge hooks; a continuous_update that returns the current value
+ *  of beta_j unchanged with probability 0.4 (as an update with its own
+ *  accept / reject step does on rejection) and with probability 0.15 a zero
+ *  (-beta_j when beta_j is a zero, +0.0 otherwise), with a log_joint that
  *  depends on the sign bit of each active beta_j, so -0.0 in place of 0.0 has
  *  to count as a change.
  *================================================================================*/
@@ -188,7 +189,8 @@ struct call_rec { arma::vec g, b; std::uint64_t h; };
 struct scenario {
     const char* name;
     bool cu, rw, linear, edge;
-    bool keep;   // continuous_update often returns the current beta_j (or -beta_j when it is a zero)
+    bool keep;   // continuous_update returns the current beta_j with probability 0.4, and with
+                 // probability 0.15 a zero: -beta_j when beta_j is a zero, +0.0 otherwise
 };
 
 void run(const scenario& sc) {

@@ -1136,7 +1136,8 @@ Modular (codegen default):
   (Ishwaran-James 2001). Composes `categorical_gibbs_block` (z) +
   `stick_breaking_block` (pi, DP a_fn / b_fn) +
   `normal_gamma_cluster_gibbs_block` (mu, lambda diagonal
-  Normal-Gamma) + `nuts_block` on log(alpha). Default K_trunc =
+  Normal-Gamma) + `univariate_slice_sampling_block` on log(alpha) +
+  `stick_label_swap_block` (last child). Default K_trunc =
   max(20, ceil(N / 5)). DP concentration alpha ~ Gamma(a_alpha,
   b_alpha).
 - `examples/PYGaussianMixture.cpp` -- Pitman-Yor variant. Identical
@@ -1147,7 +1148,8 @@ Modular (codegen default):
   `nuts_block` + interval constraint when needed).
 - `examples/DPGaussianMixture_DerivedAlpha.cpp` -- DP mixture where
   alpha = exp(phi) is REGISTERED as a deterministic refresher of
-  phi; phi has Normal(0, 1) prior and is sampled by `nuts_block`.
+  phi; phi has Normal(0, 1) prior and is sampled by
+  `univariate_slice_sampling_block`.
   Demonstrates the alpha-as-derived composition pattern; downstream
   blocks read alpha from ctx unchanged. Reference for the user's
   use case "alpha = complex_function(phi)".

@@ -33,9 +33,10 @@
 //    last token alone, is reloaded.
 // G. Tokens A, then B, then A again, set by a context with both keys, with
 //    w only (B differs from A in w) and with doc only (B differs from A in
-//    doc). Right after the revert the counts equal a recount from (z, A),
-//    and the next 100 sweeps equal bit for bit those of a block built on A
-//    with z_init = z and a copy of the RNG state.
+//    doc). Before the revert the counts equal a recount from (z, B), right
+//    after it a recount from (z, A), and the next 100 sweeps equal bit for
+//    bit those of a block built on A with z_init = z and a copy of the RNG
+//    state.
 //
 // Build from tests/ with the compile line `make -n` prints for any other
 // test, with test_fix_lda_token_reload as the target name.
@@ -658,7 +659,10 @@ void revert_case(const char* label, const Corpus& A, const Corpus& B,
     std::printf("    %s: counts on B %s, on A right after the revert %s, "
                 "max |X - Y| over 100 sweeps = %g\n",
                 label, on_b ? "match" : "differ", on_a ? "match" : "differ", md);
-    check(on_b && on_a,
+    check(on_b,
+          std::string("G: ") + label + ": counts equal a recount from (z, B) "
+          "before the revert");
+    check(on_a,
           std::string("G: ") + label + ": counts equal a recount from (z, A) "
           "right after the revert");
     check(md == 0.0,

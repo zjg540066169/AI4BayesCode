@@ -84,7 +84,7 @@ public:
   void  set_context(const block_context&) override;
   void  step(std::mt19937_64& rng) override;          // one optimizer step
   const arma::vec& current() const override;          // q-mean
-  void  set_current(const arma::vec& mu) override;    // overwrite mu only
+  void  set_current(const arma::vec& value) override; // mu = unconstrain(value)
   // noexcept is part of each signature; dropping it on an override is
   // ill-formed.
   const std::string& name() const noexcept override;
@@ -112,9 +112,10 @@ Key contract differences from MCMC blocks:
 - **`current()`** returns the q-mean E_q[theta] ~= T(mu) (apply the
   natural-scale transform to the unconstrained mean mu). For most
   use cases this is what users want as a point estimate.
-- **`set_current(mu)`** overwrites the variational mean ONLY; log
-  sigma is left intact. To overwrite both, Tier A dispatcher routes
-  the per-component keys via `set_variational_state(...)`.
+- **`set_current(value)`** takes the natural-scale value of length
+  `dim()` and sets the variational mean mu = unconstrain(value); log
+  sigma (or L) is left intact. To overwrite both, Tier A dispatcher
+  routes the per-component keys via `set_variational_state(...)`.
 - **`current_sample(rng)`** is the new method invoked by the
   composite AFTER each VI step() to write a q-sample (not the
   q-mean) into shared_data. See Sec.18.4 for the rationale.

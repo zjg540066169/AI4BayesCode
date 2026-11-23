@@ -110,7 +110,7 @@ struct interval_censored_survival_augmentation_block_config {
 
     /// Bin edges, length K+1, strictly increasing, edges[0] >= 0.
     /// MUST match the sibling piecewise_exponential_gibbs_block's edges.
-    /// edges[K] must exceed all observed / imputable times (throws otherwise).
+    /// edges[K] must be at least every observed / imputable time (throws otherwise).
     arma::vec edges;
 
     /// shared_data key for length-n lower interval bounds L_i >= 0.
@@ -125,7 +125,8 @@ struct interval_censored_survival_augmentation_block_config {
     std::string lambda_key = "lambda";
 
     /// shared_data key for length-n log-relative-hazard offset exp(f_i).
-    /// OPTIONAL: "" or missing => all exp(f_i) = 1.
+    /// OPTIONAL: "" => all exp(f_i) = 1; a non-empty key missing from the
+    /// context throws in step().
     std::string offset_key = "";
 
     /// Initial imputed times, length n. Each entry MUST satisfy
@@ -320,7 +321,7 @@ public:
                 // H_t <= cumH[0] = 0; not possible if L >= 0 and H_t > HL >= 0 unless H_t == 0.
                 k = 0;
             } else if (ub == cumH.end()) {
-                // H_t >= cumH[K]; would give t >= edges[K]. Clip to just below edges[K].
+                // H_t >= cumH[K]; would give t >= edges[K]; t_final is clipped to edges[K].
                 k = K_ - 1;
             } else {
                 k = static_cast<std::size_t>(ub - cumH.begin()) - 1;

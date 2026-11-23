@@ -141,8 +141,8 @@ Draw them from the Stage 1-3 answers. Typical sources (keep only the ones that a
  proposal; ordering; normalization) and exactly where they are enforced.
 - **Callback-contract** silent breaks (e.g. a user `Q_fn` that returns a non-PSD / asymmetric
  matrix, a `log_lik` that returns non-finite) -- these compile and run.
-- **Scope assumptions baked into the kernel** (e.g. "symbolic factorisation cached => sparsity
- pattern assumed fixed across steps") that produce wrong answers if violated.
+- **Scope assumptions baked into the kernel** (e.g. "forward filter reused while the context is
+ unchanged => `emission_logp` assumed to depend only on (t, k, ctx)") that produce wrong answers if violated.
 - **Convergence-budget reality** -- a one-line caveat that the user must pilot the budget for
  their topology/likelihood (cite the block's own test results, never invent numbers).
 

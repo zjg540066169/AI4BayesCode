@@ -47,20 +47,22 @@ unknown-K (non-BNP).
 - BNP mixtures (DP, PY, HDP) -- use the **truncated SBP** path
   (`stick_breaking_block` + `cluster_atom_block` (or
   `normal_gamma_cluster_gibbs_block` on an exact conjugate match) +
-  `categorical_gibbs_block`); see `examples/DPGaussianMixture.cpp`
+  `categorical_gibbs_block` + `stick_label_swap_block` (last child; with
+  `cluster_atom_block`, list the atom keys in its `declare_dependencies`));
+  see `examples/DPGaussianMixture.cpp`
   / `examples/PYGaussianMixture.cpp` /
   `examples/DPGaussianMixture_DerivedAlpha.cpp`. **The cluster-prior
   hyperparameters MUST be data-driven weakly-informative (see the
   CRITICAL note under `normal_gamma_cluster_gibbs_block` below) -- fixed
   hypers silently produce a wrong over-segmented posterior R-hat won't
-  flag.** CRP-marginal Neal Alg 2/8 and Jain-Neal split-merge are not
-  in the current scope; they remain optimisations rather than
-  correctness gates (note: `split_merge_block` co-composed with
-  `categorical_gibbs_block` is now unblocked via
+  flag.** CRP-marginal Neal Alg 2/8 is not in the current scope; it
+  remains an optimisation rather than a correctness gate. Jain-Neal
+  split-merge ships as `split_merge_block`, co-composed with
+  `categorical_gibbs_block` via
   `composite_block::declare_shared_history("z")`, with `z` in the
   split_merge block's dependencies and `cluster_counts` in its invalidates
   (see `split_merge_block.md`), if the truncated-SBP
-  partition posterior is multimodal for a given dataset).
+  partition posterior is multimodal for a given dataset.
 - Multi-dim bijections `R^n -> R^n` for `n > 1` (e.g., Stephens
   2000 split-merge for finite mixtures with unknown K) -- current scope ships
   the 1D-scalar case only (`templated_bijection_1d`); multi-dim

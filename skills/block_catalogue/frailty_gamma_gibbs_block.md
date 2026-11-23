@@ -26,7 +26,12 @@ H_0(t, v) = sum_k lambda_k * max(0, min(t, e_k) - max(v, e_{k-1}))
 
 w_g | rest ~ Gamma(theta + D_g, theta + H_g)           (independent across g)
 ```
-One exact Gibbs step draws all G frailties. O(n + G) per step.
+One exact Gibbs step draws all G frailties. Per step: O(nK + G) on the first step
+and when t or entry_time changed; otherwise O(n + P + G) (P = number of subject-bin
+pairs with positive exposure; the first such step costs O(n log K + P + G)).
+
+**Bin convention**: bins are `[e_{k-1}, e_k)`, as in `piecewise_exponential_gibbs_block`;
+`D_g` and `H_g` do not depend on the bin of an event time on an edge.
 
 ```cpp
 #include "AI4BayesCode/frailty_gamma_gibbs_block.hpp"

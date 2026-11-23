@@ -115,9 +115,10 @@ continuous-parameter Jacobian.
   `examples/DPGaussianMixture_DerivedAlpha.cpp` -- Tier-A composition
   templates.
 
-**Future**: CRP-marginal Neal Alg 2/8, Jain-Neal 2004 split-
-merge, full-covariance NIW cluster sampler, and Pitman-Yor with
-sampled discount. The truncated SBP architecture mixes well on
+**Future**: CRP-marginal Neal Alg 2/8 and Pitman-Yor with sampled
+discount (Jain-Neal 2004 split-merge ships as `split_merge_block`, the
+full-covariance NIW cluster sampler as `niw_cluster_gibbs_block`).
+The truncated SBP architecture mixes well on
 moderate-N problems; these are optimisations rather than
 correctness gates. Algorithm references: Neal 2000, Jain & Neal
 2004, Pitman & Yor 1997, Ishwaran & James 2001; BayesMix (Beraha
@@ -243,10 +244,12 @@ When designing a new block or a new example:
    - for BNP mixture-K subcase, use the truncated SBP infrastructure
      (`stick_breaking_block` + `cluster_atom_block` by default
      -- `normal_gamma_cluster_gibbs_block` only on an exact conjugate match +
-     `categorical_gibbs_block`; reference templates
+     `categorical_gibbs_block` + `stick_label_swap_block` (last child; with
+     `cluster_atom_block`, list the atom keys in its `declare_dependencies`);
+     reference templates
      `examples/DPGaussianMixture.cpp` / `examples/PYGaussianMixture.cpp`).
-     Future Neal Alg 2/8 marginal CRP and Jain-Neal split-merge are
-     optimisations, not correctness gates.
+     A future Neal Alg 2/8 marginal CRP and the shipped Jain-Neal split-merge
+     (`split_merge_block`) are optimisations, not correctness gates.
 3. **Check for strong local dependence** among discrete variables.
    If yes, you are in Sec.11.2(b). Do NOT assume per-site Gibbs is
    enough. Either:

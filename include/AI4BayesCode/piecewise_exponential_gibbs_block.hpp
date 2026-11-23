@@ -16,8 +16,9 @@
  *  ====================================================================
  *  Time axis is partitioned into K bins by user-supplied edges
  *      0 = e_0 < e_1 < ... < e_K   (edges.n_elem == K+1)
- *  Bin k covers (e_{k-1}, e_k], k = 1..K. Baseline hazard is piecewise constant:
- *      h_0(t) = lambda_k     for t in (e_{k-1}, e_k].
+ *  Bin k covers [e_{k-1}, e_k), k = 1..K, and bin K also holds t = e_K.
+ *  Baseline hazard is piecewise constant:
+ *      h_0(t) = lambda_k     for t in [e_{k-1}, e_k).
  *  Per-subject hazard multiplies by an externally-supplied log-relative-hazard
  *  f_i = f_i(covariates) (log-linear x_i^T beta, BART, GP, ... -- this block is
  *  AGNOSTIC to how f_i is produced):
@@ -43,8 +44,10 @@
  *
  *  This block draws all K rates in one exact Gibbs step -- no NUTS, no
  *  gradient, no warmup. Cost per step, for n subjects (k_i = bin of t_i):
- *    - first step, and any step whose t, delta or entry_time differ from
- *      those of the last completed step: O(n log K + sum_i (k_i + 1) + K);
+ *    - first step, any step whose t, delta or entry_time differ from those
+ *      of the last completed step, and any step after an error raised on t,
+ *      delta, entry_time or offset in this computation with no completed
+ *      step in between: O(n log K + sum_i (k_i + 1) + K);
  *    - otherwise, without an offset: O(n + K) (comparison with the stored
  *      data, then the K Gamma draws);
  *    - otherwise, with an offset: O(n + P + K), P = sum over subjects of the
@@ -68,8 +71,10 @@
  *    pdf(lambda) = rate^shape/Gamma(shape) * lambda^(shape-1) * exp(-rate * lambda).
  *    std::gamma_distribution takes shape-SCALE = 1/rate; construct with
  *    (shape, 1.0 / rate).
- *  - Bins are (e_{k-1}, e_k], k=1..K. A time t_i = e_k lands in bin k (not k+1).
- *    Times exactly at t=0 (measure-zero in practice) are NOT in any bin --
+ *  - Bins are [e_{k-1}, e_k), k=1..K, and bin K also holds t = e_K. An event
+ *    at an interior edge t_i = e_k (0 < k < K) is counted in bin k+1, where
+ *    the subject has zero exposure.
+ *    Times exactly at t=0 (measure-zero in practice) throw (t must be > 0) --
  *    treat them as sitting at a small positive time in bin 1.
  *  - t_i must satisfy 0 <= v_i <= t_i <= e_K. A t_i > e_K throws (the caller
  *    must ensure the last edge is >= max observed follow-up time).
@@ -90,7 +95,7 @@
  *  -----------------------------------------------------
  *      // A sibling block samples beta and writes exp(x_i^T beta) each sweep to
  *      // shared_data key "exp_lp" (length n). Then set cfg.offset_key = "exp_lp".
- *      // See examples/PehCoxRegression.cpp for the wired-up template.
+ *      // See examples/PehSharedFrailty.cpp for a wired-up offset (offset_key = "expanded_w").
  *
  *  AI RULE COMPLIANCE
  *  ==================
@@ -98,8 +103,8 @@
  *  - Standard block_sampler contract.
  *  - Output stored as arma::vec of length K under `name` in shared_data,
  *    logged to history via detail::make_history_map.
- *  - Optional refreshable-context keys (offset, entry_time) look up via
- *    context_.count(key) so absent keys silently degrade to the base model.
+ *  - Optional refreshable-context keys (offset, entry_time) are used only when
+ *    the key name is non-empty; a configured key missing from the context throws.
  *================================================================================*/
 
 #ifndef AI4BAYESCODE_PIECEWISE_EXPONENTIAL_GIBBS_BLOCK_HPP
@@ -125,8 +130,8 @@ struct piecewise_exponential_gibbs_block_config {
     std::string name;
 
     /// Bin edges, length K+1, strictly increasing, edges[0] >= 0.
-    /// Bin k covers (edges[k-1], edges[k]] for k = 1..K.
-    /// edges[K] must exceed max observed follow-up time (t_i, entry_time_i).
+    /// Bin k covers [edges[k-1], edges[k]) for k = 1..K; bin K also holds t = edges[K].
+    /// edges[K] must be at least the max observed follow-up time t_i (a t_i > edges[K] throws).
     arma::vec edges;
 
     /// Gamma(shape=a0, rate=b0) prior on each lambda_k. Independent across k.
@@ -143,13 +148,13 @@ struct piecewise_exponential_gibbs_block_config {
     std::string event_key = "delta";
 
     /// shared_data key for length-n log-relative-hazard offset exp(f_i).
-    /// OPTIONAL: empty string OR key missing from context => all exp(f_i) = 1
-    /// (baseline-only PEH -- no covariates).
+    /// OPTIONAL: empty string => all exp(f_i) = 1 (baseline-only PEH -- no
+    /// covariates); a non-empty key missing from the context throws in step().
     std::string offset_key = "";
 
     /// shared_data key for length-n left-truncation entry times v_i in [0, t_i].
-    /// OPTIONAL: empty string OR key missing from context => all v_i = 0
-    /// (no left-truncation; subjects enter at time 0).
+    /// OPTIONAL: empty string => all v_i = 0 (no left-truncation; subjects enter
+    /// at time 0); a non-empty key missing from the context throws in step().
     std::string entry_time_key = "";
 
     /// Initial lambda_1..lambda_K, length K. Each entry > 0.
@@ -350,16 +355,17 @@ public:
                 }
 
                 // Bin index k_i containing t_i (1-based math, 0-based storage).
-                // Bins are (e_{k-1}, e_k]; find smallest k such that edges[k] >= t_i and edges[k-1] < t_i.
+                // Bins are [e_{k-1}, e_k); find k such that edges[k-1] <= t_i < edges[k].
                 // std::upper_bound returns first index with edges[index] > t_i, so
                 // k_i (0-based) = upper_bound(...) - begin() - 1. For t_i = edges[k] exactly
-                // (measure zero), t_i lands in bin k (0-based k-1).
+                // (0 < k < K), t_i lands in bin k+1 (0-based k), the bin that starts at t_i.
                 const auto ub = std::upper_bound(edges_.begin(), edges_.end(), ti);
                 std::size_t k_i;
                 if (ub == edges_.begin()) {
-                    // ti <= edges[0] -- since we required ti > 0 and edges[0] >= 0,
-                    // this can only happen if edges[0] > 0 and ti in (0, edges[0]].
-                    // We treat that as bin 0 (the first bin, implicitly extending to 0).
+                    // ti < edges[0] -- since we required ti > 0 and edges[0] >= 0,
+                    // this can only happen if edges[0] > 0 and ti in (0, edges[0]).
+                    // We treat that as bin 0 (the first bin) for E_k; the time before
+                    // edges[0] adds no exposure to R_k.
                     k_i = 0;
                 } else if (ub == edges_.end()) {
                     // ti == edges[K] exactly (we already threw on ti > edges[K]).
@@ -373,7 +379,7 @@ public:
 
                 // Contribution to R_k: for each bin k, subject at-risk time is
                 //   Delta_k = max(0, min(ti, edges[k+1]) - max(vi, edges[k])).
-                // Since intervals are (edges[k], edges[k+1]], we allow subject to
+                // Since intervals are [edges[k], edges[k+1]), we allow subject to
                 // accumulate risk time on this interval only where [vi, ti] overlaps it.
                 for (std::size_t k = 0; k <= k_i; ++k) {
                     const double lo = std::max(vi, edges_[k]);

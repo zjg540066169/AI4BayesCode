@@ -28,7 +28,11 @@ Locate bin k such that cumH[k-1] <= H_target < cumH[k]
 Return T = e_{k-1} + (H_target - cumH[k-1]) / lambda_k
 ```
 For `U = +Inf` this degenerates to `H_target = H_0(L) - log(1-u) / w` (the exponential
-tail). O(n + K) per step; all `n` subjects updated independently.
+tail). O(n log K + K) per step; all `n` subjects updated independently.
+
+**Bin convention**: bins are `[e_{k-1}, e_k)`, as in `piecewise_exponential_gibbs_block`;
+`H_0` is continuous at the edges, so `L_i` or `U_i` on an edge gives the same `H_0`
+with either adjacent bin.
 
 **Why augmentation?** The observed-data likelihood for an interval-censored
 subject is `integral_{L}^{U} f(t) dt = S(L) - S(U)`, which BREAKS the
@@ -46,7 +50,8 @@ interval_censored_survival_augmentation_block_config cfg;
 cfg.name          = "t";                             // shared_data + history key (writes length-n)
 cfg.edges         = edges;                           // MUST match sibling PEH block
 // L_key="L", U_key="U", lambda_key="lambda" (defaults) -- must be in shared_data.
-// offset_key: OPTIONAL exp(f_i); "" or missing => all exp(f_i) = 1.
+// offset_key: OPTIONAL exp(f_i); "" => all exp(f_i) = 1; a non-empty key
+// missing from the context throws in step().
 cfg.initial_times = arma::vec{ /* each in (L[i], U[i]] */ };
 composite->add_child(std::make_unique<interval_censored_survival_augmentation_block>(std::move(cfg)));
 ```

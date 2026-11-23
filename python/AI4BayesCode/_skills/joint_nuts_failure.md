@@ -263,7 +263,9 @@ All variants below reduce to Form A / B / C geometry (shared scale governs a
 vector of Gaussian children) with the same NCR fix. Listed to close DETECTION
 gaps. Patterns fully handled by a shipped specialized block (DP concentration
 via `stick_breaking_block`; DP cluster atoms via `cluster_atom_block` by
-default (`normal_gamma_cluster_gibbs_block` only on an exact conjugate match);
+default (`normal_gamma_cluster_gibbs_block` only on an exact conjugate match),
+with `stick_label_swap_block` as the last child (with `cluster_atom_block`,
+list the atom keys in its `declare_dependencies`);
 CAR/ICAR/BYM2/GP/1-D-GP via `gmrf_precision_block`/`gmrf_whitened_ess_block`/
 `elliptical_slice_sampling_block`/`celerite_gp_block` -- see `codegen_cpp.md`
 Sec.4a routing table; Dirac spike-slab via `examples/SpikeSlabRJMCMC.cpp` --

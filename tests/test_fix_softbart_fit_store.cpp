@@ -7,6 +7,13 @@
 //  without the store equal those of Forest::do_gibbs, which computes every
 //  fit from the trees.
 //
+//  The number of stored fits (tree_fit_store_size()) is checked after every
+//  sweep. That no store is filled during a sweep above the bound and released
+//  at its end is checked only by memory measurement, as the forest has no
+//  count of the fits it stores within a sweep: test_fix_softbart_store_default
+//  compares the growth of the peak resident set size during one sweep above
+//  and one within the default bound.
+//
 //  Here the macro names the variable g_store_bound, so the bound is set at run
 //  time: 4000 doubles unless a part sets it otherwise (20 trees at N = 200
 //  use the store, 20 trees at N = 201 do not).

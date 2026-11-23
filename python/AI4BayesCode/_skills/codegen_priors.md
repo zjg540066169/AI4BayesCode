@@ -1218,7 +1218,8 @@ Discrete latent z found?
                                  `normal_gamma_cluster_gibbs_block` (diagonal
                                  Gaussian) or `niw_cluster_gibbs_block` (full
                                  cov) only on an exact conjugate match
-              - alpha      : `nuts_block` on log(alpha) with Gamma prior
+              - alpha      : `univariate_slice_sampling_block` on log(alpha)
+                              with Gamma prior
               - alpha derived: `register_refresher("alpha", ...)`
                               (DPGaussianMixture_DerivedAlpha.cpp)
               - label swap : `stick_label_swap_block`, last child; it
@@ -1361,6 +1362,8 @@ Discrete latent z found?
 - Class 5b (Ising / MRF) declined -- no library support in v1.2.
 - Class 4 splits into BNP (truncated SBP via `stick_breaking_block` +
   `cluster_atom_block` by default, `normal_gamma_cluster_gibbs_block` on an
-  exact conjugate match; see `DPGaussianMixture.cpp` /
+  exact conjugate match, + `stick_label_swap_block` (last child; with
+  `cluster_atom_block`, list the atom keys in its `declare_dependencies`);
+  see `DPGaussianMixture.cpp` /
   `PYGaussianMixture.cpp` / `DPGaussianMixture_DerivedAlpha.cpp`) vs
   non-BNP (`rjmcmc_block` v0 covers most).

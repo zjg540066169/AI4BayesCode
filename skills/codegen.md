@@ -1334,7 +1334,9 @@ run, and produce reasonable samples out of the box.
   `examples/DPGaussianMixture_DerivedAlpha.cpp` (composes
   `categorical_gibbs_block` + `stick_breaking_block` +
   `cluster_atom_block` by default -- `normal_gamma_cluster_gibbs_block` only
-  on an exact conjugate match -- + `nuts_block` on log alpha);
+  on an exact conjugate match -- + `univariate_slice_sampling_block` on log alpha +
+  `stick_label_swap_block` (last child; with `cluster_atom_block`, list the
+  atom keys in its `declare_dependencies`));
   for non-BNP unknown-K use `rjmcmc_block` with
   `examples/SpikeSlabRJMCMC.cpp` as template; or decline. See
   `skills/system_design.md` Sec.11 for the measure-theory reason.

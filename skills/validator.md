@@ -1779,8 +1779,9 @@ kinds when assembling the output.
 
 **(d) set_current(list(...)) dispatcher routes VI keys correctly.**
 For each VI child named `<param>`:
-- `list(<param> = mu_vec)` -> calls `vi_child->set_current(mu_vec)` (mean
-  only)
+- `list(<param> = value)` -> calls `vi_child->set_current(value)` with the
+  natural-scale value of length `dim()` (sets mu = unconstrain(value);
+  log_sd / L unchanged)
 - `list(<param>_mean = mu_vec, <param>_log_sd = ls_vec)` -> calls
   `vi_child->set_variational_state(mu_vec, ls_vec)` (mean + log_sd)
 - Unknown keys silently ignored (Sec.7 contract preserved)

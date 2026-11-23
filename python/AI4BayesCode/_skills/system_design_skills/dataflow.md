@@ -42,12 +42,14 @@ same edit.
 sweep: `stick_label_swap_block` rewrites `z` and every atom key, and
 `split_merge_block` rewrites `z` after `categorical_gibbs_block`. A block that
 keeps such a key as its own state and starts its next update from it
-(`cluster_atom_block` for the atom keys, `split_merge_block` for `z`) MUST
-list the key in its own `declare_dependencies`; it then loads the shared
-value in `set_context` and starts from it. Without the entry it starts from
-its own value from before the other block's write and writes that value back,
-and the chain targets a wrong posterior with no error. A block whose draw
-does not involve the key's previous value (a conjugate cluster block,
+(`cluster_atom_block` for the atom keys, `split_merge_block` for `z`,
+`categorical_gibbs_block` and `binary_gibbs_block` for their own key when
+their oracle uses it) MUST list the key in its own `declare_dependencies`;
+it then loads the shared value (in `set_context`, or at the start of
+`step()` for the two Gibbs blocks) and starts from it. Without the entry it
+starts from its own value from before the other block's write and writes that
+value back, and the chain targets a wrong posterior with no error. A block
+whose draw does not involve the key's previous value (a conjugate cluster block,
 `stick_breaking_block`) needs no entry. With the entry, the shared value is
 that block's starting state at every sweep, so a restore of the block must
 also write the shared key (`data().set`) or go through
