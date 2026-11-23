@@ -125,7 +125,7 @@ public:
                 likelihood* lik, rjmcmc_hypers hypers, std::size_t ntrees,
                 int numcut = 100, bool usequants = false, bool cont = false)
       : N_((std::size_t)X.n_rows), p_((std::size_t)X.n_cols), ntrees_(ntrees),
-        hypers_(std::move(hypers)), lik_(lik), trees_(ntrees),
+        hypers_(std::move(hypers)), lik_(lik), trees_(ntrees), part_cache_(ntrees),
         f_per_tree_train_(ntrees, std::vector<double>(X.n_rows, 0.0)),
         f_train_(X.n_rows, 0.0), xi_sigma_mu_(1.0)
   {
@@ -160,6 +160,7 @@ public:
   void set_X(const arma::mat& X_new) {
     if ((std::size_t)X_new.n_rows != N_) throw std::invalid_argument("set_X: N mismatch");
     if ((std::size_t)X_new.n_cols != p_) throw std::invalid_argument("set_X: p mismatch");
+    clear_partition_cache_();
     for (std::size_t i = 0; i < N_; ++i)
       for (std::size_t j = 0; j < p_; ++j) X_row_[i*p_ + j] = X_new(i, j);
     std::fill(f_train_.begin(), f_train_.end(), 0.0);
@@ -177,11 +178,13 @@ public:
   move_stats update_step(rn& gen) {
     move_stats stats;
     std::vector<double> lam_minus_t(N_, 0.0), new_f(N_);
+    std::vector<std::size_t> leaf_slot;   // scratch of leaf_partition::build
     for (std::size_t t = 0; t < ntrees_; ++t) {
       for (std::size_t i = 0; i < N_; ++i)
         lam_minus_t[i] = f_train_[i] - f_per_tree_train_[t][i] + offset_[i];
-      move_result mr = draw_tree(trees_[t], X_row_.data(), Y_.data(), lam_minus_t.data(),
-          N_, p_, xi_, hypers_, *lik_, gen, /*do_M_step=*/true, /*f_tree_out=*/new_f.data());
+      move_result mr = draw_tree_cached(trees_[t], X_row_.data(), Y_.data(), lam_minus_t.data(),
+          N_, p_, xi_, hypers_, *lik_, gen, /*do_M_step=*/true, /*f_tree_out=*/new_f.data(),
+          part_cache_[t], &leaf_slot);
       stats.tally(mr);
       std::vector<double>& fti = f_per_tree_train_[t];
       for (std::size_t i = 0; i < N_; ++i) { f_train_[i] += new_f[i]-fti[i]; fti[i] = new_f[i]; }
@@ -251,6 +254,7 @@ public:
     }
     std::string trailing;
     if (is >> trailing) throw std::invalid_argument("genbart_model::set_tree: unexpected trailing content");
+    clear_partition_cache_();
     for (std::size_t t = 0; t < T; ++t) trees_[t] = new_trees[t];
     std::fill(f_train_.begin(), f_train_.end(), 0.0);
     for (std::size_t t = 0; t < T; ++t)
@@ -427,7 +431,14 @@ public:
   const std::vector<tree>& trees() const { return trees_; }
 
 private:
+  // Called before X_row_, xi_ or the tree structures are written outside
+  // draw_tree_cached.
+  void clear_partition_cache_() {
+    for (std::size_t t = 0; t < part_cache_.size(); ++t) part_cache_[t].clear();
+  }
+
   void set_data_internal(const ::genbart_pp::BmmResult& bmm) {
+    clear_partition_cache_();
     const arma::mat& X = bmm.X;
     X_row_.assign(N_*p_, 0.0);
     for (std::size_t i=0;i<N_;++i) for (std::size_t j=0;j<p_;++j) X_row_[i*p_+j]=X(i,j);
@@ -443,6 +454,10 @@ private:
   rjmcmc_hypers hypers_;
   likelihood*   lik_;
   std::vector<tree> trees_;
+  // Leaf partition of each tree from its last M-step (N indices per tree),
+  // reused by the next move.  Copies start invalid (the partitions refer to
+  // node addresses); moves keep the trees' nodes.
+  std::vector<leaf_partition_cache> part_cache_;
   xinfo xi_;
   std::vector<double> X_row_, Y_, offset_;
   std::vector<std::vector<double> > f_per_tree_train_;

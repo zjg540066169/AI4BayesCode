@@ -53,24 +53,26 @@ public:
 
   double phi() const { return phi_; }
 
-  double log_f(double y, double lam, std::size_t /*obs_i*/) const override {
+  double log_f(double y, double lam, std::size_t obs_i) const override {
     // Clip y to (eps, 1-eps) to avoid -inf in log(y), log(1-y).
-    const double yc = std::min(std::max(y, 1e-10), 1.0 - 1e-10);
+    double log_yc, log1m_yc;
+    log_clipped_y(y, obs_i, log_yc, log1m_yc);
     const double s  = safe_sigmoid(lam);
     const double p  = phi_;
     const double a  = s * p;
     const double b  = (1.0 - s) * p;
     return std::lgamma(p) - std::lgamma(a) - std::lgamma(b)
-         + (a - 1.0) * std::log(yc) + (b - 1.0) * std::log(1.0 - yc);
+         + (a - 1.0) * log_yc + (b - 1.0) * log1m_yc;
   }
 
-  double score(double y, double lam, std::size_t /*obs_i*/) const override {
-    const double yc = std::min(std::max(y, 1e-10), 1.0 - 1e-10);
+  double score(double y, double lam, std::size_t obs_i) const override {
+    double log_yc, log1m_yc;
+    log_clipped_y(y, obs_i, log_yc, log1m_yc);
     const double s  = safe_sigmoid(lam);
     const double p  = phi_;
     const double a  = s * p;
     const double b  = (1.0 - s) * p;
-    const double logit_y = std::log(yc) - std::log(1.0 - yc);
+    const double logit_y = log_yc - log1m_yc;
     const double dL_dmu = p * (R::digamma(b) - R::digamma(a) + logit_y);
     const double ds_dlam = s * (1.0 - s);
     return ds_dlam * dL_dmu;
@@ -102,10 +104,9 @@ public:
     double ll_cur = 0.0, ll_new = 0.0;
     const std::size_t N = y.size();
     for (std::size_t i = 0; i < N; ++i) {
-      const double yc = std::min(std::max(y[i], 1e-10), 1.0 - 1e-10);
       const double s_i = safe_sigmoid(lam[i]);
-      const double logy = std::log(yc);
-      const double log1my = std::log(1.0 - yc);
+      double logy, log1my;
+      log_clipped_y(y[i], i, logy, log1my);
       {
         const double a = s_i * phi_;
         const double b = (1.0 - s_i) * phi_;
@@ -128,6 +129,19 @@ public:
     if (std::log(gen.uniform()) < ll_new - ll_cur) phi_ = phi_new;
   }
 
+  // Stores y_i, log(yc_i) and log(1 - yc_i) for log_f, score and
+  // update_nuisance.
+  void prepare(const std::vector<double>& y) override {
+    y_ = y;
+    log_yc_.resize(y.size());
+    log1m_yc_.resize(y.size());
+    for (std::size_t i = 0; i < y.size(); ++i) {
+      const double yc = std::min(std::max(y[i], 1e-10), 1.0 - 1e-10);
+      log_yc_[i] = std::log(yc);
+      log1m_yc_[i] = std::log(1.0 - yc);
+    }
+  }
+
   const char* name() const override { return "beta"; }
   std::size_t num_nuisance() const override { return 1; }
   std::vector<double> nuisance_snapshot() const override {
@@ -135,9 +149,24 @@ public:
   }
 
 private:
+  // log(yc) and log(1 - yc), yc = y clipped to [1e-10, 1 - 1e-10]: the stored
+  // values when y is the prepared y of obs_i, else computed.
+  void log_clipped_y(double y, std::size_t obs_i,
+                     double& log_yc, double& log1m_yc) const {
+    if (obs_i < y_.size() && y_[obs_i] == y) {
+      log_yc = log_yc_[obs_i];
+      log1m_yc = log1m_yc_[obs_i];
+      return;
+    }
+    const double yc = std::min(std::max(y, 1e-10), 1.0 - 1e-10);
+    log_yc = std::log(yc);
+    log1m_yc = std::log(1.0 - yc);
+  }
+
   double phi_;
   double prior_sd_log_phi_;
   double prop_sd_log_phi_;
+  std::vector<double> y_, log_yc_, log1m_yc_;  // prepared y_i and its logs
 };
 
 }}  // namespace genbart::lik

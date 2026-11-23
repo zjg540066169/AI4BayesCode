@@ -51,18 +51,26 @@ public:
 
   double beta() const { return beta_; }
 
-  double log_f(double y, double lam, std::size_t /*obs_i*/) const override {
+  double log_f(double y, double lam, std::size_t obs_i) const override {
     if (y <= 0.0) return -std::numeric_limits<double>::infinity();
     const double a = safe_exp_shape(lam);
     // a*log(beta) - lgamma(a) + (a-1)*log(y) - beta*y
     return a * std::log(beta_) - std::lgamma(a)
-         + (a - 1.0) * std::log(y) - beta_ * y;
+         + (a - 1.0) * log_y(y, obs_i) - beta_ * y;
   }
 
-  double score(double y, double lam, std::size_t /*obs_i*/) const override {
+  double score(double y, double lam, std::size_t obs_i) const override {
     if (y <= 0.0) return 0.0;
     const double a = safe_exp_shape(lam);
-    return a * (std::log(beta_) - R::digamma(a) + std::log(y));
+    return a * (std::log(beta_) - R::digamma(a) + log_y(y, obs_i));
+  }
+
+  // Stores y_i and log(y_i) (y_i > 0) for log_f and score.
+  void prepare(const std::vector<double>& y) override {
+    y_ = y;
+    log_y_.assign(y.size(), 0.0);
+    for (std::size_t i = 0; i < y.size(); ++i)
+      if (y[i] > 0.0) log_y_[i] = std::log(y[i]);
   }
 
   double fisher_info(double lam) const override {
@@ -108,8 +116,15 @@ private:
     return std::exp(lam);
   }
 
+  // log(y) for y > 0: the stored value when y is the prepared y of obs_i,
+  // else computed.
+  double log_y(double y, std::size_t obs_i) const {
+    return (obs_i < y_.size() && y_[obs_i] == y) ? log_y_[obs_i] : std::log(y);
+  }
+
   double beta_;
   double a0_, b0_;
+  std::vector<double> y_, log_y_;  // prepared y_i and log(y_i)
 };
 
 }}  // namespace genbart::lik

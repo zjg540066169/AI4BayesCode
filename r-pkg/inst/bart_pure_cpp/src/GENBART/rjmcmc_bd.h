@@ -32,6 +32,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <functional>
+#include <map>
 #include <random>
 #include <vector>
 
@@ -128,6 +130,88 @@ inline void partition_by_leaf(
   }
 }
 
+// Indices of the observations routed to one leaf: a contiguous range of a
+// leaf_partition, in increasing order.
+struct leaf_rows {
+  const std::size_t* ptr = nullptr;
+  std::size_t        n   = 0;
+  const std::size_t* data()  const { return ptr; }
+  std::size_t        size()  const { return n; }
+  const std::size_t* begin() const { return ptr; }
+  const std::size_t* end()   const { return ptr + n; }
+  const std::size_t& operator[](std::size_t k) const { return ptr[k]; }
+};
+
+// Leaf partition of the N training observations of one tree, stored as one
+// array of the N observation indices grouped by leaf (leaves in increasing
+// address order) and the offset of each group.  Within a group the indices
+// are in increasing order, the order partition_by_leaf gives, so every sum
+// over a leaf's observations is evaluated in the same order.
+class leaf_partition {
+public:
+  // Partition of observations 0..N-1 under t.  A counting pass routes each
+  // observation to its leaf and stores the leaf's position in `slot`
+  // (resized to N; its previous content is overwritten); a fill pass then
+  // writes the indices group by group.
+  void build(tree& t, const double* X_row_major, std::size_t N, std::size_t p,
+             xinfo& xi, std::vector<std::size_t>& slot)
+  {
+    leaf_.clear();
+    t.getbots(leaf_);
+    std::sort(leaf_.begin(), leaf_.end(), std::less<tree::tree_p>());
+    start_.assign(leaf_.size() + 1, 0);
+    slot.resize(N);
+    for (std::size_t i = 0; i < N; ++i) {
+      const tree::tree_p leaf = t.bn(const_cast<double*>(X_row_major) + i * p, xi);
+      const std::size_t k = find(leaf);   // bn returns one of t's leaves
+      slot[i] = k;
+      ++start_[k + 1];
+    }
+    for (std::size_t k = 0; k < leaf_.size(); ++k) start_[k + 1] += start_[k];
+    row_.resize(N);
+    std::vector<std::size_t> next(start_.begin(), start_.end() - 1);
+    for (std::size_t i = 0; i < N; ++i) row_[next[slot[i]]++] = i;
+  }
+  // Observations of `leaf`; empty when `leaf` is not a leaf of the tree the
+  // partition was built for.
+  leaf_rows rows(tree::tree_p leaf) const { return rows_at(find(leaf)); }
+  // Number of leaves, the k-th leaf and its observations (k < num_leaves()).
+  std::size_t  num_leaves() const { return leaf_.size(); }
+  tree::tree_p leaf(std::size_t k) const { return leaf_[k]; }
+  leaf_rows rows_at(std::size_t k) const {
+    leaf_rows r;
+    if (k < leaf_.size()) { r.ptr = row_.data() + start_[k]; r.n = start_[k + 1] - start_[k]; }
+    return r;
+  }
+  bool empty() const { return leaf_.empty(); }
+  void clear() { leaf_.clear(); start_.clear(); row_.clear(); }
+
+private:
+  // Position of `leaf` in leaf_, or leaf_.size() when absent.
+  std::size_t find(tree::tree_p leaf) const {
+    const tree::npv::const_iterator it =
+        std::lower_bound(leaf_.begin(), leaf_.end(), leaf, std::less<tree::tree_p>());
+    return (it != leaf_.end() && *it == leaf) ? (std::size_t)(it - leaf_.begin()) : leaf_.size();
+  }
+
+  tree::npv                leaf_;    // leaves of the tree, increasing address
+  std::vector<std::size_t> start_;   // group k is row_[start_[k], start_[k+1])
+  std::vector<std::size_t> row_;     // the N observation indices, grouped by leaf
+};
+
+// Partition of one tree kept between draw_tree_cached calls.  `valid` is true
+// only while `part` is the partition of the tree's current structure under the
+// current X and xi.  `part` refers to the node addresses of that tree, so a
+// copy starts empty and invalid.
+struct leaf_partition_cache {
+  leaf_partition part;
+  bool valid = false;
+  leaf_partition_cache() = default;
+  leaf_partition_cache(const leaf_partition_cache&) {}
+  leaf_partition_cache& operator=(const leaf_partition_cache&) { clear(); return *this; }
+  void clear() { part.clear(); valid = false; }
+};
+
 // ---------------------------------------------------------------------------
 // Sample a splitting rule (variable index v, cutpoint index c) at a given
 // node.  The node's hyperrectangle [L_j, U_j] per variable is computed via
@@ -210,9 +294,10 @@ struct move_result {
 
 // ---------------------------------------------------------------------------
 // BIRTH move on tree t.  Picks a random leaf, tries to split it.
-// Updates `t` in place if accepted.
+// Updates `t` in place if accepted.  part_t is the current leaf partition of
+// t, or nullptr to build it here.
 // ---------------------------------------------------------------------------
-inline move_result propose_birth(
+inline move_result propose_birth_cached(
     tree&                 t,
     const double*         X_row_major,
     const double*         Y,
@@ -222,7 +307,8 @@ inline move_result propose_birth(
     xinfo&                xi,
     const rjmcmc_hypers&  h,
     const likelihood&     lik,
-    rn&                   gen)
+    rn&                   gen,
+    const leaf_partition* part_t)
 {
   move_result res; res.move = 'B';
 
@@ -241,9 +327,13 @@ inline move_result propose_birth(
 
   // --- 3. partition this leaf's observations into L, R ------------------
   // Temporarily treat ell as if it had been split by (v_new, c_new).
-  std::map<tree::tree_p, std::vector<std::size_t> > part;
-  partition_by_leaf(t, X_row_major, N, p, xi, part);
-  const std::vector<std::size_t>& idx_ell = part[ell];
+  leaf_partition part;
+  if (part_t == nullptr) {
+    std::vector<std::size_t> slot;
+    part.build(t, X_row_major, N, p, xi, slot);
+    part_t = &part;
+  }
+  const leaf_rows idx_ell = part_t->rows(ell);
 
   std::vector<std::size_t> idx_L, idx_R;
   idx_L.reserve(idx_ell.size());
@@ -261,7 +351,7 @@ inline move_result propose_birth(
 
   // --- 4. Laplace proposals for mu_ellL, mu_ellR, and existing mu_ell ---
   // Assemble the per-leaf (y, lambda_minus_t) slices.
-  auto slice = [&](const std::vector<std::size_t>& idx,
+  auto slice = [&](const auto& idx,
                    std::vector<double>& ys, std::vector<double>& lams) {
     ys.resize(idx.size());
     lams.resize(idx.size());
@@ -383,10 +473,7 @@ inline move_result propose_birth(
   return res;
 }
 
-// ---------------------------------------------------------------------------
-// DEATH move.  Picks a random NOG branch and collapses it into a leaf.
-// ---------------------------------------------------------------------------
-inline move_result propose_death(
+inline move_result propose_birth(
     tree&                 t,
     const double*         X_row_major,
     const double*         Y,
@@ -397,6 +484,26 @@ inline move_result propose_death(
     const rjmcmc_hypers&  h,
     const likelihood&     lik,
     rn&                   gen)
+{
+  return propose_birth_cached(t, X_row_major, Y, lam_minus_t, N, p, xi, h, lik, gen, nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// DEATH move.  Picks a random NOG branch and collapses it into a leaf.
+// part_t is the current leaf partition of t, or nullptr to build it here.
+// ---------------------------------------------------------------------------
+inline move_result propose_death_cached(
+    tree&                 t,
+    const double*         X_row_major,
+    const double*         Y,
+    const double*         lam_minus_t,
+    std::size_t           N,
+    std::size_t           p,
+    xinfo&                xi,
+    const rjmcmc_hypers&  h,
+    const likelihood&     lik,
+    rn&                   gen,
+    const leaf_partition* part_t)
 {
   (void)p;  // unused (we partition by leaf not by NOG directly)
   move_result res; res.move = 'D';
@@ -410,10 +517,14 @@ inline move_result propose_death(
   const int d = (int)b->depth();
 
   // Gather observations of the two children leaves.
-  std::map<tree::tree_p, std::vector<std::size_t> > part;
-  partition_by_leaf(t, X_row_major, N, p, xi, part);
-  const std::vector<std::size_t>& idx_L = part[b->getl()];
-  const std::vector<std::size_t>& idx_R = part[b->getr()];
+  leaf_partition part;
+  if (part_t == nullptr) {
+    std::vector<std::size_t> slot;
+    part.build(t, X_row_major, N, p, xi, slot);
+    part_t = &part;
+  }
+  const leaf_rows idx_L = part_t->rows(b->getl());
+  const leaf_rows idx_R = part_t->rows(b->getr());
 
   // Union for the merged leaf.
   std::vector<std::size_t> idx_M;
@@ -422,7 +533,7 @@ inline move_result propose_death(
   idx_M.insert(idx_M.end(), idx_R.begin(), idx_R.end());
 
   // --- 2. Laplace proposals ---------------------------------------------
-  auto slice = [&](const std::vector<std::size_t>& idx,
+  auto slice = [&](const auto& idx,
                    std::vector<double>& ys, std::vector<double>& lams) {
     ys.resize(idx.size()); lams.resize(idx.size());
     for (std::size_t k = 0; k < idx.size(); ++k) {
@@ -513,11 +624,7 @@ inline move_result propose_death(
   return res;
 }
 
-// ---------------------------------------------------------------------------
-// CHANGE move.  Picks a NOG branch, changes its splitting rule to a freshly-
-// sampled one, and re-samples mu_L, mu_R from their Laplace conditionals.
-// ---------------------------------------------------------------------------
-inline move_result propose_change(
+inline move_result propose_death(
     tree&                 t,
     const double*         X_row_major,
     const double*         Y,
@@ -528,6 +635,27 @@ inline move_result propose_change(
     const rjmcmc_hypers&  h,
     const likelihood&     lik,
     rn&                   gen)
+{
+  return propose_death_cached(t, X_row_major, Y, lam_minus_t, N, p, xi, h, lik, gen, nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// CHANGE move.  Picks a NOG branch, changes its splitting rule to a freshly-
+// sampled one, and re-samples mu_L, mu_R from their Laplace conditionals.
+// part_t is the current leaf partition of t, or nullptr to build it here.
+// ---------------------------------------------------------------------------
+inline move_result propose_change_cached(
+    tree&                 t,
+    const double*         X_row_major,
+    const double*         Y,
+    const double*         lam_minus_t,
+    std::size_t           N,
+    std::size_t           p,
+    xinfo&                xi,
+    const rjmcmc_hypers&  h,
+    const likelihood&     lik,
+    rn&                   gen,
+    const leaf_partition* part_t)
 {
   move_result res; res.move = 'C';
 
@@ -547,10 +675,14 @@ inline move_result propose_change(
 
   // Partition observations under b.  We compute for both (old rule) and
   // (new rule) -- old rule is the current partition of the tree.
-  std::map<tree::tree_p, std::vector<std::size_t> > part_old;
-  partition_by_leaf(t, X_row_major, N, p, xi, part_old);
-  const std::vector<std::size_t>& idx_L_old = part_old[b->getl()];
-  const std::vector<std::size_t>& idx_R_old = part_old[b->getr()];
+  leaf_partition part_old;
+  if (part_t == nullptr) {
+    std::vector<std::size_t> slot;
+    part_old.build(t, X_row_major, N, p, xi, slot);
+    part_t = &part_old;
+  }
+  const leaf_rows idx_L_old = part_t->rows(b->getl());
+  const leaf_rows idx_R_old = part_t->rows(b->getr());
   std::vector<std::size_t> idx_all;
   idx_all.reserve(idx_L_old.size() + idx_R_old.size());
   idx_all.insert(idx_all.end(), idx_L_old.begin(), idx_L_old.end());
@@ -572,7 +704,7 @@ inline move_result propose_change(
   }
 
   // --- 3. Laplace proposals for both old and new partitions --------------
-  auto slice = [&](const std::vector<std::size_t>& idx,
+  auto slice = [&](const auto& idx,
                    std::vector<double>& ys, std::vector<double>& lams) {
     ys.resize(idx.size()); lams.resize(idx.size());
     for (std::size_t k = 0; k < idx.size(); ++k) {
@@ -645,6 +777,21 @@ inline move_result propose_change(
   return res;
 }
 
+inline move_result propose_change(
+    tree&                 t,
+    const double*         X_row_major,
+    const double*         Y,
+    const double*         lam_minus_t,
+    std::size_t           N,
+    std::size_t           p,
+    xinfo&                xi,
+    const rjmcmc_hypers&  h,
+    const likelihood&     lik,
+    rn&                   gen)
+{
+  return propose_change_cached(t, X_row_major, Y, lam_minus_t, N, p, xi, h, lik, gen, nullptr);
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch: one tree-update step.  Picks a move at random.
 // After the move, refreshes every leaf mu (M-step) by ONE slice-sampling
@@ -660,6 +807,91 @@ inline move_result propose_change(
 // If f_tree_out != nullptr, it's filled with the per-observation leaf theta
 // values after the M-step (saving a subsequent full tree traversal in the
 // caller).  If you pass a valid pointer, it MUST be a length-N array.
+//
+// cache: if cache.valid on entry, cache.part is used as the current partition
+// of t by the move.  On return cache.part is the partition of t after this
+// call and cache.valid is true (false if neither do_M_step nor f_tree_out).
+// The caller clears the cache whenever t, X or xi change outside this function.
+// slot_buf: scratch for leaf_partition::build (resized to N); nullptr uses a
+// local vector.
+inline move_result draw_tree_cached(
+    tree&                 t,
+    const double*         X_row_major,
+    const double*         Y,
+    const double*         lam_minus_t,
+    std::size_t           N,
+    std::size_t           p,
+    xinfo&                xi,
+    const rjmcmc_hypers&  h,
+    const likelihood&     lik,
+    rn&                   gen,
+    bool                  do_M_step,
+    double*               f_tree_out,
+    leaf_partition_cache& cache,
+    std::vector<std::size_t>* slot_buf = nullptr)
+{
+  const leaf_partition* part_t = cache.valid ? &cache.part : nullptr;
+  cache.valid = false;
+
+  // --- normalise p_birth, p_death, p_change --------------------------------
+  const double s = h.p_birth + h.p_death + h.p_change;
+  const double pb = h.p_birth / s;
+  const double pd = (h.p_birth + h.p_death) / s;
+  const double u = gen.uniform();
+
+  move_result mr;
+  if (u < pb) {
+    mr = propose_birth_cached(t, X_row_major, Y, lam_minus_t, N, p, xi, h, lik, gen, part_t);
+  } else if (u < pd) {
+    mr = propose_death_cached(t, X_row_major, Y, lam_minus_t, N, p, xi, h, lik, gen, part_t);
+  } else {
+    mr = propose_change_cached(t, X_row_major, Y, lam_minus_t, N, p, xi, h, lik, gen, part_t);
+  }
+
+  // --- M-step: slice-sample every leaf mu from its exact full conditional --
+  // (Linero 2022 Alg 2 line 6; one Neal-2003 transition per leaf leaves the
+  // conditional invariant.)  While we're traversing the tree partition,
+  // optionally fill f_tree_out[i] with each obs's leaf theta (saves a
+  // redundant full traversal later).
+  std::vector<std::size_t> local_slot;
+  std::vector<std::size_t>& slot = slot_buf != nullptr ? *slot_buf : local_slot;
+  if (do_M_step) {
+    leaf_partition& part = cache.part;
+    part.build(t, X_row_major, N, p, xi, slot);
+    tree::npv leaves;
+    t.getbots(leaves);
+    std::vector<double> ys, lams;
+    for (std::size_t k = 0; k < leaves.size(); ++k) {
+      const leaf_rows idx = part.rows(leaves[k]);
+      ys.resize(idx.size()); lams.resize(idx.size());
+      for (std::size_t j = 0; j < idx.size(); ++j) {
+        ys[j]   = Y[idx[j]];
+        lams[j] = lam_minus_t[idx[j]];
+      }
+      const double new_mu = slice_leaf(ys.data(), lams.data(), idx.data(),
+                                       ys.size(), h.sigma_mu, lik,
+                                       leaves[k]->gettheta(), gen);
+      leaves[k]->settheta(new_mu);
+      if (f_tree_out != nullptr) {
+        for (std::size_t j = 0; j < idx.size(); ++j) f_tree_out[idx[j]] = new_mu;
+      }
+    }
+    cache.valid = true;
+  } else if (f_tree_out != nullptr) {
+    // No M-step: fill f_tree_out via a single partition so caller doesn't have
+    // to do it separately.
+    leaf_partition& part = cache.part;
+    part.build(t, X_row_major, N, p, xi, slot);
+    for (std::size_t k = 0; k < part.num_leaves(); ++k) {
+      const double mu_k = part.leaf(k)->gettheta();
+      const leaf_rows idx = part.rows_at(k);
+      for (std::size_t j = 0; j < idx.size(); ++j) f_tree_out[idx[j]] = mu_k;
+    }
+    cache.valid = true;
+  }
+  return mr;
+}
+
 inline move_result draw_tree(
     tree&                 t,
     const double*         X_row_major,
@@ -674,58 +906,9 @@ inline move_result draw_tree(
     bool                  do_M_step = true,
     double*               f_tree_out = nullptr)
 {
-  // --- normalise p_birth, p_death, p_change --------------------------------
-  const double s = h.p_birth + h.p_death + h.p_change;
-  const double pb = h.p_birth / s;
-  const double pd = (h.p_birth + h.p_death) / s;
-  const double u = gen.uniform();
-
-  move_result mr;
-  if (u < pb) {
-    mr = propose_birth(t, X_row_major, Y, lam_minus_t, N, p, xi, h, lik, gen);
-  } else if (u < pd) {
-    mr = propose_death(t, X_row_major, Y, lam_minus_t, N, p, xi, h, lik, gen);
-  } else {
-    mr = propose_change(t, X_row_major, Y, lam_minus_t, N, p, xi, h, lik, gen);
-  }
-
-  // --- M-step: slice-sample every leaf mu from its exact full conditional --
-  // (Linero 2022 Alg 2 line 6; one Neal-2003 transition per leaf leaves the
-  // conditional invariant.)  While we're traversing the tree partition,
-  // optionally fill f_tree_out[i] with each obs's leaf theta (saves a
-  // redundant full traversal later).
-  if (do_M_step) {
-    std::map<tree::tree_p, std::vector<std::size_t> > part;
-    partition_by_leaf(t, X_row_major, N, p, xi, part);
-    tree::npv leaves;
-    t.getbots(leaves);
-    std::vector<double> ys, lams;
-    for (std::size_t k = 0; k < leaves.size(); ++k) {
-      const std::vector<std::size_t>& idx = part[leaves[k]];
-      ys.resize(idx.size()); lams.resize(idx.size());
-      for (std::size_t j = 0; j < idx.size(); ++j) {
-        ys[j]   = Y[idx[j]];
-        lams[j] = lam_minus_t[idx[j]];
-      }
-      const double new_mu = slice_leaf(ys.data(), lams.data(), idx.data(),
-                                       ys.size(), h.sigma_mu, lik,
-                                       leaves[k]->gettheta(), gen);
-      leaves[k]->settheta(new_mu);
-      if (f_tree_out != nullptr) {
-        for (std::size_t j = 0; j < idx.size(); ++j) f_tree_out[idx[j]] = new_mu;
-      }
-    }
-  } else if (f_tree_out != nullptr) {
-    // No M-step: fill f_tree_out via a single partition so caller doesn't have
-    // to do it separately.
-    std::map<tree::tree_p, std::vector<std::size_t> > part;
-    partition_by_leaf(t, X_row_major, N, p, xi, part);
-    for (auto& kv : part) {
-      const double mu_k = kv.first->gettheta();
-      for (std::size_t j : kv.second) f_tree_out[j] = mu_k;
-    }
-  }
-  return mr;
+  leaf_partition_cache cache;
+  return draw_tree_cached(t, X_row_major, Y, lam_minus_t, N, p, xi, h, lik, gen,
+                          do_M_step, f_tree_out, cache);
 }
 
 }  // namespace genbart
