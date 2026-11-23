@@ -426,6 +426,7 @@ public:
         }
         auto it_kappa = params.find("kappa");
         if (it_kappa != params.end()) {
+            if (it_kappa->second.n_elem < 1) ai4b::stop("kappa must have length 1");
             const double k_new = it_kappa->second[0];
             if (k_new <= 0.0) ai4b::stop("kappa must be > 0");
             cat_new[P] = k_new;
@@ -433,6 +434,7 @@ public:
         }
         auto it_theta = params.find("theta");
         if (it_theta != params.end()) {
+            if (it_theta->second.n_elem < 1) ai4b::stop("theta must have length 1");
             const double th_new = it_theta->second[0];
             if (th_new <= 0.0) ai4b::stop("theta must be > 0");
             cat_new[P + 1] = th_new;

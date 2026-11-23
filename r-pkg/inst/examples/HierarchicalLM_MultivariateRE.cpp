@@ -676,10 +676,10 @@ public:
         // beta; u reads z_flat,tau,R_chol -- all written by the one block.
         impl_->data().declare_invalidates(
             "joint_block", {"tau", "sigma", "mu_fixed", "u"});
-        // Prime initial tau / sigma from the initial log_tau / log_sigma.
-        // The joint block's write-back on first step will populate these
-        // keys; until then we keep the tau=1 / sigma=sigma_init defaults
-        // already set above.
+        // Prime the derived keys (mu_fixed, u, tau, sigma) from the initial
+        // state, so get_current and predict_at before the first sweep use
+        // the values of that state.
+        impl_->data().refresh_all();
     }
 
     void step() { step(1); }              // no-arg convenience: one sweep
@@ -712,11 +712,88 @@ public:
         return out;
     }
 
-    void set_current(const AI4BayesCode::state_map& /*params*/) {
-        // The joint block owns beta/z/tau/sigma; fine-grained set_current
-        // for individual sub-params is not currently exposed. Round-trip
-        // via get_current() preserved; direct overwrite of individual
-        // params is a future extension.
+    // set_current: any subset of beta (p), z (d*J, col-major), tau (d),
+    // L (d*d, col-major) and sigma, in the layout get_current() reports.
+    // Each supplied key replaces its slice of the joint block's current
+    // value (beta, z_flat, log_tau, log_sigma, R_chol); the block is loaded
+    // and the shared sub-parameters, tau, sigma, mu_fixed and u are written
+    // from it. L must be lower-triangular with a positive diagonal and rows
+    // of unit length (|row norm^2 - 1| <= 1e-8); the block stores it through
+    // its below-diagonal entries. R = L L' is computed from L and is not
+    // loaded. Every supplied key is checked before anything is written, so a
+    // call that throws leaves the state unchanged.
+    void set_current(const AI4BayesCode::state_map& params) {
+        auto& jblk = dynamic_cast<joint_nuts_block&>(impl_->child(0));
+        arma::vec cat = jblk.current();   // [beta, z_flat, log_tau, log_sigma, R_chol]
+        const std::size_t off_z  = p_;
+        const std::size_t off_lt = p_ + J_ * d_;
+        const std::size_t off_ls = off_lt + d_;
+        const std::size_t off_L  = off_ls + 1;
+        bool touched = false;
+
+        auto it_beta = params.find("beta");
+        if (it_beta != params.end()) {
+            if (it_beta->second.n_elem != p_)
+                ai4b::stop("set_current: beta length must equal p");
+            cat.subvec(0, p_ - 1) = it_beta->second;
+            touched = true;
+        }
+        auto it_z = params.find("z");
+        if (it_z != params.end()) {
+            if (it_z->second.n_elem != J_ * d_)
+                ai4b::stop("set_current: z length must equal d * J");
+            cat.subvec(off_z, off_z + J_ * d_ - 1) = it_z->second;
+            touched = true;
+        }
+        auto it_tau = params.find("tau");
+        if (it_tau != params.end()) {
+            const arma::vec& tau = it_tau->second;
+            if (tau.n_elem != d_)
+                ai4b::stop("set_current: tau length must equal d");
+            for (std::size_t k = 0; k < d_; ++k) {
+                if (!(std::isfinite(tau[k]) && tau[k] > 0.0))
+                    ai4b::stop("set_current: tau must be finite and > 0");
+                cat[off_lt + k] = std::log(tau[k]);
+            }
+            touched = true;
+        }
+        auto it_sigma = params.find("sigma");
+        if (it_sigma != params.end()) {
+            const arma::vec& sg = it_sigma->second;
+            if (sg.n_elem != 1 || !(std::isfinite(sg[0]) && sg[0] > 0.0))
+                ai4b::stop("set_current: sigma must be a finite value > 0");
+            cat[off_ls] = std::log(sg[0]);
+            touched = true;
+        }
+        auto it_L = params.find("L");
+        if (it_L != params.end()) {
+            const arma::vec& L = it_L->second;   // L(i, j) = L[i + j * d]
+            if (L.n_elem != d_ * d_)
+                ai4b::stop("set_current: L length must equal d * d");
+            for (std::size_t i = 0; i < d_; ++i) {
+                double norm2 = 0.0;
+                for (std::size_t j = 0; j < d_; ++j) {
+                    const double v = L[i + j * d_];
+                    if (!std::isfinite(v))
+                        ai4b::stop("set_current: L must be finite");
+                    if (j > i && v != 0.0)
+                        ai4b::stop("set_current: L must be lower-triangular");
+                    if (j <= i) norm2 += v * v;
+                }
+                if (!(L[i + i * d_] > 0.0))
+                    ai4b::stop("set_current: L must have a positive diagonal");
+                if (std::abs(norm2 - 1.0) > 1e-8)
+                    ai4b::stop("set_current: the rows of L must have unit "
+                               "length (L L' is a correlation matrix)");
+            }
+            cat.subvec(off_L, off_L + d_ * d_ - 1) = L;
+            touched = true;
+        }
+
+        if (touched) {
+            jblk.set_current(cat);
+            impl_->sync_child(0);
+        }
     }
 
     /// Unchanged one-argument form: predict_at(new_data) means exactly what

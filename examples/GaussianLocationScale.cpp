@@ -243,9 +243,13 @@ public:
         bool touched = false;
 
         auto it_mu = params.find("mu");
+        if (it_mu != params.end() && it_mu->second.n_elem < 1)
+            throw std::runtime_error("mu must have length 1");
         if (it_mu != params.end()) { cat_new[0] = it_mu->second[0]; touched = true; }
         auto it_sg = params.find("sigma");
         if (it_sg != params.end()) {
+            if (it_sg->second.n_elem < 1)
+                throw std::runtime_error("sigma must have length 1");
             const double sg = it_sg->second[0];
             if (sg <= 0.0) throw std::runtime_error("sigma must be strictly positive");
             cat_new[1] = sg; touched = true;

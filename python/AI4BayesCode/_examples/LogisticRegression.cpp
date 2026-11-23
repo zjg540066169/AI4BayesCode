@@ -258,18 +258,16 @@ public:
     void set_current(const AI4BayesCode::state_map& params) {
         auto* beta_blk = dynamic_cast<pg_logistic_block*>(&impl_->child(0));
         auto it_b = params.find("beta");
-        if (it_b != params.end()) {
-            const arma::vec& bnew = it_b->second;
-            if (bnew.n_elem != p_)
-                throw std::runtime_error("set_current: beta length must equal p");
-            beta_blk->set_current(bnew);
-            impl_->data().set("beta", bnew);
-        }
         // X / y: canonical dynamic-N pattern (codegen_cpp.md Sec.7a).
         // p is strict (beta length); N is dynamic, derived from
         // X.n_elem / p when X is supplied.
         auto it_X = params.find("X");
         auto it_y = params.find("y");
+        // Every input is checked before anything is written, so a call that
+        // throws leaves the state unchanged.
+        if (it_b != params.end() && it_b->second.n_elem != p_)
+            throw std::runtime_error("set_current: beta length must equal p");
+        std::size_t N_new = N_;
         if (it_X != params.end()) {
             const arma::vec& X_new = it_X->second;
             if (X_new.n_elem == 0 || X_new.n_elem % p_ != 0)
@@ -277,13 +275,31 @@ public:
                     std::to_string(X_new.n_elem) +
                     " not a positive multiple of p = " +
                     std::to_string(p_));
-            const std::size_t N_new = X_new.n_elem / p_;
+            N_new = X_new.n_elem / p_;
             if (it_y != params.end()) {
                 if (it_y->second.n_elem != N_new)
                     throw std::runtime_error("set_current: X implies N=" +
                         std::to_string(N_new) + " but y has length " +
                         std::to_string(it_y->second.n_elem));
             }
+        }
+        if (it_y != params.end()) {
+            const arma::vec& y_new = it_y->second;
+            if (y_new.n_elem != N_new)
+                throw std::runtime_error("set_current: y length " +
+                    std::to_string(y_new.n_elem) +
+                    " != current N = " + std::to_string(N_new));
+            for (std::size_t i = 0; i < N_new; ++i)
+                if (y_new[i] != 0.0 && y_new[i] != 1.0)
+                    throw std::runtime_error("y must be 0/1");
+        }
+        if (it_b != params.end()) {
+            const arma::vec& bnew = it_b->second;
+            beta_blk->set_current(bnew);
+            impl_->data().set("beta", bnew);
+        }
+        if (it_X != params.end()) {
+            const arma::vec& X_new = it_X->second;
             impl_->data().set("X", X_new);
             if (N_new != N_) {
                 impl_->data().set("y_rep",
@@ -300,16 +316,12 @@ public:
             N_ = N_new;
         }
         if (it_y != params.end()) {
-            const arma::vec& y_new = it_y->second;
-            if (y_new.n_elem != N_)
-                throw std::runtime_error("set_current: y length " +
-                    std::to_string(y_new.n_elem) +
-                    " != current N = " + std::to_string(N_));
-            for (std::size_t i = 0; i < N_; ++i)
-                if (y_new[i] != 0.0 && y_new[i] != 1.0)
-                    throw std::runtime_error("y must be 0/1");
-            impl_->data().set("y", y_new);
+            impl_->data().set("y", it_y->second);
         }
+        // "eta" = X beta and "prob" of the loaded state (predict_at({}) uses
+        // "prob").
+        if (it_b != params.end() || it_X != params.end())
+            impl_->data().refresh_derived_for("beta");
     }
 
     // predict_at: optional X = arma::vec (vectorised N_test*p, column-major).

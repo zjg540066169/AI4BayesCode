@@ -249,6 +249,8 @@ public:
     void set_current(const AI4BayesCode::state_map& params) {
         auto it = params.find("p");
         if (it != params.end()) {
+            if (it->second.n_elem < 1)
+                throw std::runtime_error("p must have length 1");
             const double pv = it->second[0];
             if (pv <= 0 || pv >= 1)
                 throw std::runtime_error("p must be in (0, 1)");

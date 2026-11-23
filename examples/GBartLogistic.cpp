@@ -317,6 +317,9 @@ public:
             blk->set_Y(y_new);
             impl_->data().set("y", y_new);
         }
+        // The forest's r at the training X, and "prob" derived from it, in
+        // the shared data (get_current and predict_at({}) use them).
+        if (has_X || has_y) impl_->sync_child(0);
         // r is read-only output; silently ignored on input so that round-trip
         // set_current(get_current()) is supported. Use set_tree() to restore
         // the forest.
@@ -324,12 +327,12 @@ public:
 
     // Restore the full genBART forest from a serialized snapshot previously
     // obtained from get_tree(). Separate from set_current because a tree is a
-    // std::string, not a numeric state vector. Refreshes shared_data r so
-    // downstream nodes see the restored forest immediately.
+    // std::string, not a numeric state vector. Sets shared_data r and
+    // "prob" from the restored forest.
     void set_tree(const std::string& tree_s) {
         auto* blk = dynamic_cast<genbart_block*>(&impl_->child(0));
         blk->set_tree(tree_s);
-        impl_->data().set("r", blk->current());
+        impl_->sync_child(0);
     }
 #ifdef AI4BAYESCODE_RCPP_MODULE
     // R-facing predict_at. An R matrix loses its dim crossing into state_map

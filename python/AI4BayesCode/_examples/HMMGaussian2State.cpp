@@ -245,18 +245,32 @@ public:
     void set_current(const AI4BayesCode::state_map& params) {
         auto* z_blk = dynamic_cast<hmm_block*>(&impl_->child(0));
         auto it_z = params.find("z");
+        auto it_y = params.find("y");
+        // z and y are checked before anything is written, so a call that
+        // throws leaves the state unchanged.
         if (it_z != params.end()) {
             const arma::vec& znew = it_z->second;
             if (znew.n_elem != T_)
                 ai4b::stop("set_current: z length must equal T");
-            z_blk->set_current(znew);
-            impl_->data().set("z", znew);
+            // The condition and exception of hmm_block::set_current, which
+            // writes each entry as it checks it.
+            for (std::size_t t = 0; t < T_; ++t) {
+                const double lab = std::round(znew[t]);
+                if (!(lab == 0.0 || lab == 1.0))
+                    throw std::invalid_argument(
+                        "hmm_block 'z': z entries must be in {0..K-1}");
+            }
         }
-        auto it_y = params.find("y");
+        if (it_y != params.end() && it_y->second.n_elem != T_)
+            ai4b::stop("y length must equal T");
+        if (it_z != params.end()) {
+            z_blk->set_current(it_z->second);
+            // The block rounds z to state labels; the shared z is written
+            // from the block, so predict_at({}) uses the same labels.
+            impl_->sync_child(0);
+        }
         if (it_y != params.end()) {
-            const arma::vec& y_new = it_y->second;
-            if (y_new.n_elem != T_) ai4b::stop("y length must equal T");
-            impl_->data().set("y", y_new);
+            impl_->data().set("y", it_y->second);
         }
     }
 

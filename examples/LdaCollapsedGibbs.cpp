@@ -249,9 +249,9 @@ public:
         impl_->data().set("beta",  beta_arma);
 
         // ---- Initial sampler state --------------------------------
-        // z, theta, phi are written by the block's first set_context.
-        // We seed shared_data with placeholder zeros so any pre-step
-        // get_current() / refresh has well-defined values.
+        // z, theta, phi are written from the block after its first
+        // set_context (end of the constructor). Until then shared_data
+        // holds placeholder zeros under these keys.
         impl_->data().set("z",     arma::vec(N_, arma::fill::zeros));
         impl_->data().set("theta", arma::vec(M_ * K_, arma::fill::zeros));
         impl_->data().set("phi",   arma::vec(K_ * V_, arma::fill::zeros));
@@ -341,6 +341,15 @@ public:
                 std::make_unique<lda_collapsed_gibbs_block>(std::move(cfg)));
         }
 
+        // The block sets up z, its count tables and its initial theta, phi
+        // from w and doc at its first set_context. That is done here, and the
+        // shared z, theta and phi are written from the block, so get_current,
+        // predict_at and set_current(z) before the first sweep use the
+        // initial state. The first sweep passes the same w and doc again,
+        // which leaves the block unchanged.
+        impl_->child(0).set_context(impl_->data().build_context_for("lda"));
+        impl_->sync_child(0);
+
         if (keep_history_) impl_->set_keep_history(true);
     }
 
@@ -392,9 +401,12 @@ public:
                 "posterior draws conditional on z and the count "
                 "tables). Update z instead and call step().");
         }
+        // z, w and doc are checked before anything is written, so a call
+        // that throws leaves the model unchanged.
         auto it_z = params.find("z");
+        arma::vec z_new;
         if (it_z != params.end()) {
-            arma::vec z_new = it_z->second;
+            z_new = it_z->second;
             if (z_new.n_elem != N_) {
                 ai4b::stop("LdaCollapsedGibbs::set_current: z length "
                            "must equal N");
@@ -410,9 +422,6 @@ public:
                 // any floating drift from the numpy/R round-trip.
                 z_new[t] = static_cast<double>(zk);
             }
-            dynamic_cast<lda_collapsed_gibbs_block&>(impl_->child(0))
-                .set_current(z_new);
-            impl_->data().set("z", z_new);
         }
         // Allow the user to swap the observed token data (rare, but
         // useful for reproducibility / ablation):
@@ -427,6 +436,7 @@ public:
                        "be supplied together (they are correlated "
                        "observed data).");
         }
+        arma::vec w_arma, doc_arma;
         if (has_w && has_doc) {
             const arma::vec& w_new   = it_w->second;
             const arma::vec& doc_new = it_doc->second;
@@ -434,7 +444,8 @@ public:
                 ai4b::stop("LdaCollapsedGibbs::set_current: w length must equal N");
             if (doc_new.n_elem != N_)
                 ai4b::stop("LdaCollapsedGibbs::set_current: doc length must equal N");
-            arma::vec w_arma(N_), doc_arma(N_);
+            w_arma.set_size(N_);
+            doc_arma.set_size(N_);
             for (std::size_t t = 0; t < N_; ++t) {
                 const long wt = std::lround(w_new[t]);
                 const long dt = std::lround(doc_new[t]);
@@ -447,12 +458,19 @@ public:
                 w_arma[t]   = static_cast<double>(wt);
                 doc_arma[t] = static_cast<double>(dt);
             }
+        }
+        if (it_z != params.end()) {
+            dynamic_cast<lda_collapsed_gibbs_block&>(impl_->child(0))
+                .set_current(z_new);
+            impl_->data().set("z", z_new);
+        }
+        if (has_w && has_doc) {
             impl_->data().set("w",   w_arma);
             impl_->data().set("doc", doc_arma);
             // The next step() passes the new w/doc to the block's
             // set_context, which reloads them and rebuilds its counts
-            // from the current z (before the first step, the block's
-            // first set_context loads them).
+            // from the current z (also before the first step: the
+            // constructor makes the block's first set_context call).
         }
     }
 

@@ -420,6 +420,10 @@ public:
             impl_->add_child(std::make_unique<joint_nuts_block>(std::move(cfg)));
         }
 
+        // "I_traj" = the ODE solution at the initial theta, so predict_at
+        // before the first sweep draws I_rep around it.
+        impl_->data().refresh_all();
+
         if (keep_history_) impl_->set_keep_history(true);
     }
 
@@ -445,26 +449,47 @@ public:
 
         auto it_beta = params.find("beta");
         if (it_beta != params.end()) {
+            if (it_beta->second.n_elem < 1)
+                throw std::runtime_error("beta must have length 1");
             const double b = it_beta->second[0];
             if (!(b > 0.0)) throw std::runtime_error("beta must be > 0");
             cat_new[0] = b; touched = true;
         }
         auto it_gamma = params.find("gamma");
         if (it_gamma != params.end()) {
+            if (it_gamma->second.n_elem < 1)
+                throw std::runtime_error("gamma must have length 1");
             const double g = it_gamma->second[0];
             if (!(g > 0.0)) throw std::runtime_error("gamma must be > 0");
             cat_new[1] = g; touched = true;
         }
         auto it_sigma = params.find("sigma");
         if (it_sigma != params.end()) {
+            if (it_sigma->second.n_elem < 1)
+                throw std::runtime_error("sigma must have length 1");
             const double s = it_sigma->second[0];
             if (!(s > 0.0)) throw std::runtime_error("sigma must be > 0");
             cat_new[2] = s; touched = true;
         }
         if (touched) {
+            // "I_traj" at the loaded theta (predict_at({}) uses it), computed
+            // on a copy of the shared data before anything is written, so a
+            // call for which the ODE solver stops with an error leaves the
+            // model unchanged.
+            AI4BayesCode::shared_data_t trial = impl_->data();
+            trial.set("theta", arma::vec{cat_new[0], cat_new[1]});
+            try {
+                trial.refresh_derived_for("theta_sigma_joint");
+            } catch (const std::exception& e) {
+                throw std::runtime_error(
+                    std::string("set_current: the SIR solution at the loaded "
+                                "beta and gamma could not be computed (")
+                    + e.what() + ")");
+            }
             jblk.set_current(cat_new);
             impl_->data().set("theta", arma::vec{cat_new[0], cat_new[1]});
             impl_->data().set("sigma", arma::vec{cat_new[2]});
+            impl_->data().set("I_traj", trial.get("I_traj"));
         }
     }
 

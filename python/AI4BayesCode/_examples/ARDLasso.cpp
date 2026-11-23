@@ -208,27 +208,33 @@ public:
 
     // Backend-neutral overwrite: each value is an arma::vec (frontend already
     // converted the R list / Python dict). Scalars arrive as length-1 vectors.
+    // Every supplied key is checked before anything is written, so a call
+    // that throws leaves the state unchanged.
     void set_current(const AI4BayesCode::state_map& params) {
         auto it_beta = params.find("beta");
         if (it_beta != params.end()) {
             if (it_beta->second.n_elem != p_)
                 ai4b::stop("set_current: beta has wrong length");
-            beta_ = it_beta->second;
         }
         auto it_alpha = params.find("alpha");
-        if (it_alpha != params.end()) alpha_ = it_alpha->second[0];
+        if (it_alpha != params.end() && it_alpha->second.n_elem < 1)
+            ai4b::stop("set_current: alpha must have length 1");
         auto it_sigma2 = params.find("sigma2");
         if (it_sigma2 != params.end()) {
+            if (it_sigma2->second.n_elem < 1)
+                ai4b::stop("set_current: sigma2 must have length 1");
             const double s2 = it_sigma2->second[0];
             if (s2 <= 0.0) ai4b::stop("set_current: sigma2 must be > 0");
-            sigma2_ = s2;
         }
         auto it_psi2 = params.find("psi2");
         if (it_psi2 != params.end()) {
             if (it_psi2->second.n_elem != p_)
                 ai4b::stop("set_current: psi2 has wrong length");
-            psi2_ = it_psi2->second;
         }
+        if (it_beta != params.end()) beta_ = it_beta->second;
+        if (it_alpha != params.end()) alpha_ = it_alpha->second[0];
+        if (it_sigma2 != params.end()) sigma2_ = it_sigma2->second[0];
+        if (it_psi2 != params.end()) psi2_ = it_psi2->second;
     }
 
     // Full model DAG, hand-coded because ARDLasso is a self-contained

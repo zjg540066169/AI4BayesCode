@@ -607,28 +607,50 @@ public:
             return arma::reshape(x_flat, x_flat.n_elem / p, p);
         };
 
+        // sigma is checked before X and y are loaded, so a call that throws
+        // leaves the state unchanged (the bart_block loaders check their
+        // input before they change anything).
+        const auto it_s = params.find("sigma");
+        if (it_s != params.end() && it_s->second.n_elem < 1)
+            ai4b::stop("sigma must have length 1");
+        if (it_s != params.end() && !(it_s->second[0] > 0.0))
+            ai4b::stop("sigma must be strictly positive");
+
         if (has_X && has_y) {
             arma::mat X_new = reshape_X(it_X->second);
             const arma::vec& y_new = it_y->second;
-            bart_blk->set_data(X_new, y_new);
+            {
+                no_history_row_ load(*bart_blk);
+                bart_blk->set_data(X_new, y_new);
+            }
             // Push into shared_data so working_response_key refresh on
-            // the next set_context is a no-op / consistent.
+            // the next set_context is a no-op / consistent. sigma's
+            // conditional uses "y".
             impl_->data().set("bart_target", y_new);
+            impl_->data().set("y", y_new);
             impl_->data().set("X", arma::vec(arma::vectorise(X_new)));
         } else if (has_X) {
             arma::mat X_new = reshape_X(it_X->second);
-            bart_blk->set_X(X_new);
+            {
+                no_history_row_ load(*bart_blk);
+                bart_blk->set_X(X_new);
+            }
             impl_->data().set("X", arma::vec(arma::vectorise(X_new)));
         } else if (has_y) {
             const arma::vec& y_new = it_y->second;
-            bart_blk->set_Y(y_new);
+            {
+                no_history_row_ load(*bart_blk);
+                bart_blk->set_Y(y_new);
+            }
             impl_->data().set("bart_target", y_new);
+            impl_->data().set("y", y_new);
         }
+        // f_bart = the forest's fit at the loaded X and y (get_current and
+        // predict_at({}) use it).
+        if (has_X || has_y) impl_->sync_child(0);
 
-        const auto it_s = params.find("sigma");
         if (it_s != params.end()) {
             const double s = it_s->second[0];
-            if (!(s > 0.0)) ai4b::stop("sigma must be strictly positive");
             sg_blk->set_current(arma::vec{s});
             impl_->data().set("sigma", arma::vec{s});
         }
@@ -640,7 +662,10 @@ public:
     // f_bart so downstream blocks see the restored forest immediately.
     void set_tree(const std::string& tree_s) {
         auto* bart_blk = dynamic_cast<bart_block*>(&impl_->child(0));
-        bart_blk->set_tree(tree_s);
+        {
+            no_history_row_ load(*bart_blk);
+            bart_blk->set_tree(tree_s);
+        }
         const arma::vec& f_new = bart_blk->current();
         impl_->data().set("f_bart", f_new);
     }
@@ -661,6 +686,20 @@ public:
     }
 
 private:
+    // The bart_block loaders (set_X, set_Y, set_data, set_tree) add a row
+    // to the block's history when keep_history is on. A load is not a
+    // sweep, so they run with keep_history off: the f_bart history has one
+    // row per sweep, like the sigma history.
+    struct no_history_row_ {
+        AI4BayesCode::block_sampler& blk;
+        const bool keep;
+        explicit no_history_row_(AI4BayesCode::block_sampler& b)
+            : blk(b), keep(b.keep_history()) { blk.set_keep_history(false); }
+        ~no_history_row_() { blk.set_keep_history(keep); }
+        no_history_row_(const no_history_row_&) = delete;
+        no_history_row_& operator=(const no_history_row_&) = delete;
+    };
+
     std::mt19937_64                  rng_;
     // predict_rng_ is mutable so `predict_at() const` can advance it when
     // sampling y_rep. Seeded once at construction (derived from rng_seed

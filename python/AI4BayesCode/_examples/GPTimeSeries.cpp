@@ -40,10 +40,10 @@
 // tests_autodiff/block_tests/test_univariate_slice_sampling_block.cpp.
 // See skills/codegen.md section 2b.1 for when to use slice vs NUTS.
 //
-// predict_at: celerite_gp_block is placed LAST in the composite's Gibbs
-// order so its internal CholeskySolver reflects the post-sweep state;
-// predict_at then calls celerite_gp_block::predict_mean_var(t_new)
-// directly, without any re-stepping.
+// celerite_gp_block is placed LAST in the composite's Gibbs order, so
+// celerite_logp is the log marginal likelihood at the post-sweep state;
+// predict_at calls predict_mean_var(t_new) on a separate celerite block
+// with the current (history mode: per-draw) kernel coefficients.
 // ============================================================================
 
 // @example:R
@@ -368,8 +368,8 @@ public:
         //   child(0) slice(amp)
         //   child(1) slice(tau)
         //   child(2) slice(sigma)
-        //   child(3) celerite_gp_block   (LAST -- solver reflects final state;
-        //                                  predict_at uses it directly)
+        //   child(3) celerite_gp_block   (LAST -- logp at the final state;
+        //                                  predict_at uses a separate block)
         {
             univariate_slice_sampling_block_config cfg;
             cfg.name         = "amp";
@@ -406,12 +406,11 @@ public:
                 std::make_unique<univariate_slice_sampling_block>(
                     std::move(cfg)));
         }
-        {
-            celerite_gp_block_config cfg;
-            cfg.name = "celerite_logp";
-            impl_->add_child(
-                std::make_unique<celerite_gp_block>(std::move(cfg)));
-        }
+        impl_->add_child(
+            std::make_unique<celerite_gp_block>(celerite_config_()));
+
+        // celerite_logp of the initial state (get_current reports it).
+        refresh_logp_();
 
         if (keep_history_) impl_->set_keep_history(true);
     }
@@ -433,27 +432,36 @@ public:
     void set_current(const AI4BayesCode::state_map& params) {
         auto refresh_all_after = [&]() {
             impl_->data().refresh_all();
+            refresh_logp_();   // celerite_logp at the loaded a_real, c_real, obs_diag
         };
         auto it_amp = params.find("amp");
+        auto it_tau = params.find("tau");
+        auto it_sigma = params.find("sigma");
+        // All three are checked before anything is written, so a call that
+        // throws leaves the state and the derived keys unchanged.
+        for (const auto& it : {it_amp, it_tau, it_sigma})
+            if (it != params.end() && it->second.n_elem < 1)
+                ai4b::stop("%s must have length 1", it->first.c_str());
+        if (it_amp != params.end() && !(it_amp->second[0] > 0))
+            ai4b::stop("amp must be positive");
+        if (it_tau != params.end() && !(it_tau->second[0] > 0))
+            ai4b::stop("tau must be positive");
+        if (it_sigma != params.end() && !(it_sigma->second[0] > 0))
+            ai4b::stop("sigma must be positive");
         if (it_amp != params.end()) {
             const double a = it_amp->second[0];
-            if (!(a > 0)) ai4b::stop("amp must be positive");
             dynamic_cast<univariate_slice_sampling_block&>(
                 impl_->child(0)).set_current(arma::vec{a});
             impl_->data().set("amp", arma::vec{a});
         }
-        auto it_tau = params.find("tau");
         if (it_tau != params.end()) {
             const double t = it_tau->second[0];
-            if (!(t > 0)) ai4b::stop("tau must be positive");
             dynamic_cast<univariate_slice_sampling_block&>(
                 impl_->child(1)).set_current(arma::vec{t});
             impl_->data().set("tau", arma::vec{t});
         }
-        auto it_sigma = params.find("sigma");
         if (it_sigma != params.end()) {
             const double s = it_sigma->second[0];
-            if (!(s > 0)) ai4b::stop("sigma must be positive");
             dynamic_cast<univariate_slice_sampling_block&>(
                 impl_->child(2)).set_current(arma::vec{s});
             impl_->data().set("sigma", arma::vec{s});
@@ -528,7 +536,11 @@ public:
             const arma::mat& sigma_hist = hist.at("sigma");
             const std::size_t n_draws   = amp_hist.n_rows;
 
-            auto& cel = dynamic_cast<celerite_gp_block&>(impl_->child(3));
+            // A separate celerite block per call, so the child's state and
+            // history are not modified. Its kernel coefficients and noise are
+            // those of draw d (the formulas of the a_real, c_real and
+            // obs_diag refreshers).
+            celerite_gp_block cel(celerite_config_());
             block_context ctx = impl_->data().build_context_for("celerite_logp");
 
             arma::mat mu_mat (n_draws, N_new_h);
@@ -541,9 +553,9 @@ public:
                 const double amp_d   = amp_hist(d, 0);
                 const double tau_d   = tau_hist(d, 0);
                 const double sigma_d = sigma_hist(d, 0);
-                ctx["amp"]   = arma::vec{amp_d};
-                ctx["tau"]   = arma::vec{tau_d};
-                ctx["sigma"] = arma::vec{sigma_d};
+                ctx["a_real"]   = arma::vec{amp_d * amp_d};
+                ctx["c_real"]   = arma::vec{1.0 / std::max(tau_d, 1e-10)};
+                ctx["obs_diag"] = arma::vec{sigma_d * sigma_d};
                 cel.set_context(ctx);
                 cel.step(const_cast<std::mt19937_64&>(predict_rng_));
                 auto [mu, var] = cel.predict_mean_var(t_new_h);
@@ -565,18 +577,12 @@ public:
 
         arma::vec t_new = t_new_in;
 
-        // celerite_gp_block is child(3) (LAST in Gibbs order); its
-        // internal solver_ reflects the current post-sweep state thanks
-        // to the end-of-sweep celerite_logp step. No re-step needed.
-        auto& cel = dynamic_cast<celerite_gp_block&>(impl_->child(3));
-
-        // Provide cel's context in case predict_at is called immediately
-        // after construction (before any step()). build_context_for
-        // projects the declared dependencies.
+        // A separate celerite block with the current context (the
+        // declared dependencies of child(3)), so the child's state and
+        // history are not modified. Its step computes the solver (O(N)).
+        celerite_gp_block cel(celerite_config_());
         block_context ctx = impl_->data().build_context_for("celerite_logp");
         cel.set_context(ctx);
-        // A single step refreshes the solver (O(N)) -- idempotent if the
-        // state hasn't changed since the last sweep.
         cel.step(const_cast<std::mt19937_64&>(predict_rng_));
 
         auto [mu, var] = cel.predict_mean_var(t_new);
@@ -612,6 +618,25 @@ public:
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
 
 private:
+    // Configuration of the celerite block (child 3).
+    static celerite_gp_block_config celerite_config_() {
+        celerite_gp_block_config cfg;
+        cfg.name = "celerite_logp";
+        return cfg;
+    }
+
+    // celerite_logp at the current t, y, a_real, c_real and obs_diag,
+    // computed with a separate celerite block (so the child's history is
+    // unchanged), loaded into child(3) and written to the shared data.
+    void refresh_logp_() {
+        celerite_gp_block cel(celerite_config_());
+        cel.set_context(impl_->data().build_context_for("celerite_logp"));
+        std::mt19937_64 no_draw;   // celerite_gp_block::step draws nothing
+        cel.step(no_draw);
+        impl_->child(3).set_current(cel.current());
+        impl_->sync_child(3);
+    }
+
     std::mt19937_64                  rng_;
     mutable std::mt19937_64          predict_rng_;
     std::unique_ptr<composite_block> impl_;

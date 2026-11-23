@@ -219,10 +219,11 @@ public:
     }
 
     void set_current(const AI4BayesCode::state_map& params) {
+        // x and kappa are checked before anything is written, so a call
+        // that throws leaves the state unchanged.
         auto it_x = params.find("x");
+        auto* x_blk = dynamic_cast<gmrf_precision_block*>(&impl_->child(0));
         if (it_x != params.end()) {
-            auto* x_blk = dynamic_cast<gmrf_precision_block*>(
-                &impl_->child(0));
             if (!x_blk) {
                 ai4b::stop("internal: child 0 is not gmrf_precision_block");
             }
@@ -230,8 +231,6 @@ public:
             if (x_new.n_elem != N_) {
                 ai4b::stop("set_current: x length must equal L_x * L_y");
             }
-            x_blk->set_current(x_new);
-            impl_->data().set("x", x_new);
         }
         auto it_kappa = params.find("kappa");
         if (it_kappa != params.end()) {
@@ -242,8 +241,13 @@ public:
             if (!(kappa_new[0] > 0.0)) {
                 ai4b::stop("set_current: kappa must be > 0");
             }
-            impl_->data().set("kappa", kappa_new);
         }
+        if (it_x != params.end()) {
+            x_blk->set_current(it_x->second);
+            impl_->data().set("x", it_x->second);
+        }
+        if (it_kappa != params.end())
+            impl_->data().set("kappa", it_kappa->second);
     }
 
     // GMRFPrior has no observation model -- no y_rep, no data inputs.

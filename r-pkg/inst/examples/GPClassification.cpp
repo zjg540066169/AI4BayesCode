@@ -454,7 +454,11 @@ public:
 
         // ---- K_matrix refresher (libgp CovSEiso) ------------------------
         const libgp::CovSEiso* cf_ptr = cf_.get();
-        const std::vector<Eigen::VectorXd>* X_rows_ptr = &X_rows_;
+        // The refresher holds its own copy of the rows: it moves with the
+        // composite when the wrapper is moved, while the address of X_rows_
+        // changes.
+        const auto X_rows_ptr =
+            std::make_shared<const std::vector<Eigen::VectorXd>>(X_rows_);
         impl_->data().register_refresher("K_matrix",
             [cf_ptr, X_rows_ptr, N](
                 const AI4BayesCode::shared_data_t& d) -> arma::vec {
@@ -495,7 +499,11 @@ public:
                 arma::mat L;
                 if (!arma::chol(L, M, "lower")) {
                     M.diag() += amp * amp * 1e-4;
-                    arma::chol(L, M, "lower");
+                    if (!arma::chol(L, M, "lower"))
+                        ai4b::stop("GPClassification: the Cholesky "
+                                   "factorisation of K + amplitude^2 jitter I "
+                                   "failed, also with amplitude^2 1e-4 added "
+                                   "to the diagonal");
                 }
                 return arma::vectorise(L);
             });
@@ -505,6 +513,9 @@ public:
             [N](const AI4BayesCode::shared_data_t& d) -> arma::vec {
                 const arma::vec& L_flat = d.get("L_chol");
                 const arma::vec& z_vec  = d.get("z");
+                if (L_flat.n_elem != N * N)
+                    ai4b::stop("GPClassification: L_chol must have N * N "
+                               "entries");
                 arma::mat L(const_cast<double*>(L_flat.memptr()), N, N,
                              /*copy_aux_mem=*/false, /*strict=*/true);
                 return L * z_vec;
@@ -613,9 +624,13 @@ public:
         auto assign_pos = [&](const char* key, std::size_t idx) {
             auto it = params.find(key);
             if (it == params.end()) return;
+            if (it->second.n_elem < 1)
+                ai4b::stop("GPClassification::set_current: %s must have "
+                           "length 1", key);
             const double v = it->second[0];
-            if (!(v > 0.0))
-                ai4b::stop("GPClassification::set_current: %s must be positive", key);
+            if (!(v > 0.0) || !std::isfinite(v))
+                ai4b::stop("GPClassification::set_current: %s must be finite "
+                           "and positive", key);
             cat_new[idx] = v;
             touched = true;
         };
@@ -666,11 +681,27 @@ public:
         }
 
         if (touched) {
+            // K_matrix, L_chol and f at the loaded values, computed on a copy
+            // of the shared data before anything is written, so a call for
+            // which the Cholesky factorisation fails leaves the model
+            // unchanged.
+            AI4BayesCode::shared_data_t trial = impl_->data();
+            trial.set("amplitude",   arma::vec{cat_new[0]});
+            trial.set("lengthscale", arma::vec{cat_new[1]});
+            trial.set("z", arma::vec(cat_new.subvec(2, 2 + N_ - 1)));
+            try {
+                trial.refresh_derived_for("amp_ell_joint");
+            } catch (const std::exception& e) {
+                ai4b::stop("GPClassification::set_current: K_matrix, L_chol "
+                           "and f at the loaded values could not be computed "
+                           "(%s)", e.what());
+            }
             jblk.set_current(cat_new);
             impl_->data().set("amplitude",   arma::vec{cat_new[0]});
             impl_->data().set("lengthscale", arma::vec{cat_new[1]});
             impl_->data().set("z", arma::vec(cat_new.subvec(2, 2 + N_ - 1)));
-            impl_->data().refresh_derived_for("amp_ell_joint");
+            for (const char* key : {"K_matrix", "L_chol", "f"})
+                impl_->data().set(key, trial.get(key));
         }
     }
 

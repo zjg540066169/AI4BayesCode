@@ -74,6 +74,8 @@
 //   summary, plot_fn = ai.diagnose(run[0]["hist"]); print(summary)
 // @example:end
 
+// [[Rcpp::depends(RcppArmadillo)]]
+
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
 #endif
@@ -171,8 +173,14 @@ public:
     }
 
     void set_current(const AI4BayesCode::state_map& params) {
+        // lambda is the state of the piecewise-exponential block: the block
+        // checks it (length K, positive and finite) and holds it, and the
+        // shared copy is written from the block.
         auto it = params.find("lambda");
-        if (it != params.end()) impl_->data().set("lambda", it->second);
+        if (it != params.end()) {
+            impl_->child(0).set_current(it->second);
+            impl_->sync_child(0);
+        }
     }
 
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }

@@ -195,20 +195,24 @@ public:
 
     void set_current(const AI4BayesCode::state_map& params) {
         auto it_x = params.find("x");
+        auto it_beta = params.find("beta");
+        // x and beta are checked before anything is written; the block
+        // rounds x and writes each entry as it checks it, so an entry it
+        // rejects would leave it partly loaded. x is checked with the
+        // condition and exception of ising_cluster_block::set_current.
         if (it_x != params.end()) {
-            auto* x_blk = dynamic_cast<ising_cluster_block*>(
-                &impl_->child(0));
-            if (!x_blk) {
-                ai4b::stop("internal: child 0 is not ising_cluster_block");
-            }
             const arma::vec& x_new = it_x->second;
             if (x_new.n_elem != N_) {
                 ai4b::stop("set_current: x length must equal L_x * L_y");
             }
-            x_blk->set_current(x_new);
-            impl_->data().set("x", x_new);
+            for (std::size_t i = 0; i < N_; ++i) {
+                const double lab = std::round(x_new[i]);
+                if (!(lab >= 0.0 && lab < static_cast<double>(Q_)))
+                    throw std::invalid_argument(
+                        "ising_cluster_block 'x': x entries must be in "
+                        "{0..n_states-1}");
+            }
         }
-        auto it_beta = params.find("beta");
         if (it_beta != params.end()) {
             const arma::vec& beta_new = it_beta->second;
             if (beta_new.n_elem != 1) {
@@ -217,7 +221,18 @@ public:
             if (!(beta_new[0] >= 0.0)) {
                 ai4b::stop("set_current: beta must be >= 0");
             }
-            impl_->data().set("beta", beta_new);
+        }
+        if (it_x != params.end()) {
+            auto* x_blk = dynamic_cast<ising_cluster_block*>(
+                &impl_->child(0));
+            if (!x_blk) {
+                ai4b::stop("internal: child 0 is not ising_cluster_block");
+            }
+            x_blk->set_current(it_x->second);
+            impl_->sync_child(0);   // shared x = the block's rounded labels
+        }
+        if (it_beta != params.end()) {
+            impl_->data().set("beta", it_beta->second);
         }
     }
 

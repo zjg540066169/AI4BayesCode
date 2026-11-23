@@ -235,13 +235,24 @@ public:
                 ai4b::stop("set_current: z length must equal L * L");
             }
             for (std::size_t i = 0; i < N_; ++i) {
-                const int lab = static_cast<int>(z_new[i] + 0.5);
-                if (lab != 0 && lab != 1) {
+                // z + 0.5 truncated toward zero is 0 or 1.
+                const double v = z_new[i] + 0.5;
+                if (!(v > -1.0 && v < 2.0)) {
                     ai4b::stop("set_current: z entries must be in {0,1}");
                 }
             }
+            // The condition and exception of ising_cluster_block::set_current,
+            // which writes each entry as it checks it: an entry it rejects
+            // would leave it partly loaded.
+            for (std::size_t i = 0; i < N_; ++i) {
+                const double lab = std::round(z_new[i]);
+                if (lab != 0.0 && lab != 1.0)
+                    throw std::invalid_argument(
+                        "ising_cluster_block 'z': x entries must be in "
+                        "{0..n_states-1}");
+            }
             z_blk->set_current(z_new);
-            impl_->data().set("z", z_new);
+            impl_->sync_child(0);   // shared z = the block's rounded labels
         }
     }
 

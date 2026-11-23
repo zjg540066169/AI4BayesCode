@@ -617,9 +617,14 @@ public:
     // Backend-neutral set_current: read from a state_map (map<string,arma::vec>).
     // "y" arrives as a vectorised COLUMN-MAJOR arma::vec of a N_ x d_ matrix
     // (the standard state_map matrix convention), i.e. y_col[j*N_ + i] = y(i,j);
-    // it is restored into the model's row-major (i*d_+j) "y" buffer.
+    // it is restored into the model's row-major (i*d_+j) "y" buffer. mu and
+    // lambda use the layout get_current() reports (row-major k*d_+j); alpha
+    // is computed from phi and is not loaded. Every supplied key is checked
+    // before anything is written, so a call that throws leaves the model
+    // unchanged.
     void set_current(const AI4BayesCode::state_map& params) {
         auto it_y = params.find("y");
+        arma::vec yflat;
         if (it_y != params.end()) {
             const arma::vec& y_col = it_y->second;   // column-major N_ x d_
             // STRICT-N legitimate: z allocation length-N.
@@ -630,39 +635,84 @@ public:
                            "Reconstruct to change N/d.",
                            static_cast<int>(y_col.n_elem),
                            static_cast<int>(N_ * d_));
-            arma::vec yflat(N_ * d_);
+            yflat.set_size(N_ * d_);
             for (std::size_t i = 0; i < N_; ++i)
                 for (std::size_t j = 0; j < d_; ++j)
                     yflat[i * d_ + j] = y_col[j * N_ + i];
-            impl_->data().set("y", yflat);
         }
         auto it_z = params.find("z");
         if (it_z != params.end()) {
-            arma::vec znew = it_z->second;
+            const arma::vec& znew = it_z->second;
             if (znew.n_elem != N_) ai4b::stop("z length mismatch");
             for (std::size_t i = 0; i < N_; ++i) {
                 const long lab = static_cast<long>(std::llround(znew[i]));
                 if (lab < 1 || static_cast<std::size_t>(lab) > K_)
                     ai4b::stop("z[i] out of {1, ..., K_trunc}");
             }
-            dynamic_cast<categorical_gibbs_block&>(
-                impl_->child(0)).set_current(znew);
-            impl_->data().set("z", znew);
-            impl_->data().refresh_derived_for("z");
         }
         auto it_pi = params.find("pi");
         if (it_pi != params.end()) {
-            arma::vec pinew = it_pi->second;
+            // The conditions and exceptions of
+            // stick_breaking_block::set_current.
+            const arma::vec& pinew = it_pi->second;
             if (pinew.n_elem != K_)
                 ai4b::stop("pi length must equal K_trunc");
-            dynamic_cast<stick_breaking_block&>(
-                impl_->child(2)).set_current(pinew);
-            impl_->data().set("pi", pinew);
+            if (std::abs(arma::sum(pinew) - 1.0) > 1e-8)
+                throw std::invalid_argument(
+                    "stick_breaking_block::set_current: pi must sum to 1");
+            for (std::size_t k = 0; k < K_; ++k)
+                if (!(pinew[k] > 0.0))
+                    throw std::invalid_argument(
+                        "stick_breaking_block::set_current: pi entries must "
+                        "be > 0");
+        }
+        auto it_mu  = params.find("mu");
+        auto it_lam = params.find("lambda");
+        if (it_mu != params.end() && it_mu->second.n_elem != K_ * d_)
+            ai4b::stop("mu length must equal K_trunc * d");
+        if (it_lam != params.end()) {
+            const arma::vec& lam_new = it_lam->second;
+            if (lam_new.n_elem != K_ * d_)
+                ai4b::stop("lambda length must equal K_trunc * d");
+            for (std::size_t i = 0; i < K_ * d_; ++i)
+                if (!(lam_new[i] > 0.0)) ai4b::stop("lambda must be > 0");
         }
         auto it_phi = params.find("phi");
+        if (it_phi != params.end() && it_phi->second.n_elem < 1)
+            ai4b::stop("phi must have length 1");
+        const double p_new = it_phi != params.end() ? it_phi->second[0] : 0.0;
+        if (it_phi != params.end() && !std::isfinite(p_new))
+            ai4b::stop("phi must be finite");
+
+        if (it_y != params.end()) impl_->data().set("y", yflat);
+        if (it_z != params.end()) {
+            dynamic_cast<categorical_gibbs_block&>(
+                impl_->child(0)).set_current(it_z->second);
+            // The shared z is the block's labels (the input rounded), and
+            // cluster_counts their counts.
+            impl_->sync_child(0);
+        }
+        if (it_pi != params.end()) {
+            dynamic_cast<stick_breaking_block&>(
+                impl_->child(2)).set_current(it_pi->second);
+            // pi and the sticks stick_V the block computes from it
+            // (label_swap uses stick_V).
+            impl_->sync_child(2);
+        }
+        if (it_mu != params.end() || it_lam != params.end()) {
+            // The cluster block holds [mu; lambda]; for a key that is not
+            // supplied, the current value is used. mu and lambda are then
+            // written from the block.
+            arma::vec cluster_concat(2 * K_ * d_);
+            cluster_concat.head(K_ * d_) = it_mu != params.end()
+                ? it_mu->second : impl_->data().get("mu");
+            cluster_concat.tail(K_ * d_) = it_lam != params.end()
+                ? it_lam->second : impl_->data().get("lambda");
+            dynamic_cast<normal_gamma_cluster_gibbs_block&>(
+                impl_->child(1)).set_current(cluster_concat);
+            impl_->sync_child(1);
+        }
         if (it_phi != params.end()) {
-            const double p_new = it_phi->second[0];
-            if (!std::isfinite(p_new)) ai4b::stop("phi must be finite");
             dynamic_cast<univariate_slice_sampling_block&>(impl_->child(3))
                 .set_current(arma::vec{p_new});
             impl_->data().set("phi", arma::vec{p_new});

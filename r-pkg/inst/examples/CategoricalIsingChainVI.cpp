@@ -259,6 +259,49 @@ public:
             &impl_->child(0));
         if (!vi) ai4b::stop("internal: child 0 is not mean_field_categorical_vi_block");
 
+        // beta and h are fixed at construction: the log_density closure of
+        // the VI block holds the construction values. Other values are
+        // rejected, and z is checked, before anything is written; the
+        // current values are accepted, so set_current(get_current())
+        // round-trips.
+        auto it_z    = params.find("z");
+        auto it_beta = params.find("beta");
+        auto it_h    = params.find("h");
+        if (it_z != params.end()) {
+            const arma::vec& z_new = it_z->second;
+            if (z_new.n_elem != n_) {
+                ai4b::stop("set_current: z must have length n");
+            }
+            for (std::size_t i = 0; i < n_; ++i) {
+                const double zi = z_new[i];
+                if (zi < 0.0 || zi >= static_cast<double>(K_) ||
+                    std::floor(zi) != zi) {
+                    ai4b::stop("set_current: z entries must be integers in 0..K-1");
+                }
+            }
+        }
+        if (it_beta != params.end()) {
+            const arma::vec& beta_new = it_beta->second;
+            if (beta_new.n_elem != 1)
+                ai4b::stop("set_current: beta must be length 1");
+            if (!(beta_new[0] >= 0.0))
+                ai4b::stop("set_current: beta must be >= 0");
+            if (beta_new[0] != beta_)
+                ai4b::stop("set_current: beta is fixed at construction (the "
+                           "VI log-density uses it); construct a new "
+                           "CategoricalIsingChainVI for another beta");
+        }
+        if (it_h != params.end()) {
+            const arma::vec& h_new = it_h->second;
+            if (h_new.n_elem != n_)
+                ai4b::stop("set_current: h must have length n");
+            for (std::size_t i = 0; i < n_; ++i)
+                if (h_new[i] != h_[i])
+                    ai4b::stop("set_current: h is fixed at construction (the "
+                               "VI log-density uses it); construct a new "
+                               "CategoricalIsingChainVI for another h");
+        }
+
         // phi arrives as the flat COLUMN-MAJOR length-(n*K) vector (matrices
         // are vectorised column-major under the backend-neutral convention).
         // The VI block expects ROW-MAJOR (i*K + k) layout, so transpose.
@@ -278,44 +321,8 @@ public:
             vi->set_current(phi_block);
         }
 
-        auto it_z = params.find("z");
         if (it_z != params.end()) {
-            const arma::vec& z_new = it_z->second;
-            if (z_new.n_elem != n_) {
-                ai4b::stop("set_current: z must have length n");
-            }
-            for (std::size_t i = 0; i < n_; ++i) {
-                const double zi = z_new[i];
-                if (zi < 0.0 || zi >= static_cast<double>(K_) ||
-                    std::floor(zi) != zi) {
-                    ai4b::stop("set_current: z entries must be integers in 0..K-1");
-                }
-            }
-            impl_->data().set("z", z_new);
-        }
-
-        auto it_beta = params.find("beta");
-        if (it_beta != params.end()) {
-            const arma::vec& beta_new = it_beta->second;
-            if (beta_new.n_elem != 1)
-                ai4b::stop("set_current: beta must be length 1");
-            if (!(beta_new[0] >= 0.0))
-                ai4b::stop("set_current: beta must be >= 0");
-            impl_->data().set("beta", beta_new);
-            beta_ = beta_new[0];
-            // NOTE: the log_density closure captured beta at construction.
-            // Updating beta in shared_data is informational only; for
-            // re-tuning the VI under a new beta, reconstruct the wrapper.
-        }
-
-        auto it_h = params.find("h");
-        if (it_h != params.end()) {
-            const arma::vec& h_new = it_h->second;
-            if (h_new.n_elem != n_)
-                ai4b::stop("set_current: h must have length n");
-            impl_->data().set("h", h_new);
-            for (std::size_t i = 0; i < n_; ++i) h_[i] = h_new[i];
-            // Same caveat: log_density captured h at construction.
+            impl_->data().set("z", it_z->second);
         }
     }
 

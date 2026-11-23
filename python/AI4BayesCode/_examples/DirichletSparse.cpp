@@ -267,6 +267,7 @@ public:
         }
         auto it_theta = params.find("theta");
         if (it_theta != params.end()) {
+            if (it_theta->second.n_elem < 1) ai4b::stop("theta must have length 1");
             const double th_new = it_theta->second[0];
             if (th_new <= 0.0) ai4b::stop("theta must be strictly positive");
             cat_new[P] = th_new;

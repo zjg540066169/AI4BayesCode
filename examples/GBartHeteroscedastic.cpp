@@ -273,7 +273,15 @@ public:
 
     void step() { step(1); }              // no-arg convenience: one sweep
     void step(int n_steps) {
-        for (int i = 0; i < n_steps; ++i) impl_->step(rng_);
+        for (int i = 0; i < n_steps; ++i) {
+            impl_->step(rng_);
+            // phi is drawn inside the likelihood and has no block history, so
+            // the phi of each sweep is stored here for the history-mode
+            // posterior predictive.
+            if (keep_history_)
+                phi_hist_.push_back(static_cast<genbart::lik::heteroscedastic_lik*>(
+                    likelihood_.get())->phi());
+        }
     }
 
     // Current draw: r + mean (= exp(r)) + phi (dispersion). The serialized
@@ -351,16 +359,19 @@ public:
             blk->set_Y(y_new);
             impl_->data().set("y", y_new);
         }
+        // The forest's r at the training X, and "mean_r" derived from it, in
+        // the shared data (get_current and predict_at({}) use them).
+        if (has_X || has_y) impl_->sync_child(0);
     }
 
     // Restore the full genBART forest from a serialized snapshot previously
     // obtained from get_tree(). Separate from set_current because a tree is
-    // a std::string, not a numeric state vector. Refreshes shared_data r so
-    // downstream blocks see the restored forest immediately.
+    // a std::string, not a numeric state vector. Sets shared_data r and
+    // "mean_r" from the restored forest.
     void set_tree(const std::string& tree_s) {
         auto* blk = dynamic_cast<genbart_block*>(&impl_->child(0));
         blk->set_tree(tree_s);
-        impl_->data().set("r", blk->current());
+        impl_->sync_child(0);
     }
 #ifdef AI4BAYESCODE_RCPP_MODULE
     // R-facing predict_at. An R matrix loses its dim crossing into state_map
@@ -425,17 +436,27 @@ public:
         if (!has_X) {
             // ---- Training-X posterior predictive ------------------------
             if (use_history) {
-                // History mode at training X: per-draw y_rep_d from r_d.
+                // History mode at training X: per-draw y_rep_d from r_d and
+                // the phi of the same sweep.
                 AI4BayesCode::history_map hist = impl_->get_history();
                 const arma::mat& r_hist = hist.at("r");   // n_draws x N
                 const std::size_t n_draws = r_hist.n_rows;
                 const std::size_t N_local = r_hist.n_cols;
+                // Before the first sweep the history is the current state
+                // (one row) and no phi has been stored: that row uses the
+                // current phi.
+                if (!phi_hist_.empty() && phi_hist_.size() != n_draws) {
+                    ai4b::stop("GBartHeteroscedastic::predict_at: inconsistent "
+                               "history sizes (r=%d, phi=%d)",
+                               (int)n_draws, (int)phi_hist_.size());
+                }
                 auto* lik_ptr = static_cast<genbart::lik::heteroscedastic_lik*>(
                     likelihood_.get());
-                const double phi = lik_ptr->phi();
                 arma::mat yrep_mat(n_draws, N_local);
                 std::normal_distribution<double> norm(0.0, 1.0);
                 for (std::size_t d = 0; d < n_draws; ++d) {
+                    const double phi =
+                        phi_hist_.empty() ? lik_ptr->phi() : phi_hist_[d];
                     for (std::size_t i = 0; i < N_local; ++i) {
                         const double m  = std::exp(r_hist(d, i));
                         const double sd = std::sqrt(phi * m);
@@ -533,6 +554,7 @@ private:
     std::size_t                          x_ncol_ = 0;
     bool                                 keep_tree_    = false;
     bool                                 keep_history_ = false;
+    std::vector<double>                  phi_hist_;   // phi of each sweep (keep_history_)
 };
 
 // ============================================================================

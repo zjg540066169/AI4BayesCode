@@ -326,12 +326,25 @@ public:
     }
 
     // Update from an outer sampler. Supported keys:
-    //   sigma : scalar > 0.
+    //   sigma : scalar, equal to the current sigma (sigma is drawn inside
+    //           the BART kernel of beta_0, which has no loader for it, so
+    //           another value is rejected).
     //   y     : length-N response; refreshes every working response + mu.
+    // Both keys are checked before anything is written.
     void set_current(const AI4BayesCode::state_map& params) {
         auto it_s = params.find("sigma");
-        if (it_s != params.end()) impl_->data().set("sigma", it_s->second);
+        if (it_s != params.end() &&
+            (it_s->second.n_elem != 1 ||
+             it_s->second[0] != impl_->data().get("sigma")[0]))
+            ai4b::stop("VCBart::set_current: sigma is drawn inside the BART "
+                       "kernel of beta_0 and cannot be loaded; only its "
+                       "current value is accepted");
         auto it_y = params.find("y");
+        if (it_y != params.end() &&
+            it_y->second.n_elem != impl_->data().get("y").n_elem)
+            ai4b::stop("VCBart::set_current: y has length %d but N = %d",
+                       (int)it_y->second.n_elem,
+                       (int)impl_->data().get("y").n_elem);
         if (it_y != params.end()) {
             impl_->data().set("y", it_y->second);
             impl_->data().refresh_all();   // wr_j and mu depend on y

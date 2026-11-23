@@ -313,6 +313,10 @@ public:
 
         N_ = N; p_ = p;
 
+        // "mu" = alpha + X beta of the initial state, so predict_at before
+        // the first sweep draws y_rep around it.
+        impl_->data().refresh_all();
+
         if (keep_history_) impl_->set_keep_history(true);
     }
 
@@ -335,12 +339,39 @@ public:
         auto it_a = params.find("alpha");
         auto it_b = params.find("beta");
         auto it_s = params.find("sigma");
+        auto it_X = params.find("X");
+        auto it_y = params.find("y");
+
+        // X and y are checked before anything is written, so a call that
+        // throws leaves the state unchanged.
+        std::size_t N_new = N_;
+        if (it_X != params.end()) {
+            const arma::vec& X_new = it_X->second;
+            if (X_new.n_elem == 0 || X_new.n_elem % p_ != 0)
+                throw std::runtime_error("set_current: X length " +
+                    std::to_string(X_new.n_elem) +
+                    " is not a positive multiple of p = " +
+                    std::to_string(p_));
+            N_new = X_new.n_elem / p_;
+            if (it_y != params.end() && it_y->second.n_elem != N_new)
+                throw std::runtime_error("set_current: X implies N=" +
+                    std::to_string(N_new) + " but y has length " +
+                    std::to_string(it_y->second.n_elem));
+        }
+        if (it_y != params.end() && it_y->second.n_elem != N_new)
+            throw std::runtime_error("set_current: y length " +
+                std::to_string(it_y->second.n_elem) +
+                " != current N = " + std::to_string(N_new));
 
         if (it_a != params.end() || it_b != params.end() || it_s != params.end()) {
             arma::vec alpha_cur = impl_->data().get("alpha");
             arma::vec beta_cur  = impl_->data().get("beta");
             arma::vec sigma_cur = impl_->data().get("sigma");
-            if (it_a != params.end()) alpha_cur[0] = it_a->second[0];
+            if (it_a != params.end()) {
+                if (it_a->second.n_elem < 1)
+                    throw std::runtime_error("set_current: alpha must have length 1");
+                alpha_cur[0] = it_a->second[0];
+            }
             if (it_b != params.end()) {
                 const arma::vec& beta_new = it_b->second;
                 if (beta_new.n_elem != p_)
@@ -348,6 +379,8 @@ public:
                 beta_cur = beta_new;
             }
             if (it_s != params.end()) {
+                if (it_s->second.n_elem < 1)
+                    throw std::runtime_error("set_current: sigma must have length 1");
                 const double sg = it_s->second[0];
                 if (!(sg > 0.0)) throw std::runtime_error("sigma must be > 0");
                 sigma_cur[0] = sg;
@@ -362,21 +395,8 @@ public:
             impl_->data().set("sigma", sigma_cur);
         }
         // Dynamic-N canonical pattern (codegen_cpp.md Sec.7a).
-        auto it_X = params.find("X");
-        auto it_y = params.find("y");
         if (it_X != params.end()) {
-            const arma::vec& X_new = it_X->second;
-            if (X_new.n_elem == 0 || X_new.n_elem % p_ != 0)
-                throw std::runtime_error("set_current: X length " +
-                    std::to_string(X_new.n_elem) +
-                    " is not a positive multiple of p = " +
-                    std::to_string(p_));
-            const std::size_t N_new = X_new.n_elem / p_;
-            if (it_y != params.end() && it_y->second.n_elem != N_new)
-                throw std::runtime_error("set_current: X implies N=" +
-                    std::to_string(N_new) + " but y has length " +
-                    std::to_string(it_y->second.n_elem));
-            impl_->data().set("X", X_new);
+            impl_->data().set("X", it_X->second);
             if (N_new != N_) {
                 impl_->data().set("y_rep",
                                   arma::vec(N_new, arma::fill::zeros));
@@ -386,13 +406,11 @@ public:
             N_ = N_new;
         }
         if (it_y != params.end()) {
-            const arma::vec& y_new = it_y->second;
-            if (y_new.n_elem != N_)
-                throw std::runtime_error("set_current: y length " +
-                    std::to_string(y_new.n_elem) +
-                    " != current N = " + std::to_string(N_));
-            impl_->data().set("y", y_new);
+            impl_->data().set("y", it_y->second);
         }
+        // "mu" = alpha + X beta of the loaded state (predict_at({}) uses it).
+        if (it_a != params.end() || it_b != params.end() || it_X != params.end())
+            impl_->data().refresh_derived_for("abs_joint");
     }
 
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }

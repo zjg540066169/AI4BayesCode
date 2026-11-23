@@ -365,22 +365,19 @@ public:
     }
 
     void set_current(const AI4BayesCode::state_map& params) {
+        // Every supplied key is checked before anything is written, so a
+        // call that throws leaves the state unchanged.
         auto it_b = params.find("beta");
         if (it_b != params.end()) {
             const arma::vec& bnew = it_b->second;
             if (bnew.n_elem != p_)
                 throw std::runtime_error("beta length must equal p");
-            dynamic_cast<nuts_block&>(impl_->child(1)).set_current(bnew);
-            impl_->data().set("beta", bnew);
-            impl_->data().refresh_derived_for("beta");
         }
         auto it_z = params.find("z");
         if (it_z != params.end()) {
             const arma::vec& zn = it_z->second;
             if (zn.n_elem != N_)
                 throw std::runtime_error("z length must equal N");
-            dynamic_cast<probit_aug_block&>(impl_->child(0)).set_current(zn);
-            impl_->data().set("z", zn);
         }
         // ProbitRegression uses Albert-Chib data augmentation: the
         // latent z vector of length N is allocated inside
@@ -397,8 +394,6 @@ public:
                     std::to_string(Xnew.n_elem) + " but requires N*p = " +
                     std::to_string(N_ * p_) +
                     ". To change N, reconstruct the wrapper.");
-            impl_->data().set("X", Xnew);
-            impl_->data().refresh_derived_for("beta");  // refresh mu_lin
         }
         auto it_y = params.find("y");
         if (it_y != params.end()) {
@@ -413,8 +408,21 @@ public:
                 if (ynew[i] != 0.0 && ynew[i] != 1.0)
                     throw std::runtime_error("y must be 0/1");
             }
-            impl_->data().set("y", ynew);
         }
+        if (it_b != params.end()) {
+            dynamic_cast<nuts_block&>(impl_->child(1)).set_current(it_b->second);
+            impl_->data().set("beta", it_b->second);
+            impl_->data().refresh_derived_for("beta");
+        }
+        if (it_z != params.end()) {
+            dynamic_cast<probit_aug_block&>(impl_->child(0)).set_current(it_z->second);
+            impl_->data().set("z", it_z->second);
+        }
+        if (it_X != params.end()) {
+            impl_->data().set("X", it_X->second);
+            impl_->data().refresh_derived_for("beta");  // refresh mu_lin
+        }
+        if (it_y != params.end()) impl_->data().set("y", it_y->second);
     }
 
     // predict_at: optional X = arma::vec (vectorised N*p_test).

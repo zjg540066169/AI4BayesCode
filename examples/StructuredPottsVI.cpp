@@ -331,14 +331,9 @@ public:
             &impl_->child(0));
         if (!vi) ai4b::stop("internal: child 0 not structured_categorical_vi_block");
 
-        auto it_phi = params.find("clique_phi");
-        if (it_phi != params.end()) {
-            const arma::vec& phi_flat = it_phi->second;
-            if (phi_flat.n_elem != vi->total_S())
-                ai4b::stop("clique_phi length must equal total_S (sum_C S_C)");
-            vi->set_current(phi_flat);
-        }
-
+        // z is checked before clique_phi is loaded, and the VI block checks
+        // clique_phi before it writes, so a call that throws leaves the
+        // state unchanged.
         auto it_z = params.find("z");
         if (it_z != params.end()) {
             const arma::vec& z_new = it_z->second;
@@ -350,8 +345,17 @@ public:
                     ai4b::stop("z entries must be integers in 0..K-1");
                 }
             }
-            impl_->data().set("z", z_new);
         }
+
+        auto it_phi = params.find("clique_phi");
+        if (it_phi != params.end()) {
+            const arma::vec& phi_flat = it_phi->second;
+            if (phi_flat.n_elem != vi->total_S())
+                ai4b::stop("clique_phi length must equal total_S (sum_C S_C)");
+            vi->set_current(phi_flat);
+        }
+
+        if (it_z != params.end()) impl_->data().set("z", it_z->second);
     }
 
     // predict_at(): draw n_draws fresh q-samples. Reads optional "n_draws"

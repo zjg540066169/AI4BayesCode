@@ -319,6 +319,13 @@ public:
                 softmax_with_ref(N_here, C_cap, ptrs, probs);
                 return probs;
             });
+        // probs is recomputed after the last class forest r_{C-1} updates.
+        // The forests update in the order r_1, ..., r_{C-1} in every sweep
+        // (a genbart_block cannot be frozen) and no block uses probs, so at
+        // the end of each sweep the shared value is the softmax of the
+        // current r_1, ..., r_{C-1}; set_tree and set_current(X) write r_j
+        // of every forest, the last of them r_{C-1}.
+        impl_->data().declare_invalidates(r_key(C_ - 1), {"probs"});
 
         // Stochastic refresher: y_rep[i] ~ Categorical(probs[i, :]).
         impl_->data().register_stochastic_refresher(
@@ -448,8 +455,12 @@ public:
     }
 
     // Restore the C-1 BART forests from a single serialized snapshot
-    // previously obtained from get_tree(). Refreshes shared_data r_j so
-    // downstream blocks see the restored forests immediately.
+    // previously obtained from get_tree(). Sets shared_data r_j and probs
+    // from the restored forests. If a forest of the snapshot is rejected,
+    // the forests already replaced get their previous trees back before the
+    // error propagates, and r_j and probs are set from the forests: each
+    // forest's fit is recomputed from its trees, so it equals the fit
+    // before the call up to rounding.
     void set_tree(const std::string& tree_s) {
         // Split on the sentinel.
         std::vector<std::string> parts;
@@ -469,11 +480,21 @@ public:
                        "forests but C - 1 = %d",
                        (int)parts.size(), (int)(C_ - 1));
         }
-        for (std::size_t j = 0; j < C_ - 1; ++j) {
-            auto* g = dynamic_cast<genbart_block*>(&impl_->child(1 + j));
-            g->set_tree(parts[j]);
-            impl_->data().set(r_key(j + 1), g->current());
+        std::vector<std::string> old(C_ - 1);
+        for (std::size_t j = 0; j < C_ - 1; ++j)
+            old[j] = dynamic_cast<genbart_block&>(impl_->child(1 + j)).get_tree();
+        std::size_t j = 0;
+        try {
+            for (; j < C_ - 1; ++j)
+                dynamic_cast<genbart_block&>(impl_->child(1 + j)).set_tree(parts[j]);
+        } catch (...) {
+            for (std::size_t k = 0; k < j; ++k)
+                dynamic_cast<genbart_block&>(impl_->child(1 + k)).set_tree(old[k]);
+            if (j > 0)
+                for (std::size_t k = 0; k < C_ - 1; ++k) impl_->sync_child(1 + k);
+            throw;
         }
+        for (std::size_t k = 0; k < C_ - 1; ++k) impl_->sync_child(1 + k);
     }
 
     // Update parameters / data inputs from an outer sampler. Supported
@@ -494,11 +515,29 @@ public:
         const auto it_X = params.find("X");
         const bool has_y = it_y != params.end();
         const bool has_X = it_X != params.end();
+        const std::size_t N =
+            static_cast<std::size_t>(impl_->data().get("y").n_elem);
+
+        // X is checked before y is written, so a call that throws on X
+        // leaves the state unchanged. Each forest has N rows.
+        arma::mat X_new;
+        if (has_X) {
+            const arma::vec& x_flat = it_X->second;
+            if (x_ncol_ == 0 || (x_flat.n_elem % x_ncol_) != 0) {
+                ai4b::stop("GBartMultinomial::set_current: flattened X "
+                           "length %d is not a multiple of p = %d",
+                           (int)x_flat.n_elem, (int)x_ncol_);
+            }
+            const std::size_t n_new = x_flat.n_elem / x_ncol_;
+            if (n_new != N) {
+                ai4b::stop("GBartMultinomial::set_current: X has %d rows "
+                           "but N = %d", (int)n_new, (int)N);
+            }
+            X_new = arma::reshape(x_flat, n_new, x_ncol_);
+        }
 
         if (has_y) {
             const arma::vec& y_new = it_y->second;
-            const std::size_t N =
-                static_cast<std::size_t>(impl_->data().get("y").n_elem);
             if (y_new.n_elem != N) {
                 ai4b::stop("GBartMultinomial::set_current: y length %d "
                            "does not match N = %d",
@@ -520,19 +559,13 @@ public:
         }
 
         if (has_X) {
-            const arma::vec& x_flat = it_X->second;
-            if (x_ncol_ == 0 || (x_flat.n_elem % x_ncol_) != 0) {
-                ai4b::stop("GBartMultinomial::set_current: flattened X "
-                           "length %d is not a multiple of p = %d",
-                           (int)x_flat.n_elem, (int)x_ncol_);
-            }
-            const std::size_t n_new = x_flat.n_elem / x_ncol_;
-            arma::mat X_new = arma::reshape(x_flat, n_new, x_ncol_);
             for (std::size_t j = 0; j < C_ - 1; ++j) {
                 auto* g = dynamic_cast<genbart_block*>(&impl_->child(1 + j));
                 g->set_X(X_new);
             }
             impl_->data().set("X", arma::vec(arma::vectorise(X_new)));
+            // r_j of each forest at the new X, and probs, in the shared data.
+            for (std::size_t j = 0; j < C_ - 1; ++j) impl_->sync_child(1 + j);
         }
     }
 

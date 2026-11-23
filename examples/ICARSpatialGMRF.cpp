@@ -511,6 +511,12 @@ public:
             cat_new[2] = v[0];
             touched = true;
         }
+        // phi and y are checked before anything is written, so a call that
+        // throws leaves the state unchanged.
+        if (params.count("phi") && params.at("phi").n_elem != N_)
+            ai4b::stop("phi must have length N_nodes");
+        if (params.count("y") && params.at("y").n_elem != T_)
+            ai4b::stop("y length must equal T");
         if (touched) {
             jblk.set_current(cat_new);
             impl_->data().set("Intercept", arma::vec{cat_new[0]});
@@ -519,16 +525,12 @@ public:
         }
         if (params.count("phi")) {
             const arma::vec& v = params.at("phi");
-            if (v.n_elem != N_)
-                ai4b::stop("phi must have length N_nodes");
             impl_->data().set("phi", v);
             auto* blk = dynamic_cast<gmrf_precision_block*>(&impl_->child(0));
             if (blk) blk->set_current(v);
         }
         if (params.count("y")) {
-            const arma::vec& yn = params.at("y");
-            if (yn.n_elem != T_) ai4b::stop("y length must equal T");
-            impl_->data().set("y", yn);
+            impl_->data().set("y", params.at("y"));
         }
     }
 

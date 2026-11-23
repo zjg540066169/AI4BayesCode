@@ -332,12 +332,16 @@ public:
 
         auto it_g = params.find("gamma");
         if (it_g != params.end()) {
+            if (it_g->second.n_elem < 1)
+                ai4b::stop("gamma must have length 1");
             const double g = (it_g->second[0] >= 0.5) ? 1.0 : 0.0;
             cat[0] = g;
             touched = true;
         }
         auto it_b = params.find("beta");
         if (it_b != params.end()) {
+            if (it_b->second.n_elem < 1)
+                ai4b::stop("beta must have length 1");
             cat[1] = it_b->second[0];
             touched = true;
         }

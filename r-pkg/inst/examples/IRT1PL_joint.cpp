@@ -499,6 +499,8 @@ public:
         double sigma_b_cur = cat_new[N + J];
         auto it_sb = params.find("sigma_b");
         if (it_sb != params.end()) {
+            if (it_sb->second.n_elem < 1)
+                throw std::runtime_error("sigma_b must have length 1");
             const double sb_new = it_sb->second[0];
             if (sb_new <= 0.0)
                 throw std::runtime_error("sigma_b must be > 0");

@@ -89,6 +89,8 @@
 //   summary, plot_fn = ai.diagnose(run[0]["hist"]); print(summary)
 // @example:end
 
+// [[Rcpp::depends(RcppArmadillo)]]
+
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
 #endif
@@ -229,8 +231,32 @@ public:
     }
 
     void set_current(const AI4BayesCode::state_map& params) {
-        auto it1 = params.find("lambda"); if (it1 != params.end()) impl_->data().set("lambda", it1->second);
-        auto it2 = params.find("w");      if (it2 != params.end()) impl_->data().set("w",      it2->second);
+        // w and lambda are the states of the frailty block (child 0) and the
+        // piecewise-exponential block (child 1). Both are checked (length G
+        // and K, positive and finite) before anything is written; each block
+        // then holds its value, and the shared copies, with expanded_w, are
+        // written from the blocks.
+        auto it1 = params.find("lambda");
+        auto it2 = params.find("w");
+        auto check = [](const arma::vec& v, std::size_t len, const char* key) {
+            if (v.n_elem != len)
+                ai4b::stop("PehSharedFrailty::set_current: %s must have length %d",
+                           key, static_cast<int>(len));
+            for (std::size_t i = 0; i < v.n_elem; ++i)
+                if (!(v[i] > 0.0) || !std::isfinite(v[i]))
+                    ai4b::stop("PehSharedFrailty::set_current: %s entries must "
+                               "be positive and finite", key);
+        };
+        if (it1 != params.end()) check(it1->second, impl_->child(1).dim(), "lambda");
+        if (it2 != params.end()) check(it2->second, impl_->child(0).dim(), "w");
+        if (it1 != params.end()) {
+            impl_->child(1).set_current(it1->second);
+            impl_->sync_child(1);
+        }
+        if (it2 != params.end()) {
+            impl_->child(0).set_current(it2->second);
+            impl_->sync_child(0);   // also recomputes expanded_w
+        }
     }
 
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }

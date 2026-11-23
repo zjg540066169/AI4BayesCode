@@ -566,10 +566,8 @@ public:
             const double sigma_new = cat_cur[p + G + 2];
             impl_->data().set("tau",   arma::vec{tau_new});
             impl_->data().set("sigma", arma::vec{sigma_new});
-            // Recompute derived u = tau * z_u.
-            arma::vec u_new(G);
-            for (std::size_t g = 0; g < G; ++g) u_new[g] = tau_new * z_u_new[g];
-            impl_->data().set("u", u_new);
+            // Recompute derived u = tau * z_u and mu_fixed = alpha + X beta.
+            impl_->data().refresh_derived_for("ncr_joint");
         }
     }
 

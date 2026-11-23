@@ -52,6 +52,7 @@
 //      child(1) atoms        cluster_atom_block        (shape, rate) per k
 //      child(2) w            stick_breaking_block      Beta(1 + n_k, alpha + tail)
 //      child(3) alpha        univariate_slice_sampling_block on the Antoniak (k, n) marginal
+//      child(4) label_swap   stick_label_swap_block    relabels z, shape, rate, pi, stick_V
 //
 //  Component labels are exchangeable, so summarise label-INVARIANT functionals
 //  (the fitted density on a grid, the number of occupied components) rather
@@ -397,6 +398,11 @@ public:
                 return out;
             });
 
+        // cluster_counts of the initial z: with z frozen, the first sweep
+        // runs cluster_params, pi and alpha on it before label_swap
+        // recomputes it.
+        impl_->data().refresh_all();
+
         keep_history_ = keep_history;
         if (keep_history) impl_->set_keep_history(true);
     }
@@ -420,15 +426,25 @@ public:
     /// Accepts any subset of (y, z, pi, shape, rate, alpha). y is the data
     /// inflow an outer sampler uses to push a revised response inward
     /// (imputation, a working response from a sibling block, newly arrived
-    /// observations); the remaining keys inject parameter state.
+    /// observations); the remaining keys inject parameter state. K_trunc,
+    /// which get_current() reports, is accepted when it equals the
+    /// construction value, so set_current(get_current()) round-trips.
+    /// Every supplied key is checked before anything is written, so a call
+    /// that throws leaves the model unchanged.
     void set_current(const AI4BayesCode::state_map& params) {
         for (const auto& kv : params) {
             const std::string& k = kv.first;
             if (k != "y" && k != "z" && k != "pi" && k != "shape" &&
-                k != "rate" && k != "alpha")
+                k != "rate" && k != "alpha" && k != "K_trunc")
                 ai4b::stop("DPGammaMixture::set_current: unknown key '%s'. "
-                           "Valid: y, z, pi, shape, rate, alpha.", k.c_str());
+                           "Valid: y, z, pi, shape, rate, alpha, K_trunc "
+                           "(construction value only).", k.c_str());
         }
+        if (params.count("K_trunc") &&
+            (params.at("K_trunc").n_elem != 1 ||
+             params.at("K_trunc")[0] != static_cast<double>(K_)))
+            ai4b::stop("set_current: K_trunc is fixed at construction "
+                       "(K_trunc = %zu)", K_);
         if (params.count("y")) {
             const arma::vec& y_new = params.at("y");
             // STRICT-N: z has length N and the per-component sufficient
@@ -443,7 +459,6 @@ public:
             if (!y_new.is_finite()) ai4b::stop("set_current: y must be finite");
             if (y_new.min() <= 0.0)
                 ai4b::stop("set_current: Gamma data must be strictly positive");
-            impl_->data().set("y", y_new);
         }
         if (params.count("z")) {
             const arma::vec& znew = params.at("z");
@@ -454,35 +469,65 @@ public:
                 if (lab < 1 || static_cast<std::size_t>(lab) > K_)
                     ai4b::stop("set_current: z[i] out of {1, ..., K_trunc}");
             }
-            dynamic_cast<categorical_gibbs_block&>(impl_->child(0))
-                .set_current(znew);
-            impl_->data().set("z", znew);
-            impl_->data().refresh_derived_for("z");
         }
         if (params.count("pi")) {
+            // The conditions and exceptions of
+            // stick_breaking_block::set_current.
             const arma::vec& pinew = params.at("pi");
             if (pinew.n_elem != K_)
                 ai4b::stop("set_current: pi length must equal K_trunc");
-            dynamic_cast<stick_breaking_block&>(impl_->child(2))
-                .set_current(pinew);
-            impl_->data().set("pi", pinew);
+            if (std::abs(arma::sum(pinew) - 1.0) > 1e-8)
+                throw std::invalid_argument(
+                    "stick_breaking_block::set_current: pi must sum to 1");
+            for (std::size_t k = 0; k < K_; ++k)
+                if (!(pinew[k] > 0.0))
+                    throw std::invalid_argument(
+                        "stick_breaking_block::set_current: pi entries must "
+                        "be > 0");
         }
         // shape and rate are the two sub-parameters of the single
         // cluster_atom_block, whose state is one atom-major vector
         // [shape_0, rate_0, shape_1, rate_1, ...]; setting either one alone
         // rebuilds that vector from the other's current value.
-        if (params.count("shape") || params.count("rate")) {
-            arma::vec sh = impl_->data().get("shape");
-            arma::vec rt = impl_->data().get("rate");
+        const bool has_atoms = params.count("shape") || params.count("rate");
+        arma::vec sh = impl_->data().get("shape");
+        arma::vec rt = impl_->data().get("rate");
+        if (has_atoms) {
             if (params.count("shape")) sh = params.at("shape");
             if (params.count("rate"))  rt = params.at("rate");
             if (sh.n_elem != K_ || rt.n_elem != K_)
                 ai4b::stop("set_current: shape and rate must each have "
                            "length K_trunc");
+            // Finite and > 0, as cluster_atom_block::set_current requires.
             for (std::size_t k = 0; k < K_; ++k) {
-                if (!(sh[k] > 0.0)) ai4b::stop("set_current: shape must be > 0");
-                if (!(rt[k] > 0.0)) ai4b::stop("set_current: rate must be > 0");
+                if (!(std::isfinite(sh[k]) && sh[k] > 0.0))
+                    ai4b::stop("set_current: shape must be finite and > 0");
+                if (!(std::isfinite(rt[k]) && rt[k] > 0.0))
+                    ai4b::stop("set_current: rate must be finite and > 0");
             }
+        }
+        if (params.count("alpha") && params.at("alpha").n_elem < 1)
+            ai4b::stop("set_current: alpha must have length 1");
+        const double a_new = params.count("alpha") ? params.at("alpha")[0] : 0.0;
+        if (params.count("alpha") && !(a_new > 0.0))
+            ai4b::stop("set_current: alpha must be > 0");
+
+        if (params.count("y")) impl_->data().set("y", params.at("y"));
+        if (params.count("z")) {
+            dynamic_cast<categorical_gibbs_block&>(impl_->child(0))
+                .set_current(params.at("z"));
+            // The shared z is the block's labels (the input rounded), and
+            // cluster_counts their counts.
+            impl_->sync_child(0);
+        }
+        if (params.count("pi")) {
+            dynamic_cast<stick_breaking_block&>(impl_->child(2))
+                .set_current(params.at("pi"));
+            // pi and the sticks stick_V the block computes from it
+            // (label_swap uses stick_V).
+            impl_->sync_child(2);
+        }
+        if (has_atoms) {
             arma::vec atoms(2u * K_);
             for (std::size_t k = 0; k < K_; ++k) {
                 atoms[2 * k]     = sh[k];
@@ -494,8 +539,6 @@ public:
             impl_->data().set("rate",  rt);
         }
         if (params.count("alpha")) {
-            const double a_new = params.at("alpha")[0];
-            if (!(a_new > 0.0)) ai4b::stop("set_current: alpha must be > 0");
             dynamic_cast<univariate_slice_sampling_block&>(impl_->child(3))
                 .set_current(arma::vec{a_new});
             impl_->data().set("alpha", arma::vec{a_new});

@@ -681,7 +681,14 @@ public:
         // as a VECTORISED column-major arma::vec under their key -- element
         // (row, col) lives at col*nrow + row. We convert back to the internal
         // ROW/cluster-major storage (flat[row*ncol + col]).
-        if (params.count("y")) {
+        // Every supplied key is checked before anything is written, so a
+        // call that throws leaves the model unchanged.
+        const bool has_y = params.count("y") > 0, has_z = params.count("z") > 0,
+                   has_pi = params.count("pi") > 0, has_mu = params.count("mu") > 0,
+                   has_lam = params.count("lambda") > 0,
+                   has_alpha = params.count("alpha") > 0;
+        arma::vec yflat;
+        if (has_y) {
             const arma::vec& y_new = params.at("y");
             // STRICT-N: DPGaussianMixture's categorical_gibbs_block holds the
             // allocation vector z of length N, and the cluster_gibbs_block
@@ -694,14 +701,13 @@ public:
                            "are length-N). Supplied y has %zu elements but "
                            "requires N*d = %zu. To change N, reconstruct.",
                            static_cast<std::size_t>(y_new.n_elem), N_ * d_);
-            arma::vec yflat(N_ * d_);
+            yflat.set_size(N_ * d_);
             for (std::size_t i = 0; i < N_; ++i)
                 for (std::size_t j = 0; j < d_; ++j)
                     yflat[i * d_ + j] = y_new[j * N_ + i];  // col-major -> row-major
-            impl_->data().set("y", yflat);
         }
-        if (params.count("z")) {
-            arma::vec znew = params.at("z");
+        if (has_z) {
+            const arma::vec& znew = params.at("z");
             if (znew.n_elem != N_)
                 ai4b::stop("set_current: z length must equal N");
             for (std::size_t i = 0; i < N_; ++i) {
@@ -710,48 +716,42 @@ public:
                     ai4b::stop("set_current: z[i] out of {1, ..., K_trunc}");
                 }
             }
-            dynamic_cast<categorical_gibbs_block&>(
-                impl_->child(0)).set_current(znew);
-            impl_->data().set("z", znew);
-            impl_->data().refresh_derived_for("z");
         }
-        if (params.count("pi")) {
-            arma::vec pinew = params.at("pi");
+        if (has_pi) {
+            // The conditions and exceptions of
+            // stick_breaking_block::set_current.
+            const arma::vec& pinew = params.at("pi");
             if (pinew.n_elem != K_)
                 ai4b::stop("set_current: pi length must equal K_trunc");
-            dynamic_cast<stick_breaking_block&>(
-                impl_->child(2)).set_current(pinew);
-            impl_->data().set("pi", pinew);
+            if (std::abs(arma::sum(pinew) - 1.0) > 1e-8)
+                throw std::invalid_argument(
+                    "stick_breaking_block::set_current: pi must sum to 1");
+            for (std::size_t k = 0; k < K_; ++k)
+                if (!(pinew[k] > 0.0))
+                    throw std::invalid_argument(
+                        "stick_breaking_block::set_current: pi entries must "
+                        "be > 0");
         }
-        if (params.count("mu")) {
+        // mu and lambda: the current values with the supplied ones in place.
+        arma::vec mu_flat = impl_->data().get("mu");
+        arma::vec lam_flat = impl_->data().get("lambda");
+        if (has_mu) {
             // Accept K_trunc x d matrix as a vectorised column-major arma::vec.
             const arma::vec& mu_new = params.at("mu");
             if (mu_new.n_elem != K_ * d_) {
                 ai4b::stop("set_current: mu must be K_trunc x d "
                            "(flat length K_trunc*d)");
             }
-            arma::vec mu_flat(K_ * d_);
             for (std::size_t k = 0; k < K_; ++k)
                 for (std::size_t j = 0; j < d_; ++j)
                     mu_flat[k * d_ + j] = mu_new[j * K_ + k];  // col-major -> row-major
-            impl_->data().set("mu", mu_flat);
-            // Also push to the cluster block's internal state.
-            const arma::vec& cur_lam = impl_->data().get("lambda");
-            arma::vec cluster_concat(2 * K_ * d_);
-            for (std::size_t i = 0; i < K_ * d_; ++i) {
-                cluster_concat[i]            = mu_flat[i];
-                cluster_concat[K_ * d_ + i]  = cur_lam[i];
-            }
-            dynamic_cast<normal_gamma_cluster_gibbs_block&>(
-                impl_->child(1)).set_current(cluster_concat);
         }
-        if (params.count("lambda")) {
+        if (has_lam) {
             const arma::vec& lam_new = params.at("lambda");
             if (lam_new.n_elem != K_ * d_) {
                 ai4b::stop("set_current: lambda must be K_trunc x d "
                            "(flat length K_trunc*d)");
             }
-            arma::vec lam_flat(K_ * d_);
             for (std::size_t k = 0; k < K_; ++k) {
                 for (std::size_t j = 0; j < d_; ++j) {
                     const double v = lam_new[j * K_ + k];  // col-major -> row-major
@@ -761,20 +761,41 @@ public:
                     lam_flat[k * d_ + j] = v;
                 }
             }
-            impl_->data().set("lambda", lam_flat);
-            const arma::vec& cur_mu = impl_->data().get("mu");
+        }
+        if (has_alpha && params.at("alpha").n_elem < 1)
+            ai4b::stop("set_current: alpha must have length 1");
+        const double a_new = has_alpha ? params.at("alpha")[0] : 0.0;
+        if (has_alpha && !(a_new > 0.0))
+            ai4b::stop("set_current: alpha must be > 0");
+
+        if (has_y) impl_->data().set("y", yflat);
+        if (has_z) {
+            dynamic_cast<categorical_gibbs_block&>(
+                impl_->child(0)).set_current(params.at("z"));
+            // The shared z is the block's labels (the input rounded), and
+            // cluster_counts their counts.
+            impl_->sync_child(0);
+        }
+        if (has_pi) {
+            dynamic_cast<stick_breaking_block&>(
+                impl_->child(2)).set_current(params.at("pi"));
+            // pi and the sticks stick_V the block computes from it
+            // (label_swap uses stick_V).
+            impl_->sync_child(2);
+        }
+        if (has_mu || has_lam) {
+            // Also push to the cluster block's internal state.
             arma::vec cluster_concat(2 * K_ * d_);
             for (std::size_t i = 0; i < K_ * d_; ++i) {
-                cluster_concat[i]            = cur_mu[i];
+                cluster_concat[i]            = mu_flat[i];
                 cluster_concat[K_ * d_ + i]  = lam_flat[i];
             }
             dynamic_cast<normal_gamma_cluster_gibbs_block&>(
                 impl_->child(1)).set_current(cluster_concat);
+            impl_->data().set("mu", mu_flat);
+            impl_->data().set("lambda", lam_flat);
         }
-        if (params.count("alpha")) {
-            const double a_new = params.at("alpha")[0];
-            if (!(a_new > 0.0))
-                ai4b::stop("set_current: alpha must be > 0");
+        if (has_alpha) {
             dynamic_cast<univariate_slice_sampling_block&>(impl_->child(3))
                 .set_current(arma::vec{a_new});
             impl_->data().set("alpha", arma::vec{a_new});

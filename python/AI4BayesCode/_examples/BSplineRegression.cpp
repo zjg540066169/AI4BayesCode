@@ -380,6 +380,10 @@ public:
         // slot). sds is exp(log_sds) so the prior parent is on log_sds.
         impl_->data().declare_context_edges("sds_prior_sd", {"log_sds"});
 
+        // s, f and mu of the initial state, so predict_at before the first
+        // sweep draws y_rep around mu.
+        impl_->data().refresh_all();
+
         if (keep_history_) impl_->set_keep_history(true);
     }
 
@@ -403,10 +407,35 @@ public:
     }
 
     void set_current(const AI4BayesCode::state_map& params) {
+        // Intercept, log_sds, log_sigma and z are the state of the joint
+        // block, so they are loaded into the block and the next sweep starts
+        // from them. Their lengths are checked before anything is written.
+        // Every other key is written to the shared data.
+        auto& jblk = dynamic_cast<joint_nuts_block&>(impl_->child(0));
+        arma::vec cat = jblk.current();   // [Intercept, log_sds, log_sigma, z]
+        bool touched = false;
+        auto load = [&](const std::string& k, std::size_t off, std::size_t len) {
+            auto it = params.find(k);
+            if (it == params.end()) return;
+            if (it->second.n_elem != len)
+                throw std::runtime_error("BSplineRegression::set_current: " +
+                    k + " must have length " + std::to_string(len));
+            cat.subvec(off, off + len - 1) = it->second;
+            touched = true;
+        };
+        load("Intercept", 0, 1);
+        load("log_sds",   1, 1);
+        load("log_sigma", 2, 1);
+        load("z",         3, cat.n_elem - 3);
         for (const auto& [k, v] : params) {
-            if (k == "sds" || k == "sigma") continue;
+            if (k == "sds" || k == "sigma" || k == "Intercept" ||
+                k == "log_sds" || k == "log_sigma" || k == "z") continue;
             impl_->data().set(k, v);
         }
+        if (touched) jblk.set_current(cat);
+        // Writes the block's sub-parameters to the shared data and recomputes
+        // s, f and mu from them and the current Bsp.
+        impl_->sync_child(0);
     }
 
     // Real posterior predictive via the framework predict DAG (replaces
