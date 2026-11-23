@@ -57,7 +57,9 @@ unknown-K (non-BNP).
   in the current scope; they remain optimisations rather than
   correctness gates (note: `split_merge_block` co-composed with
   `categorical_gibbs_block` is now unblocked via
-  `composite_block::declare_shared_history("z")` if the truncated-SBP
+  `composite_block::declare_shared_history("z")`, with `z` in the
+  split_merge block's dependencies and `cluster_counts` in its invalidates
+  (see `split_merge_block.md`), if the truncated-SBP
   partition posterior is multimodal for a given dataset).
 - Multi-dim bijections `R^n -> R^n` for `n > 1` (e.g., Stephens
   2000 split-merge for finite mixtures with unknown K) -- current scope ships

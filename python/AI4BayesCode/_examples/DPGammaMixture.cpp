@@ -266,9 +266,13 @@ public:
 
         // ---- Gibbs DAG ---------------------------------------------------
         impl_->data().declare_dependencies("z",     {"y", "pi", "shape", "rate"});
+        // shape and rate are also written by label_swap, which permutes them
+        // with z; listing them makes cluster_params start each update from
+        // the shared (relabelled) atoms instead of its own pre-swap state.
         impl_->data().declare_dependencies("cluster_params", {"z", "y", "cluster_counts",
                                                      "a_shape", "b_shape",
-                                                     "a_rate", "b_rate"});
+                                                     "a_rate", "b_rate",
+                                                     "shape", "rate"});
         impl_->data().declare_dependencies("pi",    {"cluster_counts", "alpha"});
         impl_->data().declare_dependencies("alpha", {"cluster_counts", "a_alpha", "b_alpha"});
         impl_->data().declare_invalidates("z", {"cluster_counts"});

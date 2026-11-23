@@ -37,6 +37,8 @@ cfg.discount  = 0.0;                                 // Pitman-Yor d in [0, 1); 
 impl_->data().declare_dependencies("label_swap", {"z", "mu", "lambda", "pi", "stick_V", "alpha"});
 impl_->data().declare_invalidates("label_swap", {"cluster_counts"});
 impl_->add_child(std::make_unique<AI4BayesCode::stick_label_swap_block>(std::move(cfg)));
+// With cluster_atom_block for the atoms, its declare_dependencies also lists
+// every atom key above ("mu", "lambda"); see the contract below.
 ```
 
 **Contract**:
@@ -45,6 +47,18 @@ impl_->add_child(std::make_unique<AI4BayesCode::stick_label_swap_block>(std::mov
 - Each atom key holds component k in entries [k * width, (k + 1) * width).
   Every per-component parameter must be listed, or the swap would pair a
   cluster with another cluster's parameters.
+- Every block that keeps one of the keys this block writes as its own state
+  must list that key in its own `declare_dependencies`, so that its next
+  update starts from the shared value: the atom keys for
+  `cluster_atom_block` (the atom block loads its state from the shared
+  value; see its card), and `z` for `split_merge_block`. With the key
+  unlisted, that block starts from its own state from before the
+  relabelling and writes it back, so its labels no longer match the
+  relabelled atoms and weights, and the chain targets a wrong posterior with
+  no error. The conjugate
+  atom blocks (`normal_gamma_cluster_gibbs_block`, `niw_cluster_gibbs_block`)
+  and `stick_breaking_block` draw from conditionals that do not involve
+  their previous value and need no such entry.
 - Declare `invalidates("label_swap", {"cluster_counts"})` so the counts
   refresher reruns after a relabelling.
 - Its position in the sweep does not affect correctness; appending it as

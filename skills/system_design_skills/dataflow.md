@@ -38,6 +38,21 @@ posterior that passes every convergence check. So: whenever you set a
 `*_key`, add that key to the block's `declare_dependencies` list in the
 same edit.
 
+**A key written by two blocks.** Some keys have a second writer in the same
+sweep: `stick_label_swap_block` rewrites `z` and every atom key, and
+`split_merge_block` rewrites `z` after `categorical_gibbs_block`. A block that
+keeps such a key as its own state and starts its next update from it
+(`cluster_atom_block` for the atom keys, `split_merge_block` for `z`) MUST
+list the key in its own `declare_dependencies`; it then loads the shared
+value in `set_context` and starts from it. Without the entry it starts from
+its own value from before the other block's write and writes that value back,
+and the chain targets a wrong posterior with no error. A block whose draw
+does not involve the key's previous value (a conjugate cluster block,
+`stick_breaking_block`) needs no entry. With the entry, the shared value is
+that block's starting state at every sweep, so a restore of the block must
+also write the shared key (`data().set`) or go through
+`composite_block::set_current`.
+
 **Invariant -- shared_data must stay in sync.** After any change via
 `set_current`, any entry the composite advertises in shared_data
 (especially data inputs and derived quantities) MUST reflect the new

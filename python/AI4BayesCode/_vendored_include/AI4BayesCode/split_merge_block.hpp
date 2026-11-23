@@ -227,6 +227,17 @@ public:
     // ---- block_sampler interface ---------------------------------------
 
     void set_context(const block_context& ctx) override {
+        // A context entry under z_name is the shared allocation, which other
+        // blocks writing z_name (categorical_gibbs_block,
+        // stick_label_swap_block) may have changed since this block's last
+        // step; the next step starts from it. When z_name is in this block's
+        // dependency list, the shared allocation is the starting state at
+        // every composite sweep, so a restore of this block must also write
+        // the shared key (data().set, as the shipped wrappers do) or go
+        // through composite_block::set_current; a set_current of this block
+        // alone is replaced by the shared value at the next sweep.
+        const auto it = ctx.find(cfg_.z_name);
+        if (it != ctx.end()) load_z_(it->second, /*from_context=*/true);
         // COPY (per design contract).
         context_ = ctx;
     }
@@ -280,8 +291,8 @@ public:
                     "split_merge_block: sigma length mismatch");
         }
 
-        // Read current z (mostly from cached z_; could also re-read from ctx).
-        // We trust z_ since it's the canonical block state.
+        // Current z: z_, which set_context loads from the shared allocation
+        // when the context carries z_name.
 
         // Sample (i, j) uniformly without replacement.
         std::uniform_int_distribution<std::size_t> uid(0, N - 1);
@@ -347,21 +358,18 @@ public:
             // top of it below.
             const double log_q_slot = -std::log(
                 static_cast<double>(empty_slots.size()));
+            // p_si of each kk in S does not depend on z_star, so it takes the
+            // same value in every scan; it and the emission terms used in the
+            // ratio below are computed once per step.
+            const pair_terms_ pt = pair_terms_for_(S, j, s_i, c_new, y_flat, pi,
+                                                   mu, lam_ptr, sig_ptr);
             double log_q_forward = 0.0;
             for (std::size_t t = 0; t < cfg_.n_restricted_gibbs_iters; ++t) {
                 const bool accumulate = (t + 1 == cfg_.n_restricted_gibbs_iters);
                 double log_q_this = 0.0;
-                for (std::size_t kk : S) {
-                    const double y_loglik_si = y_log_lik_at_(
-                        y_flat, kk, s_i, mu, lam_ptr, sig_ptr);
-                    const double y_loglik_cn = y_log_lik_at_(
-                        y_flat, kk, c_new, mu, lam_ptr, sig_ptr);
-                    const double a = std::log(pi[s_i]   + 1e-300) + y_loglik_si;
-                    const double b = std::log(pi[c_new] + 1e-300) + y_loglik_cn;
-                    const double m = std::max(a, b);
-                    const double e_a = std::exp(a - m);
-                    const double e_b = std::exp(b - m);
-                    const double p_si = e_a / (e_a + e_b);
+                for (std::size_t q = 0; q < S.size(); ++q) {
+                    const std::size_t kk = S[q];
+                    const double p_si = pt.p_a[q];
                     const double u    = uniform(rng);
                     const std::size_t pick =
                         (u < p_si) ? s_i : c_new;
@@ -390,11 +398,11 @@ public:
                     static_cast<std::size_t>(std::llround(z_star[kk])) - 1;
                 if (z_old == z_new) continue;
                 log_prior_ratio +=
-                    std::log(pi[z_new] + 1e-300)
-                    - std::log(pi[z_old] + 1e-300);
+                    pt.log_pi(z_new)
+                    - pt.log_pi(z_old);
                 log_lik_ratio +=
-                    y_log_lik_at_(y_flat, kk, z_new, mu, lam_ptr, sig_ptr)
-                    - y_log_lik_at_(y_flat, kk, z_old, mu, lam_ptr, sig_ptr);
+                    pt.ll(kk, z_new)
+                    - pt.ll(kk, z_old);
             }
 
             // Acceptance: A = q(z|z*) / q(z*|z) * prior_ratio * lik_ratio
@@ -462,6 +470,10 @@ public:
             }
             const double log_q_slot_rev =
                 -std::log(static_cast<double>(n_empty_star));
+            // As in the split branch: p_si and the emission terms do not
+            // depend on z_aux and are computed once per step.
+            const pair_terms_ pt = pair_terms_for_(S, j, s_i, s_j, y_flat, pi,
+                                                   mu, lam_ptr, sig_ptr);
 
             std::uniform_real_distribution<double> uniform(0.0, 1.0);
             arma::vec z_aux = z_star;  // start from merged state
@@ -476,17 +488,9 @@ public:
             for (std::size_t t = 0; t < cfg_.n_restricted_gibbs_iters; ++t) {
                 const bool accumulate = (t + 1 == cfg_.n_restricted_gibbs_iters);
                 double log_q_this = 0.0;
-                for (std::size_t kk : S) {
-                    const double y_loglik_si = y_log_lik_at_(
-                        y_flat, kk, s_i, mu, lam_ptr, sig_ptr);
-                    const double y_loglik_sj = y_log_lik_at_(
-                        y_flat, kk, s_j, mu, lam_ptr, sig_ptr);
-                    const double a = std::log(pi[s_i] + 1e-300) + y_loglik_si;
-                    const double b = std::log(pi[s_j] + 1e-300) + y_loglik_sj;
-                    const double m = std::max(a, b);
-                    const double e_a = std::exp(a - m);
-                    const double e_b = std::exp(b - m);
-                    const double p_si = e_a / (e_a + e_b);
+                for (std::size_t q = 0; q < S.size(); ++q) {
+                    const std::size_t kk = S[q];
+                    const double p_si = pt.p_a[q];
                     if (accumulate) {
                         // q(z | z*): probability of selecting z[kk] at this step.
                         const std::size_t target =
@@ -522,11 +526,11 @@ public:
                     static_cast<std::size_t>(std::llround(z_star[kk])) - 1;
                 if (z_old == z_new) continue;
                 log_prior_ratio +=
-                    std::log(pi[z_new] + 1e-300)
-                    - std::log(pi[z_old] + 1e-300);
+                    pt.log_pi(z_new)
+                    - pt.log_pi(z_old);
                 log_lik_ratio +=
-                    y_log_lik_at_(y_flat, kk, z_new, mu, lam_ptr, sig_ptr)
-                    - y_log_lik_at_(y_flat, kk, z_old, mu, lam_ptr, sig_ptr);
+                    pt.ll(kk, z_new)
+                    - pt.ll(kk, z_old);
             }
 
             const double log_A = (log_q_reverse + log_q_slot_rev) - log_q_forward
@@ -554,16 +558,7 @@ public:
     }
 
     void set_current(const arma::vec& theta) override {
-        if (theta.n_elem != cfg_.N)
-            throw std::invalid_argument(
-                "split_merge_block::set_current: length mismatch");
-        for (std::size_t i = 0; i < cfg_.N; ++i) {
-            const long lab = static_cast<long>(std::llround(theta[i]));
-            if (lab < 1 || static_cast<std::size_t>(lab) > cfg_.K_trunc)
-                throw std::invalid_argument(
-                    "split_merge_block::set_current: z[i] out of {1, ..., K_trunc}");
-            z_[i] = static_cast<double>(lab);
-        }
+        load_z_(theta, /*from_context=*/false);
     }
 
     const std::string& name() const noexcept override { return cfg_.name; }
@@ -593,53 +588,142 @@ public:
     std::size_t n_merge_accepted()  const noexcept { return n_merge_accepted_; }
 
 private:
-    /// Log-density log N(y_i | mu_k, Sigma_k).  For diagonal: sum of
+    /// Checks length N and every label in {1, ..., K_trunc}, then stores
+    /// theta as z_; nothing is stored when a check fails.
+    void load_z_(const arma::vec& theta, bool from_context) {
+        const auto who = [&]() -> std::string {
+            return from_context ? "split_merge_block '" + cfg_.name +
+                                      "': context key '" + cfg_.z_name + "'"
+                                : std::string("split_merge_block::set_current");
+        };
+        if (theta.n_elem != cfg_.N)
+            throw std::invalid_argument(who() + ": length mismatch");
+        for (std::size_t i = 0; i < cfg_.N; ++i) {
+            const long lab = static_cast<long>(std::llround(theta[i]));
+            if (lab < 1 || static_cast<std::size_t>(lab) > cfg_.K_trunc)
+                throw std::invalid_argument(
+                    who() + ": z[i] out of {1, ..., K_trunc}");
+        }
+        for (std::size_t i = 0; i < cfg_.N; ++i)
+            z_[i] = static_cast<double>(
+                static_cast<long>(std::llround(theta[i])));
+    }
+
+    /// Emission factors of cluster k: log(lambda_kj) for the diagonal form;
+    /// chol(Sigma_k), with a 1e-8 diagonal jitter when the first attempt
+    /// fails, and log det(Sigma_k) for the full form.
+    struct cluster_factors_ {
+        std::size_t k = 0;
+        arma::vec   log_lambda;
+        arma::mat   L;
+        double      log_det = 0.0;
+        bool        chol_ok = true;
+    };
+
+    cluster_factors_ factors_(std::size_t k, const arma::vec* lambda,
+                              const arma::vec* sigma) const {
+        const std::size_t d = cfg_.d;
+        cluster_factors_ f;
+        f.k = k;
+        if (lambda) {
+            f.log_lambda.set_size(d);
+            for (std::size_t j = 0; j < d; ++j)
+                f.log_lambda[j] = std::log((*lambda)[k * d + j]);
+        } else {
+            arma::mat S(d, d);
+            for (std::size_t a = 0; a < d; ++a)
+                for (std::size_t b = 0; b < d; ++b)
+                    S(a, b) = (*sigma)[k * d * d + a * d + b];
+            if (!arma::chol(f.L, S, "lower")) {
+                S.diag() += 1e-8;
+                if (!arma::chol(f.L, S, "lower")) {
+                    f.chol_ok = false;
+                    return f;
+                }
+            }
+            // log det(Sigma) = 2 sum log(L_ii)
+            for (std::size_t a = 0; a < d; ++a)
+                f.log_det += 2.0 * std::log(f.L(a, a));
+        }
+        return f;
+    }
+
+    /// Log-density log N(y_i | mu_k, Sigma_k), k = f.k.  For diagonal: sum of
     /// independent Normals; for full: standard multivariate Normal via
     /// chol(Sigma_k).
-    double y_log_lik_at_(const arma::vec& y_flat,
-                          std::size_t i, std::size_t k,
-                          const arma::vec& mu,
-                          const arma::vec* lambda,
-                          const arma::vec* sigma) const {
+    double y_log_lik_at_(const arma::vec& y_flat, std::size_t i,
+                         const arma::vec& mu, const arma::vec* lambda,
+                         const cluster_factors_& f) const {
         constexpr double kLog2Pi = 1.83787706640934548356065947281;
         const std::size_t d = cfg_.d;
+        const std::size_t k = f.k;
         if (lambda) {
             // Diagonal Normal-Gamma form: lambda is precision per dim.
             double lp = 0.0;
             for (std::size_t j = 0; j < d; ++j) {
                 const double dev = y_flat[i * d + j] - mu[k * d + j];
                 const double lam_kj = (*lambda)[k * d + j];
-                lp += 0.5 * std::log(lam_kj)
+                lp += 0.5 * f.log_lambda[j]
                     - 0.5 * kLog2Pi
                     - 0.5 * lam_kj * dev * dev;
             }
             return lp;
         } else {
-            // Full covariance — load Sigma_k into d×d matrix, chol, evaluate.
-            arma::mat S(d, d);
-            for (std::size_t a = 0; a < d; ++a)
-                for (std::size_t b = 0; b < d; ++b)
-                    S(a, b) = (*sigma)[k * d * d + a * d + b];
-            arma::mat L;
-            if (!arma::chol(L, S, "lower")) {
-                S.diag() += 1e-8;
-                if (!arma::chol(L, S, "lower")) {
-                    return -std::numeric_limits<double>::infinity();
-                }
-            }
+            if (!f.chol_ok) return -std::numeric_limits<double>::infinity();
             arma::vec dev(d);
             for (std::size_t j = 0; j < d; ++j)
                 dev[j] = y_flat[i * d + j] - mu[k * d + j];
-            // log det(Sigma) = 2 sum log(L_ii)
-            double log_det = 0.0;
-            for (std::size_t a = 0; a < d; ++a)
-                log_det += 2.0 * std::log(L(a, a));
             // M dist = dev' Sigma^-1 dev = ||u||^2 where u = solve(L, dev)
-            arma::vec u = arma::solve(arma::trimatl(L), dev);
+            arma::vec u = arma::solve(arma::trimatl(f.L), dev);
             const double maha = arma::dot(u, u);
             return -0.5 * static_cast<double>(d) * kLog2Pi
-                 - 0.5 * log_det - 0.5 * maha;
+                 - 0.5 * f.log_det - 0.5 * maha;
         }
+    }
+
+    /// Terms of one split or merge proposal between clusters a and b that
+    /// do not depend on the proposed allocation: log(pi_c + 1e-300), the
+    /// emission log-likelihoods of every member of S and of j under a and b
+    /// (indexed by observation), and the restricted-Gibbs probability of a
+    /// for each member of S (indexed by position in S).
+    struct pair_terms_ {
+        std::size_t a = 0;
+        double log_pi_a = 0.0, log_pi_b = 0.0;
+        std::vector<double> ll_a, ll_b, p_a;
+        double log_pi(std::size_t c) const { return c == a ? log_pi_a : log_pi_b; }
+        double ll(std::size_t i, std::size_t c) const {
+            return c == a ? ll_a[i] : ll_b[i];
+        }
+    };
+
+    pair_terms_ pair_terms_for_(const std::vector<std::size_t>& S,
+                                std::size_t j, std::size_t a, std::size_t b,
+                                const arma::vec& y_flat, const arma::vec& pi,
+                                const arma::vec& mu, const arma::vec* lambda,
+                                const arma::vec* sigma) const {
+        pair_terms_ pt;
+        pt.a = a;
+        pt.log_pi_a = std::log(pi[a] + 1e-300);
+        pt.log_pi_b = std::log(pi[b] + 1e-300);
+        const cluster_factors_ fa = factors_(a, lambda, sigma);
+        const cluster_factors_ fb = factors_(b, lambda, sigma);
+        pt.ll_a.assign(cfg_.N, 0.0);
+        pt.ll_b.assign(cfg_.N, 0.0);
+        pt.p_a.resize(S.size());
+        for (std::size_t q = 0; q < S.size(); ++q) {
+            const std::size_t kk = S[q];
+            pt.ll_a[kk] = y_log_lik_at_(y_flat, kk, mu, lambda, fa);
+            pt.ll_b[kk] = y_log_lik_at_(y_flat, kk, mu, lambda, fb);
+            const double la = pt.log_pi_a + pt.ll_a[kk];
+            const double lb = pt.log_pi_b + pt.ll_b[kk];
+            const double m = std::max(la, lb);
+            const double e_a = std::exp(la - m);
+            const double e_b = std::exp(lb - m);
+            pt.p_a[q] = e_a / (e_a + e_b);
+        }
+        pt.ll_a[j] = y_log_lik_at_(y_flat, j, mu, lambda, fa);
+        pt.ll_b[j] = y_log_lik_at_(y_flat, j, mu, lambda, fb);
+        return pt;
     }
 
     split_merge_block_config cfg_;

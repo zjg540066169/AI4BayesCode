@@ -112,7 +112,9 @@ public:
                 ai4b::stop("stick_label_swap_block '" + cfg_.name + "': every atom key needs a name and a positive width");
     }
 
-    void set_context(const block_context& ctx) override { context_ = ctx; }
+    // z_, atoms_, pi_ and V_ hold the result of the last step() and are
+    // written back only until the next set_context or set_current.
+    void set_context(const block_context& ctx) override { context_ = ctx; have_state_ = false; }
 
     void step(std::mt19937_64& rng) override {
         const std::size_t K = cfg_.K_trunc;
@@ -225,6 +227,7 @@ public:
     void set_current(const arma::vec& theta) override {
         if (theta.n_elem != 2) ai4b::stop("stick_label_swap_block::set_current: length must be 2");
         acc_ = theta;
+        have_state_ = false;
     }
     std::size_t dim() const noexcept override { return 2; }
     const std::string& name() const noexcept override { return cfg_.name; }

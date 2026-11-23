@@ -202,9 +202,78 @@ public:
         build_sub_blocks_();
     }
 
+    // The slice sub-blocks' log_density closures capture `this`, so a move
+    // rebuilds them for the destination and leaves the source empty (dim 0).
+    // Copying is not supported. The three block_sampler flags are assigned
+    // directly; block_sampler's implicit copy operations are deprecated
+    // because it declares a destructor.
+    cluster_atom_block(const cluster_atom_block&) = delete;
+    cluster_atom_block& operator=(const cluster_atom_block&) = delete;
+
+    cluster_atom_block(cluster_atom_block&& o)
+        : block_sampler(), cfg_(std::move(o.cfg_)),
+          context_(std::move(o.context_)), theta_nat_(std::move(o.theta_nat_)),
+          atom_dim_(o.atom_dim_), total_dim_(o.total_dim_),
+          hist_(std::move(o.hist_)) {
+        keep_history_ = o.keep_history_;
+        keep_tree_    = o.keep_tree_;
+        is_frozen_    = o.is_frozen_;
+        build_sub_blocks_();
+        o.clear_moved_from_();
+    }
+
+    cluster_atom_block& operator=(cluster_atom_block&& o) {
+        if (this != &o) {
+            keep_history_ = o.keep_history_;
+            keep_tree_    = o.keep_tree_;
+            is_frozen_    = o.is_frozen_;
+            cfg_       = std::move(o.cfg_);
+            context_   = std::move(o.context_);
+            theta_nat_ = std::move(o.theta_nat_);
+            atom_dim_  = o.atom_dim_;
+            total_dim_ = o.total_dim_;
+            hist_      = std::move(o.hist_);
+            build_sub_blocks_();
+            o.clear_moved_from_();
+        }
+        return *this;
+    }
+
     // ---- block_sampler contract (Tier B) --------------------------------
 
-    void set_context(const block_context& ctx) override { context_ = ctx; }
+    /// Stores the context. A context entry named after an atom slice is that
+    /// slice's shared value, which another block (e.g. stick_label_swap_block)
+    /// may have permuted since this block's last step; it is copied into the
+    /// block state, so the next step starts from it. When another block writes
+    /// the atom keys, list them in this block's declare_dependencies.
+    /// When an atom key is in the dependency list, its shared value is the
+    /// block's starting state at every composite sweep, so a restore of this
+    /// block must also write the shared key (data().set, as the shipped
+    /// wrappers do) or go through composite_block::set_current; a set_current
+    /// of this block alone is replaced by the shared value at the next sweep.
+    void set_context(const block_context& ctx) override {
+        for (const auto& sp : cfg_.sub_params) {
+            const auto it = ctx.find(sp.name);
+            if (it != ctx.end() && it->second.n_elem != cfg_.K_trunc * sp.dim)
+                throw std::runtime_error(
+                    "cluster_atom_block '" + cfg_.name + "': context key '" +
+                    sp.name + "' has length " +
+                    std::to_string(it->second.n_elem) + " != K_trunc * dim = " +
+                    std::to_string(cfg_.K_trunc * sp.dim));
+        }
+        context_ = ctx;
+        std::size_t off = 0;
+        for (const auto& sp : cfg_.sub_params) {
+            const auto it = ctx.find(sp.name);
+            if (it != ctx.end()) {
+                const arma::vec& v = it->second;
+                for (std::size_t k = 0; k < cfg_.K_trunc; ++k)
+                    for (std::size_t j = 0; j < sp.dim; ++j)
+                        theta_nat_[k * atom_dim_ + off + j] = v[k * sp.dim + j];
+            }
+            off += sp.dim;
+        }
+    }
 
     void step(std::mt19937_64& rng) override {
         const auto it = context_.find(cfg_.counts_key);
@@ -441,7 +510,8 @@ private:
     /// kernel -- including the Neal (2003) Eq. 5 random split of the step-out
     /// budget -- is that block's, not ours.
     void build_sub_blocks_() {
-        subs_.reserve(total_dim_);
+        std::vector<std::unique_ptr<univariate_slice_sampling_block>> subs;
+        subs.reserve(total_dim_);
         for (std::size_t k = 0; k < cfg_.K_trunc; ++k) {
             for (std::size_t c = 0; c < atom_dim_; ++c) {
                 univariate_slice_sampling_block_config sc;
@@ -464,9 +534,22 @@ private:
                 auto blk = std::make_unique<univariate_slice_sampling_block>(
                     std::move(sc));
                 blk->set_keep_history(false);
-                subs_.push_back(std::move(blk));
+                subs.push_back(std::move(blk));
             }
         }
+        subs_ = std::move(subs);
+    }
+
+    /// State of a moved-from block: no components and no sub-blocks.
+    void clear_moved_from_() {
+        subs_.clear();
+        cfg_.K_trunc = 0;
+        cfg_.sub_params.clear();
+        atom_dim_  = 0;
+        total_dim_ = 0;
+        theta_nat_.reset();
+        context_.clear();
+        hist_.clear();
     }
 
     arma::vec atom_of_(std::size_t k) const {

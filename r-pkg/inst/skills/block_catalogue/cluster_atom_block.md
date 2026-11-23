@@ -53,6 +53,11 @@ cfg.sub_params.push_back(joint_nuts_sub_param{"shape", 1u, joint_constraint::POS
 cfg.sub_params.push_back(joint_nuts_sub_param{"rate",  1u, joint_constraint::POSITIVE});
 cfg.initial_cat = init;                       // K_trunc * sum(dim), cluster-major
 cfg.log_density = &atom_log_density;          // the ONE user function
+// cluster_counts, the keys used in the density, AND the atom keys, which
+// stick_label_swap_block also writes:
+impl_->data().declare_dependencies("cluster_params",
+    {"z", "y", "cluster_counts", "a_shape", "b_shape", "a_rate", "b_rate",
+     "shape", "rate"});
 impl_->add_child(std::make_unique<cluster_atom_block>(std::move(cfg)));
 ```
 
@@ -62,6 +67,24 @@ log-density. The block adds the `log|Jacobian|` of each constraint transform
 itself; never hand-write one. Declare `cluster_counts` (and whatever the
 density reads) in the block's `declare_dependencies` or they will not be in its
 context.
+
+**Every atom key that another block writes must be in this block's
+`declare_dependencies`.** `stick_label_swap_block` (part of every truncated
+stick-breaking composition) permutes all atom keys together with `z`. The
+block loads its state from the shared value of each listed atom key in
+`set_context`, so its next update starts from the relabelled atoms; for an
+unlisted key it starts from its own pre-swap atoms and writes them back over
+the swapped ones. That chain targets a wrong posterior with no error and a
+clean R-hat: on exactly enumerated 4-slot, 6-observation mixtures (Normal
+atoms, Normal-Gamma atoms, and the Gamma shape/rate atoms of this recipe),
+max |P(z_i = k) - exact| is 0.025-0.15 with the keys unlisted and at most
+0.002 with them listed. Without a second writer, listing them changes no
+draw.
+With an atom key listed, its shared value is the block's starting state at
+every sweep, so a restore of this block must also write the shared key
+(`data().set`, as `DPGammaMixture::set_current` does) or go through
+`composite_block::set_current`; a `set_current` of this block alone is
+replaced by the shared value at the next sweep.
 
 **Outputs.** One shared_data key per slice, each `K_trunc * dim` in
 cluster-major order -- the layout the conjugate cluster blocks use, so this

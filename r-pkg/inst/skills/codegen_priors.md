@@ -1221,8 +1221,13 @@ Discrete latent z found?
               - alpha      : `nuts_block` on log(alpha) with Gamma prior
               - alpha derived: `register_refresher("alpha", ...)`
                               (DPGaussianMixture_DerivedAlpha.cpp)
-            CRP-marginal Neal Alg 2/3/8 and Jain-Neal split-merge are
-            NOT shipped; they remain future extensions. Truncated SBP
+              - label swap : `stick_label_swap_block`, last child; it
+                              rewrites z and the atom keys, so with
+                              `cluster_atom_block` list the atom keys in
+                              its declare_dependencies (both cards)
+            CRP-marginal Neal Alg 2/3/8 is NOT shipped; it remains a
+            future extension (Jain-Neal split-merge ships as
+            `split_merge_block`; see its card). Truncated SBP
             mixes well for moderate-N problems and avoids the discrete-
             partition state-space changes.
         (b) Non-BNP (unknown # change points / basis functions /
