@@ -65,16 +65,25 @@ cfg.sigma_key             = "sigma";        // forwarded to update_step if prese
 
 cfg.ntrees                = 50;    // ensemble size
 cfg.k                     = 2.0;   // leaf-prior scale (as in BART)
-cfg.sigma_hat             = -1.0;  // <= 0 -> sd(Y)
+cfg.sigma_hat             = -1.0;  // <= 0 -> sqrt(RSS/n) of the OLS fit of y on [1, X]; scale of y
+cfg.y_scale               = -1.0;  // <= 0 -> max(y_init) - min(y_init) (1 if 0); see below
 cfg.alpha                 = 1.0;   // tree-prior base
 cfg.beta                  = 2.0;   // tree-prior power
 cfg.gamma                 = 0.95;
 cfg.width                 = 0.1;   // initial branch bandwidth tau
 cfg.shape                 = 1.0;
 cfg.tau_rate              = 10.0;  // Gamma rate on tau
-cfg.center_Y              = true;  // subtract mean(Y) before the kernel
+cfg.center_Y              = true;  // m = mean(Y): f excludes it; false: m = midrange(y_init)
 cfg.dart                  = false; // true -> Dirichlet split prior (honoured)
 ```
+
+Pass `X` and `y` on their own scale. As SoftBart does, the block maps each
+column of `X` to `[0, 1]` by the ranks of its distinct training values (new
+`X` linearly between them, clamped to `[0, 1]`; `set_X` makes the map again)
+and fits `Z = (Y - m) / y_scale`, so the leaf prior has SoftBart's
+calibration; `f`, `sigma`, `predict()` and the context `sigma` are on the
+scale of `y`. When `y_init` is a placeholder (e.g. a latent variable started at
+0), set `y_scale` to the expected range of the response.
 
 Typical composite: `softbart_block` for the mean, plus an
 `inv_gamma_gibbs_block` (or a `nuts_block` on `log sigma`) for the noise

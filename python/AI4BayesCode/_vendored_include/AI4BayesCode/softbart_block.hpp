@@ -25,6 +25,25 @@
  *  yields differentiable predictions and tends to outperform hard BART
  *  for smooth response surfaces.
  *
+ *  PREPROCESSING
+ *  -------------
+ *  As SoftBart (Linero & Yang 2018; R package SoftBart) does, the forest
+ *  works on normalised inputs; every input and output of this block is on
+ *  the user's scale:
+ *    - X: each column is mapped to [0, 1] by the ranks of its distinct
+ *      training values (the k-th smallest of m maps to k / (m - 1), SoftBart's
+ *      rank transform), linearly between them for new X, 0 below and 1 above
+ *      the training range, 0.5 for a constant column; the kernel draws split
+ *      points in [0, 1]. set_X / set_data make the map again from the new X.
+ *    - Y: the forest fits Z = (Y - m) / y_scale with y_scale fixed at
+ *      construction (default max(y_init) - min(y_init)), so the leaf prior
+ *      sd 0.5 / (k sqrt(ntrees)) has SoftBart's calibration; m is the mean of
+ *      the working response (center_Y) or the midrange of y_init. f, sigma
+ *      and predictions are returned on the scale of Y, and a sigma from the
+ *      context is divided by y_scale.
+ *    - sigma_hat: default sqrt(RSS / n) of the least-squares fit of y_init on
+ *      an intercept and X (SoftBart uses a cross-validated lasso fit).
+ *
  *  ARCHITECTURE
  *  ------------
  *    Tier C -- softbart::softbart_model: thin wrapper around the
@@ -41,9 +60,9 @@
  *
  *  HISTORY RECORDING
  *  -----------------
- *  The constructor unconditionally calls `impl_->set_history(true)`, so
- *  every successful step() snapshots the current forest + sigma +
- *  sigma_mu + s + var_counts into the internal softbart_model buffers.
+ *  With set_keep_tree(true) (off at construction), every successful
+ *  step() snapshots the current forest + sigma + sigma_mu + s +
+ *  var_counts into the internal softbart_model buffers.
  *  predict_history() iterates over those snapshots when called by
  *  wrapper-level predict_at.
  *
@@ -86,6 +105,7 @@
 #include "block_sampler.hpp"
 #include "AI4BayesCode/backend_neutral.hpp"   // ai4b::stop / ai4b::warning
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <memory>
@@ -122,7 +142,16 @@ struct softbart_block_config {
     /// SoftBart hyperparameters.
     int    ntrees      = 50;
     double k           = 2.0;
-    double sigma_hat   = -1.0;     // <= 0 -> sd(Y)
+    /// Scale of the half-Cauchy prior on sigma when the block samples sigma
+    /// (sigma_key empty), and its initial value; on the scale of Y. <= 0 ->
+    /// sqrt(RSS / n) of the least-squares fit of y_init on an intercept and
+    /// x_train (sd(y_init) when n <= p + 1 or the RSS is 0).
+    double sigma_hat   = -1.0;
+    /// Scale of the response: the forest fits Z = (Y - m) / y_scale (see
+    /// center_Y for m), as SoftBart fits Y rescaled to [-0.5, 0.5]. <= 0 ->
+    /// max(y_init) - min(y_init) (1 when that is 0). Set it when y_init is a
+    /// placeholder (e.g. a latent variable started at 0).
+    double y_scale     = -1.0;
     double alpha       = 1.0;
     double beta        = 2.0;
     double gamma       = 0.95;
@@ -135,9 +164,10 @@ struct softbart_block_config {
     bool   dart        = false;
     bool   verbose     = false;
 
-    /// Center Y in set_Y (subtract mean(Y) before feeding the kernel).
-    /// Soft BART's vendored API defaults to NOT centering, but block
-    /// users typically want centering for parity with bart_block.
+    /// m in Z = (Y - m) / y_scale: true -> m = mean of the current working
+    /// response, and f excludes it (parity with bart_block); false -> m =
+    /// the midrange (max + min) / 2 of y_init, and f = m + y_scale f_Z
+    /// (SoftBart's normalisation).
     bool   center_Y    = true;
 };
 
@@ -160,19 +190,35 @@ public:
                        "': y_init length must match x_train row count");
         }
 
+        if (!cfg_.y_init.is_finite()) {
+            ai4b::stop("softbart_block '" + cfg_.name +
+                       "': y_init must be finite");
+        }
+
+        // SoftBart's preprocessing (see PREPROCESSING above): the forest
+        // works on X mapped to [0, 1] and on Z = (Y - m) / y_scale_.
+        make_x_map_(cfg_.x_train);
+        xn_train_ = map_x_(cfg_.x_train);
+        const double y_max = cfg_.y_init.max(), y_min = cfg_.y_init.min();
+        y_mid_ = 0.5 * (y_max + y_min);
+        if (cfg_.y_scale > 0.0 && std::isfinite(cfg_.y_scale)) {
+            y_scale_ = cfg_.y_scale;
+        } else {
+            const double r = y_max - y_min;
+            y_scale_ = (r > 0.0 && std::isfinite(r)) ? r : 1.0;
+        }
+        const double sigma_hat_y =
+            (cfg_.sigma_hat > 0.0) ? cfg_.sigma_hat
+                                   : default_sigma_hat_(cfg_.x_train, cfg_.y_init);
+
         impl_ = std::make_unique<softbart::softbart_model>(
-            cfg_.x_train, cfg_.y_init,
-            cfg_.ntrees, cfg_.k, cfg_.sigma_hat,
+            xn_train_, to_z_(cfg_.y_init),
+            cfg_.ntrees, cfg_.k, sigma_hat_y / y_scale_,
             cfg_.alpha, cfg_.beta, cfg_.gamma,
             cfg_.width, cfg_.shape, cfg_.tau_rate,
             cfg_.alpha_scale, cfg_.alpha_shape_1, cfg_.alpha_shape_2,
             cfg_.dart, cfg_.verbose);
         model_x_key_ = impl_->x_key();
-
-        // Honour cfg_.center_Y: re-set Y after construction with the
-        // requested centering. (softbart_model's constructor copies Y
-        // verbatim with no centering.)
-        if (cfg_.center_Y) impl_->set_Y(cfg_.y_init, true);
 
         // Kernel history (per-step forest snapshot serialisation) is OFF
         // by default.  Turned ON only when the wrapper opts into
@@ -202,8 +248,7 @@ public:
                 + " does not match x_train row count "
                 + std::to_string(cfg_.x_train.n_rows));
         }
-        // Kernel takes arma::vec directly (no Rcpp copy needed).
-        impl_->set_Y(arma_y, cfg_.center_Y);
+        impl_->set_Y(to_z_(arma_y), false);
 
         // 2. Sigma override (sentinel <= 0 means "use internal sigma").
         sigma_override_ = -1.0;
@@ -225,7 +270,7 @@ public:
                     ai4b::stop("softbart_block '" + cfg_.name
                         + "': sigma must be strictly positive and finite");
                 }
-                sigma_override_ = s;
+                sigma_override_ = s / y_scale_;   // sigma of Z
             }
         }
     }
@@ -277,7 +322,10 @@ public:
                 + " does not match current n = "
                 + std::to_string(n_cur));
         }
-        impl_->set_Y(y_new, cfg_.center_Y);
+        if (!y_new.is_finite()) {
+            ai4b::stop("softbart_block '" + cfg_.name + "': set_Y values must be finite");
+        }
+        impl_->set_Y(to_z_(y_new), false);
         cfg_.y_init = y_new;
         refresh_current_fit_();
     }
@@ -300,7 +348,14 @@ public:
                 + " does not match current p = "
                 + std::to_string(p_cur));
         }
-        impl_->set_X(X_new);
+        // The map to [0, 1] is made again from the new X (as SoftBart
+        // ranks the X it is given); nothing changes when this throws.
+        std::vector<std::vector<double>> knots = x_knots_;
+        make_x_map_(X_new);
+        arma::mat xn;
+        try { xn = map_x_(X_new); impl_->set_X(xn); }
+        catch (...) { x_knots_.swap(knots); throw; }
+        xn_train_ = std::move(xn);
         cfg_.x_train = X_new;
         model_x_key_ = impl_->x_key();
         refresh_current_fit_();
@@ -314,7 +369,15 @@ public:
                 + std::to_string(X_new.n_rows) + " vs "
                 + std::to_string(y_new.n_elem));
         }
-        impl_->set_data(X_new, y_new, cfg_.center_Y);
+        if (!y_new.is_finite()) {
+            ai4b::stop("softbart_block '" + cfg_.name + "': set_data y values must be finite");
+        }
+        std::vector<std::vector<double>> knots = x_knots_;
+        make_x_map_(X_new);
+        arma::mat xn;
+        try { xn = map_x_(X_new); impl_->set_data(xn, to_z_(y_new), false); }
+        catch (...) { x_knots_.swap(knots); throw; }
+        xn_train_ = std::move(xn);
         cfg_.x_train = X_new;
         cfg_.y_init  = y_new;
         model_x_key_ = impl_->x_key();
@@ -331,7 +394,8 @@ public:
                 + " does not match current n = " + std::to_string(n_cur)
                 + " (length 0 for zero offset is also accepted)");
         }
-        impl_->set_offset(off_new);
+        impl_->set_offset(off_new.n_elem == 0 ? off_new
+                                              : arma::vec(off_new / y_scale_));
         // set_offset does not change f_train inside the Forest, so
         // current_fit_ stays valid.
     }
@@ -351,8 +415,14 @@ public:
 
     // ---- softbart_block-specific accessors ----------------------------
 
-    double current_sigma() const    { return impl_->current_sigma(); }
+    /// sigma on the scale of Y.
+    double current_sigma() const    { return y_scale_ * impl_->current_sigma(); }
+    /// Leaf scale on the scale of Z = (Y - m) / y_scale().
     double current_sigma_mu() const { return impl_->current_sigma_mu(); }
+    /// The scale of the response (see softbart_block_config::y_scale).
+    double y_scale() const { return y_scale_; }
+    /// X mapped to [0, 1] with the map of the training X (see PREPROCESSING).
+    arma::mat x_to_unit(const arma::mat& X) const { return map_x_(X); }
 
     arma::vec current_var_probs() const {
         return const_cast<softbart::softbart_model*>(impl_.get())
@@ -372,7 +442,7 @@ public:
 
     /// Predict f(X_new) at the CURRENT forest. Returns length-Nt vector.
     arma::vec predict(const arma::mat& X_new) {
-        return impl_->predict(X_new);
+        return to_y_(impl_->predict(map_x_(X_new)));
     }
 
     /// Predict at X_new for ALL historical draws. Returns
@@ -390,11 +460,12 @@ public:
             return m;
         }
 
+        const arma::mat xn_new = map_x_(X_new);
         arma::mat result(n_draws, Nt, arma::fill::zeros);
         for (std::size_t d = 0; d < n_draws; ++d) {
             std::vector<::Node*> trees_d =
                 softbart::deserialize_forest_from_str(h.tree_history[d]);
-            arma::vec f = softbart::predict_softbart_forest_(trees_d, X_new);
+            arma::vec f = to_y_(softbart::predict_softbart_forest_(trees_d, xn_new));
             for (arma::uword k = 0; k < Nt; ++k) result(d, k) = f[k];
             softbart::free_forest_(trees_d);
         }
@@ -412,8 +483,12 @@ public:
     /// sigma, sigma_mu, s, var_counts) as a backend-neutral struct.
     /// Useful for downstream posterior predictive analyses outside the
     /// wrapper.
+    /// sigma_history is on the scale of Y, sigma_mu_history on the scale of
+    /// Z, and the trees act on X mapped to [0, 1].
     softbart::SoftbartHistory get_full_history() const {
-        return impl_->get_history();
+        softbart::SoftbartHistory h = impl_->get_history();
+        h.sigma_history *= y_scale_;
+        return h;
     }
 
     /// Tree-string history; per-draw serialized snapshots of the forest.
@@ -459,10 +534,122 @@ private:
         // X key is the one recorded when this block last set it.
         const arma::vec* kept = (impl_->x_key() == model_x_key_)
                                     ? impl_->train_fit() : nullptr;
-        current_fit_ = kept ? *kept : impl_->predict(cfg_.x_train);
+        current_fit_ = to_y_(kept ? *kept : impl_->predict(xn_train_));
         if (keep_history_) {
             history_fit_buf_.push_back(current_fit_);
         }
+    }
+
+    // ---- preprocessing (SoftBart's normalisation) ----------------------
+
+    // Per column, the sorted distinct values of X (non-finite values throw).
+    void make_x_map_(const arma::mat& X) {
+        std::vector<std::vector<double>> knots(X.n_cols);
+        for (arma::uword j = 0; j < X.n_cols; ++j) {
+            std::vector<double> u(X.colptr(j), X.colptr(j) + X.n_rows);
+            for (double v : u) {
+                if (!std::isfinite(v)) {
+                    ai4b::stop("softbart_block '" + cfg_.name +
+                               "': x_train must be finite");
+                }
+            }
+            std::sort(u.begin(), u.end());
+            u.erase(std::unique(u.begin(), u.end()), u.end());
+            knots[j].swap(u);
+        }
+        x_knots_.swap(knots);
+    }
+
+    // x -> [0, 1]: the k-th smallest distinct training value (k = 0..m-1)
+    // maps to k / (m - 1), as SoftBart's rank transform of the training X;
+    // linear between them, 0 below the smallest and 1 above the largest;
+    // 0.5 for a column with one distinct value.
+    arma::mat map_x_(const arma::mat& X) const {
+        if (X.n_cols != x_knots_.size()) {
+            ai4b::stop("softbart_block '" + cfg_.name + "': X has " +
+                       std::to_string(X.n_cols) + " columns, the training X " +
+                       std::to_string(x_knots_.size()));
+        }
+        arma::mat out(X.n_rows, X.n_cols);
+        for (arma::uword j = 0; j < X.n_cols; ++j) {
+            const std::vector<double>& u = x_knots_[j];
+            const std::size_t m = u.size();
+            for (arma::uword i = 0; i < X.n_rows; ++i) {
+                const double x = X(i, j);
+                if (!std::isfinite(x)) {
+                    ai4b::stop("softbart_block '" + cfg_.name +
+                               "': X must be finite");
+                }
+                double t;
+                if (m == 1) t = 0.5;
+                else if (x <= u.front()) t = 0.0;
+                else if (x >= u.back()) t = 1.0;
+                else {
+                    const std::size_t k = static_cast<std::size_t>(
+                        std::lower_bound(u.begin(), u.end(), x) - u.begin());
+                    t = (u[k] == x)
+                        ? static_cast<double>(k) / static_cast<double>(m - 1)
+                        : (static_cast<double>(k - 1) + (x - u[k - 1]) / (u[k] - u[k - 1]))
+                              / static_cast<double>(m - 1);
+                }
+                out(i, j) = t;
+            }
+        }
+        return out;
+    }
+
+    // Z = (Y - m) / y_scale_, m = mean(Y) (center_Y) or y_mid_.
+    arma::vec to_z_(const arma::vec& y) const {
+        return cfg_.center_Y ? arma::vec((y - arma::mean(y)) / y_scale_)
+                             : arma::vec((y - y_mid_) / y_scale_);
+    }
+    // f on the scale of Y from f of Z.
+    arma::vec to_y_(const arma::vec& fz) const {
+        return cfg_.center_Y ? arma::vec(y_scale_ * fz)
+                             : arma::vec(y_mid_ + y_scale_ * fz);
+    }
+
+    // sqrt(RSS / n) of the least-squares fit of y on an intercept and the
+    // columns of X (Householder; a column whose norm after the earlier
+    // reflections is below 1e-7 times its initial norm is skipped), or sd(y)
+    // when n <= p + 1 or the RSS is not positive.
+    static double default_sigma_hat_(const arma::mat& X, const arma::vec& y) {
+        const arma::uword n = X.n_rows, k = X.n_cols + 1;
+        const double sd = (n > 1) ? arma::stddev(y) : 1.0;
+        if (n <= k) return sd;
+        arma::mat A(n, k);
+        A.col(0).ones();
+        A.cols(1, k - 1) = X;
+        arma::vec r = y;
+        arma::uword row = 0;
+        for (arma::uword j = 0; j < k && row < n; ++j) {
+            const double nrm0 = arma::norm(A.col(j));
+            double* c = A.colptr(j);
+            double s = 0.0;
+            for (arma::uword i = row; i < n; ++i) s += c[i] * c[i];
+            s = std::sqrt(s);
+            if (!(nrm0 > 0.0) || !(s >= 1e-7 * nrm0)) continue;
+            const double a0 = c[row];
+            const double v0 = a0 + (a0 >= 0.0 ? s : -s);
+            const double h = s * (s + std::fabs(a0));   // v'v / 2
+            c[row] = v0;                                // v = (v0, c[row+1..])
+            for (arma::uword l = j + 1; l < k; ++l) {
+                double* d = A.colptr(l);
+                double dot = 0.0;
+                for (arma::uword i = row; i < n; ++i) dot += c[i] * d[i];
+                const double f = dot / h;
+                for (arma::uword i = row; i < n; ++i) d[i] -= f * c[i];
+            }
+            double dot = 0.0;
+            for (arma::uword i = row; i < n; ++i) dot += c[i] * r[i];
+            const double f = dot / h;
+            for (arma::uword i = row; i < n; ++i) r[i] -= f * c[i];
+            ++row;
+        }
+        double rss = 0.0;
+        for (arma::uword i = row; i < n; ++i) rss += r[i] * r[i];
+        if (!(rss > 0.0) || !std::isfinite(rss)) return sd;
+        return std::sqrt(rss / static_cast<double>(n));
     }
 
     softbart_block_config                    cfg_;
@@ -470,6 +657,10 @@ private:
     arma::vec                                current_fit_;
     std::vector<arma::vec>                   history_fit_buf_;
     std::uint64_t                            model_x_key_ = 0;
+    std::vector<std::vector<double>>         x_knots_;    // see make_x_map_
+    arma::mat                                xn_train_;   // x_train mapped to [0, 1]
+    double                                   y_scale_ = 1.0;
+    double                                   y_mid_   = 0.0;
 
     double sigma_override_ = -1.0;
 };

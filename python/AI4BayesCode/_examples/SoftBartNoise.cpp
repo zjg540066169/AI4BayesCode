@@ -36,9 +36,9 @@
 //  AI4BayesCode::state_map / history_map) and routes errors through
 //  ai4b::stop. The BART IG-prior calibration `R::qchisq(0.1, nu, ...)`
 //  resolves to R's math library under the Rcpp backend and to the
-//  kernel's `namespace R { qchisq(...) }` (bart_pure_cpp/src/r_compat.h,
-//  ~5e-14 vs R) under pybind / standalone -- same calibrated lambda
-//  across all three.
+//  C++ implementation in bart_pure_cpp/src/r_compat.h under pybind /
+//  standalone, so lambda can differ between them in the last bits (1 ulp
+//  in qchisq at nu = 3).
 //
 //  RNG / SEEDING
 //  -------------
@@ -296,16 +296,16 @@ public:
         {
             auto& sb_blk = dynamic_cast<softbart_block&>(impl_->child(0));
             const double sigest = sb_blk.current_sigma();
-            // SoftBart's initial sigma may be 0 before any step; if so,
-            // fall back to sd(y).
+            // The block's initial sigma is its sigma_hat (sqrt(RSS / n) of
+            // the least-squares fit of y on [1, X] by default), on the scale
+            // of y; sd(y) if it is not positive.
             const double sigest_eff =
                 (sigest > 0.0) ? sigest : arma::stddev(y);
             impl_->data().set("sigma", arma::vec{sigest_eff});
 
-            // R::qchisq resolves to R's math library under the Rcpp
-            // backend and to the kernel's namespace R { qchisq } (from
-            // bart_pure_cpp/src/r_compat.h, ~5e-14 vs R) under
-            // pybind / standalone. Same calibrated lambda in all three.
+            // R::qchisq is R's under the Rcpp backend and the C++
+            // implementation in bart_pure_cpp/src/r_compat.h under pybind /
+            // standalone; lambda can differ between them in the last bits.
             const double qchi   = R::qchisq(0.1, nu, /*lower.tail=*/1,
                                             /*log.p=*/0);
             const double lambda = sigest_eff * sigest_eff * qchi / nu;

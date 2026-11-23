@@ -918,12 +918,12 @@ out of the box:
 2. **`sigma_hat` is RMSE, not `sd`.** Compute
    `sqrt(mean(resid**2))` (denominator N), NOT `sd(resid)`
    (denominator N-1), from the in-sample residuals at the 1-SE alpha.
-3. **Min-max normalize Y to [-0.5, 0.5] BEFORE the lasso**, and
-   un-normalize predictions on the way out. Save
+3. **Min-max normalize Y to [-0.5, 0.5] BEFORE the lasso**: save
    `(a, b) = (min(y), max(y))`, fit the lasso on
-   `(y - a) / (b - a) - 0.5`, and inverse-transform any posterior
-   summary via `(z + 0.5) * (b - a) + a`. The C++ kernel side does not
-   change.
+   `(y - a) / (b - a) - 0.5`, and multiply the RMSE by `b - a` to put
+   `sigma_hat` on the scale of `y`. Pass `X` and `y` to the sampler
+   unchanged and do not un-normalize its outputs: `softbart_block`
+   normalizes internally and returns values on the scale of `y`.
 
 ## 10. Reference templates
 

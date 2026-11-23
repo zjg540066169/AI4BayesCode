@@ -970,12 +970,18 @@ R-hat with the validator.md recipe -- that stays harness-internal.)
 
 ## 9a. Model-specific R-side preprocessing -- SoftBart `sigma_hat` recipe
 
-When the wrapper is `SoftBartNoise` (or any future SoftBart-derived
-example), the R-side runner MUST compute `sigma_hat` exactly as the
-SoftBart R package does (Linero & Yang 2018) and pass it to the C++
-constructor. The C++ kernel (`bart_pure_cpp/src/softbart_model.h`) accepts
-`sigma_hat` but its default of `-1.0` falls back to `sd(Y)`, which is
-the wrong scale for the half-Cauchy prior `sigma ~ Cauchy_+(0, sigma-hat)`.
+`softbart_block` normalises its inputs as the SoftBart R package does
+(Linero & Yang 2018): each column of `X` is mapped to `[0, 1]` by its ranks
+and `Y` is divided by a fixed `y_scale` (default `max(y_init) - min(y_init)`);
+`f`, `sigma` and predictions are returned on the scale of the `y` given to
+the block. So the runner passes `X` and `y` unchanged. `sigma_hat` (the scale
+of the half-Cauchy prior `sigma ~ Cauchy_+(0, sigma-hat)`) matters only when
+the block samples sigma itself (`sigma_key` empty); its default (`-1.0`) is
+`sqrt(RSS / n)` of the least-squares fit of `y` on `[1, X]`. To use the
+package's lasso-based value instead, compute it as below and set
+`softbart_block_config::sigma_hat` to it, on the scale of `y`.
+`SoftBartNoise` samples sigma with its own block (IG prior calibrated as in
+BART) and has no `sigma_hat` argument, so this recipe does not apply to it.
 
 ### Why R-side, not C++ side
 
@@ -1014,27 +1020,19 @@ softbart_sigma_hat <- function(X, y_norm, weights = rep(1, length(y_norm))) {
     sqrt(mean((fitted - y_norm)^2))     # RMSE, NOT sd()
 }
 
-# 3. Construct SoftBartNoise with the lasso-derived sigma_hat.
+# 3. sigma_hat on the scale of y (softbart_sigma_hat returns it on the
+#    [-0.5, 0.5] scale), for a wrapper whose softbart_block samples sigma
+#    (sigma_key empty) and exposes cfg.sigma_hat as an argument.
 norm_info <- softbart_normalize_Y(y)
-sigma_hat <- softbart_sigma_hat(X, norm_info$y_norm)
-m <- new(SoftBartNoise, X, norm_info$y_norm,
-         /* ntrees */ 50L,
-         /* k     */ 2.0,
-         /* sigma_hat */ sigma_hat,
-         /* ... other hypers per the wrapper signature ... */,
-         /* seed */ 1L,
-         /* keep_history */ TRUE)
-
-# 4. After MCMC, un-normalize any prediction / posterior summary the
-#    user sees on the natural Y scale.
-y_rep_norm <- m$predict_at(...)$y_rep   # on [-0.5, 0.5]
-y_rep      <- softbart_unnormalize(y_rep_norm, norm_info$a, norm_info$b)
+sigma_hat <- (norm_info$b - norm_info$a) * softbart_sigma_hat(X, norm_info$y_norm)
+# Pass X and y unchanged to the constructor; the block's outputs are on the
+# scale of y, so nothing is un-normalized afterwards.
 ```
 
 ### Hard rules for SoftBart R-side runners
 
-1. **NEVER** let `sigma_hat` fall back to the C++ default. Always
-   compute the lasso sigma-hat in R and pass it explicitly.
+1. The C++ default (`-1.0`) is a least-squares value on the right scale;
+   compute the lasso sigma-hat in R only to match the package exactly.
 2. **`s = "lambda.1se"`** (the default in SoftBart's `predict_glmnet`),
    not `"lambda.min"`. The 1se rule gives a sparser, more regularized
    fit; sigma-hat is therefore larger and the half-Cauchy prior is wider --
@@ -1042,14 +1040,11 @@ y_rep      <- softbart_unnormalize(y_rep_norm, norm_info$a, norm_info$b)
 3. **`sqrt(mean(residuals^2))`** (denominator N), not `sd(residuals)`
    (denominator N-1). Small but real difference; the package uses RMSE.
 4. **`alpha = 1`** (lasso, not ridge or elastic net).
-5. **Apply `normalize_bart(Y)` BEFORE `cv.glmnet`**, not after. sigma-hat is
-   computed on the [-0.5, 0.5]-scaled response so it's on the same
-   scale the C++ kernel sees during MCMC. Save `(a, b) = (min(y), max(y))`
-   so predictions can be un-normalized.
-6. **Un-normalize on the way out.** Posterior-predictive `y_rep`,
-   posterior mean of `f(X)`, etc. are on the normalized scale inside
-   the C++ kernel. The wrapper / runner is responsible for inverse-
-   transforming via `(z + 0.5) * (b - a) + a` before reporting.
+5. **Apply `normalize_bart(Y)` BEFORE `cv.glmnet`**, not after, as the
+   package does, then multiply the result by `b - a` (`(a, b) = (min(y),
+   max(y))`) to put it on the scale of `y`, the scale of `cfg.sigma_hat`.
+6. **Do not normalize `y` or `X` before passing them, and do not
+   un-normalize outputs**: the block does both internally.
 7. **`weights = rep(1, length(y))`** by default. If the wrapper
    eventually supports heteroscedastic weights, pass them through to
    `cv.glmnet` as well so the sigma-hat matches the kernel's weighted draw.
@@ -1064,10 +1059,9 @@ SE per lambda). The C++ kernel side does not change.
 
 ### Status
 
-`SoftBartNoise` ships (see `examples/SoftBartNoise.cpp`); its R runner
-follows this recipe verbatim (softBART noise has a different prior
-than BART, so the preprocessing differs). No other shipped example
-uses this preprocessing.
+`SoftBartNoise` ships (see `examples/SoftBartNoise.cpp`); it samples sigma
+with its own block, so its runner passes `X` and `y` unchanged and needs no
+`sigma_hat`. No shipped example uses this recipe.
 
 ---
 

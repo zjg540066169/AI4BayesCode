@@ -221,12 +221,17 @@ static BlockRun run_block(const arma::mat& X, const arma::mat& X2, const arma::v
         b.set_context(ctx);
         Sweep w;
         if (reference) {
+            // The block's preprocessing (center_Y = false): X mapped to
+            // [0, 1], Z = (y - midrange(y_init)) / y_scale, sigma / y_scale.
             Forest* f = b.underlying()->forest();
-            f->set_sigma(sig);
-            f->do_gibbs(Xc, yc, X0, 1);
-            f->set_sigma(sig);
+            const double sc = b.y_scale(), mid = 0.5 * (y.max() + y.min());
+            const arma::mat Xn = b.x_to_unit(Xc);
+            const arma::vec z = (yc - mid) / sc;
+            f->set_sigma(sig / sc);
+            f->do_gibbs(Xn, z, X0, 1);
+            f->set_sigma(sig / sc);
             w.rng = bart_rng::engine();
-            w.fit = b.underlying()->predict(Xc);
+            w.fit = mid + sc * b.underlying()->predict(Xn);
         } else {
             const Forest* f = b.underlying()->forest();
             if (b.underlying()->train_fit() != nullptr && f->tree_fit_store_size() == 0 &&
