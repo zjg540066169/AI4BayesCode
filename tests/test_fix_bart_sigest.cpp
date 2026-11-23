@@ -148,6 +148,33 @@ int main(int argc, char** argv)
     check(b.prior_sigest() == m.get_sigest() && b.prior_lambda() == m.get_lambda() &&
           b.current_sigma() == (kCases[c].rank > 0 ? b.prior_sigest() : 1.0), msg);
   }
+  std::printf("column scale: a column multiplied by 2^600 or 2^-600 gives the same sigest and lambda bit for bit\n");
+  for (int c : {0, 1, 5, 11}) {
+    arma::mat X; arma::vec y; make(c, kCases[c], X, y);
+    stdbart::bart_model m0(X, y, 100L, false, false, false, 20);
+    for (int e : {600, -600}) {
+      arma::mat Xs = X; Xs.col(1) *= std::ldexp(1.0, e);
+      stdbart::bart_model m1(Xs, y, 100L, false, false, false, 20);
+      char msg[256];
+      std::snprintf(msg, sizeof msg, "%s, column 1 times 2^%d: sigest %a vs %a", kCases[c].name, e,
+                    m1.get_sigest(), m0.get_sigest());
+      check(m1.get_sigest() == m0.get_sigest() && m1.get_lambda() == m0.get_lambda() &&
+            m1.get_sigma() == m0.get_sigma(), msg);
+    }
+  }
+  std::printf("constant columns: p >= n counts only the non-constant columns (as wbart with rm.const = TRUE)\n");
+  for (int c : {0, 11}) {
+    arma::mat X; arma::vec y; make(c, kCases[c], X, y);
+    stdbart::bart_model m0(X, y, 100L, false, false, false, 20);
+    const long add = kCases[c].n - kCases[c].p + 2;   // p + add = n + 2 columns
+    arma::mat Xc = arma::join_rows(arma::ones<arma::mat>(kCases[c].n, add) * 3.0, X);
+    stdbart::bart_model m1(Xc, y, 100L, false, false, false, 20);
+    char msg[256];
+    std::snprintf(msg, sizeof msg, "%s plus %ld constant columns (p %ld >= n %ld): sigest %a vs %a", kCases[c].name, add,
+                  kCases[c].p + add, kCases[c].n, m1.get_sigest(), m0.get_sigest());
+    check(m1.get_sigest() == m0.get_sigest() && m1.get_lambda() == m0.get_lambda() &&
+          m1.get_sigma() == m0.get_sigma(), msg);
+  }
   std::printf("%s\n", g_fail ? "SOME FAILED" : "ALL PASS");
   return g_fail ? 1 : 0;
 }

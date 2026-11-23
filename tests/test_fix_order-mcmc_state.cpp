@@ -509,6 +509,11 @@ void S10_outputs_without_generator() {
         const std::string mode = partition ? "S10 method = partition: " : "S10 method = order: ";
         order_mcmc_block blk(noise_cfg(n, partition));
         const arma::vec loaded = load_reversed(blk, nullptr, partition);
+        if (partition) {
+            const std::vector<std::size_t> permy(blk.order().begin(), blk.order().end());
+            check(dag_in_partition(blk.sampled_dag(), permy, party_of(blk)),
+                  mode + "sampled_dag() is a DAG of the loaded partition", "");
+        }
         bool random_dag = dag_draws_differ(blk) && arma::all(blk.current() == loaded);
         const std::string a1 = state_mismatch(plain_outputs(blk), blk, partition);
         // After each of 300 sweeps: compare the outputs without a generator

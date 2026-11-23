@@ -163,15 +163,18 @@ All other BART hyperparameters (`ntrees`, `k`, `power`, `base`, `nu`,
 **You do NOT need to compute hat_sigma in R or in AI-generated code.**
 The `bart_model` constructor automatically:
 
-1. Fits OLS of `y - mean(y)` on an intercept and `X` internally when `p < n`:
+1. Fits OLS of `y - mean(y)` on an intercept and `X` internally when `X` has
+   fewer than `n` non-constant columns:
    the residual sum of squares (RSS) and the rank come from a deterministic
    Householder QR (plain C++, no BLAS / LAPACK)
 2. Computes `sigest = sqrt(RSS / (n - rank))` from OLS residuals, with the
    rank counted as R's `lm` counts it (intercept first; a column that is
    zero, or whose norm after the earlier Householder steps is below `1e-7`
    times its original norm, is not counted)
-3. Falls back to `sd(y)` when `p >= n` (high-dimensional case) or when the
-   RSS or `n - rank` is 0 (e.g. a saturated design, `p = n - 1`)
+3. Falls back to `sd(y)` when `X` has `n` or more non-constant columns
+   (high-dimensional case; wbart counts `p` after its default
+   `rm.const = TRUE` removes constant columns) or when the RSS or
+   `n - rank` is 0 (e.g. a saturated design, `p = n - 1`)
 4. Sets `lambda = sigest^2 * qchisq(0.1, nu) / nu` for the conjugate
    sigma prior (qchisq from R in the R build, from a C++ implementation
    otherwise; no lookup table)
@@ -185,10 +188,9 @@ OLS-based estimate matches `BART::wbart`'s `sigest` default
 rounding, except that the rank can differ when a column's norm after the
 earlier steps is within a few percent of `1e-7` times its original norm
 (`lm` compares a downdated norm, whose error there can reach a few percent).
-In the fallbacks wbart differs: its initial sigma is its `sigest`, which is
-`sd(y)` when `p >= n` with `p` counted after its default `rm.const = TRUE`
-removes constant columns, and the `lm` value otherwise (0 or NaN when the
-RSS or `n - rank` is 0).
+In the fallbacks wbart differs: its initial sigma is its `sigest` (`sd(y)`
+in the high-dimensional case), and its `sigest` is the `lm` value (0 or NaN)
+when the RSS or `n - rank` is 0.
 
 ### Recommended sigma prior for BART-structured models
 

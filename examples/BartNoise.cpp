@@ -38,11 +38,11 @@
 //    * neither defined            -> standalone int main() demo
 //  All shared code names only backend-neutral types (arma::vec/mat,
 //  AI4BayesCode::state_map / history_map) and routes errors through
-//  ai4b::stop. The BART IG-prior calibration `R::qchisq(0.1, nu, ...)`
-//  resolves to R's math library under the Rcpp backend and to the
-//  kernel's `namespace R { qchisq(...) }` (bart_pure_cpp/src/r_compat.h,
-//  ~5e-14 vs R) under pybind / standalone -- same calibrated lambda
-//  across all three.
+//  ai4b::stop. The BART IG-prior calibration lambda comes from
+//  bart_block::prior_lambda(): its qchisq(0.1, nu) is R's under the Rcpp
+//  backend and the C++ implementation in bart_pure_cpp/src/r_compat.h
+//  under pybind / standalone, so lambda can differ between them in the
+//  last bits (1 ulp in qchisq at nu = 3).
 //
 //  LICENSE WARNING
 //  ---------------
@@ -316,26 +316,25 @@ public:
         //     lambda  = sigest^2 * qchisq(0.1, nu) / nu    (sigquant = 0.9)
         {
             auto& bblk = dynamic_cast<bart_block&>(impl_->child(0));
-            const double sigest = bblk.current_sigma();
+            const double sigest = bblk.prior_sigest();
             impl_->data().set("sigma", arma::vec{sigest});
 
-            // R::qchisq resolves to R's math library under the Rcpp
-            // backend and to the kernel's namespace R { qchisq } (from
-            // bart_pure_cpp/src/r_compat.h, ~5e-14 vs R) under
-            // pybind / standalone. Same calibrated lambda in all three.
-            const double qchi   = R::qchisq(0.1, nu, /*lower.tail=*/1,
-                                            /*log.p=*/0);
-            const double lambda = sigest * sigest * qchi / nu;
+            // lambda comes from bart_block::prior_lambda(); its
+            // qchisq(0.1, nu) is R's under the Rcpp backend and the C++
+            // implementation in bart_pure_cpp/src/r_compat.h under pybind /
+            // standalone, so lambda can differ between them in the last
+            // bits (1 ulp in qchisq at nu = 3).
+            const double lambda = bblk.prior_lambda();
             impl_->data().set("sigma_nu",     arma::vec{nu});
             impl_->data().set("sigma_lambda", arma::vec{lambda});
         }
 
         // ---- Add the sigma block (positive slice) -----------------------
-        // Use bart_model's OLS sigest as initial sigma for NUTS, not
-        // the user-provided sigma_init (which is typically sd(y) and
-        // includes signal).
+        // Use bart_model's OLS sigest as initial sigma for the slice
+        // sampler, not the user-provided sigma_init (which is typically
+        // sd(y) and includes signal).
         const double sigest_for_nuts =
-            dynamic_cast<bart_block&>(impl_->child(0)).current_sigma();
+            dynamic_cast<bart_block&>(impl_->child(0)).prior_sigest();
         univariate_slice_sampling_block_config sg_cfg;
         sg_cfg.name        = "sigma";
         sg_cfg.initial_unc = arma::vec{std::log(sigest_for_nuts)};

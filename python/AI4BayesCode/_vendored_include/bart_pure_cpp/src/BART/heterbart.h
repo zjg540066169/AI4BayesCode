@@ -19,6 +19,10 @@
  */
 
 /*
+ *  Modifications by Jungang Zou, 2024.
+ *  - To make it easier to compile, I move the function definitions in the separate 
+ *  .cpp file to this file, and merge them with declaration.
+ *
  *  Modifications by Jungang Zou, 2026.
  *  - draw() runs the collapsed change move (cchange.h) on every tree after birth/death.
  *  - draw() keeps the fit of every tree between draws.

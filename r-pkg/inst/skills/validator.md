@@ -2365,8 +2365,9 @@ before the sampler ships.
 `composite_block::freeze(names)` validates every name is a known child
 and belongs to a WHITELIST family; unknown -> ai4b::stop; blacklist ->
 ai4b::stop; already-frozen -> Rcpp::warning; static-Gibbs-DAG check
-emits Rcpp::warning if the frozen name is upstream of any registered
-refresher. Validator does NOT check this dispatch logic -- it's
+emits Rcpp::warning if the frozen name is upstream of a registered
+refresher whose key the wrapper has not declared with
+`declare_refreshed_after_set_current`. Validator does NOT check this dispatch logic -- it's
 covered by `composite_block`'s own unit tests. The wrapper-level
 audit above only ensures the three methods are correctly bound and
 behave through the R interface.

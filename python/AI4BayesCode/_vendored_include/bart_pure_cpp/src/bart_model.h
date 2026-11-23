@@ -136,10 +136,15 @@ public:
     // sigest equals summary(lm(y ~ ., data.frame(x, y)))$sigma, the sigest of BART::wbart, up to rounding. A constant
     // column is linearly dependent on the intercept and is not counted in the rank; rm_const has no effect (the
     // argument is kept for source compatibility).
-    // sigest = sd(y) when p >= n, when RSS <= 0 (RSS is 0 for a saturated design, rank = n) or when n - rank <= 0.
-    // The initial sigma is sigest, or 1 when sigest = sd(y). get_sigest() and get_lambda() return sigest and lambda.
+    // sigest = sd(y) when p_nc >= n, p_nc = the number of non-constant columns (wbart counts p after rm.const = TRUE,
+    // its default, has removed the constant columns), when RSS <= 0 (RSS is 0 for a saturated design, rank = n) or
+    // when n - rank <= 0. The initial sigma is sigest, or 1 when sigest = sd(y). get_sigest() and get_lambda() return
+    // sigest and lambda.
     double sigest = (n > 1) ? arma::stddev(y_train) : 1.0;   // R sd: /(n-1)
-    if (p < n) {
+    long p_nc = 0;
+    for (arma::uword j = 0; j < x_train.n_cols; ++j)
+      if (n > 0 && arma::any(x_train.col(j) != x_train(0, j))) ++p_nc;
+    if (p_nc < n) {
       if (!x_train.is_finite())
         throw std::invalid_argument(
           "bart_model: x_train must be finite (it has a NaN or infinite value); the sigma prior is calibrated from "
@@ -342,7 +347,20 @@ private:
     const arma::uword n = A.n_rows, k = A.n_cols, nb = 32;
     const double tol = 1e-7;
     std::vector<double> nrm0(k);
-    for (arma::uword j = 0; j < k; ++j) { const double s0 = norm2_(A.colptr(j), n); nrm0[j] = s0 > 0.0 ? s0 : 1.0; }
+    // Each column is first multiplied by the power of two 2^-e, e = ilogb of its largest absolute entry. The
+    // multiplication is exact, and every later quantity of that column (norms, v, h, f) scales by an exact power of
+    // two, so RSS, rank and every bit of them are unchanged, except that h = s (s + |a0|) no longer overflows for a
+    // column norm above about 1e154 and no longer underflows for one below about 1e-154.
+    for (arma::uword j = 0; j < k; ++j) {
+      double* cj = A.colptr(j);
+      double mx = 0.0;
+      for (arma::uword i = 0; i < n; ++i) { const double t = std::fabs(cj[i]); if (t > mx) mx = t; }
+      if (mx > 0.0 && std::isfinite(mx)) {
+        const int e = std::ilogb(mx);
+        if (e != 0) for (arma::uword i = 0; i < n; ++i) cj[i] = std::ldexp(cj[i], -e);
+      }
+      const double s0 = norm2_(cj, n); nrm0[j] = s0 > 0.0 ? s0 : 1.0;
+    }
     std::vector<const double*> pv(nb);   // reflection a of the current panel: vector pv[a] on rows row0 + a .. n - 1,
     std::vector<double> ph(nb);          // H = I - v v' / ph[a]
     arma::uword row = 0;

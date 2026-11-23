@@ -51,8 +51,10 @@
  *    - otherwise, without an offset: O(n + K) (comparison with the stored
  *      data, then the K Gamma draws);
  *    - otherwise, with an offset: O(n + P + K), P = sum over subjects of the
- *      number of bins with positive exposure; the first such step computes
- *      each subject's run of those bins in the same pass, O(n log K + P + K).
+ *      number of bins with positive exposure; the first such step after the
+ *      full computation, and any such step after one that raised an error on
+ *      the offset in that pass, computes each subject's run of those bins in
+ *      the same pass, O(n log K + P + K).
  *
  *  WHY THIS BLOCK EXISTS
  *  =====================

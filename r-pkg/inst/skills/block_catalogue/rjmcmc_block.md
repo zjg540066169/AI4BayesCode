@@ -61,7 +61,7 @@ unknown-K (non-BNP).
   `categorical_gibbs_block` via
   `composite_block::declare_shared_history("z")`, with `z` in the
   split_merge block's dependencies and `cluster_counts` in its invalidates
-  (see `split_merge_block.md`), if the truncated-SBP
+  (see `split_merge_block.md`); use it when the truncated-SBP
   partition posterior is multimodal for a given dataset.
 - Multi-dim bijections `R^n -> R^n` for `n > 1` (e.g., Stephens
   2000 split-merge for finite mixtures with unknown K) -- current scope ships

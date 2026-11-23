@@ -63,11 +63,11 @@
   ##       precond_sqrt_cache under the same precond_cache_valid contract (for
   ##       a dense metric these fields hold the n x n inverse and Cholesky); on
   ##       a cache hit the n^2 diagonal check is skipped and the cached arrays
-  ##       are used in place. The log-density, gradient and leapfrog closures
-  ##       capture the metric arrays, the bounds, raw_grad_fn and (log-density
-  ##       and gradient closures) target_log_kernel by reference; leap_frog_fn
-  ##       copies target_log_kernel once per call. Draws are bit-identical to
-  ##       the previous version.
+  ##       are used in place. box_log_kernel_fn and raw_grad_fn capture
+  ##       target_log_kernel and the bounds by reference; leap_frog_fn
+  ##       captures raw_grad_fn, the metric arrays and the bounds by reference
+  ##       and copies target_log_kernel once per call. Draws are bit-identical
+  ##       to the previous version.
   ##
   ################################################################################*/
 

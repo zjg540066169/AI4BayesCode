@@ -599,10 +599,7 @@ RCPP_MODULE(OrderMCMCBN_module) {
                 "Full posterior-predictive simulation deferred to v1.2.1.")
         .method("get_dag",     &OrderMCMCBN::get_dag)
         .method("get_history", &OrderMCMCBN::get_history,
-                "Returns list(order = node sequences, 1-based as in "
-                "get_current(), one row per sweep when keep_history = TRUE, "
-                "else the current sequence; order_log_score = log P(D | "
-                "partition), one row per sweep when keep_history = TRUE).")
+                "Returns list(order = node sequences, 1-based as in get_current(), one row per sweep when keep_history = TRUE, else the current sequence; order_log_score = log P(D | partition), one row per sweep when keep_history = TRUE).")
         AI4BAYESCODE_BIND_KERNEL_CONTROL(OrderMCMCBN);
 }
 #endif
