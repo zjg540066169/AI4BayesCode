@@ -35,7 +35,12 @@
  *
  *  - set_current(mu) overwrites the variational mean ONLY; log_sd is
  *    left intact. To overwrite both, call
- *    set_variational_state(mu, log_sd) directly.
+ *    set_variational_state(mu, log_sd) directly. A load of values
+ *    other than the current ones starts a new iterate-averaging epoch
+ *    at the loaded values (the step size and epoch count are kept).
+ *    In a converged block a load replaces q (current_sample draws from
+ *    the loaded q) and step() stays a no-op; final_khat and
+ *    current_elbo() keep the values computed before the load.
  *
  *  - get_history() (via the Tier A wrapper) returns per-step
  *    (elbo, mu, log_sd, gamma, epoch) PLUS a scalar final_khat filled
@@ -66,6 +71,7 @@
 #include "block_sampler.hpp"
 
 #include <cmath>     // std::isnan
+#include <cstring>   // std::memcmp
 #include <limits>    // std::numeric_limits
 #include <random>
 #include <string>
@@ -78,6 +84,42 @@
 #endif
 
 namespace AI4BayesCode {
+
+namespace detail {
+
+/// True if a and b have the same length and the same bytes.
+inline bool vi_same_bytes(const arma::vec& a, const arma::vec& b) {
+    return a.n_elem == b.n_elem &&
+           (a.n_elem == 0 ||
+            std::memcmp(a.memptr(), b.memptr(), a.n_elem * sizeof(double)) == 0);
+}
+
+/// set_context of the VI blocks: sets dst to the entries of ctx named in
+/// keys, writing into dst's existing storage (no reallocation when a length
+/// is unchanged) and erasing the keys absent from ctx. With skip_equal, an
+/// entry whose bytes already match is not rewritten. Returns true if dst
+/// changed.
+inline bool vi_copy_dependencies(const std::vector<std::string>& keys,
+                                 const block_context& ctx,
+                                 block_context& dst, bool skip_equal) {
+    bool changed = false;
+    for (const auto& key : keys) {
+        const auto it = ctx.find(key);
+        const auto jt = dst.find(key);
+        if (it == ctx.end()) {
+            if (jt != dst.end()) { dst.erase(jt); changed = true; }
+        } else if (jt == dst.end()) {
+            dst.emplace(key, it->second);
+            changed = true;
+        } else if (!(skip_equal && vi_same_bytes(jt->second, it->second))) {
+            jt->second = it->second;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+} // namespace detail
 
 /**
  * @brief Per-step VI optimization-history record.

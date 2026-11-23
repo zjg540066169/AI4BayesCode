@@ -25,7 +25,8 @@ phi_{i,k} - 1` where `G_{i,k} = E_{q\i}[log p-tilde(z_{-i}, z_i = k)]`.
 **Two gradient modes** (selected by `cfg.exact_enumeration`):
 - **Exact**: enumerate full joint state space `prod_i K_i` (capped at
   `cfg.exact_state_cap`, default 4096). Used for unit tests and small
-  models. Zero variance.
+  models. Zero variance. `log_density` must depend only on `(z, ctx)`:
+  its values are tabulated and reused while the context is unchanged.
 - **Monte Carlo** (default): sample `S = cfg.n_mc_samples` joint
   draws `z_s ~ q`; for each `(i, k)`, substitute `z_s[i] := k` and
   evaluate `log_density`. Cost = `S x Sigma_i K_i` evaluations per step.
@@ -56,7 +57,8 @@ correctly diagnosed by PSIS-k-hat.
   indices in `{0..K_i-1}`)
 - `get_log_sd()` returns the unconstrained eta vector (length `Sigma_i (K_i-1)`)
 - `set_current(phi_concat)` accepts a probability vector and recovers
-  eta via inverse softmax
+  eta via inverse softmax; loading values that differ from the current
+  ones restarts the averaging epoch
 - composite_block writes integer-indexed q-samples to shared_data
   under `cfg.name` (per Sec.18.4 hybrid-correctness invariant)
 

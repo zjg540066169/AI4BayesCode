@@ -135,7 +135,9 @@ namespace AI4BayesCode {
 /// arbitrary discrete assignment z. The block evaluates this many times
 /// per step (S * sum_i K_i times) so the callback should be reasonably
 /// fast and SHOULD NOT have side effects (it is called from inside
-/// step() in a tight loop). Reading from ctx is fine.
+/// step() in a tight loop). Reading from ctx is fine. Its value must be a
+/// function of (z, ctx) only: exact mode tabulates it over all z and
+/// re-evaluates it only when set_context installs different ctx values.
 using categorical_log_density_fn =
     std::function<double(const arma::uvec& z, const block_context& ctx)>;
 
@@ -303,12 +305,16 @@ public:
     // ---- block_sampler interface ----------------------------------------
 
     void set_context(const block_context& ctx) override {
-        ctx_.clear();
-        for (const auto& key : cfg_.dependencies) {
-            auto it = ctx.find(key);
-            if (it != ctx.end()) {
-                ctx_.emplace(key, it->second);
-            }
+        // ctx_ is accessed only by steps before convergence; after convergence
+        // no copy is made. A change of ctx_ marks the exact-mode lp table
+        // invalid.
+        if (converged_) return;
+        try {
+            if (detail::vi_copy_dependencies(cfg_.dependencies, ctx, ctx_, true))
+                lp_tab_valid_ = false;
+        } catch (...) {
+            lp_tab_valid_ = false;   // ctx_ may be partly updated
+            throw;
         }
     }
 
@@ -390,6 +396,7 @@ public:
                     + " must sum to 1 (got " + std::to_string(sum) + ")");
             }
         }
+        const bool same = detail::vi_same_bytes(phi_new, phi_);
         // Recover eta from phi via log(phi_k / phi_0). Clamp phi to avoid
         // -inf eta when phi_0 = 0 (use eps).
         const double eps = 1e-12;
@@ -403,6 +410,7 @@ public:
             }
         }
         update_phi_from_eta_();
+        if (!same) restart_epoch_();
     }
 
     const std::string& name() const noexcept override { return cfg_.name; }
@@ -543,8 +551,10 @@ public:
     void set_variational_state(const arma::vec& mu_or_phi,
                                const arma::vec& log_sd_or_eta) override {
         if (log_sd_or_eta.n_elem == total_D_) {
+            const bool same = detail::vi_same_bytes(log_sd_or_eta, eta_);
             eta_ = log_sd_or_eta;
             update_phi_from_eta_();
+            if (!same) restart_epoch_();
         } else if (mu_or_phi.n_elem == total_K_) {
             set_current(mu_or_phi);
         } else {
@@ -595,6 +605,16 @@ private:
         }
     }
 
+    /// Called by the loaders when the loaded values differ from the current
+    /// ones: the iterate sums and the SKL reference restart at the loaded
+    /// eta, so the next epoch close averages only iterates computed after
+    /// the load.
+    void restart_epoch_() {
+        opt_state_.reset_epoch(total_D_);
+        steps_in_epoch_ = 0;
+        epoch_eta_avg_history_.assign(1, eta_);
+    }
+
     /// Compute ELBO and gradient w.r.t. eta in one pass.
     ///
     /// Returns the ELBO estimate. Fills *g_eta with dELBO/deta.
@@ -604,7 +624,7 @@ private:
     ///   (b) MC: sample z_s ~ q; for each (i,k), replace z_s[i]:=k and
     ///       average log p~ over s; gives unbiased G_{i,k} estimate
     double compute_elbo_and_grad_(std::mt19937_64& rng,
-                                   arma::vec* g_eta) const {
+                                   arma::vec* g_eta) {
         // G_{i,k} stored linearly using phi offsets.
         arma::vec G(total_K_, arma::fill::zeros);
 
@@ -671,13 +691,18 @@ private:
     }
 
     /// Exact enumeration over all joint z. Cost = prod K_i log_density
-    /// evaluations. Used only when exact_state_cap is not exceeded.
-    void compute_G_exact_(arma::vec& G_out) const {
-        // Joint state count.
-        std::size_t total = 1;
-        for (std::size_t i = 0; i < n_; ++i) {
-            total *= cfg_.cardinalities[i];
-        }
+    /// evaluations while the lp table is invalid, prod K_i table lookups
+    /// while it is valid. Used only when exact_state_cap is not exceeded.
+    void compute_G_exact_(arma::vec& G_out) {
+        const std::size_t total = exact_total_states_;
+        // lp_tab_[s] = log_density(z_s, ctx_). The values depend only on ctx_
+        // and the fixed config. The table is valid from the end of a pass
+        // that evaluated every state until set_context changes ctx_. A pass
+        // with an invalid table evaluates log_density and stores the values
+        // in lp_tab_, whose storage is kept from one fill to the next.
+        const bool use_tab = lp_tab_valid_ && lp_tab_.size() == total;
+        const bool fill_tab = !use_tab && total <= lp_tab_max_states_;
+        if (fill_tab) lp_tab_.resize(total);
         arma::uvec z(n_, arma::fill::zeros);
 
         // Need sum over z of [prod_{j != i} phi_{j, z_j}] * log_density(z)
@@ -687,30 +712,51 @@ private:
         // Implementation: enumerate every z, compute weight w_full =
         // prod_j phi_{j, z_j}; for each i, the marginalised weight at
         // z_i = z[i] is w_full / phi_{i, z[i]} (handling zero); accumulate.
+        //
+        // Sizes and data pointers are copied into locals before the loop;
+        // members accessed in the loop body are loaded again from memory
+        // after every log_density call.
+        const std::size_t n = n_;
+        const arma::uword* card = cfg_.cardinalities.memptr();
+        const double* phi = phi_.memptr();
+        const std::size_t* off = offsets_phi_.data();
+        arma::uword* zp = z.memptr();
+        double* G = G_out.memptr();
+        double* tab = lp_tab_.data();
         for (std::size_t s = 0; s < total; ++s) {
-            // Decode s into z.
-            std::size_t r = s;
-            for (std::size_t i = 0; i < n_; ++i) {
-                const std::size_t Ki = cfg_.cardinalities[i];
-                z[i] = r % Ki;
-                r /= Ki;
+            if (s > 0) {
+                // z = the s-th joint state, z[0] varying fastest:
+                // z[i] = (s / prod_{j<i} K_j) % K_i.
+                for (std::size_t i = 0; i < n; ++i) {
+                    if (++zp[i] < card[i]) break;
+                    zp[i] = 0;
+                }
             }
-            const double lp = cfg_.log_density(z, ctx_);
+            double lp;
+            if (use_tab) {
+                lp = tab[s];
+            } else {
+                lp = cfg_.log_density(z, ctx_);
+                if (fill_tab) tab[s] = lp;
+            }
 
             double w_full = 1.0;
-            for (std::size_t i = 0; i < n_; ++i) {
-                w_full *= phi_[offsets_phi_[i] + z[i]];
+            for (std::size_t i = 0; i < n; ++i) {
+                w_full *= phi[off[i] + zp[i]];
             }
             // Skip if w_full is effectively 0 (avoids div-by-zero below).
             if (!(w_full > 0.0)) continue;
 
-            for (std::size_t i = 0; i < n_; ++i) {
-                const double phi_iz = phi_[offsets_phi_[i] + z[i]];
+            for (std::size_t i = 0; i < n; ++i) {
+                const double phi_iz = phi[off[i] + zp[i]];
                 if (!(phi_iz > 0.0)) continue;
                 const double w_marg = w_full / phi_iz;
-                G_out[offsets_phi_[i] + z[i]] += w_marg * lp;
+                G[off[i] + zp[i]] += w_marg * lp;
             }
         }
+        // Set only after every state was evaluated: a log_density exception
+        // leaves the table invalid.
+        if (fill_tab) lp_tab_valid_ = true;
     }
 
     /// Monte Carlo G_{i,k} estimator.
@@ -893,6 +939,13 @@ private:
 
     bool exact_enumeration_active_ = false;
     std::size_t exact_total_states_ = 0;
+
+    // Exact mode: log_density at every joint state, used while lp_tab_valid_
+    // is set. A refill writes into the same storage. Tabulated only up to
+    // lp_tab_max_states_ states (32 MB).
+    std::vector<double> lp_tab_;
+    bool lp_tab_valid_ = false;
+    static constexpr std::size_t lp_tab_max_states_ = std::size_t(1) << 22;
 
     vi_history_t history_;
 };

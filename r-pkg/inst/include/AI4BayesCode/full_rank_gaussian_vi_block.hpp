@@ -154,16 +154,16 @@ public:
         converged_      = false;
         last_elbo_      = std::numeric_limits<double>::quiet_NaN();
         refresh_cur_natural_();
+        natural_dim_ = cur_natural_.n_elem;
     }
 
     // ---- block_sampler interface ----------------------------------------
 
     void set_context(const block_context& ctx) override {
-        ctx_.clear();
-        for (const auto& key : cfg_.dependencies) {
-            auto it = ctx.find(key);
-            if (it != ctx.end()) ctx_.emplace(key, it->second);
-        }
+        // ctx_ is accessed only by steps before convergence; after
+        // convergence no copy is made.
+        if (converged_) return;
+        detail::vi_copy_dependencies(cfg_.dependencies, ctx, ctx_, false);
     }
 
     void step(std::mt19937_64& rng) override {
@@ -212,22 +212,30 @@ public:
     const arma::vec& current() const override { return cur_natural_; }
 
     void set_current(const arma::vec& theta_natural) override {
-        if (theta_natural.n_elem != K_)
+        if (theta_natural.n_elem != natural_dim_)
             throw std::invalid_argument(
                 "full_rank_gaussian_vi_block::set_current: dim mismatch");
-        mu_unc_ = cfg_.unconstrain(theta_natural);
+        arma::vec mu = cfg_.unconstrain(theta_natural);
+        if (mu.n_elem != K_)
+            throw std::invalid_argument(
+                "full_rank_gaussian_vi_block::set_current: "
+                "unconstrain(theta) must have length K");
+        const bool same = detail::vi_same_bytes(theta_natural, cur_natural_);
+        mu_unc_ = std::move(mu);
         refresh_cur_natural_();
+        if (!same) restart_epoch_();
     }
 
     const std::string& name() const noexcept override { return cfg_.name; }
-    std::size_t dim() const noexcept override { return K_; }
+    /// Natural-scale length, the length of current() and of set_current's input.
+    std::size_t dim() const noexcept override { return natural_dim_; }
 
     history_map get_history() const override {
         history_map out;
         const std::size_t n = history_.elbo.size();
         if (n == 0) {
-            arma::mat m(1, K_);
-            for (std::size_t j = 0; j < K_; ++j) m(0, j) = cur_natural_[j];
+            arma::mat m(1, cur_natural_.n_elem);
+            for (std::size_t j = 0; j < cur_natural_.n_elem; ++j) m(0, j) = cur_natural_[j];
             out.emplace(cfg_.name, std::move(m));
             return out;
         }
@@ -308,6 +316,8 @@ public:
         if (mu.n_elem != K_ || log_sd.n_elem != expected)
             throw std::invalid_argument(
                 "full_rank_gaussian_vi_block::set_variational_state: dim mismatch");
+        const bool same = detail::vi_same_bytes(mu, mu_unc_) &&
+                          detail::vi_same_bytes(log_sd, get_log_sd());
         mu_unc_ = mu;
         L_.zeros();
         for (std::size_t j = 0; j < K_; ++j) L_(j, j) = std::exp(log_sd[j]);
@@ -315,6 +325,7 @@ public:
         for (std::size_t i = 1; i < K_; ++i)
             for (std::size_t j = 0; j < i; ++j) L_(i, j) = log_sd[idx++];
         refresh_cur_natural_();
+        if (!same) restart_epoch_();
     }
 
     double current_elbo() const override { return last_elbo_; }
@@ -350,6 +361,16 @@ private:
     }
 
     void refresh_cur_natural_() { cur_natural_ = cfg_.constrain(mu_unc_); }
+
+    /// Called by the loaders when the loaded values differ from the current
+    /// ones: the iterate sums and the reference λ̄_0 restart at the loaded
+    /// (μ, L), so the next epoch close averages only iterates computed after
+    /// the load.
+    void restart_epoch_() {
+        opt_state_.reset_epoch(D_);
+        steps_in_epoch_ = 0;
+        epoch_lambda_avg_history_.assign(1, pack_lambda(mu_unc_, L_));
+    }
 
     /// Per-MC-sample reparam ELBO and gradient of -ELBO.
     /// Returns ELBO estimate; fills *g_lambda (size D) with -∇ELBO.
@@ -486,6 +507,7 @@ private:
     // ---- State ----------------------------------------------------------
     full_rank_gaussian_vi_block_config cfg_;
     std::size_t K_ = 0, D_ = 0;
+    std::size_t natural_dim_ = 0;   // length of constrain(mu), fixed at construction
     arma::vec mu_unc_;
     arma::mat L_;
     arma::vec cur_natural_;

@@ -133,7 +133,9 @@
 namespace AI4BayesCode {
 
 /// Same callback signature as Block 4: log p~(z, ctx) evaluated on an
-/// integer-encoded z vector.
+/// integer-encoded z vector. Its value must be a function of (z, ctx) only:
+/// exact mode tabulates it over all z and re-evaluates it only when
+/// set_context installs different ctx values.
 using structured_log_density_fn =
     std::function<double(const arma::uvec& z, const block_context& ctx)>;
 
@@ -282,6 +284,19 @@ public:
             clique_state_counts_[c] = S;
         }
 
+        // ---- Node strides in the clique joint-state index -----------
+        // node_stride_[i]: weight of node i in its clique's joint-state
+        // index, as in encode_clique_state_.
+        node_stride_.assign(n_, 0);
+        for (std::size_t c = 0; c < M_; ++c) {
+            std::size_t mult = 1;
+            for (std::size_t i : cfg_.clique_partition[c]) {
+                node_stride_[i] = mult;
+                mult *= cfg_.cardinalities[i];
+            }
+        }
+        clique_state_idx_.assign(M_, 0);
+
         // ---- Build offsets ------------------------------------------
         offsets_eta_.assign(M_ + 1, 0);
         offsets_phi_.assign(M_ + 1, 0);
@@ -342,10 +357,16 @@ public:
     // ---- block_sampler interface ----------------------------------------
 
     void set_context(const block_context& ctx) override {
-        ctx_.clear();
-        for (const auto& key : cfg_.dependencies) {
-            auto it = ctx.find(key);
-            if (it != ctx.end()) ctx_.emplace(key, it->second);
+        // ctx_ is accessed only by steps before convergence; after convergence
+        // no copy is made. A change of ctx_ marks the exact-mode lp table
+        // invalid.
+        if (converged_) return;
+        try {
+            if (detail::vi_copy_dependencies(cfg_.dependencies, ctx, ctx_, true))
+                lp_tab_valid_ = false;
+        } catch (...) {
+            lp_tab_valid_ = false;   // ctx_ may be partly updated
+            throw;
         }
     }
 
@@ -421,6 +442,7 @@ public:
                     + std::to_string(sum) + ")");
             }
         }
+        const bool same = detail::vi_same_bytes(phi_new, phi_);
         const double eps = 1e-12;
         for (std::size_t c = 0; c < M_; ++c) {
             const std::size_t S = clique_state_counts_[c];
@@ -432,6 +454,7 @@ public:
             }
         }
         update_phi_from_eta_();
+        if (!same) restart_epoch_();
     }
 
     const std::string& name() const noexcept override { return cfg_.name; }
@@ -565,8 +588,10 @@ public:
     void set_variational_state(const arma::vec& mu_or_phi,
                                 const arma::vec& log_sd_or_eta) override {
         if (log_sd_or_eta.n_elem == total_D_) {
+            const bool same = detail::vi_same_bytes(log_sd_or_eta, eta_);
             eta_ = log_sd_or_eta;
             update_phi_from_eta_();
+            if (!same) restart_epoch_();
         } else if (mu_or_phi.n_elem == total_S_) {
             set_current(mu_or_phi);
         } else {
@@ -668,9 +693,19 @@ private:
         }
     }
 
+    /// Called by the loaders when the loaded values differ from the current
+    /// ones: the iterate sums and the SKL reference restart at the loaded
+    /// eta, so the next epoch close averages only iterates computed after
+    /// the load.
+    void restart_epoch_() {
+        opt_state_.reset_epoch(total_D_);
+        steps_in_epoch_ = 0;
+        epoch_eta_avg_history_.assign(1, eta_);
+    }
+
     /// Compute ELBO and gradient w.r.t. eta in one pass.
     double compute_elbo_and_grad_(std::mt19937_64& rng,
-                                    arma::vec* g_eta) const {
+                                    arma::vec* g_eta) {
         arma::vec G(total_S_, arma::fill::zeros);
 
         if (exact_active_) compute_G_exact_(G);
@@ -726,46 +761,74 @@ private:
     }
 
     /// Exact enumeration of the FULL joint state space.
-    void compute_G_exact_(arma::vec& G_out) const {
-        // Joint state count.
-        std::size_t total = 1;
-        for (std::size_t i = 0; i < n_; ++i) total *= cfg_.cardinalities[i];
+    void compute_G_exact_(arma::vec& G_out) {
+        const std::size_t total = exact_total_states_;
+        // lp_tab_[s] = log_density(z_s, ctx_) for the s-th joint state, z[0]
+        // varying fastest (z_s[i] = (s / prod_{j<i} K_j) % K_i). The values
+        // depend only on ctx_ and the fixed config. The table is valid from
+        // the end of a pass that evaluated every state until set_context
+        // changes ctx_. A pass with an invalid table evaluates log_density
+        // and stores the values in lp_tab_, whose storage is kept from one
+        // fill to the next.
+        const bool use_tab = lp_tab_valid_ && lp_tab_.size() == total;
+        const bool fill_tab = !use_tab && total <= lp_tab_max_states_;
+        if (fill_tab) lp_tab_.resize(total);
 
-        arma::uvec z(n_);
+        arma::uvec z(n_, arma::fill::zeros);
         // q(z) = prod_C phi_C(state of clique C induced by z).
         // For each global z, induce per-clique state s_c via encoding,
         // accumulate G_C(s_c) += w_marg(c) * log_density.
         // w_marg(c) = q(z) / phi_C(s_c) = prod_{c' != c} phi_{c'}(s_{c'}).
-        std::vector<std::size_t> nbr_vals;
+        // z steps through the joint states in the order of s (z[0] fastest)
+        // and s_c[c] is updated with it to clique c's joint-state index
+        // (stride = node_stride_).
+        clique_state_idx_.assign(M_, 0);
+        // Sizes and data pointers are copied into locals before the loop;
+        // members accessed in the loop body are loaded again from memory
+        // after every log_density call.
+        const std::size_t n = n_, M = M_;
+        const arma::uword* card = cfg_.cardinalities.memptr();
+        const std::size_t* v2c = var_to_clique_.data();
+        const std::size_t* stride = node_stride_.data();
+        std::size_t* s_c = clique_state_idx_.data();
+        const double* phi = phi_.memptr();
+        const std::size_t* off = offsets_phi_.data();
+        arma::uword* zp = z.memptr();
+        double* G = G_out.memptr();
+        double* tab = lp_tab_.data();
         for (std::size_t s = 0; s < total; ++s) {
-            std::size_t r = s;
-            for (std::size_t i = 0; i < n_; ++i) {
-                z[i] = r % cfg_.cardinalities[i];
-                r /= cfg_.cardinalities[i];
-            }
-            const double lp = cfg_.log_density(z, ctx_);
-
-            // Determine each clique's induced state.
-            std::vector<std::size_t> s_c(M_);
-            double w_full = 1.0;
-            for (std::size_t c = 0; c < M_; ++c) {
-                const auto& C = cfg_.clique_partition[c];
-                nbr_vals.assign(C.size(), 0);
-                for (std::size_t pos = 0; pos < C.size(); ++pos) {
-                    nbr_vals[pos] = z[C[pos]];
+            if (s > 0) {
+                for (std::size_t i = 0; i < n; ++i) {
+                    const std::size_t c = v2c[i];
+                    if (++zp[i] < card[i]) { s_c[c] += stride[i]; break; }
+                    s_c[c] -= (card[i] - 1) * stride[i];
+                    zp[i] = 0;
                 }
-                s_c[c] = encode_clique_state_(c, nbr_vals);
-                w_full *= phi_[offsets_phi_[c] + s_c[c]];
+            }
+            double lp;
+            if (use_tab) {
+                lp = tab[s];
+            } else {
+                lp = cfg_.log_density(z, ctx_);
+                if (fill_tab) tab[s] = lp;
+            }
+
+            double w_full = 1.0;
+            for (std::size_t c = 0; c < M; ++c) {
+                w_full *= phi[off[c] + s_c[c]];
             }
             if (!(w_full > 0.0)) continue;
 
-            for (std::size_t c = 0; c < M_; ++c) {
-                const double phi_cs = phi_[offsets_phi_[c] + s_c[c]];
+            for (std::size_t c = 0; c < M; ++c) {
+                const double phi_cs = phi[off[c] + s_c[c]];
                 if (!(phi_cs > 0.0)) continue;
                 const double w_marg = w_full / phi_cs;
-                G_out[offsets_phi_[c] + s_c[c]] += w_marg * lp;
+                G[off[c] + s_c[c]] += w_marg * lp;
             }
         }
+        // Set only after every state was evaluated: a log_density exception
+        // leaves the table invalid.
+        if (fill_tab) lp_tab_valid_ = true;
     }
 
     /// MC estimator: sample z_s ~ q, then for each clique C and each
@@ -942,6 +1005,8 @@ private:
     std::vector<std::size_t> offsets_phi_;               // length M+1
     std::vector<std::size_t> var_to_clique_;             // length n
     std::vector<std::size_t> var_pos_in_clique_;         // length n
+    std::vector<std::size_t> node_stride_;               // length n
+    std::vector<std::size_t> clique_state_idx_;          // length M, exact-mode scratch
 
     arma::vec eta_;
     arma::vec phi_;
@@ -958,6 +1023,13 @@ private:
 
     bool exact_active_        = false;
     std::size_t exact_total_states_ = 0;
+
+    // Exact mode: log_density at every joint state, used while lp_tab_valid_
+    // is set. A refill writes into the same storage. Tabulated only up to
+    // lp_tab_max_states_ states (32 MB).
+    std::vector<double> lp_tab_;
+    bool lp_tab_valid_ = false;
+    static constexpr std::size_t lp_tab_max_states_ = std::size_t(1) << 22;
 
     vi_history_t history_;
 };

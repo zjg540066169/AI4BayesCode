@@ -29,11 +29,14 @@ returns the q-mean (point estimate), not a sample.
 | `step(rng)` | void | one RAABBVI optimizer step |
 | `current()` | `const arma::vec&` | q-mean = constrain(mu); deterministic |
 | `current_sample(rng)` | `arma::vec` | q-sample = constrain(mu + sigma*epsilon), epsilon~N(0,I) |
-| `set_current(mu)` | void | overwrites variational mean ONLY |
+| `set_current(theta)` | void | takes the natural-scale value of length `dim()`, not the unconstrained mu; overwrites mu = unconstrain(theta) ONLY |
 | `set_variational_state(mu, log_sd)` | void | overwrites both |
 | `get_log_sd()` | `arma::vec` | current log sigma |
 | `current_elbo()` | double | last-step ELBO |
 | `vi_history()` | `const vi_history_t&` | per-step (elbo, mu, log_sd, gamma, epoch) + final_khat |
+
+Loading values that differ from the current ones (`set_current`,
+`set_variational_state`) restarts the averaging epoch.
 
 **Constraints**: uses `constraints::*::wrap` identical to
 `nuts_block`. The user's log-density lambda lives on the natural

@@ -476,9 +476,10 @@ Gaussian over all sub-parameters) and `full_rank_gaussian_vi_block`
 subset). Both derive from `vi_block`, which derives from
 `block_sampler` with `engine_kind() == VI` (NUTS / Gibbs / BART /
 RJMCMC / HMM / SBP all return `MCMC`). Tier B setter:
-`set_current(arma::vec)` writes the variational mean mu on the
-unconstrained scale; log sigma (mean-field) or vec(L) (full-rank)
-keeps its current value. Tier A dispatcher routes per-component
+`set_current(arma::vec)` takes the natural-scale value of length
+`dim()` and writes the variational mean mu = unconstrain(value); log
+sigma (mean-field) or vec(L) (full-rank) keeps its current value.
+Tier A dispatcher routes per-component
 keys `list(name_mean = mu_vec, name_log_sd = ls_vec)` (full-state
 overwrite is rare -- see Sec.18.3).
 

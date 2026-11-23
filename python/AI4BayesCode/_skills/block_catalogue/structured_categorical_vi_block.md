@@ -31,7 +31,9 @@ small (4-5 nodes is typical).
 **Gradient**: analytical sum-over-CLIQUE-state (vs Block 4's
 sum-over-variable-state). Exact enumeration mode for small joint state
 spaces; Monte Carlo otherwise. Closed-form chain rule through the
-anchored softmax exactly mirrors Block 4.
+anchored softmax exactly mirrors Block 4. In exact mode `log_density`
+must depend only on `(z, ctx)`: its values are tabulated and reused
+while the context is unchanged.
 
 **JUSTIFICATION (Check #16)**: discrete latents with strong local
 dependence (`system_design.md` Sec.11.2(b)). Structured MF gives
@@ -69,7 +71,8 @@ that washes out the correlation.
 - `per_node_marginals()` helper computes per-node marginal matrix
   by marginalising the clique joint phi
 - `set_current(phi_concat)` accepts per-clique joint probabilities and
-  recovers eta via inverse anchored softmax
+  recovers eta via inverse anchored softmax; loading values that differ
+  from the current ones restarts the averaging epoch
 - composite_block writes integer-indexed q-samples to shared_data
   under `cfg.name` (per Sec.18.4 hybrid-correctness invariant)
 

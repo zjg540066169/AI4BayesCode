@@ -41,7 +41,9 @@ which is what mean-field collapses to -- textbook Bishop Sec.10.1.2.
 
 **Public interface**: identical to `mean_field_gaussian_vi_block`,
 plus `L() -> const arma::mat&` (current lower-triangular Cholesky
-factor).
+factor). `set_current` takes the natural-scale value of length `dim()`;
+loading values that differ from the current ones restarts the averaging
+epoch.
 
 **Constraints + validator obligations**: same as
 `mean_field_gaussian_vi_block`.
