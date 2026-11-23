@@ -34,11 +34,19 @@
 //        throws and leaves the new composite unchanged
 //    S9  a non-empty initial_order throws in method = partition; method =
 //        order starts from it
+//    S10 both methods, on data where a DAG drawn from the state varies:
+//        current_named_outputs() (no generator, as composite_block calls it)
+//        holds the state with sampled_dag() as the DAG, after a load and
+//        after each of 300 sweeps; the shared data keys hold the block's
+//        state after add_child and after a load through the composite
+//        (set_partition + sync_child, or composite_block::set_current in
+//        method = order); the write does not change the next 200 sweeps
 // ============================================================================
 
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/order_mcmc_block.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <random>
@@ -381,6 +389,194 @@ void S9_initial_order() {
     const order_mcmc_block ob(co);
     check(same_values(rev, ob.current()), "S9 method = order: the chain starts from initial_order");
 }
+
+// The named outputs without a generator, called through block_sampler as
+// composite_block calls them.
+state_map plain_outputs(const block_sampler& b) { return b.current_named_outputs(); }
+
+// The keys order, order_party, order_sampled_DAG and order_log_score that the
+// shared data of `comp` holds.
+state_map shared_keys(const composite_block& comp) {
+    state_map m;
+    for (const char* k : {"order", "order_party", "order_sampled_DAG", "order_log_score"})
+        if (comp.data().has(k)) m[k] = comp.data().get(k);
+    return m;
+}
+
+// The keys of `out` that do not hold the state of `blk`: order = current(),
+// order_party = the element sizes (method = partition only), order_sampled_DAG
+// = sampled_dag() flattened row-major (element i*n + j), order_log_score =
+// current_log_score() bit for bit. Empty when every key holds it.
+std::string state_mismatch(const state_map& out, const order_mcmc_block& blk, bool partition) {
+    std::string bad;
+    auto find = [&](const char* k) -> const arma::vec* {
+        const auto it = out.find(k);
+        if (it == out.end()) { bad += std::string(" missing ") + k; return nullptr; }
+        return &it->second;
+    };
+    const std::size_t n = blk.current().n_elem;
+    if (const arma::vec* v = find("order"))
+        if (!(v->n_elem == n && arma::all(*v == blk.current()))) bad += " order";
+    if (partition) {
+        if (const arma::vec* v = find("order_party"))
+            if (to_sizes(*v) != party_of(blk)) bad += " order_party";
+    } else if (out.count("order_party")) {
+        bad += " order_party in method = order";
+    }
+    if (const arma::vec* v = find("order_sampled_DAG")) {
+        bool ok = v->n_elem == n * n;
+        for (std::size_t i = 0; ok && i < n; ++i)
+            for (std::size_t j = 0; j < n; ++j)
+                if (((*v)[i * n + j] != 0.0) != (((blk.sampled_dag()[i] >> j) & 1ULL) != 0))
+                    ok = false;
+        if (!ok) bad += " order_sampled_DAG";
+    }
+    if (const arma::vec* v = find("order_log_score")) {
+        const double ls = blk.current_log_score();
+        if (!(v->n_elem == 1 && std::memcmp(v->memptr(), &ls, sizeof ls) == 0))
+            bad += " order_log_score";
+    }
+    if (out.size() != (partition ? 4u : 3u)) bad += " keys = " + std::to_string(out.size());
+    return bad;
+}
+
+// Independent fair-coin columns, 30 rows: the DAG drawn from a partition with
+// two or more elements, or from an order, varies from draw to draw.
+order_mcmc_block_config noise_cfg(std::size_t n, bool partition) {
+    order_mcmc_block_config cfg = make_cfg(n, partition);
+    std::mt19937_64 g(20261123u);
+    prng::uniform_real_distribution<double> U(0, 1);
+    cfg.data.set_size(30, n);
+    for (std::size_t r = 0; r < 30; ++r)
+        for (std::size_t j = 0; j < n; ++j) cfg.data(r, j) = U(g) < 0.5 ? 0 : 1;
+    return cfg;
+}
+
+// Do the DAGs drawn from the state of `blk` with generators 1 to 10 take two
+// or more values?
+bool dag_draws_differ(const order_mcmc_block& blk) {
+    std::mt19937_64 g1(1);
+    const arma::vec first = blk.current_named_outputs(g1).at("order_sampled_DAG");
+    for (std::uint64_t k = 2; k <= 10; ++k) {
+        std::mt19937_64 g(k);
+        if (!arma::all(blk.current_named_outputs(g).at("order_sampled_DAG") == first))
+            return true;
+    }
+    return false;
+}
+
+// Does the DAG drawn from the state of `blk` with a generator seeded by `seed`
+// differ from sampled_dag()?
+bool seeded_dag_differs(const order_mcmc_block& blk, std::uint64_t seed) {
+    std::mt19937_64 g(seed);
+    const arma::vec d = blk.current_named_outputs(g).at("order_sampled_DAG");
+    const std::size_t n = blk.current().n_elem;
+    for (std::size_t i = 0; i < n; ++i)
+        for (std::size_t j = 0; j < n; ++j)
+            if ((d[i * n + j] != 0.0) != (((blk.sampled_dag()[i] >> j) & 1ULL) != 0))
+                return true;
+    return false;
+}
+
+// Loads the reversed node sequence of `blk`, through `comp` when given: in
+// method = partition with element sizes n/2 and n - n/2 (each node of
+// element 0 takes one or more parents from element 1), in method = order as
+// the order. Returns the loaded node sequence (sorted within each element).
+arma::vec load_reversed(order_mcmc_block& blk, composite_block* comp, bool partition) {
+    const arma::vec cur = blk.current();
+    const std::size_t n = cur.n_elem;
+    arma::vec rev(n);
+    for (std::size_t k = 0; k < n; ++k) rev[k] = cur[n - 1 - k];
+    if (partition) {
+        const arma::uvec permy = arma::conv_to<arma::uvec>::from(rev);
+        const arma::uvec party{n / 2, n - n / 2};
+        blk.set_partition(permy, party);
+        if (comp) comp->sync_child(0);
+        std::sort(rev.begin(), rev.begin() + n / 2);
+        std::sort(rev.begin() + n / 2, rev.end());
+    } else if (comp) {
+        comp->set_current(rev);
+    } else {
+        blk.set_current(rev);
+    }
+    return rev;
+}
+
+void S10_outputs_without_generator() {
+    std::printf("\n--- S10: named outputs without a generator; shared data after add_child and loads ---\n");
+    const std::size_t n = 6;
+    for (bool partition : {true, false}) {
+        const std::string mode = partition ? "S10 method = partition: " : "S10 method = order: ";
+        order_mcmc_block blk(noise_cfg(n, partition));
+        const arma::vec loaded = load_reversed(blk, nullptr, partition);
+        bool random_dag = dag_draws_differ(blk) && arma::all(blk.current() == loaded);
+        const std::string a1 = state_mismatch(plain_outputs(blk), blk, partition);
+        // After each of 300 sweeps: compare the outputs without a generator
+        // with the state, and count the sweeps at which a DAG drawn from the
+        // state with a generator of fixed seed differs from sampled_dag().
+        block_context ctx;
+        std::mt19937_64 rng(31);
+        int bad_sweeps = 0, seeded_differs = 0;
+        std::string first_bad;
+        for (int s = 1; s <= 300; ++s) {
+            blk.set_context(ctx);
+            blk.step(rng);
+            const std::string a = state_mismatch(plain_outputs(blk), blk, partition);
+            if (!a.empty() && bad_sweeps++ == 0)
+                first_bad = ", first at sweep " + std::to_string(s) + ":" + a;
+            if (!dag_draws_differ(blk)) random_dag = false;
+            if (seeded_dag_differs(blk, 12345)) ++seeded_differs;
+        }
+        check(random_dag && seeded_differs >= 30,
+              mode + "precondition: DAG draws from the state differ after the load and after "
+              "each of 300 sweeps, and a DAG drawn with a generator of fixed seed differs from "
+              "sampled_dag() after 30 or more of them",
+              "(after " + std::to_string(seeded_differs) + " of 300)");
+        check(a1.empty() && bad_sweeps == 0, mode + "current_named_outputs() holds the state, with "
+              "sampled_dag() as the DAG, after a load and after each of 300 sweeps",
+              (a1.empty() ? std::string() : "after the load:" + a1 + "; ")
+              + "mismatching sweeps = " + std::to_string(bad_sweeps) + first_bad);
+
+        composite_block comp("bn");
+        comp.add_child(std::make_unique<order_mcmc_block>(noise_cfg(n, partition)));
+        auto* cb = dynamic_cast<order_mcmc_block*>(&comp.child(0));
+        const std::string b = state_mismatch(shared_keys(comp), *cb, partition);
+        check(b.empty(), mode + "after add_child the shared data keys hold the block's state", b);
+
+        // Twin composite with the same generator: loaded the same way, but
+        // without the shared data write.
+        composite_block twin("bn");
+        twin.add_child(std::make_unique<order_mcmc_block>(noise_cfg(n, partition)));
+        auto* tb = dynamic_cast<order_mcmc_block*>(&twin.child(0));
+        std::mt19937_64 crng(37), trng(37);
+        for (int s = 0; s < 300; ++s) { comp.step(crng); twin.step(trng); }
+        const arma::vec rev = load_reversed(*cb, &comp, partition);
+        load_reversed(*tb, nullptr, partition);
+        const std::string c = state_mismatch(shared_keys(comp), *cb, partition);
+        check(c.empty() && dag_draws_differ(*cb) && arma::all(cb->current() == rev)
+              && arma::all(comp.current() == rev),
+              mode + (partition ? "after set_partition and sync_child(0)"
+                                : "after composite_block::set_current")
+              + " the shared data keys hold the loaded state (DAG draws from it differ)", c);
+        // Node sequence or order, log-score bits, sampled DAG, and in method
+        // = partition the element sizes.
+        auto same_chain = [&]() {
+            const double la = cb->current_log_score(), lb = tb->current_log_score();
+            return arma::all(cb->current() == tb->current())
+                && std::memcmp(&la, &lb, sizeof la) == 0
+                && cb->sampled_dag() == tb->sampled_dag()
+                && (!partition || party_of(*cb) == party_of(*tb));
+        };
+        int mismatch = 0;
+        for (int s = 0; s < 200; ++s) {
+            comp.step(crng); twin.step(trng);
+            if (!same_chain()) ++mismatch;
+        }
+        if (crng() != trng()) ++mismatch;
+        check(mismatch == 0, mode + "the next 200 sweeps equal those of a twin loaded without "
+              "the shared data write", "mismatches = " + std::to_string(mismatch));
+    }
+}
 }  // namespace
 
 int main() {
@@ -394,6 +590,7 @@ int main() {
     S7_new_block_set_current_throws();
     S8_restore_into_new_composite();
     S9_initial_order();
+    S10_outputs_without_generator();
     std::printf("\n=== %d PASS / %d FAIL ===\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

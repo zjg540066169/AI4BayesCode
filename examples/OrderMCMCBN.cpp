@@ -95,6 +95,11 @@
 //                                    as a 1 x n² matrix (column-major). Full
 //                                    posterior-predictive simulation deferred
 //                                    to v1.2.1 per spec Sec.5.5.
+//    * get_history()  -> history_map { "order" (node sequences, 1-based as
+//                                    in get_current(); one row per sweep
+//                                    with keep_history, else the current
+//                                    sequence), "order_log_score" (one row
+//                                    per sweep with keep_history) }.
 //  Constructor takes arma::mat data (N x n, integer-valued, rounded to
 //  category indices 0..r-1), arma::vec cardinalities (length n), and an
 //  arma::vec initial_order that must be EMPTY: partition MCMC starts from the
@@ -103,6 +108,10 @@
 //  set_current(list(order = ..., order_party = ...)). This replaces the
 //  Rcpp-only IntegerMatrix / IntegerVector / Nullable signature so the SAME
 //  class compiles under both RCPP_MODULE and PYBIND11_MODULE.
+//  candidate_top_C, family_cache_F, gamma_prune_nats and prob_adjacent_swap
+//  are validated and passed to the block but do not change the draws of
+//  partition MCMC: the block uses every family up to max_parents without
+//  gamma pruning, and prob_adjacent_swap applies only to the order method.
 // ============================================================================
 
 // @example:R
@@ -434,7 +443,11 @@ public:
                     "..., 'order_party': ...}))."));
             }
         }
-        write_shared_outputs_(*blk);
+        // Writes the block's outputs to the shared data keys order,
+        // order_party, order_sampled_DAG and order_log_score (the DAG is the
+        // block's sampled_dag()) and marks the composite's current() for
+        // rebuild.
+        impl_->sync_child(0);
     }
 
     AI4BayesCode::history_map predict_at(
@@ -463,7 +476,14 @@ public:
     }
 
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag(); }
-    AI4BayesCode::history_map  get_history() const { return impl_->get_history(); }
+
+    // The composite's history with "order" 1-based, as in get_current().
+    AI4BayesCode::history_map  get_history() const {
+        AI4BayesCode::history_map h = impl_->get_history();
+        const auto it = h.find("order");
+        if (it != h.end()) it->second += 1.0;
+        return h;
+    }
 
     // freeze / unfreeze: "order_party" names the "order" block (the node
     // sequence and the element sizes are one block state), so
@@ -518,28 +538,6 @@ private:
     }
 #endif
 
-    // Writes the block's state to the shared data keys that a sweep writes
-    // ("order", "order_party", "order_sampled_DAG", "order_log_score"; the
-    // formats of order_mcmc_block::current_named_outputs, with the block's
-    // sampled_dag() as the DAG), so that they describe a loaded partition
-    // before the next sweep.
-    void write_shared_outputs_(const order_mcmc_block& blk) {
-        const std::vector<std::size_t>& party = blk.partition().party;
-        arma::vec party_v(party.size());
-        for (std::size_t t = 0; t < party.size(); ++t)
-            party_v[t] = static_cast<double>(party[t]);
-        const auto& dag = blk.sampled_dag();
-        arma::vec dag_v(n_ * n_, arma::fill::zeros);
-        for (std::size_t i = 0; i < n_; ++i)
-            for (std::size_t j = 0; j < n_; ++j)
-                if (dag[i] & (1ULL << j)) dag_v[i * n_ + j] = 1.0;
-        auto& d = impl_->data();
-        d.set("order", arma::conv_to<arma::vec>::from(blk.order()));
-        d.set("order_party", std::move(party_v));
-        d.set("order_sampled_DAG", std::move(dag_v));
-        d.set("order_log_score", arma::vec{blk.current_log_score()});
-    }
-
     std::mt19937_64                  rng_;
     mutable std::mt19937_64          predict_rng_;
     std::unique_ptr<composite_block> impl_;
@@ -569,7 +567,12 @@ RCPP_MODULE(OrderMCMCBN_module) {
             "20), family_cache_F (default 4000), gamma_prune_nats (default "
             "10), prob_adjacent_swap (default 0.5), initial_order (must be "
             "EMPTY numeric(0); load a partition with set_current(list(order "
-            "= ..., order_party = ...))), rng_seed, keep_history.")
+            "= ..., order_party = ...))), rng_seed, keep_history. "
+            "candidate_top_C, family_cache_F, gamma_prune_nats and "
+            "prob_adjacent_swap are validated and passed to the block but do "
+            "not change the draws of partition MCMC: the block uses every "
+            "family up to max_parents without gamma pruning, and "
+            "prob_adjacent_swap applies only to the order method.")
         .method("step", (void (OrderMCMCBN::*)())    &OrderMCMCBN::step, "Run one sweep.")
         .method("step", (void (OrderMCMCBN::*)(int)) &OrderMCMCBN::step, "Run n sweeps.")
         .method("get_current", &OrderMCMCBN::get_current,
@@ -595,7 +598,11 @@ RCPP_MODULE(OrderMCMCBN_module) {
                 "v1: stub returning current sampled_DAG (1 x n² matrix). "
                 "Full posterior-predictive simulation deferred to v1.2.1.")
         .method("get_dag",     &OrderMCMCBN::get_dag)
-        .method("get_history", &OrderMCMCBN::get_history)
+        .method("get_history", &OrderMCMCBN::get_history,
+                "Returns list(order = node sequences, 1-based as in "
+                "get_current(), one row per sweep when keep_history = TRUE, "
+                "else the current sequence; order_log_score = log P(D | "
+                "partition), one row per sweep when keep_history = TRUE).")
         AI4BAYESCODE_BIND_KERNEL_CONTROL(OrderMCMCBN);
 }
 #endif
@@ -627,7 +634,12 @@ PYBIND11_MODULE(OrderMCMCBN, m) {
              "partition MCMC (order_mcmc_block, default method) with BDeu "
              "scoring. initial_order must be empty (np.zeros(0)): load a "
              "partition with set_current({'order': ..., 'order_party': ...}) "
-             "after construction.")
+             "after construction. candidate_top_C, family_cache_F, "
+             "gamma_prune_nats and prob_adjacent_swap are validated and "
+             "passed to the block but do not change the draws of partition "
+             "MCMC: the block uses every family up to max_parents without "
+             "gamma pruning, and prob_adjacent_swap applies only to the order "
+             "method.")
         .def("step", (void (OrderMCMCBN::*)())    &OrderMCMCBN::step, "Run one sweep.")
         .def("step", (void (OrderMCMCBN::*)(int)) &OrderMCMCBN::step,        pybind11::arg("n_steps"))
         .def("get_current", &OrderMCMCBN::get_current,
@@ -649,7 +661,11 @@ PYBIND11_MODULE(OrderMCMCBN, m) {
              "loads the partition and freezes the block at it.")
         .def("predict_at",  &OrderMCMCBN::predict_at,  pybind11::arg("new_data"))
         .def("get_dag",     &OrderMCMCBN::get_dag)
-        .def("get_history", &OrderMCMCBN::get_history)
+        .def("get_history", &OrderMCMCBN::get_history,
+             "Returns {'order': node sequences, 1-based as in get_current(), "
+             "one row per sweep when keep_history=True, else the current "
+             "sequence; 'order_log_score': log P(D | partition), one row per "
+             "sweep when keep_history=True}.")
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(OrderMCMCBN);
 }
 #endif

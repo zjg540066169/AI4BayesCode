@@ -112,7 +112,8 @@ category (freeze / unfreeze / get_frozen) per interface.md Sec.1.
 - FK Sec.4.2 three-tier candidate-parent heuristic (top-C parents
   per node by single-edge score; top-F whole families cached
   globally; gamma-pruning in nats of remaining families during the
-  sum step).
+  sum step). The block disables gamma-pruning, and in method =
+  partition it uses every family up to max_parents.
 - **Per-order BDeu Bayesian model averaging** for sampled DAG --
   parent sets drawn from the FK Sec.4.2 posterior conditional on
   the current order.
@@ -152,10 +153,15 @@ cfg.structure_prior   = dag_prior::UNIFORM;   // quote the deciding spec line
 cfg.bdeu_alpha        = 1.0;           // BDeu equivalent sample size
 cfg.max_parents       = 5;             // hard cap (FK Sec.4.2 typical 4-6)
 cfg.candidate_top_C   = 7;             // FK Sec.4.2 top-C candidates
+                                       //   (method = order only)
 cfg.family_cache_F    = 200;           // FK Sec.4.2 top-F cached families
-cfg.gamma_prune_nats  = 10.0;          // gamma-prune sum in nats
+                                       //   (method = order only)
+cfg.gamma_prune_nats  = 10.0;          // no effect in either method: the
+                                       //   block scores without gamma
+                                       //   pruning
 cfg.prob_adjacent_swap = 0.5;          // 0.5 = balanced any-pair /
                                        //   adjacent-swap mixture
+                                       //   (method = order only)
 cfg.initial_order     = arma::uvec();  // method = order: empty = random,
                                        //   otherwise a permutation of
                                        //   0..n-1. method = partition (the
@@ -173,13 +179,15 @@ elements, so children come before parents and the reversed sequence lists
 parents first); `<name>_party` holds the element sizes; `<name>_log_score`
 is log P(D | partition). `set_partition(permy, party)` loads a partition
 (nodes are sorted within each element; it throws for invalid input or a
-partition with log-score -inf). `set_current(v)` loads nothing: it returns
-without a change when `v` equals `current()` on a partition with two or
-more elements (the element sizes are those of the current partition) and
-throws `std::invalid_argument` otherwise, also whenever the current
-partition is the one-element partition. `cfg.method = method_t::order`:
-the state is an order, `set_current(v)` loads it, and `<name>_log_score` is
-log P(D | order).
+partition with log-score -inf); on a child of a `composite_block`, call
+the composite's `sync_child(i)` after it to write the shared data keys.
+`set_current(v)` loads nothing: it returns without a change when `v`
+equals `current()` on a partition with two or more elements, or on the
+one-element partition when n = 1 (the element sizes are those of the
+current partition), and throws `std::invalid_argument` otherwise, also,
+for n >= 2, whenever the current partition is the one-element partition.
+`cfg.method = method_t::order`: the state is an order, `set_current(v)`
+loads it, and `<name>_log_score` is log P(D | order).
 
 **Tier C kernels:**
 - `include/AI4BayesCode/bde_scorer.hpp` -- BDe / BDeu family-score
@@ -214,8 +222,8 @@ partition method):
 - `predict_at(list())` -- v1 stub returning the current
   `sampled_DAG`.
 - `get_dag()` -- sampling DAG topology (block-level).
-- `get_history()` -- `list(order = M x n matrix, ...)` when
-  `keep_history = TRUE`.
+- `get_history()` -- `list(order = M x n matrix, 1-based as in
+  get_current(), ...)` when `keep_history = TRUE`.
 
 **Vendored kernel:** none. Pure C++17 + Armadillo + 64-bit
 bitmasks for parent sets (caps n <= 64; FK Sec.4.2 already requires

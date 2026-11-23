@@ -274,17 +274,20 @@ struct order_mcmc_block_config {
     /// Max parent set size k (default 5).
     std::size_t max_parents = 5;
 
-    /// Candidate parents top-C per node (default 20).
+    /// Candidate parents top-C per node (default 20). method = order only:
+    /// method = partition uses all n - 1 candidates.
     std::size_t candidate_top_C = 20;
 
-    /// Family cache top-F per node (default 4000).
+    /// Family cache top-F per node (default 4000). method = order only:
+    /// method = partition uses every family up to max_parents.
     std::size_t family_cache_F = 4000;
 
-    /// γ-pruning threshold in nats (default 10).
+    /// γ-pruning threshold in nats (default 10). No effect: the block scores
+    /// without γ-pruning in both methods.
     double gamma_prune_nats = 10.0;
 
     /// Probability of adjacent-swap proposal (rest is any-pair swap).
-    /// Default 0.5.
+    /// Default 0.5. method = order only.
     double prob_adjacent_swap = 0.5;
 
     /// DAG prior P(G). MANDATORY -- there is no default, and the
@@ -607,16 +610,16 @@ public:
     /// method = partition: the state is a labelled partition, and v does not
     /// give its element sizes, so set_current loads nothing. It returns
     /// without a change when v equals current() on a partition with two or
-    /// more elements; the element sizes are then those of the current
-    /// partition, so a saved partition with the same node sequence and other
-    /// element sizes is not loaded. It throws std::invalid_argument for any
-    /// other v, and for every v when the current partition is the
-    /// one-element partition (the partition of the empty DAG), both on a new
-    /// block and on a running chain at that partition: there current() is
-    /// 0..n-1, the node sequence of every partition that cuts 0..n-1 into
-    /// consecutive elements, so a round trip and a restore of such a
-    /// partition are the same call. set_partition loads a partition with its
-    /// element sizes.
+    /// more elements, or on the one-element partition when n = 1; the element
+    /// sizes are then those of the current partition, so a saved partition
+    /// with the same node sequence and other element sizes is not loaded. It
+    /// throws std::invalid_argument for any other v, and, when n >= 2, for
+    /// every v when the current partition is the one-element partition (the
+    /// partition of the empty DAG), both on a new block and on a running chain
+    /// at that partition: there current() is 0..n-1, the node sequence of
+    /// every partition that cuts 0..n-1 into consecutive elements, so a round
+    /// trip and a restore of such a partition are the same call.
+    /// set_partition loads a partition with its element sizes.
     void set_current(const arma::vec& v) override {
         if (v.n_elem != n_) {
             throw std::invalid_argument(
@@ -674,13 +677,15 @@ public:
     /// std::invalid_argument for invalid input or for a partition with
     /// log-score -inf, and std::logic_error in method = order.
     /// set_partition writes only this block's state. On a child of a
-    /// composite_block, the composite's current() (a concatenation that the
-    /// composite stores and recomputes on the first call after its step()
-    /// or set_current()) and the shared data keys <name>, <name>_party,
-    /// <name>_sampled_DAG and <name>_log_score show the loaded partition only
-    /// after the composite's next step(), or, for the shared data keys, after
-    /// the caller writes them (the OrderMCMCBN wrapper writes them after each
-    /// load).
+    /// composite_block, the composite's current() can return the values from
+    /// before the load until the composite's next step(), set_current() or
+    /// sync_child() (it recomputes its stored concatenation only on the first
+    /// current() call after those), and the shared data keys <name>,
+    /// <name>_party, <name>_sampled_DAG and <name>_log_score hold the values
+    /// from before the load until the composite's next step() in which this
+    /// block is not frozen, set_current() or sync_child(), or until the
+    /// caller writes them (the OrderMCMCBN wrapper calls sync_child() after
+    /// each load).
     void set_partition(const arma::uvec& permy, const arma::uvec& party) {
         if (cfg_.method != order_mcmc_block_config::method_t::partition) {
             throw std::logic_error(
@@ -737,49 +742,24 @@ public:
     const std::string& name() const noexcept override { return cfg_.name; }
     std::size_t dim() const noexcept override { return n_; }
 
+    /// The named outputs of the current state (see named_outputs_), with a
+    /// DAG drawn with rng from the current partition (method = partition) or
+    /// order (method = order) as <name>_sampled_DAG. composite_block::step()
+    /// writes these to the shared data.
     state_map current_named_outputs(std::mt19937_64& rng) const override {
-        state_map out;
-        if (cfg_.method == order_mcmc_block_config::method_t::partition) {
-            // "<name>"           = the partition's node permutation (permy)
-            // "<name>_party"     = the element sizes (partition composition)
-            // "<name>_sampled_DAG" = a DAG drawn from the current partition
-            // "<name>_log_score" = the partition log-score
-            arma::vec order_vec(n_);
-            for (std::size_t p = 0; p < n_; ++p)
-                order_vec[p] = static_cast<double>(pchain_.state.permy[p]);
-            out.emplace(cfg_.name, std::move(order_vec));
-            arma::vec party_vec(pchain_.state.party.size());
-            for (std::size_t t = 0; t < pchain_.state.party.size(); ++t)
-                party_vec[t] = static_cast<double>(pchain_.state.party[t]);
-            out.emplace(cfg_.name + "_party", std::move(party_vec));
-            auto pdag = partition_sample_dag(*cache_, rng, pchain_.state);
-            arma::vec pdag_flat(n_ * n_, arma::fill::zeros);
-            for (std::size_t i = 0; i < n_; ++i)
-                for (std::size_t j = 0; j < n_; ++j)
-                    if (pdag[i] & (1ULL << j)) pdag_flat[i * n_ + j] = 1.0;
-            out.emplace(cfg_.name + "_sampled_DAG", std::move(pdag_flat));
-            out.emplace(cfg_.name + "_log_score", arma::vec({current_log_score_}));
-            return out;
-        }
-        // "order" key (length n).
-        arma::vec order_vec = arma::conv_to<arma::vec>::from(order_state_);
-        out.emplace(cfg_.name, std::move(order_vec));
-        // "sampled_DAG" key (length n*n, row-major).
+        if (cfg_.method == order_mcmc_block_config::method_t::partition)
+            return named_outputs_(partition_sample_dag(*cache_, rng, pchain_.state));
         // Sample a fresh DAG for this output.
-        auto dag = cache_->sample_dag(rng, order_as_vec_());
-        arma::vec dag_flat(n_ * n_, arma::fill::zeros);
-        for (std::size_t i = 0; i < n_; ++i) {
-            for (std::size_t j = 0; j < n_; ++j) {
-                if (dag[i] & (1ULL << j)) {
-                    dag_flat[i * n_ + j] = 1.0;
-                }
-            }
-        }
-        out.emplace(cfg_.name + "_sampled_DAG", std::move(dag_flat));
-        // "log_score" key (length 1).
-        out.emplace(cfg_.name + "_log_score",
-                    arma::vec({current_log_score_}));
-        return out;
+        return named_outputs_(cache_->sample_dag(rng, order_as_vec_()));
+    }
+
+    /// The named outputs of the current state with sampled_dag() as
+    /// <name>_sampled_DAG; no generator is used. composite_block writes
+    /// these to the shared data in add_child(), set_current() and
+    /// sync_child(), so after those calls every key holds the block's
+    /// state.
+    state_map current_named_outputs() const override {
+        return named_outputs_(sampled_dag_);
     }
 
     history_map get_history() const override {
@@ -862,6 +842,36 @@ private:
             current_natural_[p] = static_cast<double>(permy[p]);
         }
         current_log_score_ = pchain_.log_score;
+    }
+
+    /// Named outputs of the current state with `dag` as <name>_sampled_DAG:
+    ///   "<name>"             the order, or in method = partition the node
+    ///                        sequence of the partition (permy), as doubles
+    ///   "<name>_party"       method = partition only: the element sizes
+    ///   "<name>_sampled_DAG" `dag` flattened row-major (length n*n; element
+    ///                        i*n + j is 1 when j is a parent of i)
+    ///   "<name>_log_score"   the current log-score (length 1)
+    state_map named_outputs_(const std::vector<std::uint64_t>& dag) const {
+        state_map out;
+        if (cfg_.method == order_mcmc_block_config::method_t::partition) {
+            arma::vec order_vec(n_);
+            for (std::size_t p = 0; p < n_; ++p)
+                order_vec[p] = static_cast<double>(pchain_.state.permy[p]);
+            out.emplace(cfg_.name, std::move(order_vec));
+            arma::vec party_vec(pchain_.state.party.size());
+            for (std::size_t t = 0; t < pchain_.state.party.size(); ++t)
+                party_vec[t] = static_cast<double>(pchain_.state.party[t]);
+            out.emplace(cfg_.name + "_party", std::move(party_vec));
+        } else {
+            out.emplace(cfg_.name, arma::conv_to<arma::vec>::from(order_state_));
+        }
+        arma::vec dag_flat(n_ * n_, arma::fill::zeros);
+        for (std::size_t i = 0; i < n_; ++i)
+            for (std::size_t j = 0; j < n_; ++j)
+                if (dag[i] & (1ULL << j)) dag_flat[i * n_ + j] = 1.0;
+        out.emplace(cfg_.name + "_sampled_DAG", std::move(dag_flat));
+        out.emplace(cfg_.name + "_log_score", arma::vec({current_log_score_}));
+        return out;
     }
 
     /// DAG for a state set by the constructor or a loader, drawn from a

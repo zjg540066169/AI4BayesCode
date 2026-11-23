@@ -26,6 +26,14 @@
 //    W5  a non-empty initial_order is an error that points to
 //        set_current(list(order = ..., order_party = ...))
 //    W6  invalid input is an error and leaves the state unchanged
+//    W7  get_history(): "order" is 1-based, as in get_current(): with
+//        keep_history, row t equals get_current()$order after sweep t (also
+//        after a load); without, the single row is get_current()$order
+//    W8  the composite inside the wrapper: at construction and after loads,
+//        the shared data keys order, order_party, order_sampled_DAG and
+//        order_log_score hold the state of get_current() (the DAG is
+//        sampled_DAG), and after a load its current() is the loaded node
+//        sequence also when current() was called before the load
 // ============================================================================
 
 #include "AI4BayesCode/backend_neutral.hpp"
@@ -47,10 +55,28 @@
 #include <string>
 #include <vector>
 
+// Access to the wrapper's composite for W8. OrderMCMCBN declares
+// kernel_control_mixin<OrderMCMCBN> a friend. In this standalone build the
+// primary template has no members, so this explicit specialization, which
+// becomes the base class of OrderMCMCBN, has only the accessor.
+class OrderMCMCBN;
+namespace AI4BayesCode {
+template <>
+class kernel_control_mixin<OrderMCMCBN> {
+public:
+    static const composite_block& composite_of(const OrderMCMCBN& m);
+};
+}  // namespace AI4BayesCode
+
 // The example's own int main() is renamed; this file provides main().
 #define main ordermcmcbn_example_main
 #include "../examples/OrderMCMCBN.cpp"
 #undef main
+
+const AI4BayesCode::composite_block&
+AI4BayesCode::kernel_control_mixin<OrderMCMCBN>::composite_of(const OrderMCMCBN& m) {
+    return *m.impl_;
+}
 
 using namespace AI4BayesCode;
 
@@ -86,10 +112,11 @@ const arma::mat& data() {
 }
 
 std::unique_ptr<OrderMCMCBN> make_model(int seed, int max_parents = 3,
-                                        const arma::vec& init = arma::vec()) {
+                                        const arma::vec& init = arma::vec(),
+                                        bool keep_history = false) {
     return std::make_unique<OrderMCMCBN>(data(), arma::vec(kN, arma::fill::value(2.0)),
                                          "fk_eq2", 1.0, max_parents, 20, 4000, 10.0, 0.5,
-                                         init, seed, false);
+                                         init, seed, keep_history);
 }
 
 // The block the wrapper builds (same data, prior and settings), for the
@@ -415,6 +442,136 @@ void W6_invalid_input() {
           "W6 a partition with log-score -inf (max_parents = 0): an error, state unchanged",
           e.substr(0, 90));
 }
+
+// A model with seed `seed` after `burn` sweeps and then until its partition
+// has two or more elements (at most 5000 more sweeps).
+std::unique_ptr<OrderMCMCBN> stepped_model(int seed, int burn) {
+    auto m = make_model(seed);
+    m->step(burn);
+    for (int s = 0; s < 5000 && value_of(m->get_current(), "order_party").n_elem < 2; ++s)
+        m->step(1);
+    return m;
+}
+
+void W7_history_is_one_based() {
+    std::printf("\n--- W7: get_history() 'order' is 1-based, as in get_current() ---\n");
+    const state_map saved = stepped_model(41, 300)->get_current();
+    // keep_history: one row per sweep; a partition is loaded before sweep 201.
+    auto m = make_model(17, 3, arma::vec(), true);
+    std::vector<arma::vec> orders;
+    std::vector<double> scores;
+    std::string e;
+    for (int s = 0; s < 400; ++s) {
+        if (s == 200) e = error_of([&] { m->set_current(partition_of(saved)); });
+        m->step(1);
+        const state_map cur = m->get_current();
+        orders.push_back(value_of(cur, "order"));
+        scores.push_back(value_of(cur, "log_score")[0]);
+    }
+    const history_map h = m->get_history();
+    const auto ho = h.find("order"), hl = h.find("order_log_score");
+    const bool shape = ho != h.end() && hl != h.end()
+        && ho->second.n_rows == orders.size() && ho->second.n_cols == kN
+        && hl->second.n_rows == orders.size() && hl->second.n_cols == 1;
+    int bad_order = 0, bad_score = 0;
+    for (std::size_t t = 0; shape && t < orders.size(); ++t) {
+        const arma::vec row = ho->second.row(t).t();
+        if (!same_bits(row, orders[t])) ++bad_order;
+        if (!same_bits(arma::vec{hl->second(t, 0)}, arma::vec{scores[t]})) ++bad_score;
+    }
+    check(e.empty() && shape && bad_order == 0,
+          "W7 keep_history: row t of 'order' equals get_current()$order (1-based) after "
+          "sweep t, before and after a load",
+          e + "rows = " + std::to_string(shape ? ho->second.n_rows : 0)
+          + ", mismatching rows = " + std::to_string(bad_order));
+    check(shape && bad_score == 0 && h.size() == 2,
+          "W7 keep_history: the keys are order and order_log_score, and row t of "
+          "order_log_score is get_current()$log_score after sweep t",
+          "mismatching rows = " + std::to_string(bad_score));
+    // keep_history off: one row, the current node sequence.
+    auto q = make_model(17);
+    auto single_row_ok = [&]() {
+        const history_map hq = q->get_history();
+        const auto it = hq.find("order");
+        if (it == hq.end() || it->second.n_rows != 1) return false;
+        const arma::vec row = it->second.row(0).t();
+        return same_bits(row, value_of(q->get_current(), "order"));
+    };
+    int bad_single = single_row_ok() ? 0 : 1;               // construction
+    q->step(150);
+    if (!single_row_ok()) ++bad_single;                     // after sweeps
+    const std::string eq = error_of([&] { q->set_current(partition_of(saved)); });
+    if (!eq.empty() || !single_row_ok()) ++bad_single;      // after a load
+    check(bad_single == 0,
+          "W7 keep_history off: the single 'order' row is get_current()$order at "
+          "construction, after sweeps and after a load",
+          "mismatches = " + std::to_string(bad_single) + " of 3 " + eq);
+}
+
+using wrapper_access = kernel_control_mixin<OrderMCMCBN>;
+
+// The keys of the wrapper's shared data that do not hold the state of
+// get_current(): order (0-based there), order_party, order_sampled_DAG
+// (row-major there: element i*n + j; get_current() is column-major) and
+// order_log_score. Empty when all four hold it.
+std::string shared_mismatch(const OrderMCMCBN& m) {
+    const shared_data_t& d = wrapper_access::composite_of(m).data();
+    const state_map cur = m.get_current();
+    std::string bad;
+    for (const char* k : {"order", "order_party", "order_sampled_DAG", "order_log_score"})
+        if (!d.has(k)) bad += std::string(" missing ") + k;
+    if (!bad.empty()) return bad;
+    if (!same_bits(d.get("order"), value_of(cur, "order") - 1.0)) bad += " order";
+    if (!same_bits(d.get("order_party"), value_of(cur, "order_party"))) bad += " order_party";
+    const arma::vec& dag = d.get("order_sampled_DAG");
+    const arma::vec a = value_of(cur, "sampled_DAG");
+    bool dag_ok = dag.n_elem == kN * kN && a.n_elem == kN * kN;
+    for (std::size_t i = 0; dag_ok && i < kN; ++i)
+        for (std::size_t j = 0; j < kN; ++j)
+            if (dag[i * kN + j] != a[i + j * kN]) dag_ok = false;
+    if (!dag_ok) bad += " order_sampled_DAG";
+    if (!same_bits(d.get("order_log_score"), value_of(cur, "log_score"))) bad += " order_log_score";
+    return bad;
+}
+
+// Is the composite's current() get_current()$order - 1?
+bool composite_current_ok(const OrderMCMCBN& m) {
+    return same_bits(wrapper_access::composite_of(m).current(),
+                     value_of(m.get_current(), "order") - 1.0);
+}
+
+void W8_composite_after_loads() {
+    std::printf("\n--- W8: the wrapper's composite at construction and after loads ---\n");
+    auto m = make_model(29);
+    const std::string s0 = shared_mismatch(*m);
+    check(s0.empty() && composite_current_ok(*m),
+          "W8 at construction, the shared data keys and the composite's current() hold the "
+          "state of get_current()", s0);
+    m->step(300);
+    // The reversed node sequence as single-node elements: a partition with
+    // another node sequence and a finite log-score.
+    state_map singles;
+    singles["order"] = arma::reverse(value_of(m->get_current(), "order"));
+    singles["order_party"] = arma::vec(kN, arma::fill::ones);
+    (void)wrapper_access::composite_of(*m).current();   // the composite stores the concatenation
+    const std::string e1 = error_of([&] { m->set_current(singles); });
+    const bool loaded = e1.empty()
+        && same_bits(value_of(m->get_current(), "order"), singles["order"]);
+    check(loaded && composite_current_ok(*m),
+          "W8 after a load, the composite's current() is the loaded node sequence (current() "
+          "was called before the load)", e1);
+    const std::string s1 = shared_mismatch(*m);
+    check(loaded && s1.empty(), "W8 after a load, the shared data keys hold the loaded partition", s1);
+    // 'order' alone, the current node sequence: no change.
+    state_map seq;
+    seq["order"] = value_of(m->get_current(), "order");
+    (void)wrapper_access::composite_of(*m).current();
+    const std::string e2 = error_of([&] { m->set_current(seq); });
+    const std::string s2 = shared_mismatch(*m);
+    check(e2.empty() && s2.empty() && composite_current_ok(*m),
+          "W8 after 'order' alone (no change), the shared data keys and the composite's "
+          "current() hold the state", e2 + s2);
+}
 }  // namespace
 
 int main() {
@@ -425,6 +582,8 @@ int main() {
     W4_order_alone();
     W5_initial_order();
     W6_invalid_input();
+    W7_history_is_one_based();
+    W8_composite_after_loads();
     std::printf("\n=== %d PASS / %d FAIL ===\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
