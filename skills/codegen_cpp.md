@@ -2059,6 +2059,12 @@ in the lambda to read nuisance parameters at PPC time.
    `impl_->data().refresh_all();` as the last line of setup. Otherwise
    `get_current()` and `predict_at()` on a freshly-constructed model read the
    placeholder the refresher was registered against. 11 shipped examples do this.
+   A derived key that `set_current` recomputes itself (Sec.7a, "Derived keys
+   after set_current") is declared with
+   `impl_->data().declare_refreshed_after_set_current({"<key>", ...});`.
+   `freeze("<block>")` then leaves that key out of its warning that the
+   frozen block holds the keys of its `declare_invalidates` list stale, and
+   emits no such warning when no key remains.
 6. **Declare predict DAG edges** into `y_rep` and **register the y_rep
    stochastic refresher** (see Sec.6a above).
 7. Add child blocks in Gibbs-sweep order: `impl_->add_child(...)`.
@@ -2200,6 +2206,20 @@ void set_current(const AI4BayesCode::state_map& params) {
     }
 }
 ```
+
+### Derived keys after set_current
+
+`impl_->data().set(...)` recomputes no derived key. A derived key that
+`get_current()` or `predict_at()` uses (the single-draw `predict_at(list())`
+samples `y_rep` from the stored keys without recomputing them) is recomputed
+inside `set_current` with `impl_->data().refresh_key("<key>")` right after
+its inputs are written, before any later check that can throw
+(`SpikeSlabRJMCMC`: `eta` = X beta, after `beta` and after `X`). A key that
+only `step()` uses may instead be marked in `set_current` and recomputed by
+`step(n > 0)` before the first sweep (`SpikeSlabRJMCMC`: `sse`). Declare each
+key handled in one of these two ways with
+`impl_->data().declare_refreshed_after_set_current(...)` (Sec.7 step 5), and
+only if every `set_current` path handles it.
 
 ### Refresher capture rule (must hold)
 
@@ -2357,7 +2377,8 @@ invent others:**
 - `impl_->get_history()` -> `history_map`; `impl_->get_dag()` -> `dag_info`.
 - `impl_->data()` (the shared DataContext: `.set(...)`, `.declare_dependencies(...)`,
   `.declare_invalidates(...)`, `.declare_data_input(...)`, `.register_refresher(...)`,
-  `.register_stochastic_refresher(...)`, `.refresh_all()`,
+  `.register_stochastic_refresher(...)`, `.refresh_all()`, `.refresh_key(...)`,
+  `.declare_refreshed_after_set_current(...)`,
   `.valid_predict_inputs()`), `impl_->add_child(std::make_unique<...block>(...))`.
 - `impl_->child(i)` -> `block_sampler&` -- needed to write `set_current` for a
   joint block: `dynamic_cast<joint_nuts_block&>(impl_->child(0)).set_slot(...)`.
@@ -2366,7 +2387,10 @@ invent others:**
 - `impl_->history_size()` and `impl_->clear_history()` -- both called by
   Sec.7a's own `set_current` template.
 - `impl_->freeze(...)` / `unfreeze(...)` / `get_frozen()` are reached through
-  the kernel_control_mixin, not called directly.
+  the kernel_control_mixin, not called directly. `freeze("<block>")` emits a
+  warning that the keys of `<block>`'s `declare_invalidates` list are held
+  stale, leaving out the keys declared with
+  `declare_refreshed_after_set_current` (Sec.7 step 5).
 
 There is **NO `impl_->get_current()`**. Assemble the class's `get_current()`
 from shared_data, one entry per parameter:

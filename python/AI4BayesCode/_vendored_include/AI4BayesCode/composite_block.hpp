@@ -58,7 +58,6 @@
 #include "shared_data.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <stdexcept>
@@ -66,6 +65,26 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+// Bounds, in bytes, of the context sizes for which composite_block::step()
+// passes a child a fresh copy of its context instead of views (see
+// composite_block::context_copy_min_bytes). Defining both macros before this
+// header is included sets the bounds on any platform; every translation unit
+// of a program has to use the same values.
+#ifndef AI4BAYESCODE_CONTEXT_COPY_MIN_BYTES
+#  if defined(__APPLE__) && defined(__aarch64__)
+#    define AI4BAYESCODE_CONTEXT_COPY_MIN_BYTES (36 * 1024)
+#  else
+#    define AI4BAYESCODE_CONTEXT_COPY_MIN_BYTES 1
+#  endif
+#endif
+#ifndef AI4BAYESCODE_CONTEXT_COPY_MAX_BYTES
+#  if defined(__APPLE__) && defined(__aarch64__)
+#    define AI4BAYESCODE_CONTEXT_COPY_MAX_BYTES 132000
+#  else
+#    define AI4BAYESCODE_CONTEXT_COPY_MAX_BYTES 0
+#  endif
+#endif
 
 namespace AI4BayesCode {
 
@@ -164,8 +183,8 @@ public:
     const block_sampler& child(std::size_t i) const { return *children_.at(i); }
 
     /**
-     * Bring the shared data in line with child i after a loader was called on
-     * that child directly: child(i).set_current(theta), or a loader of the
+     * Updates the shared data from child i after a loader was called on that
+     * child directly: child(i).set_current(theta), or a loader of the
      * child's own class such as order_mcmc_block::set_partition. Writes every
      * named output of child i into the shared data (the overload without an
      * RNG, as set_current does), refreshes the derived keys that child i
@@ -177,6 +196,41 @@ public:
         sync_child_(*children_.at(i));
         current_dirty_ = true;
     }
+
+    // ---- How step() passes a child its context ---------------------------
+
+    /**
+     * step() passes a child a fresh copy of its context (the context
+     * shared_data_t::build_context_for returns) when the values in that
+     * context take between context_copy_min_bytes and context_copy_max_bytes
+     * bytes, bounds included, and read-only views of the stored values
+     * (shared_data_t::context_view_for) otherwise; readapt_NUTS() passes
+     * views. The size is the sum of n_elem * sizeof(double) over the entries
+     * of the context, so which of the two a child gets depends only on the
+     * build and on the context. A copy and the views have the same keys,
+     * values and iteration order, so the draws are the same with either;
+     * only the time differs. A copy exists until the child's step(), the
+     * write-back of its outputs and the refresh after it are done.
+     *
+     * Views save the copy of every value. The bounds are set by
+     * AI4BAYESCODE_CONTEXT_COPY_MIN_BYTES and
+     * AI4BAYESCODE_CONTEXT_COPY_MAX_BYTES (defined at the top of this file
+     * unless defined before it is included); no context gets a copy when the
+     * minimum exceeds the maximum. In builds for Apple arm64 (__APPLE__ and
+     * __aarch64__ defined) they are 36864 bytes (36 KiB) and 132000 bytes
+     * (128.9 KiB): there, with Accelerate BLAS, when a child's step()
+     * applies BLAS to the child's own copy of its context and a refresher
+     * in the sweep applies BLAS to the stored values, the projection and
+     * the child's set_context take longer with views than with a fresh copy
+     * (the child then copies from a buffer written just before), for
+     * contexts of about 37 to 125 KiB, depending on the shape of the data.
+     * Elsewhere the minimum is 1 and the maximum 0, so every child gets
+     * views.
+     */
+    static constexpr std::size_t context_copy_min_bytes =
+        AI4BAYESCODE_CONTEXT_COPY_MIN_BYTES;
+    static constexpr std::size_t context_copy_max_bytes =
+        AI4BAYESCODE_CONTEXT_COPY_MAX_BYTES;
 
     // ---- block_sampler interface ---------------------------------------
 
@@ -198,7 +252,8 @@ public:
 
     /**
      * One Gibbs sweep. For each child, in the order they were added:
-     *   1. Build the child's context from shared_data_t dependencies.
+     *   1. Build the child's context from shared_data_t dependencies
+     *      (a fresh copy or views; see context_copy_min_bytes).
      *   2. Push it to the child via set_context.
      *   3. child->step(rng).
      *   4. Write the child's updated value back to shared_data_t.
@@ -214,15 +269,14 @@ public:
         // sub-parameter name mistaken for the block name -- is otherwise a
         // silent no-op: build_context_for / context_view_for /
         // refresh_derived_for return without doing anything, the derived
-        // key freezes at its initial value, and the sampler converges to the
-        // wrong posterior with no exception, no NaN, healthy R-hat and ESS.
-        // Fail loudly instead.
+        // key remains at its initial value, and the sampler converges to the
+        // wrong posterior with no exception, no NaN, and R-hat and ESS
+        // within their usual thresholds. validate_dag_keys_() throws instead.
         if (!dag_checked_) {
             validate_dag_keys_();
             dag_checked_ = true;
         }
-        for (std::size_t ci = 0; ci < children_.size(); ++ci) {
-            auto& child = children_[ci];
+        for (auto& child : children_) {
             const std::string& cname = child->name();
 
             // Kernel-control freeze (interface.md Sec.1):
@@ -247,10 +301,10 @@ public:
             }
 
             // 1-2. Project shared_data into the child's context and push it
-            //      (views or a copy, see pass_context_). Steps 3-5 run inside
-            //      pass_context_, so a copy exists until the write-back and
-            //      the refresh are done.
-            pass_context_(ci, *child, [&]() {
+            //      (a fresh copy or views, see with_context_). Steps 3-5 run
+            //      inside with_context_, so a copy exists until the
+            //      write-back and the refresh are done.
+            with_context_(*child, [&]() {
                 // 3. Sample.
                 child->step(rng);
 
@@ -260,9 +314,9 @@ public:
                 //    a VI block (engine_kind() == VI) the rng overload routes
                 //    to current_sample(rng), writing a fresh q-sample (NOT
                 //    the q-mean) — preserving the VI block's uncertainty for
-                //    any MCMC sibling that reads it next iteration. See
-                //    system_design.md §18.4 for the hybrid-correctness
-                //    invariant.
+                //    any MCMC sibling whose context contains it in the next
+                //    sweep. See system_design.md §18.4 for the
+                //    hybrid-correctness invariant.
                 auto outputs = child->current_named_outputs(rng);
                 for (const auto& kv : outputs) {
                     data_.write_back(kv.first, kv.second);
@@ -712,7 +766,9 @@ private:
     // Emit a stale-derived-state warning if the frozen block name appears
     // as an upstream key in any refresher's dependency set. This is the
     // Sec.9 hazard: freezing an upstream block leaves its derived key
-    // stale under subsequent set_current updates.
+    // stale under subsequent set_current updates. Keys declared with
+    // shared_data_t::declare_refreshed_after_set_current are left out, and
+    // no warning is emitted when no key remains.
     void emit_stale_derived_warning_(const std::string& block_name,
                                      bool quiet,
                                      std::vector<std::string>& warnings) const {
@@ -720,10 +776,13 @@ private:
         const auto& invals = data_.invalidates();
         auto it = invals.find(block_name);
         if (it == invals.end() || it->second.empty()) return;
+        const auto& refreshed = data_.refreshed_after_set_current();
         std::string derived;
         for (const auto& k : it->second) {
+            if (refreshed.count(k)) continue;
             derived += (derived.empty() ? "" : ", ") + k;
         }
+        if (derived.empty()) return;
         warnings.push_back(
             "freezing '" + block_name + "' will hold derived key(s) [" +
             derived + "] stale under subsequent set_current updates to "
@@ -1066,99 +1125,19 @@ public:
     }
 
 private:
-    // How child i gets its context in step(): views of the stored values
-    // (shared_data_t::context_view_for) or a fresh copy (build_context_for).
-    // Both give the same keys, values and iteration order. Which one makes
-    // the child's set_context faster depends on the child and the machine:
-    // copying from the stored value can take longer than copying from a
-    // buffer written just before (measured on Apple Silicon when the child's
-    // copy is an operand of Accelerate BLAS calls). So the child's first
-    // update passes a copy and its second update views, both untimed; the
-    // next 2 * n_timed updates are timed, with views and copies in the order
-    // view, copy, copy, view, .... From then on views are passed if their
-    // median time is below view_ratio times the median time of copies, and
-    // copies otherwise. All of this starts again when the number of elements
-    // n in the context and the number n0 at the first update satisfy
-    // max(n, n0) > 2 * min(n, n0) + 1024.
-    struct context_pass_t {
-        static constexpr unsigned n_untimed  = 2;    // a copy, then views
-        static constexpr unsigned n_timed    = 9;    // per way
-        static constexpr double   view_ratio = 0.9;
-        unsigned            calls = 0;               // updates since (re)start
-        std::size_t         n_elem = 0;              // context size at (re)start
-        std::vector<double> t_view, t_copy;          // seconds
-        bool                decided = false;
-        bool                use_view = false;
-    };
-
-    using steady_clock_ = std::chrono::steady_clock;
-
-    // Passes child i its context (views or a copy, as described above) and
-    // then calls then(), which runs the rest of the child's update. A copy is
-    // destroyed after then() returns. The timed interval is the projection
-    // and the child's set_context.
+    // Passes `child` its context, then calls then(), which runs the rest of
+    // the child's update. The context is a fresh copy (the context
+    // build_context_for returns) when the size of its values is in
+    // [context_copy_min_bytes, context_copy_max_bytes], and read-only views
+    // of the stored values (context_view_for) otherwise; both have the same
+    // keys, values and iteration order (shared_data_t::
+    // context_view_or_copy_for). A copy is destroyed after then() returns.
     template <class Then>
-    void pass_context_(std::size_t i, block_sampler& child, Then&& then) {
-        if (context_pass_.size() < children_.size()) {
-            context_pass_.resize(children_.size());
-        }
-        context_pass_t& m = context_pass_[i];
-        const bool timed = !m.decided && m.calls >= context_pass_t::n_untimed;
-        const unsigned j = timed ? m.calls - context_pass_t::n_untimed : 0;
-        const bool view = m.decided ? m.use_view
-                        : timed     ? (j % 4 == 0 || j % 4 == 3)
-                                    : m.calls == 1;
-        const steady_clock_::time_point t0 =
-            timed ? steady_clock_::now() : steady_clock_::time_point();
-        if (view) {
-            const block_context& ctx = data_.context_view_for(child.name());
-            child.set_context(ctx);
-            record_pass_(m, view, timed, t0, n_elem_(ctx));
-            then();
-        } else {
-            const block_context ctx = data_.build_context_for(child.name());
-            child.set_context(ctx);
-            record_pass_(m, view, timed, t0, n_elem_(ctx));
-            then();
-        }
-    }
-
-    // Bookkeeping of pass_context_ after the child's set_context: n is the
-    // number of elements in the context that was passed.
-    static void record_pass_(context_pass_t& m, bool view, bool timed,
-                             steady_clock_::time_point t0, std::size_t n) {
-        const double dt = timed
-            ? std::chrono::duration<double>(steady_clock_::now() - t0).count()
-            : 0.0;
-
-        if (!m.decided && m.calls == 0) m.n_elem = n;
-        if (std::max(n, m.n_elem) > 2 * std::min(n, m.n_elem) + 1024) {
-            m = context_pass_t();  // start again with the next update
-            return;
-        }
-        if (m.decided) return;
-        ++m.calls;
-        if (!timed) return;
-        (view ? m.t_view : m.t_copy).push_back(dt);
-        if (m.t_view.size() < context_pass_t::n_timed
-            || m.t_copy.size() < context_pass_t::n_timed) return;
-        m.use_view = median_(m.t_view)
-                     < context_pass_t::view_ratio * median_(m.t_copy);
-        m.decided = true;
-        std::vector<double>().swap(m.t_view);
-        std::vector<double>().swap(m.t_copy);
-    }
-
-    static std::size_t n_elem_(const block_context& ctx) {
-        std::size_t n = 0;
-        for (const auto& kv : ctx) n += kv.second.n_elem;
-        return n;
-    }
-
-    static double median_(std::vector<double> v) {
-        const auto mid = v.begin() + static_cast<std::ptrdiff_t>(v.size() / 2);
-        std::nth_element(v.begin(), mid, v.end());
-        return *mid;
+    void with_context_(block_sampler& child, Then&& then) {
+        block_context copy;
+        child.set_context(data_.context_view_or_copy_for(
+            child.name(), context_copy_min_bytes, context_copy_max_bytes, copy));
+        then();
     }
 
     // The per-child part of set_current(theta) after the child's own
@@ -1169,9 +1148,10 @@ private:
         // a joint_nuts_block's name() is not a shared_data key at all
         // (see joint_nuts_block's docs), so that path would store a junk
         // entry while the real sub-parameter keys -- beta, sigma, ... --
-        // kept their PRE-restore values, and the next sweep would run
+        // still had their PRE-restore values, and the next sweep would run
         // against stale state. Use the no-rng overload here: this is a
-        // restore, not a sweep, so a VI child must not burn a q-draw.
+        // restore, not a sweep, so it must not consume a q-draw of a VI
+        // child.
         for (const auto& kv : child.current_named_outputs()) {
             data_.write_back(kv.first, kv.second);
         }
@@ -1200,11 +1180,11 @@ private:
     // DAG (declare_dependencies / declare_invalidates) names a direct child.
     // Both maps are only ever queried by child name -- build_context_for,
     // context_view_for and refresh_derived_for are called with
-    // child->name() -- so any other key is dead. The dangerous case is a
+    // child->name() -- so any other key has no effect. The dangerous case is a
     // joint block's sub-parameter name passed where the block name was
-    // meant: it silently freezes a derived key. Called once from the first
-    // step(); throws std::invalid_argument listing the unmatched names
-    // alongside the valid child names.
+    // meant: it leaves a derived key at its initial value with no error.
+    // Called once from the first step(); throws std::invalid_argument
+    // listing the unmatched names alongside the valid child names.
     void validate_dag_keys_() const {
         std::unordered_set<std::string> child_names;
         for (const auto& c : children_) child_names.insert(c->name());
@@ -1252,9 +1232,6 @@ private:
     // Set once the first step() has run validate_dag_keys_(). Mutable so the
     // one-time check can fire from the non-const step() without re-running.
     bool              dag_checked_ = false;
-
-    // Per child, in children_ order; see pass_context_.
-    std::vector<context_pass_t>                 context_pass_;
 };
 
 } // namespace AI4BayesCode

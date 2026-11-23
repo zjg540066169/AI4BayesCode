@@ -619,8 +619,10 @@ public:
         //   y_rep ~ N(eta, sigma^2) (stochastic; reads ONLY eta, sigma)
         // eta kept current during sampling via
         // declare_invalidates("gamma_beta_rj", {"eta"}) (the rjmcmc
-        // block writes beta), so stateful predict_at(list()) (empty
-        // changed-set, no Pass-1 recompute) reads a fresh eta.
+        // block writes beta), at the end of this constructor, and in
+        // set_current right after beta or X is written, so stateful
+        // predict_at(list()) (empty changed-set, no Pass-1 recompute) uses
+        // eta = X * beta of the current X and beta.
         // Behaviour-preserving: same X*beta and same per-i normal draw
         // order ⇒ bit-identical y_rep under a fixed predict RNG.
         impl_->data().set("eta", arma::vec(N, arma::fill::zeros));
@@ -640,6 +642,12 @@ public:
                 return eta;
             });
         impl_->data().declare_invalidates("gamma_beta_rj", {"eta"});
+
+        // "sse" (recomputed by step() before the first sweep after any
+        // set_current) and "eta" (recomputed by set_current) are current
+        // also while gamma_beta_rj is frozen, so freeze("gamma_beta_rj")
+        // emits no warning that they are held stale.
+        impl_->data().declare_refreshed_after_set_current({"sse", "eta"});
 
         // Predict DAG (full generative chain): X,beta -> eta ;
         // eta,sigma -> y_rep.
@@ -773,6 +781,10 @@ public:
             impl_->add_child(std::make_unique<rjmcmc_block>(std::move(cfg)));
         }
 
+        // eta from the initial X and beta, for predict_at before the first
+        // sweep.
+        impl_->data().refresh_key("eta");
+
         if (keep_history_) impl_->set_keep_history(true);
     }
 
@@ -856,6 +868,10 @@ public:
             rj_blk->set_current(cat);
             impl_->data().set("gamma", g_new);
             impl_->data().set("beta",  b_new);
+            // eta = X * beta is used by predict_at, so it is recomputed here,
+            // right after beta is written and before any check below can
+            // throw.
+            impl_->data().refresh_key("eta");
         }
         auto it_sigma = params.find("sigma");
         if (it_sigma != params.end()) {
@@ -905,9 +921,12 @@ public:
                                (std::size_t)y_chk.n_elem);
             }
             impl_->data().set("X", x_flat);
+            impl_->data().refresh_key("eta");   // of this X: N_new entries
             if (N_new != N_) {
                 impl_->data().set("y_rep",
                                   arma::vec(N_new, arma::fill::zeros));
+                impl_->data().set("N",
+                                  arma::vec{static_cast<double>(N_new)});
                 if (keep_history_ && impl_->history_size() > 1) {
                     // Non-fatal warning. backend_neutral.hpp's installed R
                     // copy only guarantees ai4b::stop (not ai4b::warning),

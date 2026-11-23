@@ -5,32 +5,32 @@
  *  "sse", which is computed once per sweep instead of at every slice
  *  evaluation. Checks:
  *
- *    C1  sigma's context contains "sse" and not X, and "sse" is refreshed
+ *    dag: sigma's context contains "sse" and not X, and "sse" is refreshed
  *        after gamma_beta_rj (the block that writes beta) updates.
  *
- *    C2  the draws are bit-identical to those of a reference copy of the model
- *        in which "sse" is recomputed from the current y, X and beta before
- *        every sweep, across construction, step(n), set_current of every input
- *        (a call that throws after writing beta, X and y set in separate
- *        calls with step(0) after each call, a change of N) and move
+ *    draws: the draws are bit-identical to those of a reference copy of the
+ *        model in which "sse" is recomputed from the current y, X and beta
+ *        before every sweep, across construction, step(n), set_current of
+ *        every input (a call that throws after writing beta, X and y set in
+ *        separate calls with step(0) after each call, a change of N) and move
  *        construction / assignment. A stale "sse" on any of these paths
  *        changes the next sigma draw.
  *
- *    C3  the cached "sse" equals ||y - X beta||^2 computed in this test from
+ *    sse: the cached "sse" equals ||y - X beta||^2 computed in this test from
  *        the model's current y, X and beta (relative tolerance 1e-12; the
  *        BLAS result may differ in the last bits from this loop), after the
  *        first sweep, after step(n), and after one sweep following each
- *        set_current path of C2 and C4.
+ *        set_current path of the draws and X/y lengths checks.
  *
- *    C4  X and y of different lengths (set_current of X with a new row count
- *        and no y): step(0) runs, step(1) raises the error "X has .. rows but
- *        y has length ..", and the failed step leaves the state and the RNG
- *        unchanged. Covered with X shorter than y while sigma and
+ *    X/y lengths: X and y of different lengths (set_current of X with a new
+ *        row count and no y): step(0) runs, step(1) raises the error "X has ..
+ *        rows but y has length ..", and the failed step leaves the state and
+ *        the RNG unchanged. Covered with X shorter than y while sigma and
  *        gamma_beta_rj are frozen (the step then uses X only through "sse"),
  *        and with X longer than y and nothing frozen.
  *
- *  The model and its reference run in one process, so the C2 comparison
- *  holds on every platform and BLAS.
+ *  The model and its reference run in one process, so the comparison of the
+ *  draws holds on every platform and BLAS.
  *================================================================================*/
 
 #include <armadillo>
@@ -115,7 +115,7 @@ void refresh_sse(SpikeSlabRJMCMC& r) {
     impl(r).data().refresh_key("sse");
 }
 
-// C3: the cached "sse" of m equals ||y - X beta||^2 computed here, with a
+// The cached "sse" of m equals ||y - X beta||^2 computed here, with a
 // plain loop, from m's current y, X and beta.
 bool sse_current(const SpikeSlabRJMCMC& m) {
     const AI4BayesCode::shared_data_t& d = impl(m).data();
@@ -151,14 +151,14 @@ bool sweeps(SpikeSlabRJMCMC& a, SpikeSlabRJMCMC& r, int n) {
     return true;
 }
 
-// C2 over n sweeps, with C3 on a after the first of them.
+// The draws over n sweeps, and the cached "sse" of a after the first of them.
 void check_sweeps(SpikeSlabRJMCMC& a, SpikeSlabRJMCMC& r, int n,
                   const std::string& what, bool pre_ok = true) {
     bool ok = sweeps(a, r, 1);
-    const bool c3 = sse_current(a);
+    const bool sse_ok = sse_current(a);
     ok = ok && sweeps(a, r, n - 1);
-    check(pre_ok && ok, "C2 " + what);
-    check(c3, "C3 " + what);
+    check(pre_ok && ok, "draws: " + what);
+    check(sse_ok, "sse: " + what);
 }
 
 void set_both(SpikeSlabRJMCMC& a, SpikeSlabRJMCMC& r,
@@ -188,22 +188,22 @@ void run_case(std::size_t N, std::size_t p, int seed) {
     SpikeSlabRJMCMC a(X, y, 1.0, 1.0, seed, false);
     SpikeSlabRJMCMC r(X, y, 1.0, 1.0, seed, false);
 
-    // C1
+    // dag
     const auto dag = a.get_dag();
     const auto& reads = dag.gibbs_reads.at("sigma");
     check(has(reads, "sse") && !has(reads, "X"),
-          "C1 sigma's context contains sse, not X");
+          "dag: sigma's context contains sse, not X");
     check(dag.gibbs_invalidates.count("gamma_beta_rj") &&
           has(dag.gibbs_invalidates.at("gamma_beta_rj"), "sse"),
-          "C1 sse is refreshed after gamma_beta_rj");
+          "dag: sse is refreshed after gamma_beta_rj");
 
-    // C2, C3
+    // draws, sse
     check_sweeps(a, r, 200, "construction and step(1)");
 
     a.step(150);
     for (int s = 0; s < 150; ++s) { refresh_sse(r); r.step(1); }
-    check(sse_current(a), "C3 step(n)");
-    check(same_state(a, r) && sweeps(a, r, 20), "C2 step(n)");
+    check(sse_current(a), "sse: step(n)");
+    check(same_state(a, r) && sweeps(a, r, 20), "draws: step(n)");
 
     set_both(a, r, gamma_beta(p, 0.9));
     check_sweeps(a, r, 50, "set_current gamma, beta");
@@ -282,7 +282,7 @@ bool plain_sweeps(SpikeSlabRJMCMC& a, SpikeSlabRJMCMC& r, int n) {
     return true;
 }
 
-// C4. The same set_current calls are made on a and on the reference r, and
+// X/y lengths. The same set_current calls are made on a and on the reference r, and
 // the steps that fail on a are not made on r, so equal states afterwards show
 // that a failed step changes neither the state nor the RNG.
 void run_mismatch(std::size_t N, std::size_t p, int seed) {
@@ -306,32 +306,32 @@ void run_mismatch(std::size_t N, std::size_t p, int seed) {
     impl(r).freeze(both, true);
     { AI4BayesCode::state_map sx; sx["X"] = flat(Xs); set_both(a, r, sx); }
     check(step_error(a, 0).empty(),
-          "C4 step(0) with X shorter than y (sigma, gamma_beta_rj frozen)");
+          "X/y lengths: step(0) with X shorter than y (sigma, gamma_beta_rj frozen)");
     check(step_error(a, 1) == mismatch_message(Ns, N),
-          "C4 step(1) raises the X/y length error, X shorter than y "
+          "X/y lengths: step(1) raises the X/y length error, X shorter than y "
           "(sigma, gamma_beta_rj frozen)");
     { AI4BayesCode::state_map sy; sy["y"] = ys; set_both(a, r, sy); }
     bool ok = plain_sweeps(a, r, 1);
-    const bool c3_short = sse_current(a);
+    const bool sse_short = sse_current(a);
     ok = ok && plain_sweeps(a, r, 9);
     impl(a).unfreeze_all();
     impl(r).unfreeze_all();
     ok = ok && plain_sweeps(a, r, 20);
-    check(ok, "C4 the failed step changes neither state nor RNG (X shorter)");
-    check(c3_short, "C3 after y of the new length is set (X shorter)");
+    check(ok, "X/y lengths: the failed step changes neither state nor RNG (X shorter)");
+    check(sse_short, "sse: after y of the new length is set (X shorter)");
 
     // X longer than y, nothing frozen.
     { AI4BayesCode::state_map sx; sx["X"] = flat(Xl); set_both(a, r, sx); }
     check(step_error(a, 1) == mismatch_message(Nl, Ns),
-          "C4 step(1) raises the X/y length error, X longer than y");
+          "X/y lengths: step(1) raises the X/y length error, X longer than y");
     check(step_error(a, 3) == mismatch_message(Nl, Ns),
-          "C4 step(3) raises it again while X and y differ in length");
+          "X/y lengths: step(3) raises it again while X and y differ in length");
     { AI4BayesCode::state_map sy; sy["y"] = yl; set_both(a, r, sy); }
     ok = plain_sweeps(a, r, 1);
-    const bool c3_long = sse_current(a);
+    const bool sse_long = sse_current(a);
     ok = ok && plain_sweeps(a, r, 29);
-    check(ok, "C4 the failed steps change neither state nor RNG (X longer)");
-    check(c3_long, "C3 after y of the new length is set (X longer)");
+    check(ok, "X/y lengths: the failed steps change neither state nor RNG (X longer)");
+    check(sse_long, "sse: after y of the new length is set (X longer)");
 }
 
 void guarded(void (*fn)(std::size_t, std::size_t, int),

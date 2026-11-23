@@ -312,7 +312,9 @@ Before any PR touching Tier A / B / C lands:
 - [ ] **Check #26 (d) -- stale-derived warning (only if applicable).**
       For any wrapper whose composite has a deterministic refresher over
       a whitelisted block's output: `m$freeze("<upstream_of_derived>")`
-      emits `Rcpp::warning` mentioning the downstream derived key.
+      emits `Rcpp::warning` mentioning the downstream derived key, unless
+      the wrapper declares that key with
+      `declare_refreshed_after_set_current` (codegen_cpp.md Sec.7a).
       Skip this sub-check if no such refresher exists.
 - [ ] **Layer-3 R2.f exclusion.** R runner emits the frozen-param
       exclusion filter (`h1 <- h1[setdiff(names(h1), m$get_frozen())]`)

@@ -144,6 +144,7 @@ public:
     void declare_dependencies(const std::string& block_name,
                               std::vector<std::string> keys) {
         dependencies_[block_name] = std::move(keys);
+        ++dependencies_version_;
     }
 
     /**
@@ -178,6 +179,30 @@ public:
                 existing.push_back(std::move(k));
             }
         }
+    }
+
+    /**
+     * Declare derived keys that the model recomputes from the current values
+     * after every set_current call that changes a value they are computed
+     * from, before the keys are used again. This holds also while the block
+     * that invalidates them is frozen, when refresh_derived_for does not run
+     * for that block. composite_block::freeze leaves these keys out of its
+     * warning that freezing a block holds its derived keys stale, and emits
+     * no such warning when no key remains. Declare a key only if every
+     * set_current path recomputes it, or marks it to be recomputed before it
+     * is used again. Repeated calls add to the set.
+     */
+    void declare_refreshed_after_set_current(
+            std::vector<std::string> derived_keys) {
+        for (auto& k : derived_keys) {
+            refreshed_after_set_current_.insert(std::move(k));
+        }
+    }
+
+    /// The keys declared with declare_refreshed_after_set_current().
+    const std::unordered_set<std::string>&
+    refreshed_after_set_current() const noexcept {
+        return refreshed_after_set_current_;
     }
 
     /**
@@ -246,55 +271,66 @@ public:
     /**
      * The context build_context_for(block_name) returns, with the same keys,
      * values and iteration order, but without copying the values: each entry
-     * is a read-only view of the stored value. The views are made again when
-     * the block's dependency list changes or when a stored value has another
-     * address or length than when its view was made, so every call refers to
-     * the current values. The returned map is valid until this object is next
+     * is a read-only view of the stored value. The views are made again after
+     * a declare_dependencies call or when a stored value has another address
+     * or length than when its view was made, so every call refers to the
+     * current values. The returned map is valid until this object is next
      * modified; copy from it before that (set_context does).
      */
     const block_context& context_view_for(const std::string& block_name) {
         context_views_t::entry& e = views_.blocks[block_name];
-        const auto dit = dependencies_.find(block_name);
-        bool ok = e.valid && (dit == dependencies_.end()
-                                  ? e.keys.empty() : e.keys == dit->second);
+        if (!same_list_(e)) {
+            make_views_(e, block_name);
+            return e.ctx;
+        }
+        bool ok = true;
         for (std::size_t i = 0; ok && i < e.keys.size(); ++i) {
-            const auto vit = values_.find(e.keys[i]);
-            ok = vit != values_.end()
-                 && e.addr[i] == context_views_t::address(vit->second)
-                 && e.n_elem[i] == vit->second.n_elem;
+            ok = e.addr[i] == context_views_t::address(*e.obj[i])
+                 && e.n_elem[i] == e.obj[i]->n_elem;
         }
-        if (ok) return e.ctx;
-
-        // Make the views again, inserted in dependency order as in
-        // build_context_for, so the iteration order is the same.
-        e.valid = false;
-        std::vector<std::string> keys;
-        if (dit != dependencies_.end()) keys = dit->second;
-        std::vector<std::uintptr_t> addr(keys.size());
-        std::vector<arma::uword> n_elem(keys.size());
-        block_context ctx;
-        for (std::size_t i = 0; i < keys.size(); ++i) {
-            const auto vit = values_.find(keys[i]);
-            if (vit == values_.end()) {
-                throw std::out_of_range(
-                    "shared_data_t::build_context_for: block '" + block_name
-                    + "' depends on missing key '" + keys[i] + "'");
-            }
-            arma::vec& v = vit->second;
-            ctx.emplace(std::piecewise_construct,
-                        std::forward_as_tuple(keys[i]),
-                        std::forward_as_tuple(v.memptr(), v.n_elem,
-                                              /*copy_aux_mem=*/false,
-                                              /*strict=*/true));
-            addr[i] = context_views_t::address(v);
-            n_elem[i] = v.n_elem;
-        }
-        e.ctx.swap(ctx);
-        e.keys.swap(keys);
-        e.addr.swap(addr);
-        e.n_elem.swap(n_elem);
-        e.valid = true;
+        if (!ok) remake_views_(e);
         return e.ctx;
+    }
+
+    /**
+     * The views of context_view_for(block_name), or, when the values in them
+     * take between min_bytes and max_bytes bytes (bounds included; the size
+     * is the sum of n_elem * sizeof(double) over the entries), a copy with
+     * the same keys, values and iteration order: the context
+     * build_context_for(block_name) returns. The copy is made in `copy`,
+     * which is first replaced by an empty map, from the stored values,
+     * without looking the keys up again and without making the views again
+     * unless declare_dependencies was called; `copy` is not modified when
+     * the views are returned. Returns the views or `copy`.
+     */
+    const block_context& context_view_or_copy_for(const std::string& block_name,
+                                                  std::size_t min_bytes,
+                                                  std::size_t max_bytes,
+                                                  block_context& copy) {
+        context_views_t::entry& e = views_.blocks[block_name];
+        if (!same_list_(e)) make_views_(e, block_name);
+        // e.obj now points to the stored values of the list.
+        bool same_len = true, same_addr = true;
+        for (std::size_t i = 0; i < e.keys.size(); ++i) {
+            same_len = same_len && e.n_elem[i] == e.obj[i]->n_elem;
+            same_addr = same_addr
+                        && e.addr[i] == context_views_t::address(*e.obj[i]);
+        }
+        const std::size_t bytes = same_len ? e.bytes : current_bytes_(e);
+        if (bytes < min_bytes || bytes > max_bytes) {
+            if (!same_len || !same_addr) remake_views_(e);
+            return e.ctx;
+        }
+        // The copy is made from the stored values, so the views are not made
+        // again here when a value has new storage or a new length (a derived
+        // key whose refresher returns a new vector); the next call that
+        // returns the views makes them again. Inserted in dependency order,
+        // as build_context_for inserts them, into a new map.
+        block_context().swap(copy);
+        for (std::size_t i = 0; i < e.keys.size(); ++i) {
+            copy[e.keys[i]] = *e.obj[i];
+        }
+        return copy;
     }
 
     /**
@@ -831,18 +867,25 @@ public:
     invalidates() const noexcept { return invalidates_; }
 
 private:
-    // Views made by context_view_for(), per block. Copying or moving a
-    // shared_data_t does not copy or move them: the target has none and a
-    // moved-from object is emptied, so every view refers to values_ of the
-    // object that holds it. A view map is only swapped or cleared, never
-    // assigned to: assigning to a view would write into values_.
+    // Views made by context_view_for() and context_view_or_copy_for(), per
+    // block. Copying or moving a shared_data_t does not copy or move them:
+    // the target has none and a moved-from object is emptied, so every view
+    // refers to values_ of the object that holds it. A view map is only
+    // swapped or cleared, never assigned to: assigning to a view would write
+    // into values_. obj points to elements of values_; no element of values_
+    // is erased while views_ has entries (keys are only added to it, and
+    // views_ is cleared before it is assigned), so these pointers remain
+    // valid.
     struct context_views_t {
         struct entry {
-            std::vector<std::string>    keys;    // dependency list of the views
-            std::vector<std::uintptr_t> addr;    // address of each value's storage
-            std::vector<arma::uword>    n_elem;  // length of each value
-            block_context               ctx;     // the views
-            bool                        valid = false;
+            std::vector<std::string>      keys;    // dependency list of the views
+            std::uint64_t                 version = 0;  // see same_list_()
+            std::vector<arma::vec*>       obj;     // the stored value of each key
+            std::vector<std::uintptr_t>   addr;    // address of each value's storage
+            std::vector<arma::uword>      n_elem;  // length of each value
+            std::size_t                   bytes = 0;  // size of the values in ctx
+            block_context                 ctx;     // the views
+            bool                          valid = false;
             entry() = default;
             entry(const entry&) = delete;
             entry& operator=(const entry&) = delete;
@@ -866,11 +909,88 @@ private:
         }
     };
 
+    // Whether entry e was made after the last declare_dependencies call; then
+    // e.keys is the block's dependency list and e.obj points to the stored
+    // values of its keys.
+    bool same_list_(const context_views_t::entry& e) const {
+        return e.valid && e.version == dependencies_version_;
+    }
+
+    // Makes entry e of block_name for the block's current dependency list:
+    // the list, the pointer to each key's stored value, and the views.
+    void make_views_(context_views_t::entry& e, const std::string& block_name) {
+        e.valid = false;
+        const auto dit = dependencies_.find(block_name);
+        std::vector<std::string> keys;
+        if (dit != dependencies_.end()) keys = dit->second;
+        std::vector<arma::vec*> obj(keys.size());
+        for (std::size_t i = 0; i < keys.size(); ++i) {
+            const auto vit = values_.find(keys[i]);
+            if (vit == values_.end()) {
+                throw std::out_of_range(
+                    "shared_data_t::build_context_for: block '" + block_name
+                    + "' depends on missing key '" + keys[i] + "'");
+            }
+            obj[i] = &vit->second;
+        }
+        e.keys.swap(keys);
+        e.version = dependencies_version_;
+        e.obj.swap(obj);
+        e.addr.resize(e.keys.size());
+        e.n_elem.resize(e.keys.size());
+        remake_views_(e);
+    }
+
+    // Makes the views of entry e again from e.obj, with the current address
+    // and length of each stored value, inserted in dependency order as in
+    // build_context_for, so the iteration order is the same. The list and
+    // the pointers are not changed.
+    static void remake_views_(context_views_t::entry& e) {
+        e.valid = false;
+        block_context ctx;
+        for (std::size_t i = 0; i < e.keys.size(); ++i) {
+            arma::vec& v = *e.obj[i];
+            ctx.emplace(std::piecewise_construct,
+                        std::forward_as_tuple(e.keys[i]),
+                        std::forward_as_tuple(v.memptr(), v.n_elem,
+                                              /*copy_aux_mem=*/false,
+                                              /*strict=*/true));
+            e.addr[i] = context_views_t::address(v);
+            e.n_elem[i] = v.n_elem;
+        }
+        std::size_t n = 0;
+        for (const auto& kv : ctx) n += kv.second.n_elem;
+        e.ctx.swap(ctx);
+        e.bytes = n * sizeof(double);
+        e.valid = true;
+    }
+
+    // The size of the current values of entry e, whose list is the block's
+    // current one: the sum of n_elem * sizeof(double) over the keys, a key
+    // listed twice counted once (its entries of e.obj are equal).
+    static std::size_t current_bytes_(const context_views_t::entry& e) {
+        std::size_t n = 0;
+        for (std::size_t i = 0; i < e.obj.size(); ++i) {
+            bool first = true;
+            for (std::size_t j = 0; first && j < i; ++j) {
+                first = e.obj[j] != e.obj[i];
+            }
+            if (first) n += e.obj[i]->n_elem;
+        }
+        return n * sizeof(double);
+    }
+
     // Declared first: cleared before values_ is assigned, destroyed after it.
     context_views_t views_;
     std::unordered_map<std::string, arma::vec> values_;
     std::unordered_map<std::string, std::vector<std::string>> dependencies_;
+    // Number of declare_dependencies calls; a views entry made at another
+    // value may hold an older dependency list.
+    std::uint64_t dependencies_version_ = 0;
     std::unordered_map<std::string, std::vector<std::string>> invalidates_;
+    // Derived keys the model recomputes after set_current; see
+    // declare_refreshed_after_set_current().
+    std::unordered_set<std::string> refreshed_after_set_current_;
     std::unordered_map<std::string, refresher_fn> refreshers_;
     /// Registration order of refreshers_, so refresh_all() can prime a
     /// derived-reads-derived chain in the order the author declared it.

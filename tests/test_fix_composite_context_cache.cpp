@@ -1,40 +1,59 @@
 // Regression test for how composite_block passes each child its context, and
 // for composite_block::sync_child.
 //
-// composite_block::step() passes a child either views of the stored values
-// (shared_data_t::context_view_for) or a fresh copy (build_context_for); the
-// child's first updates are timed with both, and the faster way is used
-// afterwards. Both must give exactly what build_context_for() gives at that
-// moment, on every path that writes shared data. Each probe child below
-// compares the context it receives with a fresh build_context_for(): same
-// keys, same iteration order, bitwise-equal values. Paths exercised:
-// data().set (same size, new size, small values), write_back (by step and
-// directly, also with a new length in the same storage),
-// refresh_derived_for, refresh_key, refresh_all, run_stochastic_refresher,
-// composite set_current and set_context, declare_dependencies (drop,
-// reorder, duplicate, empty, missing key), freeze / unfreeze, readapt_NUTS,
-// add_child after sweeps, copy and move of the whole shared_data_t, writes
-// through a get_mut() reference, writes to caller memory that a stored
-// value aliases, nested composites, two children with the same name.
-//
-// It also checks that unchanged data is not copied: context_view_for()
-// returns views of the stored values, and steady sweeps of a child that
-// copies nothing allocate no buffer of the size of the data. These checks
-// fail on trees where every context is a fresh copy.
-//
-// A copy must exist until the child's step, its write-back and the refresh
-// after it are done. sync_child(i) after a loader called on child i must give
-// the shared data, current() and later draws that set_current(theta) gives,
-// without calling the child's set_current, and must write the named outputs
-// of the overload without an RNG.
-//
-// context_view_for() and sync_child() are detected at compile time, so the
-// test also builds against trees without them, and then fails.
+// composite_block::step() passes a child a fresh copy of its context
+// (shared_data_t::build_context_for) when the values in the context take
+// between composite_block::context_copy_min_bytes and context_copy_max_bytes
+// bytes, and read-only views of the stored values
+// (shared_data_t::context_view_for) otherwise; readapt_NUTS() passes views.
+// This test sets the bounds to [24 KiB, 160 KiB] with
+// AI4BAYESCODE_CONTEXT_COPY_MIN_BYTES / AI4BAYESCODE_CONTEXT_COPY_MAX_BYTES,
+// so both ways are reached on every platform. Checked here:
+//  - Every context passed to a probe child equals build_context_for() at that
+//    moment: same keys, same iteration order, bitwise-equal values. Paths:
+//    data().set (same size, new size, small values), write_back (by step and
+//    directly, also with a new length in the same storage),
+//    refresh_derived_for, refresh_key, refresh_all, run_stochastic_refresher,
+//    composite set_current and set_context, declare_dependencies (drop,
+//    reorder, duplicate, empty, missing key), freeze / unfreeze,
+//    readapt_NUTS, add_child after sweeps, copy and move of the whole
+//    shared_data_t, writes through a get_mut() reference, writes to caller
+//    memory that a stored value aliases, nested composites, two children with
+//    the same name. These sections run with contexts below the copy band
+//    (views) and inside it (copies).
+//  - Every context comes the way the size rule gives, and readapt_NUTS
+//    passes views; both ways are reached on each side of both bounds; the
+//    size is the sum over the context's values, a key listed twice counted
+//    once, also after its length changes. A child whose dependency list is
+//    declared after its first update gets the context of the list, below,
+//    inside and above the band.
+//  - A copy exists until the child's step, its write-back and the refresh
+//    after it are done, and is freed after them.
+//  - context_view_for() and context_view_or_copy_for() directly, after every
+//    write path, with a copy made before the views; also for a block whose
+//    dependency list is declared after the first call, and with a `copy`
+//    argument that holds other entries.
+//  - Steady sweeps allocate no buffer of the data's size below and above the
+//    band (views), and exactly one per sweep inside it (the copy).
+//  - The views are not made again for a copy when a value in the context
+//    has new storage or a new length: context_view_or_copy_for() then calls
+//    the global operator new as often as for a copy of unchanged values,
+//    directly and in steady sweeps where a refresher returns a new vector in
+//    every sweep.
+//  - sync_child(i) after a loader called on child i gives the shared data,
+//    current() and later draws that set_current(theta) gives, does not call
+//    the child's set_current, and writes the named outputs of the overload
+//    without an RNG.
+// The members checked are detected at compile time, so the test also builds
+// against trees without them, and then fails.
 
 #include <cstddef>
 #include <cstdlib>
 
-// Count Armadillo allocations of at least g_big_threshold bytes, and keep the
+#define AI4BAYESCODE_CONTEXT_COPY_MIN_BYTES (24 * 1024)
+#define AI4BAYESCODE_CONTEXT_COPY_MAX_BYTES (160 * 1024)
+
+// Count Armadillo allocations of at least g_big_threshold bytes, and record the
 // addresses of those that are not freed yet (up to 64).
 static std::size_t g_big_allocs = 0;
 static std::size_t g_big_threshold = 0;  // 0: not counting
@@ -64,6 +83,26 @@ static bool big_live(const void* p) {
 #define ARMA_ALIEN_MEM_ALLOC_FUNCTION test_arma_alloc
 #define ARMA_ALIEN_MEM_FREE_FUNCTION  test_arma_free
 
+// Count calls of the global operator new while g_count_news is set (the
+// containers of the context code allocate through it; Armadillo allocates
+// through test_arma_alloc above). Not inlined, so GCC does not pair the
+// free() below with the operator new of a caller (-Wmismatched-new-delete).
+#include <new>
+#if defined(__GNUC__)
+#  define TEST_NOINLINE __attribute__((noinline))
+#else
+#  define TEST_NOINLINE
+#endif
+static std::size_t g_news = 0;
+static bool g_count_news = false;
+TEST_NOINLINE void* operator new(std::size_t n) {
+    if (g_count_news) ++g_news;
+    if (void* p = std::malloc(n == 0 ? 1 : n)) return p;
+    throw std::bad_alloc();
+}
+TEST_NOINLINE void operator delete(void* p) noexcept { std::free(p); }
+TEST_NOINLINE void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+
 #include <armadillo>
 #include "AI4BayesCode/block_sampler.hpp"
 #include "AI4BayesCode/shared_data.hpp"
@@ -89,8 +128,8 @@ using AI4BayesCode::state_map;
 
 static int g_checks = 0, g_fails = 0;
 static std::uint64_t g_hash = 1469598103934665603ULL;
-// Off in the sections that run on one kind of tree only, so the hash printed
-// at the end can be compared between trees.
+// Off in the sections that run on trees with the size rule only, so the hash
+// printed at the end can be compared between trees.
 static bool g_hashing = true;
 
 static void hash_bytes(const void* p, std::size_t n) {
@@ -102,6 +141,45 @@ static void hash_bytes(const void* p, std::size_t n) {
 static void ok(bool cond, const std::string& what) {
     ++g_checks;
     if (!cond) { ++g_fails; std::printf("  [FAIL] %s\n", what.c_str()); }
+}
+
+// ---- The size rule, if the tree has one -------------------------------------
+
+template <class C, class = void>
+struct has_copy_band : std::false_type {};
+template <class C>
+struct has_copy_band<C, std::void_t<decltype(C::context_copy_min_bytes),
+                                    decltype(C::context_copy_max_bytes)>>
+    : std::true_type {};
+
+template <class C>
+static std::size_t band_min() {
+    if constexpr (has_copy_band<C>::value) return C::context_copy_min_bytes;
+    else return 0;
+}
+template <class C>
+static std::size_t band_max() {
+    if constexpr (has_copy_band<C>::value) return C::context_copy_max_bytes;
+    else return 0;
+}
+static constexpr bool k_has_rule = has_copy_band<composite_block>::value;
+
+// Region of a context size: 0 below the band, 1 inside, 2 above.
+static int region_of(std::size_t bytes) {
+    if (bytes < band_min<composite_block>()) return 0;
+    return bytes <= band_max<composite_block>() ? 1 : 2;
+}
+
+// g_ways[region][way]: number of contexts passed by step(), way 0 = a copy,
+// 1 = views. g_readapt_ways[way]: the same for readapt_NUTS.
+static int g_ways[3][2] = {{0, 0}, {0, 0}, {0, 0}};
+static int g_readapt_ways[2] = {0, 0};
+static bool g_in_readapt = false;  // set around readapt_NUTS calls
+
+static std::size_t context_bytes(const block_context& ctx) {
+    std::size_t n = 0;
+    for (const auto& kv : ctx) n += kv.second.n_elem;
+    return n * sizeof(double);
 }
 
 // Same keys in the same iteration order, bitwise-equal values.
@@ -134,9 +212,31 @@ static int view_state(const block_context& ctx, const shared_data_t& d) {
     return views == 0 ? 0 : -1;
 }
 
-// Child that checks every context it receives against build_context_for()
-// on the composite's shared data. Its draw depends on every received value
-// and on the iteration order of the context.
+// Checks the way a context came against the size rule (views for
+// readapt_NUTS) and counts it.
+static void check_way(const block_context& ctx, int way, const std::string& who) {
+    if (way < 0 || !k_has_rule) return;  // a missing rule is reported in main()
+    const std::size_t bytes = context_bytes(ctx);
+    int expect = 1;
+    if (g_in_readapt) {
+        ++g_readapt_ways[way];
+    } else {
+        const int region = region_of(bytes);
+        ++g_ways[region][way];
+        expect = region == 1 ? 0 : 1;
+    }
+    if (way != expect) {
+        ok(false, who + ": a context of " + std::to_string(bytes) + " bytes came as "
+                  + (way ? "views" : "a copy") + (g_in_readapt ? " in readapt_NUTS" : "")
+                  + ", the rule gives " + (expect ? "views" : "a copy"));
+    } else {
+        ++g_checks;
+    }
+}
+
+// Child that checks every context passed to it against build_context_for()
+// on the composite's shared data and against the size rule. Its draw depends
+// on every value passed to it and on the iteration order of the context.
 class probe_block : public block_sampler {
 public:
     probe_block(std::string name, std::size_t dim, const shared_data_t* watched,
@@ -148,7 +248,9 @@ public:
         const block_context fresh = watched_->build_context_for(name_);
         ok(same_context(ctx, fresh),
            "child '" + name_ + "': context equals build_context_for");
-        modes_.push_back(view_state(ctx, *watched_));
+        const int way = view_state(ctx, *watched_);
+        modes_.push_back(way);
+        check_way(ctx, way, "child '" + name_ + "'");
         acc_ = 0.0;
         std::size_t k = 0;
         for (const auto& kv : ctx) {
@@ -177,7 +279,7 @@ public:
     }
 
     int n_set_ = 0, n_readapt_ = 0, n_set_current_ = 0;
-    std::vector<int> modes_;  // view_state of every context received
+    std::vector<int> modes_;  // view_state of every context passed
 
 private:
     std::string             name_;
@@ -187,6 +289,12 @@ private:
     double                  acc_ = 0.0;
     block_context           context_;
 };
+
+static void readapt(composite_block& c, std::mt19937_64& rng, std::size_t n) {
+    g_in_readapt = true;
+    c.readapt_NUTS(n, false, rng);
+    g_in_readapt = false;
+}
 
 // Child that uses only the lengths of its context (copies nothing).
 class length_block : public block_sampler {
@@ -224,12 +332,12 @@ static void sweeps(composite_block& c, std::mt19937_64& rng, int n) {
     for (int s = 0; s < n; ++s) c.step(rng);
 }
 
-// Fixed data X, y, c; children pa, pb, pc; derived r (invalidated by pa) and
-// q (refreshed only by refresh_key / refresh_all); stochastic eps. Returns
-// pc (readapt-capable).
-static probe_block* build_model(composite_block& comp) {
+// Fixed data X (200 * s elements), y, c; children pa, pb, pc; derived r
+// (invalidated by pa) and q (refreshed only by refresh_key / refresh_all);
+// stochastic eps. Returns pc (readapt-capable).
+static probe_block* build_model(composite_block& comp, std::size_t s) {
     shared_data_t& d = comp.data();
-    d.set("X", filled(200, 0.5, 1.0));
+    d.set("X", filled(200 * s, 0.5, 1.0));
     d.set("y", filled(30, -0.2, 0.7));
     d.set("c", arma::vec{2.0});
     d.set("eps", arma::vec(3, arma::fill::zeros));
@@ -238,18 +346,18 @@ static probe_block* build_model(composite_block& comp) {
     d.declare_dependencies("pa", {"X", "pb", "y"});
     d.declare_dependencies("pb", {"r", "pa", "X", "eps"});
     d.declare_dependencies("pc", {"c", "y", "q"});
-    d.register_refresher("r", [](const shared_data_t& s) -> arma::vec {
-        return s.get("y") * s.get("pa")[0];
+    d.register_refresher("r", [](const shared_data_t& sd) -> arma::vec {
+        return sd.get("y") * sd.get("pa")[0];
     });
-    d.register_refresher("q", [](const shared_data_t& s) -> arma::vec {
-        return 2.0 * s.get("y");
+    d.register_refresher("q", [](const shared_data_t& sd) -> arma::vec {
+        return 2.0 * sd.get("y");
     });
     d.declare_invalidates("pa", {"r"});
     d.register_stochastic_refresher("eps",
-        [](const shared_data_t& s, std::mt19937_64& g) -> arma::vec {
+        [](const shared_data_t& sd, std::mt19937_64& g) -> arma::vec {
             std::normal_distribution<double> nd(0.0, 1.0);
             arma::vec e(3);
-            for (auto& x : e) x = nd(g) + s.get("c")[0];
+            for (auto& x : e) x = nd(g) + sd.get("c")[0];
             return e;
         });
     auto pc_own = std::make_unique<probe_block>("pc", 1, &d, /*readapt=*/true);
@@ -261,7 +369,278 @@ static probe_block* build_model(composite_block& comp) {
     return pc;
 }
 
-// ---- Direct checks of shared_data_t::context_view_for -----------------------
+// ---- 1. Every ordinary write path; X has 200 * s elements, later 350 * s,
+//         480 * s and 500 * s.
+static void write_paths(std::mt19937_64& rng, std::size_t s) {
+    composite_block comp("outer");
+    probe_block* pc = build_model(comp, s);
+    shared_data_t& d = comp.data();
+
+    sweeps(comp, rng, 5);
+    d.set("X", filled(200 * s, 1.5, 0.3));          // same size
+    sweeps(comp, rng, 3);
+    d.set("X", filled(500 * s, -1.0, 0.2));         // new size
+    sweeps(comp, rng, 3);
+    d.set("y", filled(30, 0.9, 0.1));               // q is now out of date
+    sweeps(comp, rng, 2);
+    d.refresh_key("q");
+    sweeps(comp, rng, 2);
+    d.set("y", filled(30, 0.35, 0.2));
+    sweeps(comp, rng, 1);
+    d.refresh_all();
+    sweeps(comp, rng, 2);
+    {
+        std::mt19937_64 g2(5);
+        d.run_stochastic_refresher("eps", g2);
+    }
+    sweeps(comp, rng, 2);
+    d.write_back("c", arma::vec{3.0});
+    sweeps(comp, rng, 2);
+    d.set("pa", arma::vec{0.25});
+    d.refresh_derived_for("pa");
+    sweeps(comp, rng, 2);
+    comp.set_current(arma::vec{0.1, -0.2, 0.3, 0.4});
+    sweeps(comp, rng, 2);
+    {
+        block_context in;
+        in["c"] = arma::vec{4.0};
+        in["y"] = filled(30, 0.3, 0.3);
+        comp.set_context(in);
+    }
+    sweeps(comp, rng, 2);
+
+    // Dependency list changes: drop, reorder + add, empty, duplicate.
+    d.declare_dependencies("pa", {"X", "y"});
+    sweeps(comp, rng, 2);
+    d.declare_dependencies("pa", {"y", "X", "pb"});
+    sweeps(comp, rng, 2);
+    d.declare_dependencies("pa", {});
+    sweeps(comp, rng, 2);
+    d.declare_dependencies("pa", {"X", "y", "X"});
+    sweeps(comp, rng, 2);
+    d.declare_dependencies("pa", {"X", "pb", "y"});
+    sweeps(comp, rng, 2);
+
+    // A frozen child is skipped; after unfreeze its context must include
+    // the writes made while it was frozen.
+    comp.freeze(std::vector<std::string>{"pc"}, /*quiet=*/true);
+    const int pc_before = pc->n_set_;
+    d.set("c", arma::vec{5.0});
+    sweeps(comp, rng, 2);
+    ok(pc->n_set_ == pc_before, "no context is passed to a frozen child");
+    comp.unfreeze(std::vector<std::string>{"pc"});
+    sweeps(comp, rng, 2);
+
+    // readapt_NUTS passes the context too. pc's context is extended by X
+    // here, so that it lies in the copy band when s puts X there.
+    d.set("y", filled(30, -0.4, 0.5));
+    d.declare_dependencies("pc", {"c", "y", "q", "X"});
+    readapt(comp, rng, 3);
+    ok(pc->n_readapt_ == 1, "readapt reached the readapt-capable child");
+    sweeps(comp, rng, 1);
+    d.declare_dependencies("pc", {"c", "y", "q"});
+
+    // Whole-object copy and move assignment of the shared data.
+    shared_data_t snap = comp.data();
+    sweeps(comp, rng, 3);
+    d.set("X", filled(500 * s, 2.0, 0.4));
+    d.set("c", arma::vec{6.0});
+    sweeps(comp, rng, 2);
+    comp.data() = snap;                             // back to the older state
+    sweeps(comp, rng, 3);
+    shared_data_t snap2 = comp.data();
+    d.set("y", filled(30, 1.1, 0.2));
+    sweeps(comp, rng, 1);
+    snap2.set("c", arma::vec{7.0});
+    comp.data() = std::move(snap2);
+    sweeps(comp, rng, 2);
+
+    // A child added after sweeps, then a missing key.
+    d.declare_dependencies("pd", {"X", "pa"});
+    comp.add_child(std::make_unique<probe_block>("pd", 1, &d));
+    sweeps(comp, rng, 2);
+    d.declare_dependencies("pd", {"X", "nope"});
+    std::string expected_msg, got_msg;
+    try { (void)d.build_context_for("pd"); }
+    catch (const std::out_of_range& e) { expected_msg = e.what(); }
+    try { comp.step(rng); }
+    catch (const std::out_of_range& e) { got_msg = e.what(); }
+    ok(!expected_msg.empty() && got_msg == expected_msg,
+       "missing key throws the build_context_for error");
+    d.set("nope", arma::vec{1.0});
+    sweeps(comp, rng, 30);
+    d.set("X", filled(500 * s, 0.6, 0.6));
+    d.write_back("c", arma::vec{8.0});
+    sweeps(comp, rng, 3);
+    // New lengths in the same storage: X shrinks and grows within its
+    // buffer, c changes length within Armadillo's local buffer.
+    d.write_back("X", filled(350 * s, 0.4, 0.2));
+    d.write_back("c", arma::vec{1.0, 2.0});
+    sweeps(comp, rng, 2);
+    d.write_back("X", filled(480 * s, 0.1, 0.5));
+    d.write_back("c", arma::vec{9.0});
+    sweeps(comp, rng, 2);
+}
+
+// ---- 2. Writes through a held get_mut() reference ---------------------------
+static void get_mut_writes(std::mt19937_64& rng, std::size_t s) {
+    composite_block comp("mut");
+    build_model(comp, s);
+    shared_data_t& d = comp.data();
+    sweeps(comp, rng, 3);
+    arma::vec& Xref = d.get_mut("X");
+    sweeps(comp, rng, 1);
+    Xref[0] += 1.0;                                 // after the reference was taken
+    sweeps(comp, rng, 1);
+    Xref[1] -= 2.0;
+    sweeps(comp, rng, 25);
+    Xref[2] += 3.0;
+    sweeps(comp, rng, 2);
+}
+
+// ---- 3. A get_mut() reference into an object later moved in -----------------
+static void moved_in(std::mt19937_64& rng, std::size_t s) {
+    composite_block comp("moved");
+    build_model(comp, s);
+    sweeps(comp, rng, 3);
+    shared_data_t other = comp.data();
+    arma::vec& yref = other.get_mut("y");
+    comp.data() = std::move(other);                 // yref now refers into comp
+    sweeps(comp, rng, 2);
+    yref[0] += 1.0;
+    sweeps(comp, rng, 1);
+    yref[5] -= 0.5;
+    sweeps(comp, rng, 2);
+}
+
+// ---- 4. Nested composites; the outer X has 200 * s elements -----------------
+static void nested(std::mt19937_64& rng, std::size_t s) {
+    composite_block outer("outer2");
+    auto inner_own = std::make_unique<composite_block>("inner");
+    composite_block* inner = inner_own.get();
+    shared_data_t& od = outer.data();
+    shared_data_t& id = inner->data();
+    id.set("Z", filled(50, 0.1, 1.0));
+    id.declare_dependencies("i1", {"Z", "X", "o1"});
+    id.declare_dependencies("i2", {"i1", "X"});
+    inner->add_child(std::make_unique<probe_block>("i1", 1, &id));
+    inner->add_child(std::make_unique<probe_block>("i2", 2, &id));
+    od.set("X", filled(200 * s, 0.7, 0.5));
+    od.declare_dependencies("o1", {"X"});
+    od.declare_dependencies("inner", {"X", "o1"});
+    od.declare_dependencies("o2", {"inner", "X"});
+    outer.add_child(std::make_unique<probe_block>("o1", 1, &od));
+    outer.add_child(std::move(inner_own));
+    outer.add_child(std::make_unique<probe_block>("o2", 1, &od));
+    sweeps(outer, rng, 5);
+    od.set("X", filled(200 * s, -0.3, 0.9));
+    sweeps(outer, rng, 3);
+    id.set("Z", filled(80, 0.4, 0.4));
+    sweeps(outer, rng, 25);
+    od.set("X", filled(200 * s, 0.2, 0.1));
+    sweeps(outer, rng, 2);
+}
+
+// ---- 5. Two children with the same name -------------------------------------
+static void duplicate_names(std::mt19937_64& rng, std::size_t s) {
+    composite_block comp("dup");
+    shared_data_t& d = comp.data();
+    d.set("X", filled(200 * s, 0.2, 0.2));
+    d.declare_dependencies("p", {"X", "p"});
+    comp.add_child(std::make_unique<probe_block>("p", 1, &d));
+    comp.add_child(std::make_unique<probe_block>("p", 1, &d));
+    sweeps(comp, rng, 4);
+    d.set("X", filled(200 * s, 0.6, 0.1));
+    sweeps(comp, rng, 25);
+    d.set("X", filled(200 * s, 0.1, 0.9));
+    sweeps(comp, rng, 2);
+}
+
+// ---- 6. The size rule at its bounds -----------------------------------------
+// One probe child t with a single dependency X of n elements, so its context
+// takes 8 n bytes. For each n, the child's next 12 updates must come the way
+// the rule gives, and readapt_NUTS must pass views.
+template <class C>
+static void rule_checks(std::mt19937_64& rng) {
+    if constexpr (!has_copy_band<C>::value) {
+        ok(false, "composite_block::context_copy_min_bytes / context_copy_max_bytes "
+                  "are available");
+    } else {
+        const std::size_t lo = C::context_copy_min_bytes;
+        const std::size_t hi = C::context_copy_max_bytes;
+        ok(lo == std::size_t(24 * 1024) && hi == std::size_t(160 * 1024),
+           "the bounds are those of AI4BAYESCODE_CONTEXT_COPY_MIN_BYTES / "
+           "AI4BAYESCODE_CONTEXT_COPY_MAX_BYTES");
+        const std::size_t n_lo = (lo + 7) / 8;      // smallest n with 8 n >= lo
+        const std::size_t n_hi = hi / 8;            // largest n with 8 n <= hi
+        struct step_t { std::size_t n; int way; const char* what; };
+        const std::vector<step_t> plan = {
+            {1,                 1, "1 element"},
+            {n_lo - 1,          1, "just below the band"},
+            {n_lo,              0, "at the lower bound"},
+            {(n_lo + n_hi) / 2, 0, "inside the band"},
+            {n_hi,              0, "at the upper bound"},
+            {n_hi + 1,          1, "just above the band"},
+            {4 * n_hi,          1, "far above the band"},
+            {n_lo,              0, "back at the lower bound"},
+            {n_lo - 1,          1, "back below the band"},
+            {n_hi + 1,          1, "back above the band"},
+            {n_hi,              0, "back at the upper bound"},
+        };
+        composite_block comp("rule");
+        shared_data_t& d = comp.data();
+        d.set("X", filled(plan[0].n, 0.3, 0.2));
+        d.declare_dependencies("t", {"X"});
+        auto own = std::make_unique<probe_block>("t", 1, &d, /*readapt=*/true);
+        probe_block* t = own.get();
+        comp.add_child(std::move(own));
+        for (const auto& st : plan) {
+            d.set("X", filled(st.n, 0.1 + 1e-4 * double(st.n % 97), 0.2));
+            const std::size_t first = t->modes_.size();
+            sweeps(comp, rng, 12);
+            bool all = t->modes_.size() == first + 12;
+            for (std::size_t k = first; k < t->modes_.size(); ++k)
+                if (t->modes_[k] != st.way) all = false;
+            readapt(comp, rng, 2);
+            const bool views = t->modes_.size() == first + 13 && t->modes_.back() == 1;
+            ok(all && views, std::string("rule, ") + st.what + " (" + std::to_string(8 * st.n)
+                    + " bytes): every update gets " + (st.way ? "views" : "a copy")
+                    + ", readapt_NUTS views");
+        }
+
+        // Two values each below the band whose sum is inside it.
+        composite_block two("rule2");
+        shared_data_t& d2 = two.data();
+        d2.set("X", filled(n_lo / 2 + 1, 0.2, 0.3));
+        d2.set("y", filled(n_lo / 2 + 1, 0.4, 0.1));
+        d2.declare_dependencies("u", {"X", "y"});
+        auto own2 = std::make_unique<probe_block>("u", 1, &d2);
+        probe_block* u = own2.get();
+        two.add_child(std::move(own2));
+        sweeps(two, rng, 10);
+        bool all = u->modes_.size() == 10;
+        for (int m : u->modes_) if (m != 0) all = false;
+        ok(all, "rule: the size is the sum over the context's values");
+
+        // A key listed twice counts once, also after its length changes
+        // (8 n_hi bytes are inside the band, 16 n_hi bytes above it).
+        composite_block dup("rule3");
+        shared_data_t& d3 = dup.data();
+        d3.set("X", filled(n_lo, 0.1, 0.2));
+        d3.declare_dependencies("v", {"X", "X"});
+        auto own3 = std::make_unique<probe_block>("v", 1, &d3);
+        probe_block* v = own3.get();
+        dup.add_child(std::move(own3));
+        sweeps(dup, rng, 3);
+        d3.set("X", filled(n_hi, 0.3, 0.1));
+        sweeps(dup, rng, 3);
+        all = v->modes_.size() == 6;
+        for (int m : v->modes_) if (m != 0) all = false;
+        ok(all, "rule: a key listed twice counts once, also after its length changes");
+    }
+}
+
+// ---- 7. Direct checks of shared_data_t::context_view_for --------------------
 
 template <class T, class = void>
 struct has_context_view : std::false_type {};
@@ -270,20 +649,71 @@ struct has_context_view<T, std::void_t<decltype(
     std::declval<T&>().context_view_for(std::declval<const std::string&>()))>>
     : std::true_type {};
 
+template <class T, class = void>
+struct has_view_or_copy : std::false_type {};
+template <class T>
+struct has_view_or_copy<T, std::void_t<decltype(
+    std::declval<T&>().context_view_or_copy_for(
+        std::declval<const std::string&>(), std::size_t(0), std::size_t(0),
+        std::declval<block_context&>()))>>
+    : std::true_type {};
+
 // Views of d for `block` equal build_context_for and refer to d's storage.
+// context_view_or_copy_for gives a copy equal to build_context_for when the
+// size is within the bounds (both bounds included), and the views otherwise.
+// The first call after the change is a copy into a map that holds other
+// entries, so the copy is made before the views are made again.
 template <class SD>
 static void check_views(SD& d, const std::string& block, const std::string& what) {
-    const block_context& v = d.context_view_for(block);
     const block_context fresh = d.build_context_for(block);
+    if constexpr (has_view_or_copy<SD>::value) {
+        block_context c0;
+        for (int k = 0; k < 40; ++k) c0["other" + std::to_string(k)] = arma::vec{double(k)};
+        if (!fresh.empty()) c0[fresh.begin()->first] = arma::vec{-1.0, -2.0};
+        const block_context& r0 =
+            d.context_view_or_copy_for(block, 0, std::size_t(-1), c0);
+        bool copied = &r0 == &c0 && same_context(c0, fresh);
+        for (const auto& kv : c0)
+            if (copied && kv.second.n_elem > 0 &&
+                kv.second.memptr() == d.get(kv.first).memptr())
+                copied = false;
+        ok(copied, what + ": a copy made first, into a map that held other entries, "
+                          "equals build_context_for");
+    }
+    const block_context& v = d.context_view_for(block);
     ok(same_context(v, fresh), what + ": views equal build_context_for");
     bool stored = true;
     for (const auto& kv : v)
         if (kv.second.memptr() != d.get(kv.first).memptr()) stored = false;
     ok(stored, what + ": every entry refers to the stored value (no copy)");
+    if constexpr (has_view_or_copy<SD>::value) {
+        const std::size_t b = context_bytes(fresh);
+        block_context c1, c2, c3, c4;
+        c2["other"] = arma::vec{1.0, 2.0};
+        const block_context& r1 = d.context_view_or_copy_for(block, b, b, c1);
+        bool copied = &r1 == &c1;
+        for (const auto& kv : c1)
+            if (kv.second.n_elem > 0 && kv.second.memptr() == d.get(kv.first).memptr())
+                copied = false;
+        ok(copied && same_context(c1, fresh),
+           what + ": a size on both bounds gives a copy equal to build_context_for");
+        const block_context& r2 = d.context_view_or_copy_for(block, b + 1, b + 100, c2);
+        const block_context& r3 =
+            d.context_view_or_copy_for(block, 0, b == 0 ? 0 : b - 1, c3);
+        const block_context& r4 = d.context_view_or_copy_for(block, 1, 0, c4);
+        const block_context& vv = d.context_view_for(block);
+        ok(&r2 == &vv && c2.size() == 1 && c2.count("other") &&
+           (b == 0 || (&r3 == &vv && c3.empty())) && &r4 == &vv && c4.empty(),
+           what + ": a size outside the bounds gives the views and leaves `copy` "
+                  "as it was");
+    }
 }
 
 template <class SD>
 static void view_checks() {
+    if constexpr (!has_view_or_copy<SD>::value) {
+        ok(false, "shared_data_t::context_view_or_copy_for is available");
+    }
     if constexpr (!has_context_view<SD>::value) {
         ok(false, "shared_data_t::context_view_for is available");
     } else {
@@ -331,7 +761,7 @@ static void view_checks() {
         d.write_back("X", filled(450, 0.2, 0.3));       // longer, same buffer
         check_views(d, "b", "write_back of a longer value within the buffer");
         ok(d.get("X").memptr() == x_mem,
-           "the two write_backs above kept the storage address");
+           "the storage address is the same after the two write_backs above");
         d.write_back("y", filled(30, 0.9, 0.1));
         check_views(d, "b", "write_back of a longer value");
         d.refresh_derived_for("b");
@@ -369,6 +799,8 @@ static void view_checks() {
         d.declare_dependencies("b", {});
         check_views(d, "b", "empty dependency list");
         check_views(d, "nobody", "block without dependencies");
+        d.declare_dependencies("nobody", {"X", "y"});
+        check_views(d, "nobody", "dependencies declared after the first call");
         d.declare_dependencies("b", {"X", "c", "y", "e", "A", "r"});
         check_views(d, "b", "dependencies restored");
 
@@ -403,11 +835,49 @@ static void view_checks() {
     }
 }
 
+// ---- 8. A stored value that aliases caller memory ---------------------------
+static void aliased(std::mt19937_64& rng, std::size_t n) {
+    std::vector<double> buf(n, 1.0);
+    composite_block comp("alias");
+    comp.data().set("A", arma::vec(buf.data(), buf.size(),
+                                   /*copy_aux_mem=*/false, /*strict=*/true));
+    comp.data().declare_dependencies("r", {"A"});
+    auto own = std::make_unique<length_block>("r");
+    length_block* r = own.get();
+    comp.add_child(std::move(own));
+    bool all = true;
+    for (int s = 0; s < 30; ++s) {
+        buf[0] = double(s);  // written without any call on the composite
+        comp.step(rng);
+        if (r->first_ != double(s)) all = false;
+    }
+    ok(all, "every update shows the caller's latest write to aliased memory ("
+            + std::to_string(n) + " elements)");
+}
+
+// ---- 9. Data-sized allocations in steady sweeps -----------------------------
+// A child that copies nothing, with one dependency X of n elements: the
+// number of allocations of at least 8 n bytes in 50 sweeps after 5 sweeps.
+static std::size_t steady_allocs(std::mt19937_64& rng, std::size_t n) {
+    composite_block comp("big");
+    comp.data().set("X", filled(n, 0.3, 0.1));
+    comp.data().declare_dependencies("s", {"X"});
+    comp.add_child(std::make_unique<length_block>("s"));
+    sweeps(comp, rng, 5);
+    g_big_threshold = n * sizeof(double);
+    g_big_allocs = 0;
+    sweeps(comp, rng, 50);
+    const std::size_t steady = g_big_allocs;
+    g_big_threshold = 0;
+    g_n_big_live = 0;
+    return steady;
+}
+
 // ---- 10. Lifetime of a copy -------------------------------------------------
 // Child that records, when its context is a copy, whether the copy's buffer
 // for X is still allocated in its step() and in the refresh that follows its
-// write-back. It keeps the buffer's address only to look it up among the
-// allocated buffers; it never reads through it after set_context.
+// write-back. It stores the buffer's address only to look it up among the
+// allocated buffers, and never dereferences it after set_context.
 class lifetime_block : public block_sampler {
 public:
     lifetime_block(std::string name, const shared_data_t* watched)
@@ -467,15 +937,157 @@ static void copy_lifetime(std::mt19937_64& rng, std::size_t n) {
     }
     g_big_threshold = 0;
     g_n_big_live = 0;
-    ok(lt->n_copy_ > 0 && n_after == lt->n_copy_,
+    ok(lt->n_copy_ == 20 && n_after == 20,
        "lifetime: the child got a copy in " + std::to_string(lt->n_copy_)
-       + " of 20 updates");
+       + " of 20 updates (" + std::to_string(n) + " elements)");
     ok(lt->n_freed_in_step_ == 0,
        "lifetime: the copy is still allocated in the child's step()");
     ok(lt->n_freed_in_refresh_ == 0,
        "lifetime: the copy is still allocated in the refresh after the write-back");
     ok(n_freed_after == n_after,
        "lifetime: the copy is freed once the child's update is done");
+}
+
+// ---- 12. A dependency list declared after the child's first update ---------
+// The probe child t is swept with no dependency list (an empty context), then
+// given the list {X}, with X of n elements, and swept again; every context
+// is checked against build_context_for and the size rule.
+static void late_list(std::mt19937_64& rng, std::size_t n) {
+    composite_block comp("late");
+    shared_data_t& d = comp.data();
+    d.set("X", filled(n, 0.4, 0.3));
+    auto own = std::make_unique<probe_block>("t", 1, &d);
+    probe_block* t = own.get();
+    comp.add_child(std::move(own));
+    sweeps(comp, rng, 3);
+    d.declare_dependencies("t", {"X"});
+    sweeps(comp, rng, 3);
+    const int way = region_of(8 * n) == 1 ? 0 : 1;
+    bool all = t->n_set_ == 6 && t->modes_.size() == 6;
+    for (std::size_t k = 0; all && k < 6; ++k)
+        if (t->modes_[k] != (k < 3 ? -1 : way)) all = false;
+    ok(all, "dependency list declared after 3 updates (" + std::to_string(8 * n)
+            + " bytes): empty contexts, then " + (way ? "views" : "copies") + " of X");
+}
+
+// ---- 13. The views are not made again for a copy --------------------------
+// Making the views again allocates a node per key of the context and the
+// buckets; for a new dependency list it also allocates the key list and the
+// pointer vector. A copy allocates a node per key and the buckets. So, for a
+// copy made after a value got new storage or a new length,
+// context_view_or_copy_for() calls the global operator new as often as for a
+// copy of unchanged values, unless it makes the views again; and views made
+// again after a value got new storage take as many calls as a copy.
+template <class SD>
+static std::size_t news_of_copy(SD& d, const std::string& block) {
+    block_context c;
+    g_news = 0;
+    g_count_news = true;
+    (void)d.context_view_or_copy_for(block, 0, std::size_t(-1), c);
+    g_count_news = false;
+    return g_news;
+}
+
+// Steady sweeps of children a (context {s}) and b (context {X, E}, 40008
+// bytes, inside the band); E is refreshed after a, into a new vector, when
+// `refresh` is set. The number of calls of operator new in 20 sweeps.
+template <class SD>
+static std::size_t news_of_sweeps(std::mt19937_64& rng, bool refresh) {
+    composite_block comp("renew");
+    SD& d = comp.data();
+    d.set("s", arma::vec{0.5});
+    d.set("X", filled(4961, 0.3, 0.2));
+    d.set("E", filled(40, 0.1, 0.1));
+    d.declare_dependencies("a", {"s"});
+    d.declare_dependencies("b", {"X", "E"});
+    d.register_refresher("E", [](const shared_data_t& sd) -> arma::vec {
+        return filled(40, sd.get("a")[0], 0.1);
+    });
+    if (refresh) d.declare_invalidates("a", {"E"});
+    comp.add_child(std::make_unique<length_block>("a"));
+    comp.add_child(std::make_unique<length_block>("b"));
+    sweeps(comp, rng, 5);
+    const double* e_mem = d.get("E").memptr();
+    sweeps(comp, rng, 1);
+    ok((d.get("E").memptr() != e_mem) == refresh,
+       std::string("E ") + (refresh ? "gets" : "does not get") + " new storage in a sweep");
+    g_news = 0;
+    g_count_news = true;
+    sweeps(comp, rng, 20);
+    g_count_news = false;
+    const std::size_t n = g_news;
+    check_views(d, "b", std::string("after steady sweeps, E ")
+                        + (refresh ? "refreshed" : "unchanged"));
+    return n;
+}
+
+template <class SD>
+static void copy_without_views(std::mt19937_64& rng) {
+    if constexpr (has_view_or_copy<SD>::value) {
+        SD d;
+        d.set("X", filled(3000, 0.2, 0.3));
+        d.set("E", filled(40, 0.1, 0.5));
+        d.declare_dependencies("w", {"X", "E", "X"});
+        (void)news_of_copy(d, "w");                    // makes the views entry
+        const std::size_t same = news_of_copy(d, "w");
+        const double* e_mem = d.get("E").memptr();
+        d.set("E", filled(40, 0.7, 0.2));             // new storage
+        const bool moved = d.get("E").memptr() != e_mem;
+        const std::size_t new_storage = news_of_copy(d, "w");
+        d.set("E", filled(60, 0.7, 0.2));             // new storage and length
+        const std::size_t new_length = news_of_copy(d, "w");
+        std::printf("  calls of operator new for a copy: unchanged values %zu, a value "
+                    "with new storage %zu, with a new length %zu\n",
+                    same, new_storage, new_length);
+        ok(same > 0 && moved && new_storage == same && new_length == same,
+           "the views are not made again for a copy after a value got new storage or "
+           "a new length");
+        check_views(d, "w", "views after copies made while E had new storage");
+        d.declare_dependencies("w", {"X", "E"});
+        const std::size_t new_list = news_of_copy(d, "w");
+        ok(new_list > same,
+           "the views are made again for a copy after the dependency list changed ("
+           + std::to_string(new_list) + " calls of operator new)");
+        check_views(d, "w", "views after the dependency list changed");
+
+        d.declare_dependencies("u", {"X", "E"});
+        (void)news_of_copy(d, "u");                    // makes the views entry
+        const std::size_t copy_u = news_of_copy(d, "u");
+        (void)d.context_view_for("u");
+        d.set("E", filled(60, 0.3, 0.3));             // new storage, same length
+        g_news = 0;
+        g_count_news = true;
+        (void)d.context_view_for("u");
+        g_count_news = false;
+        const std::size_t remade = g_news;
+        ok(copy_u > 0 && remade == copy_u,
+           "views made again after a value got new storage take as many calls of "
+           "operator new as a copy (" + std::to_string(remade) + " and "
+           + std::to_string(copy_u)
+           + "): the key list and the pointers are not made again");
+        check_views(d, "u", "views made again after a value got new storage");
+        d.set("E", filled(60, 0.5, 0.4));             // new storage, same length
+        {
+            block_context cu;
+            g_news = 0;
+            g_count_news = true;
+            const block_context& vu = d.context_view_or_copy_for("u", 1, 0, cu);
+            g_count_news = false;
+            ok(&vu != &cu && g_news == copy_u,
+               "views returned by context_view_or_copy_for, made again after a value got "
+               "new storage, take as many calls of operator new as a copy ("
+               + std::to_string(g_news) + " and " + std::to_string(copy_u) + ")");
+        }
+        check_views(d, "u", "views of context_view_or_copy_for made again after new storage");
+
+        const std::size_t n_refresh = news_of_sweeps<SD>(rng, true);
+        const std::size_t n_fixed = news_of_sweeps<SD>(rng, false);
+        std::printf("  calls of operator new in 20 steady sweeps: E refreshed into a "
+                    "new vector %zu, E unchanged %zu\n", n_refresh, n_fixed);
+        ok(n_refresh == n_fixed,
+           "steady sweeps call operator new as often with E refreshed into a new "
+           "vector as with E unchanged");
+    }
 }
 
 // ---- 11. sync_child ---------------------------------------------------------
@@ -547,7 +1159,7 @@ private:
 // Probes pa, pb and pc on X, y, c with derived r (by pa), plus the
 // two-output child "two" with derived uw = u + w, and the child "vi".
 [[maybe_unused]] static void build_sync_model(composite_block& comp) {
-    build_model(comp);
+    build_model(comp, 1);
     shared_data_t& d = comp.data();
     d.set("uw", arma::vec{0.0});
     d.declare_dependencies("two", {"X", "pa"});
@@ -650,278 +1262,96 @@ static void sync_child_checks() {
 
 int main() {
     std::mt19937_64 rng(20261122);
+    // Used by the sections that run on trees with the size rule only, so the
+    // draws of the other sections are the same on every tree.
+    std::mt19937_64 rng_rule(99);
 
-    // ---- 1. Every ordinary write path -------------------------------------
-    {
-        composite_block comp("outer");
-        probe_block* pc = build_model(comp);
-        shared_data_t& d = comp.data();
-
-        sweeps(comp, rng, 5);
-        d.set("X", filled(200, 1.5, 0.3));             // same size
-        sweeps(comp, rng, 3);
-        d.set("X", filled(500, -1.0, 0.2));            // new size
-        sweeps(comp, rng, 3);
-        d.set("y", filled(30, 0.9, 0.1));            // q is now out of date
-        sweeps(comp, rng, 2);
-        d.refresh_key("q");
-        sweeps(comp, rng, 2);
-        d.set("y", filled(30, 0.35, 0.2));
-        sweeps(comp, rng, 1);
-        d.refresh_all();
-        sweeps(comp, rng, 2);
-        {
-            std::mt19937_64 g2(5);
-            d.run_stochastic_refresher("eps", g2);
-        }
-        sweeps(comp, rng, 2);
-        d.write_back("c", arma::vec{3.0});
-        sweeps(comp, rng, 2);
-        d.set("pa", arma::vec{0.25});
-        d.refresh_derived_for("pa");
-        sweeps(comp, rng, 2);
-        comp.set_current(arma::vec{0.1, -0.2, 0.3, 0.4});
-        sweeps(comp, rng, 2);
-        {
-            block_context in;
-            in["c"] = arma::vec{4.0};
-            in["y"] = filled(30, 0.3, 0.3);
-            comp.set_context(in);
-        }
-        sweeps(comp, rng, 2);
-
-        // Dependency list changes: drop, reorder + add, empty, duplicate.
-        d.declare_dependencies("pa", {"X", "y"});
-        sweeps(comp, rng, 2);
-        d.declare_dependencies("pa", {"y", "X", "pb"});
-        sweeps(comp, rng, 2);
-        d.declare_dependencies("pa", {});
-        sweeps(comp, rng, 2);
-        d.declare_dependencies("pa", {"X", "y", "X"});
-        sweeps(comp, rng, 2);
-        d.declare_dependencies("pa", {"X", "pb", "y"});
-        sweeps(comp, rng, 2);
-
-        // A frozen child is skipped; after unfreeze its context must include
-        // the writes made while it was frozen.
-        comp.freeze(std::vector<std::string>{"pc"}, /*quiet=*/true);
-        const int pc_before = pc->n_set_;
-        d.set("c", arma::vec{5.0});
-        sweeps(comp, rng, 2);
-        ok(pc->n_set_ == pc_before, "frozen child receives no context");
-        comp.unfreeze(std::vector<std::string>{"pc"});
-        sweeps(comp, rng, 2);
-
-        // readapt_NUTS passes the context too.
-        d.set("y", filled(30, -0.4, 0.5));
-        comp.readapt_NUTS(3, false, rng);
-        ok(pc->n_readapt_ == 1, "readapt reached the readapt-capable child");
-        sweeps(comp, rng, 1);
-
-        // Whole-object copy and move assignment of the shared data.
-        shared_data_t snap = comp.data();
-        sweeps(comp, rng, 3);
-        d.set("X", filled(500, 2.0, 0.4));
-        d.set("c", arma::vec{6.0});
-        sweeps(comp, rng, 2);
-        comp.data() = snap;                         // back to the older state
-        sweeps(comp, rng, 3);
-        shared_data_t snap2 = comp.data();
-        d.set("y", filled(30, 1.1, 0.2));
-        sweeps(comp, rng, 1);
-        snap2.set("c", arma::vec{7.0});
-        comp.data() = std::move(snap2);
-        sweeps(comp, rng, 2);
-
-        // A child added after sweeps, then a missing key.
-        d.declare_dependencies("pd", {"X", "pa"});
-        comp.add_child(std::make_unique<probe_block>("pd", 1, &d));
-        sweeps(comp, rng, 2);
-        d.declare_dependencies("pd", {"X", "nope"});
-        std::string expected_msg, got_msg;
-        try { (void)d.build_context_for("pd"); }
-        catch (const std::out_of_range& e) { expected_msg = e.what(); }
-        try { comp.step(rng); }
-        catch (const std::out_of_range& e) { got_msg = e.what(); }
-        ok(!expected_msg.empty() && got_msg == expected_msg,
-           "missing key throws the build_context_for error");
-        d.set("nope", arma::vec{1.0});
-        sweeps(comp, rng, 30);  // past the timing of every child
-        d.set("X", filled(500, 0.6, 0.6));
-        d.write_back("c", arma::vec{8.0});
-        sweeps(comp, rng, 3);
-        // New lengths in the same storage: X shrinks and grows within its
-        // buffer, c changes length within Armadillo's local buffer.
-        d.write_back("X", filled(350, 0.4, 0.2));
-        d.write_back("c", arma::vec{1.0, 2.0});
-        sweeps(comp, rng, 2);
-        d.write_back("X", filled(480, 0.1, 0.5));
-        d.write_back("c", arma::vec{9.0});
-        sweeps(comp, rng, 2);
+    // ---- 1-5 on both ways ------------------------------------------------
+    // With s = 1 every context of pa, pb, pd, o1, inner, o2, i1, i2 and p is
+    // below the copy band (views); with s = 30 X takes 6000 to 15000
+    // elements, which puts those contexts inside the band (copies).
+    for (std::size_t s : {std::size_t(1), std::size_t(30)}) {
+        write_paths(rng, s);
+        get_mut_writes(rng, s);
+        moved_in(rng, s);
+        nested(rng, s);
+        duplicate_names(rng, s);
+    }
+    if (k_has_rule) {
+        ok(g_ways[0][1] > 0 && g_ways[1][0] > 0,
+           "sections 1-5 ran with views below the band and copies inside it");
+        ok(g_readapt_ways[1] > 0 && g_readapt_ways[0] == 0,
+           "readapt_NUTS passed views, also with a context inside the band");
+    } else {
+        ok(false, "composite_block::context_copy_min_bytes / context_copy_max_bytes "
+                  "are available");
     }
 
-    // ---- 2. Writes through a held get_mut() reference ---------------------
-    {
-        composite_block comp("mut");
-        build_model(comp);
-        shared_data_t& d = comp.data();
-        sweeps(comp, rng, 3);
-        arma::vec& Xref = d.get_mut("X");
-        sweeps(comp, rng, 1);
-        Xref[0] += 1.0;                             // after the reference was taken
-        sweeps(comp, rng, 1);
-        Xref[1] -= 2.0;
-        sweeps(comp, rng, 25);
-        Xref[2] += 3.0;
-        sweeps(comp, rng, 2);
-    }
+    // ---- 8. A stored value that aliases caller memory (views) ------------
+    aliased(rng, 100);
 
-    // ---- 3. A get_mut() reference into an object later moved in -----------
-    {
-        composite_block comp("moved");
-        build_model(comp);
-        sweeps(comp, rng, 3);
-        shared_data_t other = comp.data();
-        arma::vec& yref = other.get_mut("y");
-        comp.data() = std::move(other);             // yref now refers into comp
-        sweeps(comp, rng, 2);
-        yref[0] += 1.0;
-        sweeps(comp, rng, 1);
-        yref[5] -= 0.5;
-        sweeps(comp, rng, 2);
+    // ---- 6. The size rule at its bounds (trees with the rule only) -------
+    g_hashing = false;
+    rule_checks<composite_block>(rng_rule);
+    if (k_has_rule) {
+        // ---- 12. A dependency list declared after the first update ------
+        const std::size_t n_lo = (band_min<composite_block>() + 7) / 8;
+        const std::size_t n_hi = band_max<composite_block>() / 8;
+        late_list(rng_rule, n_lo - 1);
+        late_list(rng_rule, n_lo);
+        late_list(rng_rule, n_hi + 1);
+        ok(g_ways[0][1] > 0 && g_ways[1][0] > 0 && g_ways[2][1] > 0,
+           "both ways reached: views below and above the band, copies inside");
+        ok(g_ways[0][0] == 0 && g_ways[1][1] == 0 && g_ways[2][0] == 0,
+           "no context came the other way");
+        std::printf("  contexts passed by step(): below the band %d views, %d copies; "
+                    "inside %d copies, %d views; above %d views, %d copies; "
+                    "by readapt_NUTS: %d views, %d copies\n",
+                    g_ways[0][1], g_ways[0][0], g_ways[1][0], g_ways[1][1],
+                    g_ways[2][1], g_ways[2][0], g_readapt_ways[1], g_readapt_ways[0]);
     }
+    g_hashing = true;
 
-    // ---- 4. Nested composites ---------------------------------------------
-    {
-        composite_block outer("outer2");
-        auto inner_own = std::make_unique<composite_block>("inner");
-        composite_block* inner = inner_own.get();
-        shared_data_t& od = outer.data();
-        shared_data_t& id = inner->data();
-        id.set("Z", filled(50, 0.1, 1.0));
-        id.declare_dependencies("i1", {"Z", "X", "o1"});
-        id.declare_dependencies("i2", {"i1", "X"});
-        inner->add_child(std::make_unique<probe_block>("i1", 1, &id));
-        inner->add_child(std::make_unique<probe_block>("i2", 2, &id));
-        od.set("X", filled(100, 0.7, 0.5));
-        od.declare_dependencies("o1", {"X"});
-        od.declare_dependencies("inner", {"X", "o1"});
-        od.declare_dependencies("o2", {"inner", "X"});
-        outer.add_child(std::make_unique<probe_block>("o1", 1, &od));
-        outer.add_child(std::move(inner_own));
-        outer.add_child(std::make_unique<probe_block>("o2", 1, &od));
-        sweeps(outer, rng, 5);
-        od.set("X", filled(100, -0.3, 0.9));
-        sweeps(outer, rng, 3);
-        id.set("Z", filled(80, 0.4, 0.4));
-        sweeps(outer, rng, 25);
-        od.set("X", filled(100, 0.2, 0.1));
-        sweeps(outer, rng, 2);
-    }
-
-    // ---- 5. Two children with the same name -------------------------------
-    {
-        composite_block comp("dup");
-        shared_data_t& d = comp.data();
-        d.set("X", filled(40, 0.2, 0.2));
-        d.declare_dependencies("p", {"X", "p"});
-        comp.add_child(std::make_unique<probe_block>("p", 1, &d));
-        comp.add_child(std::make_unique<probe_block>("p", 1, &d));
-        sweeps(comp, rng, 4);
-        d.set("X", filled(40, 0.6, 0.1));
-        sweeps(comp, rng, 25);
-        d.set("X", filled(40, 0.1, 0.9));
-        sweeps(comp, rng, 2);
-    }
-
-    // ---- 6. Views and copies while the child's updates are timed ----------
-    // Update 1: a copy; update 2: views (both untimed). Updates 3-20: views
-    // and copies in the order v c c v. Then one way only, until the context
-    // size changes by more than a factor of 2 (+1024): the update that sees
-    // the change uses that way, and the next 20 updates repeat the sequence.
-    {
-        composite_block comp("timing");
-        shared_data_t& d = comp.data();
-        d.set("X", filled(3000, 0.4, 0.3));
-        d.set("y", filled(100, 0.1, 0.2));
-        d.declare_dependencies("t", {"X", "y"});
-        auto own = std::make_unique<probe_block>("t", 1, &d);
-        probe_block* t = own.get();
-        comp.add_child(std::move(own));
-        sweeps(comp, rng, 30);
-        const std::vector<int> expect = {0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1,
-                                         0, 0, 1, 1, 0, 0, 1, 1, 0};
-        ok(std::vector<int>(t->modes_.begin(), t->modes_.begin() + 20) == expect,
-           "first 20 updates: copies and views in the timing order");
-        bool fixed = true;
-        for (std::size_t k = 21; k < 30; ++k)
-            if (t->modes_[k] != t->modes_[20] || t->modes_[k] < 0) fixed = false;
-        ok(fixed, "after the timing one way is used");
-        d.set("X", filled(9000, 0.2, 0.2));          // context grows 3x
-        sweeps(comp, rng, 21);
-        ok(t->modes_[30] == t->modes_[29],
-           "the update that sees the new size uses the chosen way");
-        ok(std::vector<int>(t->modes_.begin() + 31, t->modes_.begin() + 51) == expect,
-           "after the context grew, the sequence starts again");
-        d.set("X", filled(9000, 0.5, 0.5));          // same size: no new timing
-        sweeps(comp, rng, 10);
-        fixed = true;
-        for (std::size_t k = 52; k < 61; ++k)
-            if (t->modes_[k] != t->modes_[51] || t->modes_[k] < 0) fixed = false;
-        ok(fixed, "a value of the same size does not start the timing again");
-    }
-
-    // ---- 7. context_view_for, directly ------------------------------------
+    // ---- 7. context_view_for, directly -----------------------------------
     view_checks<shared_data_t>();
 
-    // ---- 8. A stored value that aliases caller memory ---------------------
+    // ---- 9. Data-sized allocations in steady sweeps, views ---------------
     {
-        std::vector<double> buf(100, 1.0);
-        composite_block comp("alias");
-        comp.data().set("A", arma::vec(buf.data(), buf.size(),
-                                       /*copy_aux_mem=*/false, /*strict=*/true));
-        comp.data().declare_dependencies("r", {"A"});
-        auto own = std::make_unique<length_block>("r");
-        length_block* r = own.get();
-        comp.add_child(std::move(own));
-        bool all = true;
-        for (int s = 0; s < 30; ++s) {
-            buf[0] = double(s);  // written without any call on the composite
-            comp.step(rng);
-            if (r->first_ != double(s)) all = false;
-        }
-        ok(all, "every update shows the caller's latest write to aliased memory");
+        const std::size_t n_above = steady_allocs(rng, 1000000);
+        std::printf("  data-sized allocations in 50 steady sweeps above the band: %zu\n",
+                    n_above);
+        ok(n_above == 0, "steady sweeps above the band do not copy unchanged data");
     }
 
-    // ---- 9. Unchanged data is not copied in steady sweeps -----------------
-    {
-        const std::size_t n_big = 1000000;
-        composite_block comp("big");
-        comp.data().set("X", filled(n_big, 0.3, 0.1));
-        comp.data().set("y", filled(1000, 0.1, 0.1));
-        comp.data().declare_dependencies("s", {"X", "y"});
-        comp.add_child(std::make_unique<length_block>("s"));
-        sweeps(comp, rng, 25);                       // past the timing
-        g_big_threshold = n_big * sizeof(double);
-        g_big_allocs = 0;
-        sweeps(comp, rng, 50);
-        const std::size_t steady = g_big_allocs;
-        g_big_threshold = 0;
-        g_n_big_live = 0;
-        std::printf("  data-sized allocations in 50 steady sweeps: %zu\n", steady);
-        ok(steady == 0, "steady sweeps do not copy unchanged data");
+    // ---- 8-10 inside the band, and 9 below it (trees with the rule only) -
+    if (k_has_rule) {
+        g_hashing = false;
+        const std::size_t lo_n = band_min<composite_block>() / 8;
+        const std::size_t mid =
+            (band_min<composite_block>() + band_max<composite_block>()) / 16;
+        aliased(rng_rule, mid);                                   // 8, copies
+        copy_lifetime(rng_rule, mid);                             // 10
+        const std::size_t n_inside = steady_allocs(rng_rule, mid);
+        std::printf("  data-sized allocations in 50 steady sweeps inside the band: %zu\n",
+                    n_inside);
+        ok(n_inside == 50, "steady sweeps inside the band make one copy each");
+        const std::size_t n_below = steady_allocs(rng_rule, lo_n / 2);
+        std::printf("  data-sized allocations in 50 steady sweeps below the band: %zu\n",
+                    n_below);
+        ok(n_below == 0, "steady sweeps below the band do not copy unchanged data");
+        // ---- 13. The views are not made again for a copy ----------------
+        copy_without_views<shared_data_t>(rng_rule);
+        g_hashing = true;
     }
 
-    // ---- 10. A copy exists until the child's update is done ---------------
-    copy_lifetime(rng, 3000);
-
-    // ---- 11. sync_child -----------------------------------------------------
+    // ---- 11. sync_child --------------------------------------------------
     g_hashing = false;
     sync_child_checks<composite_block>();
     g_hashing = true;
 
     std::printf("test_fix_composite_context_cache: %d checks, %d failures, "
-                "hash of every context and draw in sections 1-9 = %016llx\n",
+                "hash of the probe children's contexts and draws in sections 1-5 "
+                "= %016llx\n",
                 g_checks, g_fails, (unsigned long long)g_hash);
     if (g_fails == 0) {
         std::printf("PASS\n");
