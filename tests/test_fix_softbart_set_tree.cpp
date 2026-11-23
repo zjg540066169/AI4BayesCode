@@ -2,7 +2,7 @@
 // Licensed under the GNU General Public License v2.0 or later.
 // ============================================================================
 //  test_fix_softbart_set_tree.cpp -- softbart_block::set_tree restores every
-//  node field the SoftBart kernel reads, so that set_tree(get_tree()) leaves
+//  node field the SoftBart kernel uses, so that set_tree(get_tree()) leaves
 //  the transition kernel unchanged.
 //
 //  A. Constructed trees, exact values. The cutpoint limits [lower, upper] of
@@ -18,7 +18,7 @@
 //     points include stumps whose tau differs from the initial width and
 //     branches with a same-variable ancestor.
 //  C. set_tree of an earlier forest restores that forest's node fields
-//     exactly, and predict_history reads forest snapshots that contain stumps.
+//     exactly, and predict_history evaluates forest snapshots that contain stumps.
 // ============================================================================
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -336,7 +336,7 @@ static void partC() {
         std::printf("    %d of %d snapshots contain a stump; max |predict_history - fit| = %.3g\n",
                     with_stumps, M, max_err);
         check(H.n_rows == (arma::uword)M && F.n_rows == (arma::uword)M && with_stumps > 0 && max_err < 1e-12,
-              "predict_history reads every snapshot (stumps included) as the fitted forest");
+              "predict_history evaluates every snapshot (stumps included) as the fitted forest");
     }
 }
 

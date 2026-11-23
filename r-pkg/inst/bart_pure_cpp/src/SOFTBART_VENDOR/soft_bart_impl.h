@@ -1973,7 +1973,7 @@ arma::vec Forest::do_predict(const arma::mat& X) {
   return predict(trees, X, hypers);
 }
 
-// Appends, in pre-order, every node field that predict(n, X, hypers) reads
+// Appends, in pre-order, every node field that predict(n, X, hypers) uses
 // (root weight excluded): is_leaf, then mu (leaf) or var, val, tau (branch).
 void Forest::append_fit_params(const Node* n, std::vector<double>& out) {
   if(n->is_leaf) {

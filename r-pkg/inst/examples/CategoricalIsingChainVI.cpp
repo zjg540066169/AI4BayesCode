@@ -304,7 +304,7 @@ public:
 
         // phi arrives as the flat COLUMN-MAJOR length-(n*K) vector (matrices
         // are vectorised column-major under the backend-neutral convention).
-        // The VI block expects ROW-MAJOR (i*K + k) layout, so transpose.
+        // The VI block takes a ROW-MAJOR (i*K + k) layout, so transpose.
         auto it_phi = params.find("phi");
         if (it_phi != params.end()) {
             const arma::vec& phi_in = it_phi->second;

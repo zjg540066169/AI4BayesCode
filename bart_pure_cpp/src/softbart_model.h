@@ -66,7 +66,7 @@ inline std::string serialize_forest_to_str(const std::vector<::Node*>& trees) {
   }
   return os.str();
 }
-// Reads the tau after the mu of a stump; false (tau unchanged) when the next
+// Parses the tau after the mu of a stump; false (tau unchanged) when the next
 // token does not start a number, as in strings that have no stump tau.
 inline bool read_stump_tau_(std::istream& is, double& tau) {
   if (!(is >> std::ws)) return false;
