@@ -60,12 +60,14 @@
   ##       settings object must therefore not be modified while nuts() runs.
   ##       The diagonal-metric setup, 1/diag(M) and sqrt(diag(M)), is cached
   ##       across calls as n x 1 columns in precond_inv_cache /
-  ##       precond_sqrt_cache under the same precond_cache_valid contract (the
-  ##       dense metric keeps its n x n inverse and Cholesky there); on a cache
-  ##       hit the n^2 diagonal check is skipped and the cached arrays are used
-  ##       in place. The log-density, gradient and leapfrog closures capture
-  ##       their inputs by reference. Draws are bit-identical to the previous
-  ##       version.
+  ##       precond_sqrt_cache under the same precond_cache_valid contract (for
+  ##       a dense metric these fields hold the n x n inverse and Cholesky); on
+  ##       a cache hit the n^2 diagonal check is skipped and the cached arrays
+  ##       are used in place. The log-density, gradient and leapfrog closures
+  ##       capture the metric arrays, the bounds, raw_grad_fn and (log-density
+  ##       and gradient closures) target_log_kernel by reference; leap_frog_fn
+  ##       copies target_log_kernel once per call. Draws are bit-identical to
+  ##       the previous version.
   ##
   ################################################################################*/
 
@@ -340,11 +342,13 @@ internal::nuts_impl(
     //   analysis.
     // ----------------------------------------------------------------
 
-    // The three closures below capture by reference the locals of this
-    // function, among them inv_diag and inv_precond_matrix, which on a metric
-    // cache hit refer to the caller's precond_inv_cache (see the requirement
-    // on the settings object at the top of this function). The closures are
-    // used only while this function runs.
+    // The three closures below capture by reference bounds_type, lower_bounds
+    // and upper_bounds; box_log_kernel_fn and raw_grad_fn also
+    // target_log_kernel, and leap_frog_fn also raw_grad_fn, inv_diag and
+    // inv_precond_matrix, which on a metric cache hit refer to the caller's
+    // precond_inv_cache (see the requirement on the settings object at the
+    // top of this function). The closures are used only while this function
+    // runs.
     std::function<fp_t (const ColVec_t& vals_inp, ColVec_t* grad_out, void* box_data)> box_log_kernel_fn \
     = [&target_log_kernel, vals_bound, &bounds_type, &lower_bounds, &upper_bounds] (const ColVec_t& vals_inp, ColVec_t* grad_out, void* target_data) \
     -> fp_t

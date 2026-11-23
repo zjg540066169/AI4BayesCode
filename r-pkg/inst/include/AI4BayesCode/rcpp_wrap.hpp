@@ -141,8 +141,22 @@ inline AI4BayesCode::adaptation_info as(SEXP x) {
         a.precond_diag = Rcpp::as<std::vector<double>>(L["precond_diag"]);
     }
     // A list without warmup_done (e.g. one saved by an earlier version)
-    // gives false.
-    if (L.containsElementNamed("warmup_done"))  a.warmup_done = Rcpp::as<bool>(L["warmup_done"]);
+    // gives false, and so do NULL and NA: true requires a single non-NA
+    // TRUE (or a nonzero number). A value that Rcpp does not convert to a
+    // logical vector (e.g. character or list), or a length other than 1, is
+    // an error.
+    if (L.containsElementNamed("warmup_done")) {
+        SEXP v = L["warmup_done"];
+        if (!Rf_isNull(v)) {
+            Rcpp::LogicalVector w(v);
+            if (w.size() != 1) {
+                Rcpp::stop("adaptation_info: warmup_done must be a single "
+                           "logical value, got length %d",
+                           static_cast<int>(w.size()));
+            }
+            a.warmup_done = (w[0] == TRUE);
+        }
+    }
     return a;
 }
 

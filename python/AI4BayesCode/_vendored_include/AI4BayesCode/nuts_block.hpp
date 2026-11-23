@@ -139,7 +139,9 @@ struct nuts_block_config {
     /// NUTS settings. The constructor forces
     /// nuts_settings.use_persistent_adapt = true regardless of what is
     /// passed in, because a nuts_block that does not persist adaptation
-    /// would contradict the purpose of the whole package.
+    /// would contradict the purpose of the whole package. A non-empty
+    /// nuts_settings.precond_mat that is not d x d (d: length of
+    /// initial_unc) makes the constructor throw std::invalid_argument.
     mcmc::algo_settings_t nuts_settings;
 
     /// Optional override for the initial step size.
@@ -304,6 +306,24 @@ struct nuts_block_config {
     double target_accept_rate = 0.55;
 };
 
+namespace detail {
+
+/// Empty when M is accepted as the precond_mat of a block whose
+/// unconstrained dimension is d (M is empty, for the identity metric, or
+/// d x d), else the text of the error.
+inline std::string nuts_precond_shape_error(const mcmc::Mat_t& M,
+                                            std::size_t d) {
+    const std::size_t r = static_cast<std::size_t>(M.n_rows);
+    const std::size_t c = static_cast<std::size_t>(M.n_cols);
+    if (M.is_empty() || (r == d && c == d))
+        return std::string();
+    return "precond_mat is " + std::to_string(r) + "x" + std::to_string(c) +
+           ", but it must be empty or " + std::to_string(d) + "x" +
+           std::to_string(d);
+}
+
+} // namespace detail
+
 /**
  * @brief A stateful NUTS block that participates in a block_mcmc composite.
  *
@@ -321,6 +341,15 @@ public:
         if (!cfg_.log_density_grad) {
             throw std::invalid_argument(
                 "nuts_block: log_density_grad oracle is required");
+        }
+        {
+            const std::string e = detail::nuts_precond_shape_error(
+                cfg_.nuts_settings.nuts_settings.precond_mat,
+                cfg_.initial_unc.n_elem);
+            if (!e.empty()) {
+                throw std::invalid_argument(
+                    "nuts_block: nuts_settings.nuts_settings." + e);
+            }
         }
         cfg_.constrain_was_supplied   = static_cast<bool>(cfg_.constrain);
         cfg_.unconstrain_was_supplied = static_cast<bool>(cfg_.unconstrain);
@@ -526,7 +555,15 @@ public:
     /// can feed in an empirical covariance to get a v0-style online
     /// mass-matrix update by freezing the old matrix, collecting a
     /// batch of draws, and calling this with the batch covariance.
+    /// Throws std::runtime_error, with the block unchanged, when M is
+    /// non-empty and not d x d (d: length of the unconstrained value).
     void set_precond_matrix(mcmc::Mat_t M) {
+        const std::string e =
+            detail::nuts_precond_shape_error(M, theta_unc_.n_elem);
+        if (!e.empty()) {
+            throw std::runtime_error("nuts_block '" + cfg_.name +
+                                     "': set_precond_matrix " + e);
+        }
         cfg_.nuts_settings.nuts_settings.precond_mat = std::move(M);
         // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate
         // mcmclib's inv+chol setup cache. See mcmc_structs.hpp contract.
@@ -534,10 +571,13 @@ public:
     }
 
     /// T13: snapshot of NUTS dual-averaging adaptation state.
-    /// Everything the user would need to checkpoint + resume the chain
-    /// exactly: current step size, DA accumulators, persistent iter
-    /// counter, the preconditioner matrix (if non-identity), and
-    /// warmup_done = true once the first step() has completed.
+    /// Everything the user would need, besides current() and the RNG state,
+    /// to checkpoint + resume the chain (exactly when the parameter has no
+    /// constraint transform): current step size, DA accumulators, persistent
+    /// iter counter, the preconditioner matrix (if non-identity), and
+    /// warmup_done = true when the next step() does not run the first-call
+    /// warmup (the first step() has run it, or set_adaptation() received
+    /// warmup_done == true).
     adaptation_info get_adaptation() const {
         const auto& ns = cfg_.nuts_settings.nuts_settings;
         adaptation_info out;
@@ -566,23 +606,37 @@ public:
     }
 
     /// T13: restore a previously-captured adaptation snapshot.
-    /// Any missing field leaves the corresponding slot unchanged.
+    /// Installs step_size, epsilon_bar, h_val, mu_val and adapt_iter from
+    /// ad; installs precond_mat only when it is non-empty; clears the
+    /// first-call state only when ad.warmup_done is true.
     /// Natural complement to get_adaptation() for checkpoint/restart.
-    /// ad.warmup_done == true (a snapshot taken after the source block's
-    /// first step()) makes the next step() continue from the restored state
-    /// without the first-call warmup, which would replace it.
+    /// ad.warmup_done == true (the source block's next step() does not run
+    /// the first-call warmup) makes the next step() continue from the
+    /// restored state without the first-call warmup, which would replace it.
     /// ad.warmup_done == false leaves the first-call state of this block
     /// unchanged: a block that has not stepped still runs the first-call
     /// warmup, and a block that has stepped does not run it again.
+    /// Throws std::runtime_error, with the block unchanged, when precond_mat
+    /// is non-empty and not d x d (d: length of the unconstrained value).
     void set_adaptation(const adaptation_info& ad) {
+        // The shape check and the copy of precond_mat (which can throw
+        // std::bad_alloc) come before the first install, so a call that
+        // throws leaves the block unchanged.
+        const std::string e =
+            detail::nuts_precond_shape_error(ad.precond_mat, theta_unc_.n_elem);
+        if (!e.empty()) {
+            throw std::runtime_error("nuts_block '" + cfg_.name +
+                                     "': set_adaptation " + e);
+        }
+        mcmc::Mat_t precond = ad.precond_mat;
         auto& ns = cfg_.nuts_settings.nuts_settings;
         ns.step_size             = ad.step_size;
         ns.epsilon_bar_persist   = ad.epsilon_bar;
         ns.h_val_persist         = ad.h_val;
         ns.mu_val_persist        = ad.mu_val;
         ns.adapt_iter_persist    = ad.adapt_iter;
-        if (!ad.precond_mat.is_empty()) {
-            ns.precond_mat = ad.precond_mat;
+        if (!precond.is_empty()) {
+            ns.precond_mat = std::move(precond);
             // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate
             // -- precond_mat replaced.
             ns.precond_cache_valid = false;

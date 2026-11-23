@@ -137,6 +137,78 @@ public:
 // ---- register_ai4bayescode_types: call this from each PYBIND11_MODULE ------
 namespace AI4BayesCode {
 
+/// Value of adaptation_info::warmup_done from a Python object, by the rule of
+/// the R list conversion in rcpp_wrap.hpp: None, NaN, pandas.NA and
+/// pandas.NaT give false (as R's NULL and NA do, and as the default for a
+/// snapshot without the value), where NaN is a number that compares unequal
+/// to itself (float, numpy, complex and quiet decimal NaN, numpy NaT) or a
+/// signaling decimal NaN; any other value gives its truth value when its type
+/// defines __bool__ (True and False, numbers, numpy booleans) and raises
+/// TypeError when it does not (str, list, tuple, dict, bytes) or when
+/// __bool__ raises; a numpy array with exactly one element counts as that
+/// element unless the element is itself an array (TypeError) or is masked
+/// in a numpy masked array (false), and any other array raises TypeError.
+inline bool warmup_done_from_python(const py::handle& v) {
+    if (v.ptr() == Py_True) return true;
+    if (v.ptr() == Py_False || v.is_none()) return false;
+    // pandas.NA, pandas.NaT and numpy masked arrays exist only when pandas or
+    // numpy.ma is in sys.modules, so the modules are looked up there and are
+    // never imported here.
+    const py::dict modules =
+        py::reinterpret_borrow<py::dict>(PyImport_GetModuleDict());
+    if (modules.contains("pandas")) {
+        const py::object pd = modules["pandas"];
+        for (const char* name : {"NA", "NaT"}) {
+            if (!py::hasattr(pd, name)) continue;
+            const py::object missing = pd.attr(name);
+            if (v.is(missing)) return false;
+        }
+    }
+    if (py::isinstance<py::array>(v)) {
+        const auto n = py::reinterpret_borrow<py::array>(v).size();
+        if (n != 1) {
+            throw py::type_error("AdaptationInfo.warmup_done must be a single "
+                                 "value, got an array of " + std::to_string(n) +
+                                 " elements");
+        }
+        if (modules.contains("numpy.ma")) {
+            const py::object ma = modules["numpy.ma"];
+            const py::object masked_array = ma.attr("MaskedArray");
+            if (py::isinstance(v, masked_array) &&
+                ma.attr("is_masked")(v).cast<bool>()) return false;
+        }
+        // One level only: an element that is itself an array is rejected.
+        const py::object x = v.attr("item")();
+        if (py::isinstance<py::array>(x)) {
+            throw py::type_error("AdaptationInfo.warmup_done must be a single "
+                                 "value, got an array whose element is an "
+                                 "array");
+        }
+        return warmup_done_from_python(x);
+    }
+    // A NaN compares unequal to itself; a signaling decimal NaN raises on
+    // the comparison, and its is_nan() is true.
+    if (PyNumber_Check(v.ptr())) {
+        PyObject* ne = PyObject_RichCompare(v.ptr(), v.ptr(), Py_NE);
+        int is_nan = ne ? PyObject_IsTrue(ne) : -1;
+        Py_XDECREF(ne);
+        if (is_nan < 0) {
+            PyErr_Clear();
+            const py::object decimal =
+                py::module_::import("decimal").attr("Decimal");
+            is_nan = (py::isinstance(v, decimal) &&
+                      v.attr("is_nan")().cast<bool>()) ? 1 : 0;
+        }
+        if (is_nan == 1) return false;
+    }
+    pybind11::detail::make_caster<bool> conv;
+    if (!conv.load(v, /*convert=*/true)) {
+        throw py::type_error("AdaptationInfo.warmup_done must be a bool, a "
+                             "number or None");
+    }
+    return pybind11::detail::cast_op<bool>(conv);
+}
+
 /**
  * Register py::class_ bindings for dag_info and adaptation_info.
  * Each PYBIND11_MODULE should call this once at module init so Python
@@ -193,7 +265,11 @@ inline void register_ai4bayescode_types(py::module& m) {
         .def_readwrite("precond_mat", &adaptation_info::precond_mat)
         .def_readwrite("precond_diag", &adaptation_info::precond_diag)
         .def_readwrite("metric_kind", &adaptation_info::metric_kind)
-        .def_readwrite("warmup_done", &adaptation_info::warmup_done);
+        .def_property("warmup_done",
+            [](const adaptation_info& a) { return a.warmup_done; },
+            [](adaptation_info& a, const py::object& v) {
+                a.warmup_done = warmup_done_from_python(v);
+            });
 }
 
 } // namespace AI4BayesCode

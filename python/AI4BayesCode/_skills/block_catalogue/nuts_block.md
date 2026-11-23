@@ -76,3 +76,24 @@ and slice is the kernel that has no step size to go stale.
 The same reasoning applies to other blocks where the AI might be tempted
 to "patch up rejection by re-adapting": same answer applies (joint
 block, longer first-call warmup, better init).
+
+### Checkpoint and restore
+
+`get_adaptation()` returns the step size, the dual-averaging state, the
+preconditioner (when one is installed) and `warmup_done`, which is true when
+the block's next `step()` does not run the first-call warmup: its first
+`step()` has run that warmup, or `set_adaptation()` received
+`warmup_done == true`. `set_adaptation()` installs `step_size`,
+`epsilon_bar`, `h_val`, `mu_val` and `adapt_iter`, installs `precond_mat`
+only when it is non-empty, and clears the first-call state only when
+`warmup_done` is true. A missing `warmup_done` gives false (R: also `NULL`
+or `NA`; Python: also `None`, NaN, `pandas.NA`, `pandas.NaT` or a masked
+array element), and a restored block that has not stepped then runs the
+first-call warmup. `set_adaptation()` throws `std::runtime_error`, and
+leaves the block unchanged, when `precond_mat` is non-empty and not d x d
+for the unconstrained dimension d. A block given `set_current()` with
+the saved `current()`, `set_adaptation()` with a snapshot taken after
+`step()`, and the saved RNG state continues the saved chain draw for draw
+when the parameter has no constraint transform; with a transform,
+`set_current()` recomputes the unconstrained value from the natural one, and
+that value can differ in the last bit.

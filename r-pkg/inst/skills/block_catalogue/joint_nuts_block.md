@@ -172,6 +172,22 @@ NOT benefit from 3-phase warmup without refactor or regeneration.
 The 3-phase machinery operates on the joint block's mass matrix;
 per-slice NUTS blocks each have their own scalar adaptation.
 
+### Checkpoint and restore
+
+`get_adaptation()` / `set_adaptation()` work as for `nuts_block` (see
+`nuts_block.md`), with these differences. `warmup_done` is true when the
+block's next `step()` does not run the first-call metric pilot or warmup: its
+first `step()` has run them, or `set_adaptation()` received
+`warmup_done == true`. `metric_kind` is `"identity"` in `get_adaptation()`
+while the metric is not adapted, and `set_adaptation()` counts a non-empty
+`precond_mat` as an adapted metric, for which the first-call metric pilot
+does not run, only when `metric_kind` is not `"identity"`.
+`set_adaptation()` throws `std::runtime_error`, and leaves the block
+unchanged, when `precond_mat` is non-empty and not d x d for the total
+unconstrained dimension d. The draw-for-draw restore holds when every
+sub-parameter is `REAL`; with a constraint transform, `set_current()`
+recomputes the unconstrained value, which can differ in the last bit.
+
 ### When to pick joint vs modular
 
 See `skills/codegen_cpp.md` Sec.4a (Coupling analysis). The short

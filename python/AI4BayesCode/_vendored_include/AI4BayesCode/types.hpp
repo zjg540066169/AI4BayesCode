@@ -104,8 +104,9 @@ struct adaptation_info {
     arma::mat precond_mat;                    // n x n dense or diag
     std::vector<double> precond_diag;         // alternate diag-only form
     std::string metric_kind  = "identity";    // "identity" | "diagonal" | "dense"
-    // true when the snapshot comes from a block whose first step() (with the
-    // first-call warmup) has completed. set_adaptation() with true makes the
+    // true when the source block's next step() does not run the first-call
+    // warmup: its first step() has run that warmup, or set_adaptation()
+    // received warmup_done == true. set_adaptation() with true makes the
     // next step() continue from the restored state without the first-call
     // warmup; false (the default, also for a hand-built snapshot) leaves the
     // first-call state of the restored block unchanged.

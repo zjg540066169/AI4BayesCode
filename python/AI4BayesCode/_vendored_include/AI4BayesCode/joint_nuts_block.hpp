@@ -197,6 +197,9 @@ struct joint_nuts_block_config {
     arma::vec initial_cat;
 
     /// Forwarded NUTS settings. See nuts_block.hpp for the full story.
+    /// A non-empty nuts_settings.precond_mat that is not d x d (d: total
+    /// unconstrained dimension) makes the constructor throw
+    /// std::invalid_argument.
     mcmc::algo_settings_t nuts_settings;
 
     double      initial_step_size       = 0.0;
@@ -457,6 +460,15 @@ public:
                 std::to_string(cfg_.initial_cat.n_elem) +
                 ") does not match sum of sub_param dims (" +
                 std::to_string(total_dim_) + ")");
+        }
+        {
+            const std::string e = detail::nuts_precond_shape_error(
+                cfg_.nuts_settings.nuts_settings.precond_mat, total_unc_dim_);
+            if (!e.empty()) {
+                throw std::invalid_argument(
+                    "joint_nuts_block '" + cfg_.name +
+                    "': nuts_settings.nuts_settings." + e);
+            }
         }
 
         // Every slice REAL? Enables bit-identical V0 fast-paths. Also validate
@@ -904,7 +916,15 @@ public:
         return cfg_.target_accept_rate;
     }
 
+    /// Throws std::runtime_error, with the block unchanged, when M is
+    /// non-empty and not d x d (d: total unconstrained dimension).
     void set_precond_matrix(mcmc::Mat_t M) {
+        const std::string e =
+            detail::nuts_precond_shape_error(M, total_unc_dim_);
+        if (!e.empty()) {
+            throw std::runtime_error("joint_nuts_block '" + cfg_.name +
+                                     "': set_precond_matrix " + e);
+        }
         cfg_.nuts_settings.nuts_settings.precond_mat = std::move(M);
         // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate the
         // setup cache in mcmclib whenever precond_mat is mutated. See
@@ -913,8 +933,10 @@ public:
     }
 
     /// T13: snapshot of joint NUTS adaptation state (step size + DA
-    /// accumulators + preconditioner + warmup_done, true once the first
-    /// step() has completed). Complement get_adaptation() on
+    /// accumulators + preconditioner + warmup_done, true when the next
+    /// step() does not run the first-call metric pilot or warmup: the first
+    /// step() has run them, or set_adaptation() received
+    /// warmup_done == true). Complement get_adaptation() on
     /// nuts_block. For dense-metric enabled joint blocks, precond_mat
     /// is the learned precision matrix Σ⁻¹.
     adaptation_info get_adaptation() const {
@@ -946,39 +968,53 @@ public:
 
     /// T13: restore a previously-captured adaptation snapshot for
     /// checkpoint/restart.
-    /// ad.warmup_done == true (a snapshot taken after the source block's
-    /// first step()) makes the next step() continue from the restored state
-    /// without the first-call metric pilot and warmup, which would replace
-    /// it. ad.warmup_done == false leaves the first-call state of this block
-    /// unchanged: a block that has not stepped still runs them, and a block
-    /// that has stepped does not run them again.
+    /// ad.warmup_done == true (the source block's next step() does not run
+    /// the first-call metric pilot or warmup) makes the next step() continue
+    /// from the restored state without them, which would replace it.
+    /// ad.warmup_done == false leaves the first-call state of this block
+    /// unchanged: a block that has not stepped still runs the first-call
+    /// warmup, and a block that has stepped does not run it again.
+    /// A non-empty precond_mat counts as an adapted metric only when
+    /// ad.metric_kind is not "identity"; the first-call metric pilot runs only
+    /// for a metric that is not adapted, and replaces precond_mat.
+    /// Throws std::runtime_error, with the block unchanged, when precond_mat
+    /// is non-empty and not total_unc_dim_ x total_unc_dim_.
     void set_adaptation(const adaptation_info& ad) {
+        // The shape check and the copy of precond_mat (which can throw
+        // std::bad_alloc) come before the first install, so a call that
+        // throws leaves the block unchanged.
+        if (!ad.precond_mat.is_empty() &&
+            (static_cast<std::size_t>(ad.precond_mat.n_rows) != total_unc_dim_ ||
+             static_cast<std::size_t>(ad.precond_mat.n_cols) != total_unc_dim_)) {
+            // The metric lives in the UNCONSTRAINED space, so a restored
+            // precond_mat must be total_unc_dim_ x total_unc_dim_. A wrong-sized
+            // matrix (cross-block restore, or a pre-dual-offset-fix snapshot of a
+            // dim-changing block captured at total_dim_ != total_unc_dim_) would
+            // be silently discarded by mcmclib::nuts (-> identity metric) while
+            // dense_metric_adapted_ wrongly flips true, and a non-square matrix
+            // with total_unc_dim_^2 elements fails Armadillo's bounds or size
+            // checks in mcmc::nuts. Reject it loudly instead of degrading to
+            // identity behind the user's back.
+            // Stricter than the size guard in get_adaptation(), which checks the
+            // number of elements only.
+            throw std::runtime_error(
+                "joint_nuts_block '" + cfg_.name +
+                "': set_adaptation precond_mat is " +
+                std::to_string(ad.precond_mat.n_rows) + "x" +
+                std::to_string(ad.precond_mat.n_cols) + " but the "
+                "metric must be total_unc_dim_ x total_unc_dim_ = " +
+                std::to_string(total_unc_dim_) + "x" +
+                std::to_string(total_unc_dim_));
+        }
+        mcmc::Mat_t precond = ad.precond_mat;
         auto& ns = cfg_.nuts_settings.nuts_settings;
         ns.step_size            = ad.step_size;
         ns.epsilon_bar_persist  = ad.epsilon_bar;
         ns.h_val_persist        = ad.h_val;
         ns.mu_val_persist       = ad.mu_val;
         ns.adapt_iter_persist   = ad.adapt_iter;
-        if (!ad.precond_mat.is_empty()) {
-            // The metric lives in the UNCONSTRAINED space, so a restored
-            // precond_mat must be total_unc_dim_ x total_unc_dim_. A wrong-sized
-            // matrix (cross-block restore, or a pre-dual-offset-fix snapshot of a
-            // dim-changing block captured at total_dim_ != total_unc_dim_) would
-            // be silently discarded by mcmclib::nuts (-> identity metric) while
-            // dense_metric_adapted_ wrongly flips true. Reject it loudly instead
-            // of degrading to identity behind the user's back. Mirrors the size
-            // guard in get_adaptation().
-            if (static_cast<std::size_t>(ad.precond_mat.n_elem) !=
-                total_unc_dim_ * total_unc_dim_) {
-                throw std::runtime_error(
-                    "joint_nuts_block '" + cfg_.name +
-                    "': set_adaptation precond_mat has " +
-                    std::to_string(ad.precond_mat.n_elem) + " elements but the "
-                    "metric must be total_unc_dim_ x total_unc_dim_ = " +
-                    std::to_string(total_unc_dim_) + "x" +
-                    std::to_string(total_unc_dim_));
-            }
-            ns.precond_mat = ad.precond_mat;
+        if (!precond.is_empty()) {
+            ns.precond_mat = std::move(precond);
             // FORK MARKER (2026-07-26, JZ) [SAFE-SPEEDUP Fix #2]: invalidate
             // setup cache -- precond_mat just changed.
             ns.precond_cache_valid = false;
@@ -988,8 +1024,6 @@ public:
             // the pilot and overwrite the precond_mat that was just restored.
             dense_metric_adapted_ = (ad.metric_kind != "identity");
         }
-        // After the size check above, so a call that throws leaves
-        // first_call_ unchanged.
         if (ad.warmup_done) first_call_ = false;
     }
 

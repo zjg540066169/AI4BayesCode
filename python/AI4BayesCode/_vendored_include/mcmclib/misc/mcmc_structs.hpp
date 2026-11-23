@@ -34,7 +34,9 @@
   ##     - SAFE-SPEEDUP (2026-07-26, JZ): Added precond_mat setup-cache fields
   ##       (precond_cache_valid, precond_inv_cache, precond_sqrt_cache,
   ##        precond_cache_n_vals) to nuts_settings_t. See nuts.hpp Fix #2 and
-  ##       joint_nuts_block.hpp mutation-site invalidation for the contract.
+  ##       the joint_nuts_block.hpp and nuts_block.hpp mutation-site
+  ##       invalidation for the contract. (2026-11-23) For a diagonal metric
+  ##       the cache fields hold 1/diag(M) and sqrt(diag(M)) as n x 1 columns.
   ##
   ################################################################################*/
 
