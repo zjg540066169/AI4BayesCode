@@ -117,6 +117,9 @@
  *
  *    log_joint(gamma, beta, ctx) -> double
  *        Joint log-density of (gamma, beta | rest) up to additive const.
+ *        MUST be a deterministic function of (gamma, beta, ctx): step()
+ *        reuses its value at the current state instead of evaluating it
+ *        again with the same arguments.
  *        MUST include: likelihood, slab prior on active betas (those
  *        with gamma_j=1), Bernoulli prior on gamma.
  *        MUST NOT include: any Jacobian-related +log(|something|)
@@ -170,6 +173,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <numeric>
@@ -414,6 +418,19 @@ public:
         std::size_t n_death_try = 0, n_death_ok = 0;
         std::size_t n_rw_try    = 0, n_rw_ok    = 0;
 
+        // lp_state = log_joint(gamma_, beta_, context_) at the current state
+        // while lp_valid, so (B) and the RW move do not evaluate it again with
+        // the same arguments. It is cleared when continuous_update returns a
+        // value whose bytes differ from beta_[j] (-0.0 in place of 0.0 counts
+        // as a change), and set to the value of the state kept by each accept
+        // / reject. ctx_synced: context_ holds gamma_ and beta_ at their keys
+        // (compared byte for byte here, set by the sync in (B), kept by every
+        // later write); an RW value is kept only when it holds.
+        double lp_state   = 0.0;
+        bool   lp_valid   = false;
+        bool   ctx_synced = context_holds_(cfg_.gamma_key, gamma_) &&
+                            context_holds_(cfg_.beta_key, beta_);
+
         for (std::size_t j : order) {
 
             // (A) CONTINUOUS UPDATE of beta_j (only if gamma_j = 1).
@@ -433,6 +450,14 @@ public:
                 const double beta_new =
                     cfg_.continuous_update(rng, j, context_);
                 if (std::isfinite(beta_new)) {
+                    // While lp_valid, context_[beta_key] already holds beta_,
+                    // so a returned value with the bytes of beta_[j] (e.g. the
+                    // current value after a rejection inside the update)
+                    // leaves gamma_, beta_ and context_ unchanged: lp_state is
+                    // still their log_joint, and lp_valid is cleared only for
+                    // a value with other bytes.
+                    if (std::memcmp(&beta_new, &beta_[j], sizeof(double)) != 0)
+                        lp_valid = false;
                     beta_[j] = beta_new;
                     context_[cfg_.beta_key] = beta_;
                     ++n_rw_try; ++n_rw_ok;  // count as "accepted" update
@@ -448,7 +473,8 @@ public:
                 // Score both states via log_joint.
                 beta_[j] = beta_old;
                 context_[cfg_.beta_key] = beta_;
-                const double lp_old = cfg_.log_joint(gamma_, beta_, context_);
+                const double lp_old = lp_valid
+                    ? lp_state : cfg_.log_joint(gamma_, beta_, context_);
 
                 beta_[j] = beta_new;
                 context_[cfg_.beta_key] = beta_;
@@ -459,11 +485,14 @@ public:
                 if (std::log(uniform(rng)) < log_R) {
                     // Accept. beta_[j] already set to beta_new.
                     ++n_rw_ok;
+                    lp_state = lp_new;
                 } else {
                     // Reject. Restore.
                     beta_[j] = beta_old;
                     context_[cfg_.beta_key] = beta_;
+                    lp_state = lp_old;
                 }
+                lp_valid = ctx_synced;
             }
             }  // end !beta_frozen_
 
@@ -478,10 +507,16 @@ public:
             const double gamma_cur = gamma_[j];
             const double beta_cur  = beta_[j];
 
-            // Score the current state.
-            context_[cfg_.gamma_key] = gamma_;
-            context_[cfg_.beta_key]  = beta_;
-            const double lp_cur = cfg_.log_joint(gamma_, beta_, context_);
+            // Score the current state. While lp_valid, context_ already
+            // holds gamma_ and beta_ and lp_state is their log_joint.
+            if (!lp_valid) {
+                context_[cfg_.gamma_key] = gamma_;
+                context_[cfg_.beta_key]  = beta_;
+                ctx_synced = true;
+                lp_state = cfg_.log_joint(gamma_, beta_, context_);
+                lp_valid = true;
+            }
+            const double lp_cur = lp_state;
 
             if (gamma_cur == 0.0) {
                 // BIRTH attempt: gamma_j: 0 -> 1, propose beta_j_new.
@@ -526,6 +561,7 @@ public:
                 if (std::isfinite(log_R) &&
                     std::log(uniform(rng)) < log_R) {
                     ++n_birth_ok;
+                    lp_state = lp_new;
                 } else {
                     gamma_[j] = gamma_cur;
                     beta_[j]  = beta_cur;
@@ -576,6 +612,7 @@ public:
                 if (std::isfinite(log_R) &&
                     std::log(uniform(rng)) < log_R) {
                     ++n_death_ok;
+                    lp_state = lp_new;
                 } else {
                     gamma_[j] = gamma_cur;
                     beta_[j]  = beta_cur;
@@ -769,6 +806,15 @@ private:
             current_cache_[j]          = gamma_[j];
             current_cache_[cfg_.p + j] = beta_[j];
         }
+    }
+
+    // True if context_[key] has the same length and bytes as v.
+    bool context_holds_(const std::string& key, const arma::vec& v) const {
+        const auto it = context_.find(key);
+        return it != context_.end() && it->second.n_elem == v.n_elem &&
+               (v.n_elem == 0 ||
+                std::memcmp(it->second.memptr(), v.memptr(),
+                            v.n_elem * sizeof(double)) == 0);
     }
 
     rjmcmc_block_config      cfg_;
