@@ -121,9 +121,8 @@ namespace AI4BayesCode {
 ///
 /// All inputs that vary per token (w, doc) are read from the block
 /// context via the keys w_key / doc_key on the FIRST set_context call.
-/// This block expects them to be fixed for the lifetime of the chain
-/// (they are observed data); subsequent set_context calls are
-/// ignored from the data side.
+/// A later set_context whose w or doc differs from the loaded values
+/// reloads them (the number of tokens N must stay the same).
 struct lda_collapsed_gibbs_block_config {
     /// Unique label for this block in its composite. NOT used as a
     /// shared_data key directly -- z, theta, phi go to z_out_key /
@@ -188,8 +187,9 @@ struct lda_collapsed_gibbs_block_config {
  *   n_kv_    : K x V count matrix
  *   n_k_    : length K, n_kv_ row sums
  *
- * Counts are derived from z_ on every set_current and on the first
- * set_context, so the block is self-consistent regardless of init.
+ * Counts are derived from z_ on every set_current, on the first
+ * set_context and on every set_context that changes w or doc, so the
+ * block is self-consistent regardless of init.
  */
 class lda_collapsed_gibbs_block : public block_sampler {
 public:
@@ -256,14 +256,16 @@ public:
     // ---- block_sampler interface ---------------------------------------
 
     /// On the first call, copy w, doc, build counts, init z if needed.
-    /// Subsequent calls are no-ops on the data side (w, doc are
-    /// observed and fixed). The context can still be (and is)
-    /// re-installed without harm.
+    /// A later call reloads w and doc when either differs from the
+    /// loaded values, and rebuilds the counts from the current z; when a
+    /// later context lacks w or doc, the loaded value of that key is used.
     void set_context(const block_context& ctx) override {
-        context_ = ctx;
         if (!data_initialized_) {
+            context_ = ctx;
             initialize_from_context_();
             data_initialized_ = true;
+        } else {
+            reload_tokens_if_changed_(ctx);
         }
     }
 
@@ -459,7 +461,7 @@ private:
     // ----- Initialization helpers --------------------------------------
 
     void initialize_from_context_() {
-        // Pull w and doc from the context. They are observed and fixed.
+        // Pull w and doc from the context.
         auto it_w   = context_.find(cfg_.w_key);
         auto it_doc = context_.find(cfg_.doc_key);
         if (it_w == context_.end()) {
@@ -486,24 +488,7 @@ private:
         }
 
         N_ = w_vec.n_elem;
-        w_int_.resize(N_);
-        doc_int_.resize(N_);
-        for (std::size_t t = 0; t < N_; ++t) {
-            const long wt = std::lround(w_vec[t]);
-            const long dt = std::lround(doc_vec[t]);
-            if (wt < 1 || wt > static_cast<long>(cfg_.V)) {
-                throw std::runtime_error(
-                    "lda_collapsed_gibbs_block: w entry out of range "
-                    "{1, ..., V}");
-            }
-            if (dt < 1 || dt > static_cast<long>(cfg_.M)) {
-                throw std::runtime_error(
-                    "lda_collapsed_gibbs_block: doc entry out of range "
-                    "{1, ..., M}");
-            }
-            w_int_[t]   = static_cast<std::size_t>(wt - 1);
-            doc_int_[t] = static_cast<std::size_t>(dt - 1);
-        }
+        fill_token_ids_(w_vec, doc_vec, w_int_, doc_int_);
 
         // Initialize z. Random uniform if user did not supply.
         z_.set_size(N_);
@@ -558,6 +543,74 @@ private:
             }
         }
         rebuild_named_outputs_();
+    }
+
+    /// Validates w / doc entries and stores them 0-indexed.
+    void fill_token_ids_(const arma::vec& w_vec, const arma::vec& doc_vec,
+                         std::vector<std::size_t>& w_ids,
+                         std::vector<std::size_t>& doc_ids) const {
+        w_ids.resize(w_vec.n_elem);
+        doc_ids.resize(w_vec.n_elem);
+        for (std::size_t t = 0; t < w_vec.n_elem; ++t) {
+            const long wt = std::lround(w_vec[t]);
+            const long dt = std::lround(doc_vec[t]);
+            if (wt < 1 || wt > static_cast<long>(cfg_.V)) {
+                throw std::runtime_error(
+                    "lda_collapsed_gibbs_block: w entry out of range "
+                    "{1, ..., V}");
+            }
+            if (dt < 1 || dt > static_cast<long>(cfg_.M)) {
+                throw std::runtime_error(
+                    "lda_collapsed_gibbs_block: doc entry out of range "
+                    "{1, ..., M}");
+            }
+            w_ids[t]   = static_cast<std::size_t>(wt - 1);
+            doc_ids[t] = static_cast<std::size_t>(dt - 1);
+        }
+    }
+
+    /// Exact element-wise equality (a NaN never compares equal). The
+    /// loop has no early exit so that it vectorizes.
+    static bool same_values_(const arma::vec& a, const arma::vec& b) {
+        if (a.n_elem != b.n_elem) return false;
+        const double* x = a.memptr();
+        const double* y = b.memptr();
+        bool differ = false;
+        for (std::size_t i = 0; i < a.n_elem; ++i) differ |= (x[i] != y[i]);
+        return !differ;
+    }
+
+    /// After initialization: when ctx carries a w or doc that differs
+    /// element-wise from the loaded one, validates both, replaces the
+    /// token ids and rebuilds the counts from the current z. A context
+    /// rejected by the length or range check changes nothing.
+    void reload_tokens_if_changed_(const block_context& ctx) {
+        const auto it_w   = ctx.find(cfg_.w_key);
+        const auto it_doc = ctx.find(cfg_.doc_key);
+        const arma::vec& w_old   = context_.at(cfg_.w_key);
+        const arma::vec& doc_old = context_.at(cfg_.doc_key);
+        const arma::vec& w_vec   =
+            (it_w   != ctx.end()) ? it_w->second   : w_old;
+        const arma::vec& doc_vec =
+            (it_doc != ctx.end()) ? it_doc->second : doc_old;
+        if (same_values_(w_vec, w_old) && same_values_(doc_vec, doc_old)) {
+            return;
+        }
+        if (w_vec.n_elem != N_ || doc_vec.n_elem != N_) {
+            throw std::runtime_error(
+                "lda_collapsed_gibbs_block: w and doc must keep length N = "
+                + std::to_string(N_) + " after the first set_context (got "
+                + std::to_string(w_vec.n_elem) + " and "
+                + std::to_string(doc_vec.n_elem) + ")");
+        }
+        std::vector<std::size_t> w_ids, doc_ids;
+        fill_token_ids_(w_vec, doc_vec, w_ids, doc_ids);
+        arma::vec w_copy = w_vec, doc_copy = doc_vec;
+        w_int_.swap(w_ids);
+        doc_int_.swap(doc_ids);
+        context_[cfg_.w_key].swap(w_copy);
+        context_[cfg_.doc_key].swap(doc_copy);
+        rebuild_counts_();
     }
 
     void rebuild_counts_() {
@@ -645,7 +698,7 @@ private:
     double alpha_sum_ = 0.0;
     double beta_sum_  = 0.0;
 
-    block_context context_;
+    block_context context_;   // first context; w / doc as last loaded
     bool data_initialized_ = false;
 
     // Token data.

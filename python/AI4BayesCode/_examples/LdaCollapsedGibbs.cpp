@@ -449,18 +449,10 @@ public:
             }
             impl_->data().set("w",   w_arma);
             impl_->data().set("doc", doc_arma);
-            // The block caches w/doc at first set_context, but it
-            // re-queries on every set_context call -- composite_block
-            // installs a fresh context every step(). However the
-            // block's own internal w_int_/doc_int_ arrays were filled
-            // at first set_context. We need to force re-initialization.
-            // Easiest path: rebuild the block. We don't have a
-            // re-init API on the block (would complicate the v0
-            // contract). Document this limitation: w / doc cannot be
-            // changed after the first step(). For now, reject the
-            // change if N_ already had a step.
-            // (set_current before the first step is fine because the
-            // block hasn't initialized yet.)
+            // The next step() passes the new w/doc to the block's
+            // set_context, which reloads them and rebuilds its counts
+            // from the current z (before the first step, the block's
+            // first set_context loads them).
         }
     }
 
