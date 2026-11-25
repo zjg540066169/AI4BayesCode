@@ -69,7 +69,7 @@ from .meta import version, include_path, list_skills
 from ._blocks import blocks
 from .new_frozen import new_frozen
 
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 __all__ = [
     "source",
     "example",

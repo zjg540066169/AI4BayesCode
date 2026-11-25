@@ -91,10 +91,10 @@ The driver reads state back with the neutral C++ API (`comp.data().get("<key>")`
 model in a small **driver class** (the Tier-A wrapper) whose methods are NEUTRAL-typed only --
 `state_map` / `history_map` / `arma::vec`, NEVER `Rcpp::List` or a pybind type -- exposing the
 **core-six state contract** (`step` / `get_current` / `set_current` / `predict_at` / `get_dag` /
-`get_history`) plus the **kernel-control category** (`freeze` / `unfreeze` / `get_frozen` always;
-`readapt_NUTS` iff the composite contains a NUTS-family child). The driver class MUST inherit
+`get_history`) plus the **kernel-control category** (`freeze` / `unfreeze` / `get_frozen` /
+`clear_history` always; `readapt_NUTS` iff the composite contains a NUTS-family child). The driver class MUST inherit
 `AI4BayesCode::kernel_control_mixin<Driver>` (CRTP) so it gets the R/Python-facing forwarders
-for `freeze / unfreeze / get_frozen` for free -- see `codegen_cpp.md` for the exact pattern. The
+for `freeze / unfreeze / get_frozen / clear_history` for free -- see `codegen_cpp.md` for the exact pattern. The
 `block_sampler` semantics are owned by **system_design Sec.1** (`interface.md`) -- do not re-derive
 them. The two frontend module blocks bind THIS driver class; the `int main()` drives it directly.
 
@@ -129,12 +129,12 @@ blocks, and the fence copy as-is.
 4. **(optional) anonymous-namespace free functions** -- e.g. a log-density/grad closure, file-local.
 5. **The neutral driver class** -- wires data + DAG + the new block child; inherits
    `AI4BayesCode::kernel_control_mixin<Driver>` (CRTP) for kernel-control forwarders;
-   core-6 + kernel-control (freeze/unfreeze/get_frozen always; readapt_NUTS iff NUTS-family
+   core-6 + kernel-control (freeze/unfreeze/get_frozen/clear_history always; readapt_NUTS iff NUTS-family
    child) methods; neutral types only.
 6. **RCPP_MODULE block** -- `#ifdef AI4BAYESCODE_RCPP_MODULE` ... `RCPP_MODULE(<Model>_module){
    Rcpp::class_<<Model>>("<Model>") .constructor<...>() ... .method("step", ...) ...
-   AI4BAYESCODE_BIND_KERNEL_CONTROL(<Model>); }` ... `#endif`. The macro emits the three
-   `freeze` / `unfreeze` / `get_frozen` method lines from
+   AI4BAYESCODE_BIND_KERNEL_CONTROL(<Model>); }` ... `#endif`. The macro emits the
+   `freeze` / `unfreeze` / `get_frozen` / `clear_history` method lines from
    `kernel_control_mixin.hpp` -- do NOT write them by hand.
 7. **PYBIND11_MODULE block** -- `#ifdef AI4BAYESCODE_PYBIND_MODULE` ... `#include
    "AI4BayesCode/pybind_casters.hpp"` ... `PYBIND11_MODULE(<Model>, m){

@@ -18,7 +18,7 @@ see `examples/SoftBartNoise.cpp` for a worked example.
 accepts any subset of `{X, y, sigma}` and routes them into the block
 -- use this when composing BART inside an outer Gibbs. No other R
 state methods are exposed; the unified core-6 state contract + the
-kernel-control category (freeze / unfreeze / get_frozen + readapt_NUTS
+kernel-control category (freeze / unfreeze / get_frozen / clear_history + readapt_NUTS
 iff any NUTS-family sibling in the composite) + the BART tree-serialization
 carve-out (get_tree / set_tree / get_tree_history) is the whole API
 per interface.md Sec.1. (System-design agents modifying `bart_block` itself should read

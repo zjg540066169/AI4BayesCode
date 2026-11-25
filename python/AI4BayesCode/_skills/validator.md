@@ -2423,8 +2423,8 @@ valid R1 result: binding, dispatch and state bugs only surface on a real call.
 1. Enumerate the bound methods from the module itself (R: `names(m)`), not
    from documentation.
 2. Presence: the core six (`step`, `get_current`, `set_current`,
-   `predict_at`, `get_dag`, `get_history`) and the kernel-control trio
-   (`freeze`, `unfreeze`, `get_frozen`) must all be bound. `readapt_NUTS`
+   `predict_at`, `get_dag`, `get_history`) and the kernel-control members
+   (`freeze`, `unfreeze`, `get_frozen`, `clear_history`) must all be bound. `readapt_NUTS`
    must be bound IF AND ONLY IF the composite has a NUTS-family child --
    missing with one, or present without one, is a FAIL.
 3. Call every bound method at least once and check its invariants:
@@ -2440,6 +2440,9 @@ valid R1 result: binding, dispatch and state bugs only surface on a real call.
      freezing a blacklisted child errors; a frozen child's value is unchanged
      by `step()`; no-argument `unfreeze()` clears; `get_frozen()` reflects
      every transition.
+   - `clear_history()` (keep_history mode): `get_current()` is identical
+     before and after the call; after `clear_history()` and `step(k)`, every
+     `get_history()` entry and every `predict_at(list())` entry has `k` rows.
    - `readapt_NUTS` (when bound): the call returns and leaves chain state
      unchanged (`get_current()` identical before and after).
 

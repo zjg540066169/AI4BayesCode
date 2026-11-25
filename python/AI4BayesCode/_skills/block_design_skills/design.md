@@ -109,8 +109,8 @@ Your block's `step()` delegates to the child's `step()`; `current()` returns its
 that internally owns a NUTS kernel **IS NUTS-family** -- it returns `supports_readapt() == true`,
 so the Tier-A wrapper must expose the **kernel-control method `readapt_NUTS(n, reset=false,
 max_tree_depth=-1)`** (forwarding to the child), even though the new block itself is not literally
-a `nuts_block` composite child. The Tier-A wrapper ALSO exposes `freeze / unfreeze / get_frozen`
-unconditionally (kernel-control category, interface.md Sec.1); those bind via the
+a `nuts_block` composite child. The Tier-A wrapper ALSO exposes `freeze / unfreeze / get_frozen /
+clear_history` unconditionally (kernel-control category, interface.md Sec.1); those bind via the
 `AI4BAYESCODE_BIND_KERNEL_CONTROL(ClassName)` macro from
 `include/AI4BayesCode/kernel_control_mixin.hpp`.
 
@@ -278,7 +278,7 @@ ratio. Sanity-check `birth_logR == -death_logR` on a fixed pair.
 
 **Defaulted -- override only if the default is wrong:** `name()` (returns the
 config name), `engine_kind()` (default `MCMC`; override to `VI` for a VI block),
-and **`record_held_history()`**.
+**`record_held_history()`** and **`clear_history()`**.
 
 **`record_held_history()` is REQUIRED for any block that owns a history buffer
 AND allows freeze.** `composite_block::step()` skips a frozen child's `step()`,
@@ -296,6 +296,15 @@ void record_held_history() override {
 A block with SEVERAL history buffers pushes to each of them; a block that is
 freeze-BLACKLISTED (`supports_freeze()` returns false) does not need the hook.
 
+**`clear_history()` is REQUIRED for any block that owns a history buffer.**
+`composite_block::clear_history()` calls it on every child, the wrapper's
+`clear_history()` (`kernel_control_mixin`) calls the composite's, and
+`ai4bayescode_run_chains()` / `run_chains()` call the wrapper's after the warmup
+sweeps. The override empties every buffer the block owns
+(`void clear_history() override { history_buf_.clear(); }`). Left at the base
+no-op, the block's history still contains the warmup draws after the call while
+the histories of its siblings contain the kept draws only.
+
 This is
 C++-only machinery -- NONE of these get a `.method()` and R never sees them (interface.md Sec.2,
 Tier B). The lifecycle to follow is `lifecycle.md` Sec.14's 7-step (Tier C kernel + license-gate ->
@@ -307,14 +316,14 @@ block_design, Steps 4-7 land in the `blocks_local/<Block>/` bundle, NOT in core.
 EXAMPLE phase)
 exposes to R the **core-six state methods**
 (`step / get_current / set_current / predict_at / get_dag / get_history`) plus the
-**kernel-control category**: `freeze / unfreeze / get_frozen` UNCONDITIONALLY (via the
+**kernel-control category**: `freeze / unfreeze / get_frozen / clear_history` UNCONDITIONALLY (via the
 `AI4BAYESCODE_BIND_KERNEL_CONTROL(ClassName)` macro + `kernel_control_mixin<ClassName>` CRTP
 inheritance), and `readapt_NUTS` ONLY if the composite contains a NUTS-family child
 (interface.md Sec.1). Tier A's `set_current(Rcpp::List)` is a pure DISPATCHER routing keys into
 Tier B's fine-grained C++ setters (interface.md Sec.2; dispatcher contract in `dataflow.md` Sec.7).
 **There is NEVER a `$set_X`, `$set_Y`, `$set_sigma`, or any other state-method on the wrapper**
 (interface.md Sec.1; the Sec.17 anti-patterns live in `lifecycle.md`) -- kernel-control methods
-(`freeze / unfreeze / get_frozen / readapt_NUTS`) are the only allowed extensions. The C++
+(`freeze / unfreeze / get_frozen / clear_history / readapt_NUTS`) are the only allowed extensions. The C++
 contract and the R contract are DIFFERENT vocabularies at DIFFERENT tiers; the block class
 implements the former, never the latter.
 
@@ -328,7 +337,7 @@ on `-I` and need no per-block declaration.
 > **SIGN-OFF 4 (interface).** Confirm the new class's Tier-B `block_sampler` override list and
 > any fine-grained C++ setters; confirm (if a wrapper ships) the R contract matches interface.md
 > Sec.1 formula = core-6 state methods + kernel-control category
-> (`freeze / unfreeze / get_frozen` always via `AI4BAYESCODE_BIND_KERNEL_CONTROL` macro +
+> (`freeze / unfreeze / get_frozen / clear_history` always via `AI4BAYESCODE_BIND_KERNEL_CONTROL` macro +
 > `kernel_control_mixin` CRTP; `readapt_NUTS` iff NUTS-family child; BART tree-serialization
 > carve-out iff BART-family child), with set_current-as-dispatcher and zero state-method leaks;
 > confirm the license gate for any vendored kernel. **If the block owns a history buffer and is

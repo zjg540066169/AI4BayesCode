@@ -108,7 +108,7 @@ ai4bayescode_generate("Linear regression.", LLM = "gpt-5.5-codex")  # key picked
 e.g. `ai4bayescode_generate("...", API_key = "sk-other")` — without changing what
 `set_key()` configured. Omit it to use the session default.
 
-## What ships in this package (v1.1.2)
+## What ships in this package (v1.1.3)
 
 | Asset | Count | How to access |
 |---|---|---|

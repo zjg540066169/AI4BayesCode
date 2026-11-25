@@ -101,7 +101,8 @@ risk talk), is worse than no comment -- the default is omission.
 
 Same rule as the R version: the delivered example drives chains
 EXCLUSIVELY through the SHIPPED helpers (`AI4BayesCode.run_chains`,
-`AI4BayesCode.rhat_summary`, `AI4BayesCode.diagnose`), with NO
+`AI4BayesCode.rhat_summary`, `AI4BayesCode.diagnose`,
+`AI4BayesCode.predict`, `AI4BayesCode.close_models`), with NO
 generated helper functions at all -- the constructor is an inline
 lambda argument.
 The `run_chain_<ClassName>()` helper defined in the runner template
@@ -124,7 +125,8 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
 
 1. **Header comment** -- what the model is, plus the short list of the
    shipped helpers the example uses (`AI4BayesCode.run_chains` /
-   `rhat_summary` / `diagnose`, one plain-language line each). No
+   `rhat_summary` / `diagnose` / `predict` / `close_models`, one
+   plain-language line each). No
    harness talk, no validator vocabulary (PSIS-LOO, BPV, Layer-3,
    check numbers), no explanations of what the example does NOT
    contain -- an acronym with no context, or an absence-explanation,
@@ -188,12 +190,12 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
 
    On Windows `AI4BayesCode.run_chains` runs the chains one after
    another by default (there is no fork), so both forms above work as
-   written there. Do not add `n_jobs`: parallel workers on Windows
+   written there. Do not add `n_cores`: parallel workers on Windows
    re-import the example script, which has no
    `if __name__ == "__main__":` guard.
 5. **Synthetic data block** -- produces the same fixtures the harness
    used so the example runs as-is.
-6. **Multi-chain usage + diagnostics (the everyday flow)** -- the
+6. **Multi-chain usage + diagnostics + prediction (the everyday flow)** -- the
    shipped helpers, nothing else:
 
    ```python
@@ -203,6 +205,9 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
        seeds=[101, 202, 303, 404], n_burn=4000, n_keep=4000)
    print(AI4BayesCode.rhat_summary(chains))   # convergence across chains
    tbl, plot = AI4BayesCode.diagnose(chains[0]["hist"])
+   pred = AI4BayesCode.predict(chains, {"<X>": X_test})   # pooled over the chains
+   chains[0]["model"].get_current()                       # chain 1's model after the run
+   AI4BayesCode.close_models(chains)
    ```
 
    Single-chain use is `seeds=[1]` (or the stateful API below); never
@@ -222,6 +227,8 @@ Skeleton (parameterized; mirror this structure, fill placeholders):
 #   AI4BayesCode.run_chains   -- run several MCMC chains in parallel
 #   AI4BayesCode.rhat_summary -- convergence check across the chains
 #   AI4BayesCode.diagnose     -- posterior summaries + diagnostic plots
+#   AI4BayesCode.predict      -- posterior predictions from all chains
+#   AI4BayesCode.close_models -- close the background processes that hold the models
 import numpy as np
 import AI4BayesCode
 
@@ -253,6 +260,16 @@ print(tbl)
 # diagnose returns plot = None without it -- calling None raises TypeError.
 if plot is not None:
     plot()
+
+# Posterior predictions at the held-out inputs, using the draws of all chains.
+pred = AI4BayesCode.predict(chains, {"<X>": X_test})
+
+# chains[i]["model"] is the model of chain i after the run.
+print(chains[0]["model"].get_current())     # the last draw of chain 1
+
+# Close the background processes that hold the models (chains[i]["model"])
+# when you no longer need them.
+AI4BayesCode.close_models(chains)
 
 # Examples of stateful functions
 
@@ -356,7 +373,7 @@ it). This is exactly what `model.get_history()` returns. Multi-chain
 R-hat in the DELIVERED example is always the shipped pair
 `AI4BayesCode.run_chains(lambda seed: mod.<ClassName>(...), seeds=...)` +
 `AI4BayesCode.rhat_summary(chains)` (each chain's `"hist"` is keep-only;
-run_chains strips the warmup draws) -- never a hand-rolled loop or a
+run_chains clears each model's history after the warmup sweeps) -- never a hand-rolled loop or a
 hand-assembled arviz call. Over-dispersed
 initial values, when needed, go through `model.set_current(...)`
 inside the inline constructor.
@@ -368,9 +385,9 @@ types, and brief descriptions. If hyperparameters are exposed as
 constructor arguments (see `codegen.md` Sec.2 and `codegen_priors.md`),
 document those too with their defaults. Also document the history keys
 and array shapes `get_history()` returns. `AI4BayesCode.run_chains`
-puts the KEEP-ONLY version in each chain's `"hist"` (it strips the
-warmup draws); a raw `get_history()` call on a stateful model still
-spans every stepped iteration.
+puts the KEEP-ONLY version in each chain's `"hist"` (it clears each
+model's history after the warmup sweeps); a raw `get_history()` call on
+a model stepped outside run_chains still spans every stepped iteration.
 
 Concrete example -- the constructor block for a BART model:
 
@@ -393,7 +410,7 @@ Concrete example -- the constructor block for a BART model:
 #     .set_current(d)  -- overwrite sigma; f_bart is read-only
 #
 #   get_history() keys (run_chains returns these KEEP-ONLY in chain["hist"];
-#   a raw get_history() call spans burn + keep):
+#   a get_history() call on a model stepped outside run_chains spans burn + keep):
 #     hist["f_bart"] -- (n_iter, N) posterior draws of f
 #     hist["sigma"]  -- (n_iter,)   posterior draws of sigma
 # -------------------------------------------------------------------------

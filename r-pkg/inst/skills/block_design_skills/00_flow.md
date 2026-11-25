@@ -114,7 +114,7 @@ phase loads exactly ONE `block_design_skills/<phase>.md` module on entry.
  `joint_constraint` kinds (`constraints.md`), and
  the **three-tier interface implementation** (Tier C kernel +
  license-gate / Tier B `block_sampler` contract / Tier A core-6 state
- methods + kernel-control category (freeze/unfreeze/get_frozen always;
+ methods + kernel-control category (freeze/unfreeze/get_frozen/clear_history always;
  readapt_NUTS iff NUTS-family child) via the `kernel_control_mixin`
  CRTP + `AI4BAYESCODE_BIND_KERNEL_CONTROL` macro; Stage 4). This is where you index the
  **system_design modules** (see Sec.6 Module map). Output lands in the
@@ -355,7 +355,7 @@ needs -- cite via "system_design Sec.N", resolves through
 
 | Need | system_design module | Sec.N |
 |---|---|---|
-| core-6 R contract + kernel-control category (freeze/unfreeze/get_frozen + readapt_NUTS iff NUTS-family) + C++ `block_sampler` contract + three tiers | `interface.md` | Sec.1, Sec.2 |
+| core-6 R contract + kernel-control category (freeze/unfreeze/get_frozen/clear_history + readapt_NUTS iff NUTS-family) + C++ `block_sampler` contract + three tiers | `interface.md` | Sec.1, Sec.2 |
 | shared_data / Gibbs-DAG vs predict-DAG / refreshers / set_current / RNG / history | `dataflow.md` | Sec.3-Sec.9 |
 | Jacobian discipline (`constraints::<kind>::wrap`; never hand-write) | `jacobian.md` | Sec.10 |
 | target-geometry legality gate (the correctness gate; validator can't catch it) | `geometry.md` | Sec.11 |

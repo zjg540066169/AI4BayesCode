@@ -87,6 +87,20 @@ get_frozen   () -> Rcpp::CharacterVector -- always
    * returns names of currently-frozen children, in composite child
      order (matches `get_dag()` ordering).
 
+clear_history () -> void -- always
+   * present on EVERY wrapper (kernel_control_mixin; bound by both
+     AI4BAYESCODE_BIND_KERNEL_CONTROL and AI4BAYESCODE_PYBIND_KERNEL_CONTROL);
+   * empties the stored draws of every block in impl_ (composite_block
+     calls clear_history() on every child), then calls the wrapper's
+     clear_extra_history_() hook;
+   * the current state, the RNG streams and the tuning quantities are
+     unchanged; the next step() records the first draw of the new history;
+   * a wrapper that records per-sweep values in members outside impl_
+     defines a PUBLIC void clear_extra_history_() that empties them
+     (codegen_cpp.md Sec.8);
+   * ai4bayescode_run_chains() / run_chains() call it after the warmup
+     sweeps.
+
 readapt_NUTS (int n, bool reset, int max_tree_depth, double target_accept) -> void
              (a 3-arg forwarder without target_accept is also bound)
    * present ONLY on wrappers whose composite contains at least
@@ -104,7 +118,7 @@ readapt_NUTS (int n, bool reset, int max_tree_depth, double target_accept) -> vo
 
 **Semantic separation.** Core-six methods are for STATE INJECTION and QUERY.
 Kernel-control methods are for KERNEL BEHAVIOR CONFIGURATION (which
-sub-kernels run, how they adapt); they MUST NOT mutate parameter state --
+sub-kernels run, how they adapt, which draws are stored); they MUST NOT mutate parameter state --
 that goes through `set_current`. Adding a new kernel-control method (e.g.,
 a hypothetical `readapt_VI` for VI blocks) requires an explicit Sec.1
 amendment and a listed inclusion criterion.
@@ -174,7 +188,7 @@ using dbarts / mcmclib / etc. directly.
   ```
   { step, get_current, set_current, predict_at, get_dag, get_history }
     ALWAYS (core-6)
-  U { freeze, unfreeze, get_frozen }
+  U { freeze, unfreeze, get_frozen, clear_history }
     ALWAYS (kernel-control, via AI4BAYESCODE_BIND_KERNEL_CONTROL macro)
   U { readapt_NUTS }
     iff composite contains any nuts_block / joint_nuts_block child
@@ -183,7 +197,7 @@ using dbarts / mcmclib / etc. directly.
   ```
   Any name outside this formula is a bug. Missing a member the composite
   requires is also a bug (e.g., a NUTS-family wrapper without
-  `readapt_NUTS`, or ANY wrapper without freeze/unfreeze/get_frozen).
+  `readapt_NUTS`, or ANY wrapper without freeze/unfreeze/get_frozen/clear_history).
 - In R: `names(m)` on any constructed wrapper should show only the
   reference-class internals (`.self`, `.module`, `.pointer`,
   `.refClassDef`, `.cppclass`, `initialize`, `finalize`) and
@@ -193,7 +207,8 @@ using dbarts / mcmclib / etc. directly.
 - Validator Check #23 verifies `readapt_NUTS` presence/absence + state
   preservation; validator Check #26 verifies freeze/unfreeze/get_frozen
   presence + whitelist/blacklist gate + refreeze warning + stale-derived
-  warning.
+  warning; the R1 member-function sweep (validator.md Layer 3) verifies
+  clear_history.
 
 **Freeze name resolution -- resolver step order.** `composite_block`
 resolves each name passed to `freeze(...)` in this fixed order (see

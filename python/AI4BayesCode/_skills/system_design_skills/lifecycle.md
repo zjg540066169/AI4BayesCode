@@ -79,7 +79,7 @@ Write `examples/GPGaussian.cpp`:
   (see `dataflow.md` Sec.7).
 - Inherits `AI4BayesCode::kernel_control_mixin<GPGaussian>` (CRTP)
   so it automatically exposes the **kernel-control category**
-  (`freeze / unfreeze / get_frozen`) via the
+  (`freeze / unfreeze / get_frozen / clear_history`) via the
   `AI4BAYESCODE_BIND_KERNEL_CONTROL(GPGaussian)` macro in RCPP_MODULE.
 - RCPP_MODULE exposes ONLY core-6 + kernel-control (plus `readapt_NUTS`
   iff any NUTS-family child, plus BART tree-serialization carve-out iff
@@ -193,7 +193,7 @@ Before any PR touching Tier A / B / C lands:
 - [ ] **Unified-interface grep.** `grep -n '\.method(' examples/*.cpp`:
       for every wrapper class, the set of method names must match the
       interface.md Sec.1 formula: core-6 + kernel-control
-      (`freeze`/`unfreeze`/`get_frozen`) + `readapt_NUTS` iff NUTS-family
+      (`freeze`/`unfreeze`/`get_frozen`/`clear_history`) + `readapt_NUTS` iff NUTS-family
       child + BART tree-serialization carve-out (`get_tree`/`set_tree`/
       `get_tree_history`) iff BART-family child. No extras outside this
       formula; no renames.
@@ -331,7 +331,7 @@ Before any PR touching Tier A / B / C lands:
   route it through `set_current(list(...))`.
   **EXCEPTION**: kernel-control methods (separate category, NOT
   state methods) are allowed per Sec.1 / Sec.13. Kernel-control
-  members in v1: `freeze` / `unfreeze` / `get_frozen` (always) +
+  members in v1: `freeze` / `unfreeze` / `get_frozen` / `clear_history` (always) +
   `readapt_NUTS(n, reset, max_tree_depth, target_accept)` (iff any NUTS-family
   child). Future kernel-control methods (e.g., a hypothetical
   `readapt_VI`) require an explicit Sec.1 amendment.

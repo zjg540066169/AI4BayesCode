@@ -65,7 +65,7 @@ returns `MCMC` if all children are MCMC, `VI` if all are VI, and
 is C++ machinery, not Rcpp-exposed. R sees the same core-six state
 methods (`step / get_current / set_current / predict_at / get_dag /
 get_history`) plus the kernel-control category (`freeze / unfreeze /
-get_frozen` always; `readapt_NUTS` conditional on NUTS-family child).
+get_frozen / clear_history` always; `readapt_NUTS` conditional on NUTS-family child).
 The wrapper class chooses children at construction time; outer
 R/Python code is identical for MCMC, VI, and hybrid wrappers. Note:
 freezing a VI child is blacklisted (ai4b::stop) -- see Sec.18.4 for
