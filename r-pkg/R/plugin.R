@@ -9,6 +9,13 @@
 #' [ai4bayescode_source()], which needs no plugin
 #' automatically.
 #'
+#' The flags include `-include AI4BayesCode/arma_aligned_alloc.hpp`, so, as
+#' with [ai4bayescode_source()], Armadillo takes its heap arrays from memory
+#' aligned to 64 bytes. Rcpp keys its build cache on the source file alone: a
+#' module built through this plugin by an earlier version of AI4BayesCode and
+#' kept in a lasting `rcpp.cache.dir` folder is loaded again for an unchanged
+#' file unless `rebuild = TRUE` is passed to [Rcpp::sourceCpp()].
+#'
 #' @return Plugin list per the [Rcpp::Rcpp.plugin.maker()] contract.
 #' @export
 inlineCxxPlugin <- function() {
@@ -44,7 +51,15 @@ inlineCxxPlugin <- function() {
         # expands to "1", a different token sequence, and every single user
         # compile then opens with a macro-redefinition warning.
         "-DARMA_DONT_USE_WRAPPER=",
-        "-DAI4BAYESCODE_RCPP_MODULE"
+        "-DAI4BAYESCODE_RCPP_MODULE",
+        # Armadillo takes its heap arrays from 64-byte-aligned memory, as in
+        # ai4bayescode_source() (see AI4BayesCode/arma_aligned_alloc.hpp).
+        # -include reads the header before the first line of the source, so
+        # before <RcppArmadillo.h>. The relative name needs no quoting: the
+        # compiler looks for it in its working directory (Rcpp's build
+        # folder), then in R's include folder, then under the first -I above,
+        # and only the last has an AI4BayesCode folder.
+        "-include AI4BayesCode/arma_aligned_alloc.hpp"
     )
 
     list(

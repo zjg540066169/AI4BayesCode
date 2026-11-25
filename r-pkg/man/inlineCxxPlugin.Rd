@@ -19,4 +19,11 @@ AI4BayesCode headers + vendored mcmclib / BaseMatrixOps.
 Users typically do NOT call this directly: use
 [ai4bayescode_source()], which needs no plugin
 automatically.
+
+The flags include `-include AI4BayesCode/arma_aligned_alloc.hpp`, so, as
+with [ai4bayescode_source()], Armadillo takes its heap arrays from memory
+aligned to 64 bytes. Rcpp keys its build cache on the source file alone: a
+module built through this plugin by an earlier version of AI4BayesCode and
+kept in a lasting `rcpp.cache.dir` folder is loaded again for an unchanged
+file unless `rebuild = TRUE` is passed to [Rcpp::sourceCpp()].
 }

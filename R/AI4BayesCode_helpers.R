@@ -142,8 +142,11 @@ ai4bayescode_source_checkout <- function(cpp_file,
         # and LAPACK results do not depend on where an array lies (see
         # include/AI4BayesCode/arma_aligned_alloc.hpp). -include reads the
         # header before the first line of the source, so before
-        # <RcppArmadillo.h>; the compiler finds it through the first -I root,
-        # so the path needs no quoting.
+        # <RcppArmadillo.h>. The relative name needs no quoting: the compiler
+        # looks for it in its working directory (Rcpp's build folder), then
+        # in R's include folder, then under the checkout's include root, the
+        # first -I of PKG_CPPFLAGS, and only the last has an AI4BayesCode
+        # folder.
         "-include AI4BayesCode/arma_aligned_alloc.hpp",
         extra_cppflags
     )

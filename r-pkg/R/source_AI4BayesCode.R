@@ -171,9 +171,11 @@ ai4bayescode_source <- function(code,
         # Armadillo takes its heap arrays from 64-byte-aligned memory, so BLAS
         # and LAPACK results do not depend on where an array lies (see
         # AI4BayesCode/arma_aligned_alloc.hpp). -include reads the header
-        # before the first line of the source, so before <RcppArmadillo.h>;
-        # the compiler finds it through the first -I root, so the path needs
-        # no quoting.
+        # before the first line of the source, so before <RcppArmadillo.h>.
+        # The relative name needs no quoting: the compiler looks for it in its
+        # working directory (Rcpp's build folder), then in R's include folder,
+        # then under AI4BayesCode's include root, the first -I of
+        # PKG_CPPFLAGS, and only the last has an AI4BayesCode folder.
         "-include AI4BayesCode/arma_aligned_alloc.hpp",
         if (!identical(build_file, cpp_file)) paste0("-I", shQuote(src_dir)),
         # Template-heavy samplers can exceed the COFF limit of 2^15 sections.
@@ -245,18 +247,20 @@ ai4bayescode_source <- function(code,
     # folder) on the source file alone, so a module built earlier with other
     # flags is loaded again for an unchanged file. The build therefore goes to
     # a subfolder of cacheDir named after a fingerprint of the flags and of
-    # the force-included header.
-    dots <- list(...)
-    cache_base <- dots[["cacheDir", exact = TRUE]]
-    if (is.null(cache_base)) cache_base <- getOption("rcpp.cache.dir", tempdir())
-    dots[["cacheDir"]] <- file.path(
-        cache_base, paste0("ai4b-", .ai4b_build_fingerprint(cppflags, libs, align_hdr)))
+    # the force-included header. source_cpp() takes a `cacheDir` given in
+    # `...` as the folder that holds that subfolder and passes the other
+    # arguments in `...` to Rcpp::sourceCpp() unchanged. It calls
+    # Rcpp::sourceCpp() by name, so the error of a failed build reports the
+    # call `Rcpp::sourceCpp(build_file, ...)`, not the deparsed function.
+    fp_dir <- paste0("ai4b-", .ai4b_build_fingerprint(cppflags, libs, align_hdr))
+    source_cpp <- function(..., cacheDir = getOption("rcpp.cache.dir", tempdir()))
+        Rcpp::sourceCpp(build_file, rebuild = rebuild, verbose = verbose, env = env,
+                        cacheDir = file.path(cacheDir, fp_dir), ...)
     # On Windows Rcpp normalizes "<file's folder>/../inst/include" whether or not
     # it exists, which warns "The system cannot find the path specified" on
     # every call for a file outside a package source tree. That one is noise.
     withCallingHandlers(
-        do.call(Rcpp::sourceCpp,
-                c(list(build_file, rebuild = rebuild, verbose = verbose, env = env), dots)),
+        source_cpp(...),
         warning = function(w) {
             if (.Platform$OS.type == "windows" &&
                 grepl("/inst/include\"", conditionMessage(w), fixed = TRUE))

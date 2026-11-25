@@ -25,6 +25,11 @@
 //       triangular solves): four models built with the same seed, each after
 //       different heap allocations, give bit-identical get_history() and
 //       get_current() after the same number of sweeps.
+//    5. The objects the header does not cover: a Mat with at most 16
+//       elements (arma_config::mat_prealloc) and a Cube with at most 64
+//       elements (Cube_prealloc::mem_n_elem) hold their elements inside the
+//       object; with one element more the elements are on the heap, on a
+//       64-byte boundary.
 // ============================================================================
 #include "AI4BayesCode/arma_aligned_alloc.hpp"
 
@@ -228,6 +233,38 @@ void gp_regression_repeats() {
     check(same_cur,  "get_current() bit-identical in the four builds");
 }
 
+// ---- 5. elements stored inside the object ----------------------------------
+// true if address p lies within the n_bytes of the object at obj
+bool inside(const void* obj, std::size_t n_bytes, const void* p) {
+    const std::uintptr_t b = reinterpret_cast<std::uintptr_t>(obj);
+    const std::uintptr_t q = reinterpret_cast<std::uintptr_t>(p);
+    return q >= b && q < b + n_bytes;
+}
+
+void elements_inside_the_object() {
+    std::printf("5. elements stored inside the object\n");
+    check(arma::arma_config::mat_prealloc == 16 && arma::Cube_prealloc::mem_n_elem == 64,
+          "arma_config::mat_prealloc is 16 and Cube_prealloc::mem_n_elem is 64");
+    std::mt19937_64 rng(13);
+    std::vector<std::vector<char>> keep;
+    bool mat16 = true, mat17 = true, cube64 = true, cube65 = true;
+    for (int rep = 0; rep < 32; ++rep) {
+        move_heap(keep, rng, 3);
+        const arma::mat a(4, 4, arma::fill::ones);          // 16 elements
+        const arma::mat b(17, 1, arma::fill::ones);         // 17
+        const arma::cube q(4, 4, 4, arma::fill::ones);      // 64
+        const arma::cube r(5, 13, 1, arma::fill::ones);     // 65
+        mat16  = mat16  && inside(&a, sizeof(a), a.memptr());
+        mat17  = mat17  && !inside(&b, sizeof(b), b.memptr()) && on_boundary(b.memptr());
+        cube64 = cube64 && inside(&q, sizeof(q), q.memptr());
+        cube65 = cube65 && !inside(&r, sizeof(r), r.memptr()) && on_boundary(r.memptr());
+    }
+    check(mat16,  "Mat with 16 elements: elements inside the object");
+    check(mat17,  "Mat with 17 elements: elements on the heap, on a 64-byte boundary");
+    check(cube64, "Cube with 64 elements: elements inside the object");
+    check(cube65, "Cube with 65 elements: elements on the heap, on a 64-byte boundary");
+}
+
 }  // namespace
 
 int main() {
@@ -236,6 +273,7 @@ int main() {
     heap_arrays();
     blas_results();
     gp_regression_repeats();
+    elements_inside_the_object();
     std::printf("\ntest_fix_arma_aligned_alloc: %d failed check(s)\n", g_fail);
     return g_fail == 0 ? 0 : 1;
 }

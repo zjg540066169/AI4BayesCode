@@ -4,16 +4,16 @@
 //  Armadillo heap memory on 64-byte boundaries.
 //
 //  Armadillo stores the elements of a Mat, Col or Row with more than 16
-//  elements, and of every Cube and SpMat, in memory from the heap: from
-//  posix_memalign with 16-byte (below 1024 bytes) or 32-byte alignment where
-//  <unistd.h> sets _POSIX_ADVISORY_INFO (glibc), from _aligned_malloc with
-//  the same alignments under MSVC, and from malloc otherwise (macOS,
-//  MinGW-w64), which aligns to 16 bytes. The address of an array modulo 64
-//  then depends on the state of the heap. In some BLAS and LAPACK
-//  implementations (macOS Accelerate among them) the order in which ddot and
-//  the triangular solves add up their terms depends on the alignment of the
-//  operands, so the same values stored at addresses with different
-//  remainders modulo 64 give results that differ in the last bits.
+//  elements, of a Cube with more than 64 elements, and of every SpMat, in
+//  memory from the heap: from posix_memalign with 16-byte (below 1024 bytes)
+//  or 32-byte alignment where <unistd.h> sets _POSIX_ADVISORY_INFO (glibc),
+//  from _aligned_malloc with the same alignments under MSVC, and from malloc
+//  otherwise (macOS, MinGW-w64), which aligns to 16 bytes. The address of an
+//  array modulo 64 then depends on the state of the heap. In some BLAS and
+//  LAPACK implementations (macOS Accelerate among them) the order in which
+//  ddot and the triangular solves add up their terms depends on the
+//  alignment of the operands, so the same values stored at addresses with
+//  different remainders modulo 64 give results that differ in the last bits.
 //  Armadillo calls ddot for dot(a, b) and accu(A % B) with more than 32
 //  elements, and LAPACK's dtrtrs for solve(trimatl(L), b). Two models built
 //  with the same seed in one process can then produce different draws.
@@ -23,20 +23,23 @@
 //  aligned to 64 bytes:
 //      POSIX                                   posix_memalign / free
 //      Windows (MinGW-w64, Rtools, MSYS2, MSVC) _aligned_malloc / _aligned_free
-//  The R and Python packages compile every sampler with
-//      -include AI4BayesCode/arma_aligned_alloc.hpp
-//  so the header is read before the first line of the sampler source, and
-//  therefore before <RcppArmadillo.h> or <armadillo>.
+//  In R, ai4bayescode_source(), ai4bayescode_source_checkout() and the Rcpp
+//  plugin (a file with // [[Rcpp::depends(AI4BayesCode)]] compiled by
+//  Rcpp::sourceCpp), and in Python, AI4BayesCode.source(), compile every
+//  sampler with -include and this header, so the header is read before the
+//  first line of the sampler source, and therefore before <RcppArmadillo.h>
+//  or <armadillo>.
 //
 //  Memory from _aligned_malloc must be released by _aligned_free. On Windows
 //  every translation unit that creates or destroys the Armadillo objects of
 //  one module must therefore be compiled with this header; the packages
 //  compile each sampler as one translation unit.
 //
-//  Not affected: a Mat with at most 16 elements stores them inside the object
-//  (arma_config::mat_prealloc), at the alignment of the object, and an
-//  Armadillo object built on memory it does not own (copy_aux_mem = false)
-//  uses that memory.
+//  Not affected: a Mat with at most 16 elements (arma_config::mat_prealloc)
+//  and a Cube with at most 64 elements (Cube_prealloc::mem_n_elem) store
+//  them inside the object, at the alignment of the object, and an Armadillo
+//  object built on memory it does not own (copy_aux_mem = false) uses that
+//  memory.
 //
 //  If ARMA_ALIEN_MEM_ALLOC_FUNCTION or ARMA_ALIEN_MEM_FREE_FUNCTION is
 //  already defined (with -D, say), this header defines neither and the

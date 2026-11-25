@@ -408,10 +408,12 @@ def _compile_flags(include_root: Path, cxx: str | None = None) -> list[str]:
         # Armadillo takes its heap arrays from 64-byte-aligned memory, so BLAS
         # and LAPACK results do not depend on where an array lies (see
         # AI4BayesCode/arma_aligned_alloc.hpp). -include reads the header
-        # before the first line of the source, so before <armadillo>; the
-        # compiler finds it through the first -I root. The flag is part of the
-        # build signature, so modules built without it are not reused.
-        "-include", "AI4BayesCode/arma_aligned_alloc.hpp",
+        # before the first line of the source, so before <armadillo>. The
+        # header is passed by absolute path: the compiler runs in the caller's
+        # working directory and looks for a relative -include name there
+        # first. The flag is part of the build signature, so modules built
+        # without it are not reused.
+        "-include", str((inc / "AI4BayesCode" / "arma_aligned_alloc.hpp").absolute()),
         # MinGW's math.h hides M_PI and the other M_* constants in strict ISO
         # mode, so Windows builds use the GNU dialect, as R itself does.
         "-std=gnu++17" if _is_windows() else "-std=c++17",

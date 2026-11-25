@@ -135,11 +135,12 @@ test_that("the staged copy of a read-only file stays writable and follows edits"
 })
 
 # A module whose function returns the address modulo 64 of Armadillo heap
-# arrays of 17 to 400 elements.
-arma_probe_file <- function() {
+# arrays of 17 to 400 elements. `depends` is the list of packages in its
+# // [[Rcpp::depends(...)]] line.
+arma_probe_file <- function(depends = "RcppArmadillo") {
     f <- tempfile("ai4b_align_", fileext = ".cpp")
     writeLines(c(
-        "// [[Rcpp::depends(RcppArmadillo)]]",
+        paste0("// [[Rcpp::depends(", depends, ")]]"),
         "#include <RcppArmadillo.h>",
         "#include <cstdint>",
         "#include <vector>",
@@ -198,4 +199,43 @@ test_that("a module built earlier in the same cacheDir with other flags is not r
     ai4bayescode_source(f, env = e, quiet = TRUE, cacheDir = cache)
     expect_true(all(e$ai4b_arma_remainders() == 0L))
     expect_length(list.files(cache, pattern = "^ai4b-[0-9a-f]{12}$"), 1L)
+})
+
+test_that("the Rcpp plugin force-includes the alignment header", {
+    flags <- inlineCxxPlugin()$env$PKG_CPPFLAGS
+    expect_match(flags, "-include AI4BayesCode/arma_aligned_alloc.hpp", fixed = TRUE)
+    expect_true(file.exists(system.file("include", "AI4BayesCode", "arma_aligned_alloc.hpp",
+                                        package = "AI4BayesCode")))
+})
+
+test_that("a file compiled through the Rcpp plugin has 64-byte-aligned Armadillo heap arrays", {
+    skip_on_cran()
+    skip_if_not_installed("Rcpp")
+    skip_if_not_installed("RcppArmadillo")
+    # // [[Rcpp::depends(AI4BayesCode)]] makes Rcpp::sourceCpp() call
+    # AI4BayesCode::inlineCxxPlugin() for the compiler flags.
+    f <- arma_probe_file("RcppArmadillo, AI4BayesCode")
+    e <- new.env()
+    Rcpp::sourceCpp(f, env = e, cacheDir = tempfile("ai4b_plugin_cache_"))
+    rem <- e$ai4b_arma_remainders()
+    expect_length(rem, 3L * 384L)
+    expect_true(all(rem == 0L))
+})
+
+test_that("a failed build reports the call Rcpp::sourceCpp(build_file, ...)", {
+    skip_on_cran()
+    skip_if_not_installed("Rcpp")
+    skip_if_not_installed("RcppArmadillo")
+    f <- tempfile("ai4b_broken_", fileext = ".cpp")
+    writeLines(c("#include <Rcpp.h>",
+                 "// [[Rcpp::export]]",
+                 "int ai4b_broken() { return ai4b_undeclared_name; }"), f)
+    err <- NULL
+    utils::capture.output(err <- tryCatch(
+        suppressMessages(suppressWarnings(
+            ai4bayescode_source(f, env = new.env(), quiet = TRUE))),
+        error = identity))
+    expect_s3_class(err, "error")
+    expect_identical(deparse(conditionCall(err)[[1L]]), "Rcpp::sourceCpp")
+    expect_identical(conditionCall(err)[[2L]], as.name("build_file"))
 })
