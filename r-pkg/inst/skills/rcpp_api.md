@@ -91,6 +91,8 @@ vendor under `bart_pure_cpp/src/GENBART/` is header-only and needs no unity.
 BART uses R's RNG via `arn` -- reproducible with `set.seed()` in R.
 NUTS blocks use `std::mt19937_64` -- reproducible with the seed passed
 to the constructor. These are independent RNG streams.
+`ai4bayescode_run_chains()` calls `set.seed(seeds[i])` immediately before
+it constructs chain i, so both streams of a run are determined by `seeds`.
 
 ### 8. Rcpp Module method signatures
 Rcpp Modules DO bind same-name overloads, but only with an explicit

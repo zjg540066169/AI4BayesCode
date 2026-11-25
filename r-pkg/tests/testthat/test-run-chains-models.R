@@ -395,36 +395,6 @@ test_that("print(run) is compact", {
     expect_output(print(run_f), "not kept (keep_models = FALSE)", fixed = TRUE)
 })
 
-test_that("workers get the R random-number streams of mclapply(mc.set.seed = TRUE)", {
-    skip_on_os("windows"); skip_if_not_installed("withr")
-    # A model that draws from R's random-number generator, as the BART
-    # kernel does under the Rcpp backend.
-    rng_ctor <- function(seed) {
-        e <- new.env()
-        e$draws <- numeric(0)
-        e$step <- function(n = 1L) e$draws <- c(e$draws, stats::runif(n))
-        e$get_history <- function() list(u = e$draws)
-        e$clear_history <- function() e$draws <- numeric(0)
-        e
-    }
-    lecuyer <- function(keep)
-        withr::with_seed(7, ai4bayescode_run_chains(
-            rng_ctor, n_chains = 3, n_burn = 2, n_keep = 5, n_cores = 2,
-            keep_models = keep, verbose = FALSE), .rng_kind = "L'Ecuyer-CMRG")
-    run_p <- lecuyer(TRUE)
-    withr::defer(ai4bayescode_close_models(run_p))
-    run_m <- lecuyer(FALSE)
-    expect_s3_class(run_p$models[[1]], "ai4bayescode_chain_model")
-    expect_identical(run_p$histories, run_m$histories)
-    expect_false(identical(run_p$histories[[1]], run_p$histories[[2]]))
-    # Any other generator: each worker seeds R's generator afresh, so the
-    # chains in different workers do not repeat each other's draws.
-    run_d <- ai4bayescode_run_chains(rng_ctor, n_chains = 2, n_burn = 0,
-                                     n_keep = 5, n_cores = 2, verbose = FALSE)
-    withr::defer(ai4bayescode_close_models(run_d))
-    expect_false(identical(run_d$histories[[1]]$u, run_d$histories[[2]]$u))
-})
-
 test_that("an interrupted call does not shift the results of later calls", {
     skip_on_cran(); skip_on_os("windows"); skip_if_not_installed("withr")
     run <- ai4bayescode_run_chains(fake_ctor(clear = TRUE), n_chains = 2,

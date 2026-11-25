@@ -29,7 +29,15 @@ object exposing `step()` and `get_history()`. Must be deterministic in
 \item{n_keep}{Kept iterations per chain. Defaults to 10000.}
 
 \item{seeds}{Optional integer vector of length `n_chains`; auto-generated if
-`NULL`.}
+`NULL`. For chain `i`, `set.seed(seeds[i])` (R's random-number generator,
+current `RNGkind()`) is called immediately before `model_ctor(seeds[i])`,
+in every path (worker processes, `parallel::mclapply`, sequential). The
+draws of a model that uses R's generator (`bart_block`, `genbart_block`
+and `softbart_block` under Rcpp) are therefore determined by `seeds`, and
+chains with different seeds use different streams. A sequential run
+calls `set.seed()` in this R session; the caller's `.Random.seed` (or its
+absence) is saved before the run and restored afterwards, so the
+caller's random-number stream is unchanged by the run.}
 
 \item{parallel}{Logical; run the chains in forked worker processes on
 POSIX. Defaults to `TRUE` (sequential on Windows).}
