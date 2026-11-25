@@ -28,6 +28,15 @@
  *
  *  See skills/system_design_skills/interface.md Sec.1 for the full
  *  contract and rationale.
+ *
+ *  HISTORY RESET
+ *  -------------
+ *  The mixin also gives every wrapper clear_history() (backend-neutral, bound
+ *  by both macros below). It empties the stored draws of every block in
+ *  impl_ and then calls the wrapper's clear_extra_history_() hook. A wrapper
+ *  that records per-sweep values in members of its own, outside impl_,
+ *  defines that hook PUBLIC and empties those members in it; every other
+ *  wrapper inherits the no-op default.
  *================================================================================*/
 
 #ifndef AI4BAYESCODE_KERNEL_CONTROL_MIXIN_HPP
@@ -71,6 +80,30 @@ namespace AI4BayesCode {
 template <typename Derived>
 class kernel_control_mixin {
 public:
+
+    // ---- history reset (backend-neutral) --------------------------------
+    // Discards every stored draw. The current state, the RNG streams and the
+    // tuning quantities (NUTS step size and metric, slice widths, ...) are
+    // left unchanged, so each sweep after the call records the same draw as
+    // the same sweep of a run without the call. The next step() records the
+    // first draw of the new history. ai4bayescode_run_chains() / run_chains()
+    // call this after the warmup sweeps, so get_history() and predict_at()
+    // cover the post-warmup draws only.
+    //
+    // clear_extra_history_() is a hook: a wrapper that records per-sweep
+    // values in members of its own (outside impl_) defines a PUBLIC
+    //     void clear_extra_history_() { <those members>.clear(); }
+    // which hides the no-op default below. If the wrapper declares it
+    // private, the call below does not compile (name lookup finds the
+    // private member), so the hook cannot be skipped without a diagnostic.
+    void clear_history() {
+        auto self = static_cast<Derived*>(this);
+        self->impl_->clear_history();
+        self->clear_extra_history_();
+    }
+
+    /// Default hook: the wrapper records no per-sweep values outside impl_.
+    void clear_extra_history_() {}
 
 #ifdef AI4BAYESCODE_RCPP_MODULE
     // ---- R-layer forwarders (Rcpp-typed) -------------------------------
@@ -237,6 +270,12 @@ public:
             (Rcpp::CharacterVector (CLASSNAME::*)() const)                \
                 &CLASSNAME::get_frozen_names,                             \
             "List currently-frozen block names (DFS pre-order)")          \
+    .method("clear_history",                                              \
+            (void (CLASSNAME::*)())                                       \
+                &CLASSNAME::clear_history,                                \
+            "Discard the stored draws; the current state and tuning are " \
+            "kept, and the next step() records the first draw of a new "  \
+            "history")                                                    \
     .method("set_current",                                                \
             (void (CLASSNAME::*)(SEXP, SEXP))                             \
                 &CLASSNAME::set_current_misuse_,                          \
@@ -289,7 +328,12 @@ public:
          "Release sub-kernel(s); no arg / None = all")                    \
     .def("get_frozen",                                                    \
          &CLASSNAME::py_get_frozen,                                       \
-         "List currently-frozen block names (DFS pre-order)")
+         "List currently-frozen block names (DFS pre-order)")             \
+    .def("clear_history",                                                 \
+         &CLASSNAME::clear_history,                                       \
+         "Discard the stored draws; the current state and tuning are "    \
+         "kept, and the next step() records the first draw of a new "     \
+         "history")
 #endif // AI4BAYESCODE_PYBIND_MODULE
 
 // ----------------------------------------------------------------------------
