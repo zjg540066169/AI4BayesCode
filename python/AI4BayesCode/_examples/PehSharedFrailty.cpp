@@ -262,31 +262,82 @@ public:
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
     AI4BayesCode::dag_info    get_dag()     const { return impl_->get_dag(); }
 
-    /// predict_at: survival curve S_g(t) for one group g under current draw.
-    /// new_data["t"] = query times; new_data["g"] = group index (length 1).
+    /// Survival function of group g, S(t_q | g) = exp(-w_g H_0(t_q)), at the
+    /// query times new_data["t"] (n_q values), with H_0(t) = sum_k lambda_k
+    /// max(0, min(t, e_k) - e_{k-1}); new_data["g"] is one 0-based group
+    /// index, an integer with 0 <= g < G (anything else raises an error).
+    /// Returns "S" with one row per draw:
+    ///   keep_history TRUE, last_draw_only FALSE: row d from lambda and w of
+    ///     stored draw d (row d of get_history()), n_draws x n_q;
+    ///   last_draw_only TRUE, or keep_history FALSE: one row from the current
+    ///     lambda and w, 1 x n_q.
+    /// Without "t" or "g" (e.g. predict_at(list())) the result is empty.
+    /// predict_at(new_data) = predict_at(new_data, last_draw_only = false).
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the single-draw path (the path taken when
+    /// keep_history is false) and leaves the stored draws in place.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
+                                         bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
         AI4BayesCode::history_map out;
         auto it_tq = new_data.find("t"); auto it_g = new_data.find("g");
         if (it_tq == new_data.end() || it_g == new_data.end()) return out;
-        const arma::vec& t_q   = it_tq->second;
-        const std::size_t g    = static_cast<std::size_t>(it_g->second[0]);
+        const arma::vec& t_q = it_tq->second;
+
+        // g indexes w; G = number of frailties = dim of the frailty block
+        // (child 0).
+        const std::size_t G = impl_->child(0).dim();
+        const arma::vec& g_in = it_g->second;
+        if (g_in.n_elem != 1)
+            ai4b::stop("PehSharedFrailty::predict_at: g must be one group index "
+                       "(got %d values); g is an integer with 0 <= g < G = %d.",
+                       static_cast<int>(g_in.n_elem), static_cast<int>(G));
+        const double g_val = g_in[0];
+        if (!std::isfinite(g_val) || g_val != std::floor(g_val) || g_val < 0.0 ||
+            g_val >= static_cast<double>(G))
+            ai4b::stop("PehSharedFrailty::predict_at: g = %g is not a group index; "
+                       "g must be an integer with 0 <= g < G = %d.",
+                       g_val, static_cast<int>(G));
+        const std::size_t g = static_cast<std::size_t>(g_val);
+
         const arma::vec& edges_local = impl_->data().get("edges");
-        const arma::vec& lambda      = impl_->data().get("lambda");
-        const arma::vec& w           = impl_->data().get("w");
         const std::size_t K = edges_local.n_elem - 1;
-        const double w_g = w[g];
-        arma::mat S(t_q.n_elem, 1);
-        for (std::size_t i = 0; i < t_q.n_elem; ++i) {
-            double H = 0.0;
-            for (std::size_t k = 0; k < K; ++k) {
-                const double lo = edges_local[k];
-                const double hi = std::min(t_q[i], edges_local[k + 1]);
-                const double dur = hi - lo;
-                if (dur > 0.0) H += lambda[k] * dur;
-            }
-            S(i, 0) = std::exp(-w_g * H);
+
+        // Row r of `lambda_rows` and of `w_rows` is one draw of
+        // (lambda_1, ..., lambda_K) and of (w_0, ..., w_{G-1}).
+        arma::mat lambda_rows, w_rows;
+        if (use_history) {
+            const AI4BayesCode::history_map hist = impl_->get_history();
+            lambda_rows = hist.at("lambda");                     // n_draws x K
+            w_rows      = hist.at("w");                          // n_draws x G
+            if (lambda_rows.n_rows != w_rows.n_rows)
+                ai4b::stop("PehSharedFrailty::predict_at: %d stored draws of "
+                           "lambda and %d of w.",
+                           static_cast<int>(lambda_rows.n_rows),
+                           static_cast<int>(w_rows.n_rows));
+        } else {
+            lambda_rows = impl_->data().get("lambda").t();       // 1 x K
+            w_rows      = impl_->data().get("w").t();            // 1 x G
         }
-        out["S"] = S;
+
+        arma::mat S(lambda_rows.n_rows, t_q.n_elem);
+        for (std::size_t r = 0; r < lambda_rows.n_rows; ++r) {
+            const double w_g = w_rows(r, g);
+            for (std::size_t i = 0; i < t_q.n_elem; ++i) {
+                double H = 0.0;
+                for (std::size_t k = 0; k < K; ++k) {
+                    const double lo = edges_local[k];
+                    const double hi = std::min(t_q[i], edges_local[k + 1]);
+                    const double dur = hi - lo;
+                    if (dur > 0.0) H += lambda_rows(r, k) * dur;
+                }
+                S(r, i) = std::exp(-w_g * H);
+            }
+        }
+        out["S"] = std::move(S);
         return out;
     }
 
@@ -310,7 +361,18 @@ RCPP_MODULE(PehSharedFrailty_module) {
         .method("step", (void (PehSharedFrailty::*)(int)) &PehSharedFrailty::step, "Run n sweeps.")
         .method("get_current", &PehSharedFrailty::get_current)
         .method("set_current", &PehSharedFrailty::set_current)
-        .method("predict_at",  &PehSharedFrailty::predict_at)
+        .method("predict_at",
+                (AI4BayesCode::history_map (PehSharedFrailty::*)(const AI4BayesCode::state_map&) const)
+                    &PehSharedFrailty::predict_at,
+                "predict_at(list(t = <query times>, g = <group, 0 <= g < G>)): S(t | g) "
+                "with one row per stored (lambda, w) draw (keep_history = TRUE), or one "
+                "row from the current draw (keep_history = FALSE). Without t or g the "
+                "result is empty.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (PehSharedFrailty::*)(const AI4BayesCode::state_map&, bool) const)
+                    &PehSharedFrailty::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",     &PehSharedFrailty::get_dag)
         .method("get_history", &PehSharedFrailty::get_history)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(PehSharedFrailty);
@@ -334,7 +396,15 @@ PYBIND11_MODULE(PehSharedFrailty, m) {
         .def("step", (void (PehSharedFrailty::*)(int)) &PehSharedFrailty::step, pybind11::arg("n_steps"))
         .def("get_current", &PehSharedFrailty::get_current)
         .def("set_current", &PehSharedFrailty::set_current, pybind11::arg("params"))
-        .def("predict_at",  &PehSharedFrailty::predict_at,  pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (PehSharedFrailty::*)(const AI4BayesCode::state_map&, bool) const)
+                 &PehSharedFrailty::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false,
+             "predict_at({'t': query_times, 'g': group}, last_draw_only=False), "
+             "0 <= g < G: S(t | g) with one row per stored (lambda, w) draw "
+             "(keep_history=True and last_draw_only=False), else one row from the "
+             "current draw. Without 't' or 'g' the result is empty.")
         .def("get_dag",     &PehSharedFrailty::get_dag)
         .def("get_history", &PehSharedFrailty::get_history)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(PehSharedFrailty);

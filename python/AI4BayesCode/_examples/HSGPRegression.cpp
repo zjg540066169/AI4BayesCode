@@ -445,8 +445,11 @@ public:
         //   mu   = Intercept + f                                (len N)
         //   y_rep ~ N(mu, exp(log_sigma)^2)                     (stoch)
         // sqrt_spd/f/mu kept current during sampling via
-        // declare_invalidates (order sqrt_spd -> f -> mu) so stateful
-        // predict_at(list()) (empty changed-set) reads fresh values.
+        // declare_invalidates (order sqrt_spd -> f -> mu) so single-draw
+        // predict_at(list()) (empty changed-set) draws y_rep around the mu
+        // of the current state. History-mode predict_at replaces Intercept,
+        // log_amp, log_ell, log_sigma, z and phi per stored draw, and Pass 1
+        // recomputes sqrt_spd, f and mu from them.
         impl_->data().set("sqrt_spd", arma::vec(M_sz, arma::fill::zeros));
         impl_->data().set("f",        arma::vec(N,    arma::fill::zeros));
         impl_->data().set("mu",       arma::vec(N,    arma::fill::zeros));
@@ -590,19 +593,41 @@ public:
         impl_->sync_child(0);
     }
 
-    // Real posterior predictive via the framework predict DAG (replaces
-    // the old stub that echoed the training y). Single current-draw
-    // sample (state_map vector contract).
-    //   predict_at(list())                -> sqrt_spd? f,mu,y_rep at x
-    //   predict_at(list(phi=...))     -> at a NEW precomputed
-    //       spectral basis (phi = vectorise(Phi_new), N_new*M
-    //       column-major; Q3=A: basis evaluated R-side at new x).
-    // Returns history_map (matrices) per the core-six contract in
-    // interface.md: predict_at's outputs share get_history()'s shape,
-    // so a scalar draw is an n x 1 column.
+    // Posterior predictive through the predict DAG declared in the
+    // constructor. new_data is empty or holds "phi", the spectral basis
+    // evaluated at new x with the training L and lambda (an N_new x M matrix,
+    // or vectorise(Phi_new): N_new*M values, column-major). Every output key
+    // is a matrix with one row per draw.
+    //
+    //   History mode (keep_history TRUE, last_draw_only FALSE): for each
+    //   stored draw d, the values of Intercept, log_amp, log_ell, log_sigma
+    //   and z in row d of get_history(), and phi (new_data's, else the
+    //   training phi), are passed to impl_->predict_at, which computes
+    //       sqrt_spd_m = sqrt(amp_d^2 sqrt(2 pi) ell_d exp(-ell_d^2 lambda_m / 2)),
+    //       f = phi (sqrt_spd % z_d),  mu = Intercept_d + f,
+    //       y_rep ~ N(mu, exp(log_sigma_d)^2)   (one draw from predict_rng_),
+    //   with amp_d = exp(log_amp_d), ell_d = exp(log_ell_d).
+    //   Returns f, mu and y_rep, each n_draws x N.
+    //
+    //   Single-draw path (last_draw_only TRUE, or keep_history FALSE): one
+    //   impl_->predict_at call at the current state, each key 1 x N.
+    //     predict_at(list())          -> y_rep at the training phi; f and mu
+    //                                    of the current state are not
+    //                                    recomputed and not returned
+    //     predict_at(list(phi = ...)) -> f, mu and y_rep at the new phi
+    /// predict_at(new_data) = predict_at(new_data, last_draw_only = false).
     AI4BayesCode::history_map predict_at(
-        const AI4BayesCode::state_map& new_data) const {
-        block_context replaced;
+            const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the single-draw path (the path taken when
+    /// keep_history is false) and leaves the stored draws in place.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
+
+        bool has_phi = false;
         auto it = new_data.find("phi");
         if (it != new_data.end()) {
             const arma::vec& pf = it->second;
@@ -615,7 +640,7 @@ public:
                     std::to_string(M) +
                     " (pass vectorise(Phi_new), N_new*M col-major).");
             }
-            replaced["phi"] = pf;
+            has_phi = true;
         } else {
             for (const auto& kv : new_data) {
                 throw std::runtime_error(
@@ -623,9 +648,57 @@ public:
                     kv.first + "'. Valid: 'phi' (or empty).");
             }
         }
-        block_context r = impl_->predict_at(replaced, predict_rng_);
+
         AI4BayesCode::history_map out;
-        for (const auto& kv : r) out[kv.first] = arma::mat(kv.second);
+
+        if (!use_history) {
+            block_context replaced;
+            if (has_phi) replaced["phi"] = it->second;
+            block_context r = impl_->predict_at(replaced, predict_rng_);
+            for (const auto& kv : r) out.emplace(kv.first, arma::mat(kv.second.t()));
+            return out;
+        }
+
+        // History mode. Intercept, log_amp, log_ell, log_sigma and z are
+        // sub-parameters of the joint block and declared sources of the
+        // predict DAG, so impl_->predict_at accepts them as replaced values.
+        // phi is passed for every draw: f is recomputed only when each of its
+        // parents is available, and a data input is available only when it is
+        // in the replaced set. Without phi, f would equal its value at the
+        // current state and mu would be computed from that f.
+        const AI4BayesCode::history_map hist = impl_->get_history();
+        const arma::mat& Intercept_h = hist.at("Intercept");   // n_draws x 1
+        const arma::mat& log_amp_h   = hist.at("log_amp");     // n_draws x 1
+        const arma::mat& log_ell_h   = hist.at("log_ell");     // n_draws x 1
+        const arma::mat& log_sigma_h = hist.at("log_sigma");   // n_draws x 1
+        const arma::mat& z_h         = hist.at("z");           // n_draws x M
+        const std::size_t n_draws = Intercept_h.n_rows;
+        if (log_amp_h.n_rows != n_draws || log_ell_h.n_rows != n_draws ||
+            log_sigma_h.n_rows != n_draws || z_h.n_rows != n_draws) {
+            throw std::runtime_error(
+                "HSGPRegression::predict_at: the stored draws of Intercept, "
+                "log_amp, log_ell, log_sigma and z differ in number.");
+        }
+
+        block_context replaced;
+        replaced["phi"] = has_phi ? it->second : impl_->data().get("phi");
+        const std::size_t N_pred = replaced["phi"].n_elem / z_h.n_cols;
+        arma::mat f_out(n_draws, N_pred), mu_out(n_draws, N_pred),
+                  yrep_out(n_draws, N_pred);
+        for (std::size_t d = 0; d < n_draws; ++d) {
+            replaced["Intercept"] = Intercept_h.row(d).t();
+            replaced["log_amp"]   = log_amp_h.row(d).t();
+            replaced["log_ell"]   = log_ell_h.row(d).t();
+            replaced["log_sigma"] = log_sigma_h.row(d).t();
+            replaced["z"]         = z_h.row(d).t();
+            const block_context r = impl_->predict_at(replaced, predict_rng_);
+            f_out.row(d)    = r.at("f").t();
+            mu_out.row(d)   = r.at("mu").t();
+            yrep_out.row(d) = r.at("y_rep").t();
+        }
+        out.emplace("f",     std::move(f_out));
+        out.emplace("mu",    std::move(mu_out));
+        out.emplace("y_rep", std::move(yrep_out));
         return out;
     }
 
@@ -679,7 +752,18 @@ RCPP_MODULE(HSGPRegression_module) {
         .method("step", (void (HSGPRegression::*)(int)) &HSGPRegression::step, "Run n sweeps.")
         .method("get_current", &HSGPRegression::get_current)
         .method("set_current", &HSGPRegression::set_current)
-        .method("predict_at",  &HSGPRegression::predict_at)
+        .method("predict_at",
+                (AI4BayesCode::history_map (HSGPRegression::*)(const AI4BayesCode::state_map&) const)
+                    &HSGPRegression::predict_at,
+                "predict_at(new_data), new_data = list() or list(phi = <N_new x M basis>): "
+                "f, mu and y_rep with one row per stored draw (keep_history = TRUE; "
+                "predict_at(list()) at the training phi), or one row from the current "
+                "state (keep_history = FALSE; predict_at(list()) returns y_rep only).")
+        .method("predict_at",
+                (AI4BayesCode::history_map (HSGPRegression::*)(const AI4BayesCode::state_map&, bool) const)
+                    &HSGPRegression::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",     &HSGPRegression::get_dag)
         .method("get_history", &HSGPRegression::get_history)
         AI4BAYESCODE_BIND_READAPT_NUTS(HSGPRegression)
@@ -704,8 +788,16 @@ PYBIND11_MODULE(HSGPRegression, m) {
         .def("get_current", &HSGPRegression::get_current)
         .def("set_current", &HSGPRegression::set_current,
              pybind11::arg("params"))
-        .def("predict_at",  &HSGPRegression::predict_at,
-             pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (HSGPRegression::*)(const AI4BayesCode::state_map&, bool) const)
+                 &HSGPRegression::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false,
+             "predict_at(new_data, last_draw_only=False), new_data = {} or "
+             "{'phi': vectorise(Phi_new)} (N_new*M values, column-major): f, mu and "
+             "y_rep with one row per stored draw (keep_history=True and "
+             "last_draw_only=False; {} at the training phi), else one row from the "
+             "current state ({} returns y_rep only).")
         .def("get_dag",     &HSGPRegression::get_dag)
         .def("get_history", &HSGPRegression::get_history)
         .def("readapt_NUTS", (void (HSGPRegression::*)(int, bool, int, double)) &HSGPRegression::readapt_NUTS,

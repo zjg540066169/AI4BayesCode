@@ -289,6 +289,7 @@ run: build
 # header-only edit left the previous binary in place, still reporting PASS.
 test_predict_dag_depth: test_predict_dag_depth.cpp \
     $(INC_DIR)/AI4BayesCode/shared_data.hpp \
+    $(INC_DIR)/AI4BayesCode/composite_block.hpp \
     $(INC_DIR)/AI4BayesCode/block_sampler.hpp
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $@ $< $(LDFLAGS) $(LDLIBS)
 

@@ -187,28 +187,53 @@ public:
 
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
 
-    /// Predict-at: return the posterior-predictive survival curve S(t_q) at the
-    /// query times new_data["t"] under the CURRENT lambda draw (baseline-only).
+    /// Survival function S(t_q) = exp(-H_0(t_q)) at the query times
+    /// new_data["t"] (n_q values), with H_0(t) = sum_k lambda_k
+    /// max(0, min(t, e_k) - e_{k-1}). Returns "S" with one row per draw:
+    ///   keep_history TRUE, last_draw_only FALSE: row d from the lambda of
+    ///     stored draw d (row d of get_history()), n_draws x n_q;
+    ///   last_draw_only TRUE, or keep_history FALSE: one row from the current
+    ///     lambda, 1 x n_q.
+    /// Without "t" (e.g. predict_at(list())) the result is empty.
+    /// predict_at(new_data) = predict_at(new_data, last_draw_only = false).
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the single-draw path (the path taken when
+    /// keep_history is false) and leaves the stored draws in place.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
+                                         bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
         AI4BayesCode::history_map out;
         auto it_tq = new_data.find("t");
         if (it_tq == new_data.end()) return out;
         const arma::vec& t_q = it_tq->second;
         const arma::vec& edges_local = impl_->data().get("edges");
-        const arma::vec& lambda      = impl_->data().get("lambda");
         const std::size_t K = edges_local.n_elem - 1;
-        arma::mat S(t_q.n_elem, 1);
-        for (std::size_t i = 0; i < t_q.n_elem; ++i) {
-            double H = 0.0;
-            for (std::size_t k = 0; k < K; ++k) {
-                const double lo = edges_local[k];
-                const double hi = std::min(t_q[i], edges_local[k + 1]);
-                const double dur = hi - lo;
-                if (dur > 0.0) H += lambda[k] * dur;
-            }
-            S(i, 0) = std::exp(-H);
+
+        // Row r of `lambda_rows` is one draw of (lambda_1, ..., lambda_K).
+        arma::mat lambda_rows;
+        if (use_history) {
+            lambda_rows = impl_->get_history().at("lambda");    // n_draws x K
+        } else {
+            lambda_rows = impl_->data().get("lambda").t();      // 1 x K
         }
-        out["S"] = S;
+
+        arma::mat S(lambda_rows.n_rows, t_q.n_elem);
+        for (std::size_t r = 0; r < lambda_rows.n_rows; ++r) {
+            for (std::size_t i = 0; i < t_q.n_elem; ++i) {
+                double H = 0.0;
+                for (std::size_t k = 0; k < K; ++k) {
+                    const double lo = edges_local[k];
+                    const double hi = std::min(t_q[i], edges_local[k + 1]);
+                    const double dur = hi - lo;
+                    if (dur > 0.0) H += lambda_rows(r, k) * dur;
+                }
+                S(r, i) = std::exp(-H);
+            }
+        }
+        out["S"] = std::move(S);
         return out;
     }
 
@@ -231,7 +256,17 @@ RCPP_MODULE(PehSurvival_module) {
         .method("step", (void (PehSurvival::*)(int)) &PehSurvival::step, "Run n sweeps.")
         .method("get_current", &PehSurvival::get_current)
         .method("set_current", &PehSurvival::set_current)
-        .method("predict_at",  &PehSurvival::predict_at)
+        .method("predict_at",
+                (AI4BayesCode::history_map (PehSurvival::*)(const AI4BayesCode::state_map&) const)
+                    &PehSurvival::predict_at,
+                "predict_at(list(t = <query times>)): S(t) with one row per stored "
+                "lambda draw (keep_history = TRUE), or one row from the current lambda "
+                "(keep_history = FALSE). Without t the result is empty.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (PehSurvival::*)(const AI4BayesCode::state_map&, bool) const)
+                    &PehSurvival::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",     &PehSurvival::get_dag)
         .method("get_history", &PehSurvival::get_history)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(PehSurvival);
@@ -254,7 +289,14 @@ PYBIND11_MODULE(PehSurvival, m) {
         .def("step", (void (PehSurvival::*)(int)) &PehSurvival::step, pybind11::arg("n_steps"))
         .def("get_current", &PehSurvival::get_current)
         .def("set_current", &PehSurvival::set_current, pybind11::arg("params"))
-        .def("predict_at",  &PehSurvival::predict_at,  pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (PehSurvival::*)(const AI4BayesCode::state_map&, bool) const)
+                 &PehSurvival::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false,
+             "predict_at({'t': query_times}, last_draw_only=False): S(t) with one row "
+             "per stored lambda draw (keep_history=True and last_draw_only=False), else "
+             "one row from the current lambda. Without 't' the result is empty.")
         .def("get_dag",     &PehSurvival::get_dag)
         .def("get_history", &PehSurvival::get_history)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(PehSurvival);
