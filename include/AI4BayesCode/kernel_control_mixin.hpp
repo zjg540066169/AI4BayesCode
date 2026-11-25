@@ -94,8 +94,10 @@ public:
     // values in members of its own (outside impl_) defines a PUBLIC
     //     void clear_extra_history_() { <those members>.clear(); }
     // which hides the no-op default below. If the wrapper declares it
-    // private, the call below does not compile (name lookup finds the
-    // private member), so the hook cannot be skipped without a diagnostic.
+    // private, the call below either does not compile (name lookup finds the
+    // private member) or, in a wrapper that declares this mixin a friend (as
+    // every shipped wrapper built on it does), calls it; in neither case is
+    // the hook skipped.
     void clear_history() {
         auto self = static_cast<Derived*>(this);
         self->impl_->clear_history();

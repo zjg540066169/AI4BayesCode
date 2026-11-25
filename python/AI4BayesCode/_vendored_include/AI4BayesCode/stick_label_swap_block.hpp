@@ -252,7 +252,11 @@ public:
         out.emplace(cfg_.name, std::move(m));
         return out;
     }
-    std::size_t history_size() const noexcept override { return keep_history_ ? hist_.size() : 1; }
+    // 1 with no stored row (before the first step and after clear_history()),
+    // the row count of get_history() in every state.
+    std::size_t history_size() const noexcept override {
+        return (keep_history_ && !hist_.empty()) ? hist_.size() : 1;
+    }
     void clear_history() override { hist_.clear(); }
 
 private:

@@ -316,17 +316,46 @@ public:
      * child stays aligned with its siblings.
      *
      * Both buffers have to advance: q_draw_hist_ (the per-sweep draw the
-     * composite published) and the vi_history_t trajectory.
+     * composite published) and the vi_history_t trajectory. A buffer that
+     * clear_history() emptied repeats the last row it held before the call,
+     * which is the row a run without the call repeats.
      */
     void record_held_history() override {
         if (!keep_history_) return;
         if (!q_draw_hist_.empty()) q_draw_hist_.push_back(q_draw_hist_.back());
+        else if (!held_q_draw_.is_empty()) q_draw_hist_.push_back(held_q_draw_);
         if (vi_history_t* h = vi_history_buffer()) {
-            if (!h->elbo.empty())   h->elbo.push_back(h->elbo.back());
-            if (!h->mu.empty())     h->mu.push_back(h->mu.back());
-            if (!h->log_sd.empty()) h->log_sd.push_back(h->log_sd.back());
-            if (!h->gamma.empty())  h->gamma.push_back(h->gamma.back());
-            if (!h->epoch.empty())  h->epoch.push_back(h->epoch.back());
+            const vi_history_t& src = h->elbo.empty() ? held_row_ : *h;
+            if (!src.elbo.empty())   h->elbo.push_back(src.elbo.back());
+            if (!src.mu.empty())     h->mu.push_back(src.mu.back());
+            if (!src.log_sd.empty()) h->log_sd.push_back(src.log_sd.back());
+            if (!src.gamma.empty())  h->gamma.push_back(src.gamma.back());
+            if (!src.epoch.empty())  h->epoch.push_back(src.epoch.back());
+        }
+    }
+
+    /**
+     * Discards the stored rows: the q-draws and the vi_history_t trajectory.
+     * final_khat is kept: terminate_() computes it once, from the converged
+     * q, so it is not a per-sweep row, and a run without the call carries it
+     * in the rows recorded after the call. The last row of each buffer is
+     * kept for record_held_history().
+     */
+    void clear_history() override {
+        if (!q_draw_hist_.empty()) held_q_draw_ = q_draw_hist_.back();
+        q_draw_hist_.clear();
+        if (vi_history_t* h = vi_history_buffer()) {
+            if (!h->elbo.empty()) {
+                held_row_ = vi_history_t{};
+                held_row_.elbo.push_back(h->elbo.back());
+                if (!h->mu.empty())     held_row_.mu.push_back(h->mu.back());
+                if (!h->log_sd.empty()) held_row_.log_sd.push_back(h->log_sd.back());
+                if (!h->gamma.empty())  held_row_.gamma.push_back(h->gamma.back());
+                if (!h->epoch.empty())  held_row_.epoch.push_back(h->epoch.back());
+            }
+            const double khat = h->final_khat;
+            *h = vi_history_t{};
+            h->final_khat = khat;
         }
     }
 
@@ -343,6 +372,13 @@ protected:
     /// const by the block_sampler contract while still being the one place
     /// the published draw exists.
     mutable std::vector<arma::vec> q_draw_hist_;
+
+private:
+    /// The last q-draw and the last trajectory row that clear_history()
+    /// removed; record_held_history() appends them while the buffers are
+    /// empty.
+    arma::vec    held_q_draw_;
+    vi_history_t held_row_;
 };
 
 } // namespace AI4BayesCode

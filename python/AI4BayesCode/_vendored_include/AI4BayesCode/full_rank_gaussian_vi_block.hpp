@@ -281,10 +281,6 @@ public:
         // after convergence, when its appends stop while siblings keep going.
         return history_.elbo.empty() ? 1 : history_.elbo.size();
     }
-    void clear_history() override {
-        history_ = vi_history_t{};
-        q_draw_hist_.clear();   // the per-sweep draws are history too
-    }
 
     vi_history_t* vi_history_buffer() override { return &history_; }
 

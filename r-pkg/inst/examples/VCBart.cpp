@@ -406,6 +406,9 @@ public:
         return h;
     }
 
+    // Called by clear_history() after impl_ is cleared: empties sigma_hist_.
+    void clear_extra_history_() { sigma_hist_.clear(); }
+
     // shared_data key helpers (also used by the refresher closures).
     static std::string beta_key(int j) { return "beta_" + std::to_string(j); }
     static std::string wr_key(int j)   { return "wr_"   + std::to_string(j); }

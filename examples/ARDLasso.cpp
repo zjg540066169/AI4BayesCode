@@ -384,6 +384,18 @@ public:
         return out;
     }
 
+    // Discards the stored draws: empties beta_hist_, alpha_hist_,
+    // sigma2_hist_ and psi2_hist_. The current state and both RNG streams are
+    // unchanged; the next step() records the first draw of a new history.
+    // (ARDLasso has no composite_block, so it defines clear_history() itself
+    // instead of inheriting it from kernel_control_mixin.)
+    void clear_history() {
+        beta_hist_.clear();
+        alpha_hist_.clear();
+        sigma2_hist_.clear();
+        psi2_hist_.clear();
+    }
+
 private:
     std::mt19937_64 rng_;
     mutable std::mt19937_64 predict_rng_;
@@ -437,7 +449,10 @@ RCPP_MODULE(ARDLasso_module) {
                 "training X.")
         .method("get_history", &ARDLasso::get_history,
                 "History as a named list: beta (n_draws x p), alpha "
-                "(n_draws x 1), sigma2 (n_draws x 1), psi2 (n_draws x p).");
+                "(n_draws x 1), sigma2 (n_draws x 1), psi2 (n_draws x p).")
+        .method("clear_history", &ARDLasso::clear_history,
+                "Discard the stored draws; the current state is kept, and "
+                "the next step() records the first draw of a new history");
 }
 #endif
 
@@ -457,7 +472,10 @@ PYBIND11_MODULE(ARDLasso, m) {
         .def("set_current", &ARDLasso::set_current, pybind11::arg("params"))
         .def("get_dag",     &ARDLasso::get_dag)
         .def("predict_at",  &ARDLasso::predict_at,  pybind11::arg("new_data"))
-        .def("get_history", &ARDLasso::get_history);
+        .def("get_history", &ARDLasso::get_history)
+        .def("clear_history", &ARDLasso::clear_history,
+             "Discard the stored draws; the current state is kept, and the "
+             "next step() records the first draw of a new history");
 }
 #endif
 
