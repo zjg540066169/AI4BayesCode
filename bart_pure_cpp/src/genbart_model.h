@@ -219,6 +219,24 @@ public:
     tree_history_.clear(); sigma_history_.clear(); sigma_mu_history_.clear();
     s_history_.clear(); var_counts_history_.clear();
   }
+  // Appends one entry to each history buffer without a sweep: a copy of the
+  // last stored entry, or, when no entry is stored, the current forest,
+  // nuisance, sigma_mu, split probabilities and split counts.  No-op while
+  // history recording is off.  Draws no random numbers.
+  void record_held_history() {
+    if (!history_recording_) return;
+    if (tree_history_.empty()) { record_history_(); return; }
+    std::string tree_last = tree_history_.back();
+    tree_history_.push_back(std::move(tree_last));
+    const double sigma_last = sigma_history_.back();
+    sigma_history_.push_back(sigma_last);
+    const double sigma_mu_last = sigma_mu_history_.back();
+    sigma_mu_history_.push_back(sigma_mu_last);
+    std::vector<double> s_last = s_history_.back();
+    s_history_.push_back(std::move(s_last));
+    std::vector<int> counts_last = var_counts_history_.back();
+    var_counts_history_.push_back(std::move(counts_last));
+  }
   std::string get_tree() const {
     std::ostringstream os; os << std::setprecision(17) << ntrees_ << "\n";
     for (std::size_t t = 0; t < ntrees_; ++t) { os << trees_[t]; os << "---\n"; }

@@ -493,6 +493,18 @@ public:
         history_r_buf_.clear();
     }
 
+    // Hold-in-place history append, without a sweep. A genbart_block cannot
+    // be frozen, but composite_block::record_held_history() calls this on
+    // every child of a nested composite that is frozen within another
+    // composite. Appends the current r row (keep_history) and, through the
+    // kernel (keep_tree), a copy of the last stored forest, nuisance,
+    // sigma_mu, split probabilities and split counts, or the current ones
+    // when none is stored.
+    void record_held_history() override {
+        if (keep_history_) history_r_buf_.push_back(current_r_);
+        impl_->record_held_history();
+    }
+
     // keep_history -> numeric per-step buffer (history_r_buf_) only.
     void set_keep_history(bool keep) override {
         block_sampler::set_keep_history(keep);

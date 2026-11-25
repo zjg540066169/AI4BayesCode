@@ -351,6 +351,14 @@ public:
     }
     void clear_history() override { history_buf_.clear(); }
 
+    // Hold-in-place history append, without a sweep. An hmm_block cannot be
+    // frozen, but composite_block::record_held_history() calls this on every
+    // child of a nested composite that is frozen within another composite.
+    // Appends the current z.
+    void record_held_history() override {
+        if (keep_history_) history_buf_.push_back(z_);
+    }
+
 private:
     // True when ctx has the same keys as context_, with values of the same
     // length and bit pattern.
