@@ -595,9 +595,9 @@ public:
 
     // Posterior predictive through the predict DAG declared in the
     // constructor. new_data is empty or holds "phi", the spectral basis
-    // evaluated at new x with the training L and lambda (an N_new x M matrix,
-    // or vectorise(Phi_new): N_new*M values, column-major). Every output key
-    // is a matrix with one row per draw.
+    // evaluated at new x with the training L and lambda, as N_new*M values:
+    // the column-major vectorisation of the N_new x M basis (R also accepts
+    // the matrix itself). Every output key is a matrix with one row per draw.
     //
     //   History mode (keep_history TRUE, last_draw_only FALSE): for each
     //   stored draw d, the values of Intercept, log_amp, log_ell, log_sigma

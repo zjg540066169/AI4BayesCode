@@ -18,11 +18,10 @@
  *  HSGPRegression in history mode, where the per-draw replaced keys are the
  *  sampled parameters rather than the data inputs).
  *
- *  Cases 6-8 pin the ORDER when the replaced set has several keys. A parent
- *  that is itself recomputed counts as available from the start (it holds a
- *  value in shared_data), so the walk can resolve a child before that
- *  parent; the returned list is reordered so that each node follows its
- *  parents in the list.
+ *  Cases 6-9 pin the ORDER. A parent that is itself recomputed counts as
+ *  available from the start (it holds a value in shared_data), so the walk
+ *  can resolve a child before that parent; the returned list is reordered so
+ *  that each node follows its parents in the list.
  *    Case 6: A -> Q -> P -> C with X -> C, replaced {A, X}: the walk resolves C
  *            in the first round and P in the second, so before the reorder C
  *            preceded P for every iteration order of the replaced set. Also
@@ -32,6 +31,10 @@
  *            full per-draw replaced set of their history-mode predict_at
  *            (every sampled source plus the basis), through
  *            composite_block::predict_at with the examples' formulas.
+ *    Case 9: X -> Q -> P -> C with X -> C, ONE replaced key {X}: the walk
+ *            resolves Q and C in the first round and P in the second, so
+ *            before the reorder C preceded P with no iteration order
+ *            involved. Also run through composite_block::predict_at.
  *  Case 5 also checks that a list already in parent-first order is returned
  *  as the walk produced it.
  *
@@ -480,6 +483,56 @@ int main() {
                     ef, em);
         check(ef < 1e-12 && em < 1e-12,
               "predict_at: f and mu from the replaced draw (not from the sqrt_spd before the call)");
+    }
+
+    // ---- Case 9: one replaced key, parent resolved one round after its child -
+    //   X -> Q -> P -> C,  X -> C ;  replaced {X}
+    // Round 1 resolves Q (parent X) and C (parents P: holds a value, X:
+    // replaced); P follows in round 2. With one replaced key the iteration
+    // order of `changed` has no effect on the walk, so the declaration order
+    // of X's children is varied instead.
+    {
+        std::printf("\nCase 9: X -> Q -> P -> C and X -> C, ONE replaced key {X}\n");
+        for (const bool q_first : {true, false}) {
+            auto build = [q_first](AI4BayesCode::shared_data_t& d) {
+                d.declare_data_input("X");
+                d.set("X", arma::vec{0.0});
+                d.set("Q", arma::vec{1.0});
+                d.set("P", arma::vec{2.0});
+                d.set("C", arma::vec{2.0});
+                d.register_refresher("Q", [](const AI4BayesCode::shared_data_t& s) {
+                    return arma::vec{s.get("X")(0) + 1.0}; });
+                d.register_refresher("P", [](const AI4BayesCode::shared_data_t& s) {
+                    return arma::vec{2.0 * s.get("Q")(0)}; });
+                d.register_refresher("C", [](const AI4BayesCode::shared_data_t& s) {
+                    return arma::vec{s.get("P")(0) + s.get("X")(0)}; });
+                if (q_first) d.declare_predict_edges("X", {"Q", "C"});
+                else         d.declare_predict_edges("X", {"C", "Q"});
+                d.declare_predict_edges("Q", {"P"});
+                d.declare_predict_edges("P", {"C"});
+            };
+            const std::string tag = q_first ? "X -> {Q, C}" : "X -> {C, Q}";
+            AI4BayesCode::shared_data_t d;
+            build(d);
+            const auto order = d.predict_downstream_of({"X"});
+            std::printf("        %s: order = %s\n", tag.c_str(), join(order).c_str());
+            check(order.size() == 3 && contains(order, "Q") && contains(order, "P") &&
+                  contains(order, "C"),
+                  tag + ": Q, P and C recomputed (and nothing else)");
+            check_order(order, "Q", "P");
+            check_order(order, "P", "C");
+
+            AI4BayesCode::composite_block c("case9");
+            build(c.data());
+            AI4BayesCode::block_context rep;
+            rep["X"] = arma::vec{10.0};
+            std::mt19937_64 rng(1);
+            const auto r = c.predict_at(rep, rng);
+            const double C = r.count("C") ? r.at("C")(0) : NAN;
+            std::printf("        %s: predict_at(X = 10): C = %g (expected (10 + 1) * 2 + 10 = 32)\n",
+                        tag.c_str(), C);
+            check(C == 32.0, tag + ": predict_at computes C from the recomputed P");
+        }
     }
 
     std::printf("\n=== SUMMARY: %d passed, %d failed ===\n", g_pass, g_fail);

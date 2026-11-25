@@ -709,18 +709,25 @@ public:
         }
 
         // Refresh order. A parent that is in `result` counts as available
-        // from the start (it holds a value in values_), so, depending on the
-        // iteration order of `changed`, the walk can list a child before that
-        // parent. For the per-draw replaced set {Intercept, log_sds,
-        // log_sigma, z, Bsp} of examples/BSplineRegression.cpp the walk lists
-        // f (parents s, Bsp) before s (parents log_sds, z);
-        // composite_block::predict_at refreshes `result` in order, so f was
-        // computed from the s of the current state instead of the replaced
-        // log_sds and z. The loop below reorders `result` so that every node
-        // follows each of its parents in `result`. At each position it places
-        // the earliest node of `result` whose parents in `result` are already
-        // placed, so a list that satisfies the condition is returned
-        // unchanged. The set of nodes does not change.
+        // from the start (it holds a value in values_), so the walk can list
+        // a child before that parent, with one replaced key as with several:
+        //   - the parent resolves in a later round. With X -> Q -> P -> C,
+        //     X -> C and the single replaced key X, round 1 resolves Q and C
+        //     (parents P and X) and round 2 resolves P;
+        //   - the parent resolves in the same round after the child, depending
+        //     on the iteration order of `changed`. For the per-draw replaced
+        //     set {Intercept, log_sds, log_sigma, z, Bsp} of
+        //     examples/BSplineRegression.cpp, round 1 can list f (parents s,
+        //     Bsp) before s (parents log_sds, z).
+        // composite_block::predict_at refreshes `result` in order, so the
+        // child was computed from the parent's value at the current state (C
+        // from the P of the current state; f from the s of the current state
+        // instead of the replaced log_sds and z). The loop below reorders
+        // `result` so that every node follows each of its parents in `result`.
+        // At each position it places the earliest node of `result` whose
+        // parents in `result` are already placed, so a list that satisfies
+        // the condition is returned unchanged. The set of nodes does not
+        // change.
         if (result.size() > 1) {
             const std::size_t n = result.size();
             std::unordered_map<std::string, std::size_t> index;
