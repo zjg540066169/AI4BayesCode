@@ -39,12 +39,13 @@
 //  ----------------
 //  The genBART kernel draws from its OWN thread-local seedable stream
 //  (bart_rng in bart_pure_cpp/src/r_compat.h, via the `arn` adapter); the
-//  std::mt19937_64 passed to step() is ignored by genbart_block, and the
-//  constructor's rng_seed only seeds the (kernel-unused) wrapper RNG +
-//  predict_rng_ y_rep refresher. To get INDEPENDENT chains, seed the
-//  kernel stream BEFORE constructing the model: under pybind via the
-//  module-level set_kernel_seed(seed) free function, under R via the usual
-//  set.seed(). The per-point r(x_i) carries genBART's intrinsic RJMCMC
+//  std::mt19937_64 passed to step() is ignored by genbart_block. Under the
+//  pybind / standalone backend a non-zero rng_seed seeds the kernel stream
+//  in the constructor (bart_rng::set_seed), so two GBartLogistic objects
+//  built with DIFFERENT seeds produce independent chains; the module-level
+//  set_kernel_seed(seed) free function seeds the stream directly (e.g. for
+//  rng_seed = 0). Under R the kernel uses R's RNG: call set.seed() before
+//  construction. The per-point r(x_i) carries genBART's intrinsic RJMCMC
 //  tree-multimodality; the IDENTIFIED quantity is the fitted probability
 //  sigmoid(r) at a fixed grid, which is what converges.
 //
@@ -174,6 +175,16 @@ public:
                 ai4b::stop("GBartLogistic: y must be 0/1 binary");
             }
         }
+
+        // ---- Seed the kernel RNG so a construction seed yields an
+        //      independent chain (pybind / standalone backend only; the
+        //      Rcpp backend uses R's global RNG instead). ----------------
+#if !defined(AI4BAYESCODE_RCPP_MODULE)
+        if (rng_seed != 0) {
+            bart_rng::set_seed(static_cast<std::uint64_t>(rng_seed));
+        }
+#endif
+
         const std::size_t N = static_cast<std::size_t>(X.n_rows);
 
         impl_->data().set("y", y);
@@ -560,17 +571,18 @@ PYBIND11_MODULE(GBartLogistic, m) {
 
     // genBART draws from its OWN thread-local kernel RNG stream
     // (bart_rng in bart_pure_cpp/src/r_compat.h); the std::mt19937 passed
-    // to step() is ignored, and the constructor's rng_seed only seeds the
-    // (unused) wrapper RNG + predict_rng_. To reproduce a run or to get
-    // INDEPENDENT chains, seed the kernel stream BEFORE constructing the
-    // model. This free function exposes that seed hook (kernel plumbing,
-    // not model substance) -- mirrors the documented
-    // bart_rng::set_seed(seed) convention in genbart_block.hpp.
+    // to step() is ignored. The constructor seeds the kernel stream with a
+    // non-zero rng_seed (bart_rng::set_seed), which replaces any earlier
+    // seed. This free function seeds the stream directly (kernel plumbing,
+    // not model substance), e.g. for a model built with rng_seed = 0 --
+    // mirrors the documented bart_rng::set_seed(seed) convention in
+    // genbart_block.hpp.
     m.def("set_kernel_seed",
           [](std::uint64_t s) { bart_rng::set_seed(s); },
           pybind11::arg("seed"),
-          "Seed the genBART kernel RNG stream (call before constructing a "
-          "model to get reproducible / independent chains).");
+          "Seed the genBART kernel RNG stream of the calling thread. A "
+          "constructor with rng_seed != 0 seeds the stream itself, which "
+          "replaces a seed set before the construction.");
 
     pybind11::class_<GBartLogistic>(m, "GBartLogistic")
         .def(pybind11::init<arma::mat, arma::vec, int, int, bool, bool>(),

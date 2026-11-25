@@ -15,7 +15,8 @@
 //       training X (one y_rep row per stored draw, from r and phi of the
 //       same sweep).
 //  The kernels draw from the thread-local engine bart_rng, seeded before
-//  each construction.
+//  each construction (by the GBartHeteroscedastic constructor from its
+//  rng_seed in case 2).
 // ============================================================================
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
 # define MCMC_ENABLE_ARMA_WRAPPERS
@@ -100,7 +101,6 @@ chk::model gbart_heteroscedastic_case() {
         const double m = std::exp(1.0 + 0.6 * X(i, 0));
         y[i] = m + std::sqrt(0.5 * m) * nd(g);
     }
-    bart_rng::set_seed(97);
     auto w = std::make_shared<GBartHeteroscedastic>(X, y, 10, 1.0, 101, false, true);
     GBartHeteroscedastic* mdl = w.get();
     chk::model out;

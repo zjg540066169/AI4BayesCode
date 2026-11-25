@@ -15,6 +15,20 @@
 //    C4  set_current of a valid y recomputes every working response
 //        wr_j = (y - sum_{k != j} x_k beta_k) / x_j and mu (relative
 //        tolerance 1e-12).
+//  predict_at (mu = sum_{j=0..p} x_j beta_j(Z), x_0 = 1), p = 2:
+//    C5  single draw at the training data: 1 x N, equal to get_current() mu
+//        (forests evaluated at the training Z, relative tolerance 1e-12);
+//        X column j multiplies beta_{j+1};
+//    C6  keep_history, training data: one row per stored draw, row d =
+//        sum_j x_j beta_{j,d} from the rows of get_history() (relative
+//        tolerance 1e-12); the last row equals get_current() mu;
+//    C7  keep_history + keep_tree, new (X, Z): one row per stored draw; with
+//        the training (X, Z) as new data, row d equals row d of C6 (stored
+//        forest d plus the fmean of sweep d, relative tolerance 1e-12); the
+//        last row equals the last_draw_only prediction bit for bit;
+//    C8  keep_history without keep_tree: new (X, Z) throws, last_draw_only
+//        gives 1 x N_new; after clear_history() and K more sweeps every
+//        history-mode prediction has K rows.
 // ============================================================================
 #include <armadillo>
 #include <cmath>
@@ -59,6 +73,22 @@ bool throws(VCBart& m, const AI4BayesCode::state_map& s) {
     try { m.set_current(s); } catch (const std::exception&) { return true; }
     return false;
 }
+
+bool same_bits(const arma::mat& a, const arma::mat& b) {
+    return a.n_rows == b.n_rows && a.n_cols == b.n_cols &&
+           std::memcmp(a.memptr(), b.memptr(), a.n_elem * sizeof(double)) == 0;
+}
+
+// max_k |a_k - b_k| / max(1, |b_k|); infinity when the shapes differ.
+double max_rel(const arma::mat& a, const arma::mat& b) {
+    if (a.n_rows != b.n_rows || a.n_cols != b.n_cols) return INFINITY;
+    double e = 0.0;
+    for (arma::uword k = 0; k < a.n_elem; ++k)
+        e = std::max(e, std::abs(a[k] - b[k]) / std::max(1.0, std::abs(b[k])));
+    return e;
+}
+
+arma::mat as_row(const arma::vec& v) { return arma::mat(v.t()); }
 
 }  // namespace
 
@@ -122,6 +152,84 @@ int main() {
     }
     std::printf("C4 set_current(y): max rel error of wr_0, wr_1, mu = %.3g\n", e);
     check(e <= 1e-12, "C4 set_current(y) recomputes the working responses and mu");
+
+    // ---- predict_at, p = 2 ------------------------------------------------
+    const std::size_t N2 = 120, K = 25, K2 = 7, Nn = 9;
+    arma::mat X2(N2, 2), Z2(N2, 1);
+    arma::vec y3(N2);
+    for (std::size_t i = 0; i < N2; ++i) {
+        Z2(i, 0) = uZ(g); X2(i, 0) = uX(g); X2(i, 1) = uX(g);
+        y3[i] = 2.0 * std::max(Z2(i, 0), 0.0) + Z2(i, 0) * Z2(i, 0) * X2(i, 0)
+                - Z2(i, 0) * X2(i, 1) + eps(g);
+    }
+    arma::mat Zn(Nn, 1), Xn(Nn, 2);
+    for (std::size_t i = 0; i < Nn; ++i) {
+        Zn(i, 0) = -1.0 + 2.0 * static_cast<double>(i) / static_cast<double>(Nn - 1);
+        Xn(i, 0) = uX(g); Xn(i, 1) = uX(g);
+    }
+    AI4BayesCode::state_map nd_new, nd_train;
+    nd_new["Z"]   = arma::vectorise(Zn); nd_new["X"]   = arma::vectorise(Xn);
+    nd_train["Z"] = arma::vectorise(Z2); nd_train["X"] = arma::vectorise(X2);
+    const AI4BayesCode::state_map empty;
+
+    // C5
+    VCBart m5(X2, Z2, y3, 10, 2.0, 2.0, 0.95, 3.0, 100, 3, false);
+    m5.step(15);
+    const arma::mat p5 = m5.predict_at(empty).at("mu");
+    const double e5 = max_rel(p5, as_row(m5.get_current().at("mu")));
+    std::printf("C5 single draw, training data: %d x %d, max rel |mu - get_current mu| = %.3g\n",
+                (int)p5.n_rows, (int)p5.n_cols, e5);
+    check(p5.n_rows == 1 && p5.n_cols == N2 && e5 <= 1e-12,
+          "C5 single-draw mu at the training data equals get_current() mu");
+
+    // C6
+    VCBart mh(X2, Z2, y3, 10, 2.0, 2.0, 0.95, 3.0, 100, 5, true, true);
+    mh.step(static_cast<int>(K));
+    const AI4BayesCode::history_map h = mh.get_history();
+    const arma::mat p6 = mh.predict_at(empty).at("mu");
+    arma::mat ref6(K, N2);
+    for (std::size_t r = 0; r < K; ++r)
+        for (std::size_t i = 0; i < N2; ++i)
+            ref6(r, i) = h.at("beta_0")(r, i) + X2(i, 0) * h.at("beta_1")(r, i)
+                         + X2(i, 1) * h.at("beta_2")(r, i);
+    const double e6 = max_rel(p6, ref6);
+    const arma::mat mu6 = as_row(mh.get_current().at("mu"));
+    const arma::mat last6 = (p6.n_rows == K) ? arma::mat(p6.row(K - 1)) : arma::mat();
+    std::printf("C6 history, training data: %d x %d (K = %d), max rel |row d - sum_j x_j beta_j,d| "
+                "= %.3g, last row vs get_current mu: max rel %.3g, bit-identical %d\n",
+                (int)p6.n_rows, (int)p6.n_cols, (int)K, e6, max_rel(last6, mu6),
+                same_bits(last6, mu6) ? 1 : 0);
+    check(p6.n_rows == K && p6.n_cols == N2 && e6 <= 1e-12 && max_rel(last6, mu6) <= 1e-12,
+          "C6 history-mode mu at the training data: row d from the stored betas of draw d");
+
+    // C7
+    const arma::mat p7  = mh.predict_at(nd_train).at("mu");
+    const arma::mat p7n = mh.predict_at(nd_new).at("mu");
+    const arma::mat p7l = mh.predict_at(nd_new, true).at("mu");
+    const double e7 = max_rel(p7, p6);
+    const bool last7 = p7n.n_rows == K && same_bits(arma::mat(p7n.row(K - 1)), p7l);
+    std::printf("C7 history, new (X, Z): %d x %d; training (X, Z) as new data vs C6: max rel %.3g; "
+                "last row == last_draw_only (1 x %d) bit for bit: %d\n",
+                (int)p7n.n_rows, (int)p7n.n_cols, e7, (int)p7l.n_cols, last7 ? 1 : 0);
+    check(p7.n_rows == K && e7 <= 1e-12 && p7n.n_rows == K && p7n.n_cols == Nn &&
+          p7l.n_rows == 1 && last7,
+          "C7 history-mode mu at new (X, Z): row d from the forests stored at sweep d");
+
+    // C8
+    VCBart mn(X2, Z2, y3, 10, 2.0, 2.0, 0.95, 3.0, 100, 7, true);   // keep_tree = false
+    mn.step(5);
+    bool threw = false;
+    try { mn.predict_at(nd_new); } catch (const std::exception&) { threw = true; }
+    const arma::mat p8l = mn.predict_at(nd_new, true).at("mu");
+    mh.clear_history();
+    mh.step(static_cast<int>(K2));
+    const std::size_t r0 = mh.predict_at(empty).at("mu").n_rows;
+    const std::size_t r1 = mh.predict_at(nd_new).at("mu").n_rows;
+    std::printf("C8 keep_tree = false: new (X, Z) threw = %d, last_draw_only %d x %d; "
+                "after clear_history() + %d sweeps: rows %d (training), %d (new)\n",
+                threw ? 1 : 0, (int)p8l.n_rows, (int)p8l.n_cols, (int)K2, (int)r0, (int)r1);
+    check(threw && p8l.n_rows == 1 && p8l.n_cols == Nn && r0 == K2 && r1 == K2,
+          "C8 new (X, Z) in history mode needs keep_tree; row counts follow clear_history()");
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail,
                 g_fail == 1 ? "" : "s");

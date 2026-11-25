@@ -40,6 +40,18 @@
 //  C++; no R:: math calls are needed here (the conjugate Gamma update
 //  lives inside the likelihood and draws from the kernel RNG stream).
 //
+//  RNG NOTE
+//  --------
+//  The genBART kernel draws from its OWN seedable RNG stream under the
+//  pybind / standalone backend (bart_pure_cpp/src/r_compat.h,
+//  bart_rng::engine(), a thread-local std::mt19937_64); the
+//  std::mt19937_64 passed to step() is ignored. A non-zero
+//  construction-time rng_seed therefore seeds the kernel stream
+//  (bart_rng::set_seed) under that backend, so two GBartHeteroscedastic
+//  objects built with DIFFERENT seeds produce independent chains. Under
+//  the Rcpp (R) backend the kernel uses R's global RNG instead; R runs call
+//  set.seed() before construction.
+//
 //  LICENSE WARNING
 //  ---------------
 //  This file #includes "AI4BayesCode/genbart_block.hpp", which in turn
@@ -170,6 +182,15 @@ public:
         if (!(phi_init > 0.0)) {
             ai4b::stop("GBartHeteroscedastic: phi_init must be positive");
         }
+
+        // ---- Seed the kernel RNG so a construction seed yields an
+        //      independent chain (pybind / standalone backend only; the
+        //      Rcpp backend uses R's global RNG instead). ----------------
+#if !defined(AI4BAYESCODE_RCPP_MODULE)
+        if (rng_seed != 0) {
+            bart_rng::set_seed(static_cast<std::uint64_t>(rng_seed));
+        }
+#endif
 
         const std::size_t N = static_cast<std::size_t>(X.n_rows);
 
@@ -633,17 +654,18 @@ PYBIND11_MODULE(GBartHeteroscedastic, m) {
 
     // genBART draws from its OWN thread-local kernel RNG stream
     // (bart_rng in bart_pure_cpp/src/r_compat.h); the std::mt19937 passed
-    // to step() is ignored, and the constructor's rng_seed only seeds the
-    // (unused) wrapper RNG + predict_rng_. To reproduce a run or to get
-    // INDEPENDENT chains, seed the kernel stream BEFORE constructing the
-    // model. This free function exposes that seed hook (kernel plumbing,
-    // not model substance) -- mirrors the documented
-    // bart_rng::set_seed(seed) convention in genbart_block.hpp.
+    // to step() is ignored. The constructor seeds the kernel stream with a
+    // non-zero rng_seed (bart_rng::set_seed), which replaces any earlier
+    // seed. This free function seeds the stream directly (kernel plumbing,
+    // not model substance), e.g. for a model built with rng_seed = 0 --
+    // mirrors the documented bart_rng::set_seed(seed) convention in
+    // genbart_block.hpp.
     m.def("set_kernel_seed",
           [](std::uint64_t s) { bart_rng::set_seed(s); },
           pybind11::arg("seed"),
-          "Seed the genBART kernel RNG stream (call before constructing a "
-          "model to get reproducible / independent chains).");
+          "Seed the genBART kernel RNG stream of the calling thread. A "
+          "constructor with rng_seed != 0 seeds the stream itself, which "
+          "replaces a seed set before the construction.");
 
     pybind11::class_<GBartHeteroscedastic>(m, "GBartHeteroscedastic")
         .def(pybind11::init<arma::mat, arma::vec,

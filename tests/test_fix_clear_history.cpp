@@ -451,8 +451,8 @@ chk::model ardlasso_case() {
     return out;
 }
 
-// VCBart's kernels draw from the thread-local engine bart_rng, seeded before
-// construction.
+// VCBart's kernels draw from the thread-local engine bart_rng, which the
+// constructor seeds with rng_seed.
 chk::model vcbart_case() {
     const std::size_t N = 60;
     std::mt19937_64 g(53);
@@ -465,7 +465,6 @@ chk::model vcbart_case() {
         Z(i, 0) = U(g);
         y[i] = Z(i, 0) + (Z(i, 0) > 0.5 ? 1.0 : -1.0) * X(i, 0) + nd(g);
     }
-    bart_rng::set_seed(59);
     auto w = std::make_shared<VCBart>(X, Z, y, 10, 2.0, 2.0, 0.95, 3.0, 20, 61, true);
     VCBart* m = w.get();
     chk::model out;
