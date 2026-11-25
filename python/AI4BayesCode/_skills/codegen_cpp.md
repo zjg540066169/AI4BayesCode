@@ -2083,9 +2083,9 @@ appears as a `set_current` key:
 - **`N` (number of observations) is dynamic** -- Gibbs blocks read
   `N` dynamically from `y.n_elem` / `X.n_elem / p` inside their
   log-density / refresher lambdas. The dispatcher MUST update the
-  cached `N_` field whenever `X` changes, resize the `y_rep` slot,
-  and clear the history (the mixin's `clear_history()`) in
-  `keep_history_` mode.
+  cached `N_` field whenever `X` changes and, when `N` changes,
+  resize the `y_rep` slot and clear the history (the mixin's
+  `clear_history()`) in `keep_history_` mode.
 - **Cross-check** `X.nrow` against `y.length` when both are in the
   same call.
 
@@ -2156,6 +2156,7 @@ void set_current(const AI4BayesCode::state_map& params) {
     // FLATTENED: recover N as X.n_elem / p (p is fixed by block state).
     auto it_X = params.find("X");
     auto it_y = params.find("y");
+    bool history_cleared = false;   // true once the X branch clears the history
 
     // -------- X branch --------
     if (it_X != params.end()) {
@@ -2192,10 +2193,8 @@ void set_current(const AI4BayesCode::state_map& params) {
             // it also calls clear_extra_history_(), which empties the
             // wrapper's own per-sweep members.
             if (keep_history_) {
-                ai4b::warning(
-                    "set_current: X row count changed -- clearing history "
-                    "buffers (mixed-N history is unsupported).");
                 clear_history();
+                history_cleared = true;
             }
         }
         N_ = N_new;   // refresh cached N (system_design.md Sec.7 rule 6)
@@ -2211,6 +2210,12 @@ void set_current(const AI4BayesCode::state_map& params) {
         }
         impl_->data().set("y", y_new);
     }
+
+    // Last statement: under R a warning can end the call before later writes.
+    if (history_cleared)
+        ai4b::warning(
+            "set_current: X row count changed -- clearing history "
+            "buffers (mixed-N history is unsupported).");
 }
 ```
 

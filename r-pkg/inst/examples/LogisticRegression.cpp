@@ -293,6 +293,10 @@ public:
                 if (y_new[i] != 0.0 && y_new[i] != 1.0)
                     throw std::runtime_error("y must be 0/1");
         }
+        // N before this call, and whether the X branch below clears the
+        // history; the warning about the clear is the last statement.
+        const std::size_t N_old = N_;
+        bool history_cleared = false;
         if (it_b != params.end()) {
             const arma::vec& bnew = it_b->second;
             beta_blk->set_current(bnew);
@@ -309,12 +313,8 @@ public:
                 // with 0 and with 1 stored draw. The mixin's clear_history()
                 // calls impl_->clear_history() and then clear_extra_history_().
                 if (keep_history_) {
-#ifdef AI4BAYESCODE_RCPP_MODULE
-                    Rcpp::warning("set_current: N changed from %zu to %zu; "
-                                  "clearing history (mixed-N is unsupported).",
-                                  N_, N_new);
-#endif
                     clear_history();
+                    history_cleared = true;
                 }
             }
             N_ = N_new;
@@ -326,6 +326,17 @@ public:
         // "prob").
         if (it_b != params.end() || it_X != params.end())
             impl_->data().refresh_derived_for("beta");
+#ifdef AI4BAYESCODE_RCPP_MODULE
+        // Raised after every write above: Rcpp::warning calls Rf_warning,
+        // which under options(warn = 2) or a tryCatch(warning = ...) handler
+        // ends the call by a longjmp, so no statement after it runs.
+        if (history_cleared)
+            Rcpp::warning("set_current: N changed from %zu to %zu; "
+                          "clearing history (mixed-N is unsupported).",
+                          N_old, N_);
+#else
+        (void)N_old; (void)history_cleared;   // no warning outside R
+#endif
     }
 
     // predict_at: optional X = arma::vec (vectorised N_test*p, column-major).
