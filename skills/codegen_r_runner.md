@@ -87,7 +87,8 @@ risk talk), is worse than no comment -- the default is omission.
 NOT a stripped golden-path snippet, and NOT a copy of the Layer-3
 harness prefix. The delivered example drives chains EXCLUSIVELY
 through the SHIPPED multi-chain helpers (`ai4bayescode_run_chains`,
-`ai4bayescode_rhat_summary`, `ai4bayescode_diagnose`), with NO
+`ai4bayescode_rhat_summary`, `ai4bayescode_diagnose`, `predict`,
+`ai4bayescode_close_models`), with NO
 generated helper functions at all -- the constructor is an inline
 closure argument. The
 `run_chain_<ClassName>()` chain helper defined in the R runner
@@ -187,7 +188,7 @@ documentation a first-time user reads):
    `run_chain_<ClassName>()` stays in the throwaway runner only.
 5. **Simulation / toy-data code** -- generate `<data_args>` (+ a
    held-out `<X>_test` for the predict example), commented.
-6. **Multi-chain usage + diagnostics (the everyday flow)** -- the
+6. **Multi-chain usage + diagnostics + prediction (the everyday flow)** -- the
    shipped helpers, nothing else:
 
    ```r
@@ -197,6 +198,9 @@ documentation a first-time user reads):
    ai4bayescode_rhat_summary(run)   # convergence check across the chains
    dg <- ai4bayescode_diagnose(run$histories[[1]])
    dg$summary; dg$plot
+   pred <- predict(run, list(<X> = <X>_test))   # pooled over the chains
+   run$models[[1]]$get_current()                # chain 1's model after the run
+   ai4bayescode_close_models(run)
    ```
 
    Single-chain use is `n_chains = 1L` (or the stateful API below);
@@ -239,6 +243,8 @@ Skeleton (parameterized; mirror this structure, fill placeholders):
 #   ai4bayescode_run_chains   -- run several MCMC chains in parallel
 #   ai4bayescode_rhat_summary -- convergence check across the chains
 #   ai4bayescode_diagnose     -- posterior summaries + diagnostic plots
+#   predict                   -- posterior predictions from all chains
+#   ai4bayescode_close_models -- close the background R processes that hold the models
 
 # Compile + load the model (the class becomes available by name).
 library(AI4BayesCode)
@@ -265,6 +271,16 @@ ai4bayescode_rhat_summary(run)   # convergence check across the chains
 dg <- ai4bayescode_diagnose(run$histories[[1]])
 dg$summary   # per-parameter table: mean/sd/median/90% CI, R-hat, ESS
 dg$plot      # trace + autocorrelation + density (prints; needs 'bayesplot')
+
+# Posterior predictions at the held-out inputs, using the draws of all chains.
+pred <- predict(run, list(<X> = <X>_test))
+
+# run$models[[i]] is the model of chain i after the run.
+run$models[[1]]$get_current()   # the last draw of chain 1
+
+# Close the background R processes that hold the models (run$models)
+# when you no longer need them.
+ai4bayescode_close_models(run)
 
 # Examples of stateful functions
 
@@ -347,7 +363,8 @@ simulation block. The ENTIRE Layer-3 harness -- including its internal
 omitted from the default deliverable and deleted on PASS (shipped
 only under the opt-in). The delivered example never contains a
 bespoke chain driver; it uses `ai4bayescode_run_chains` +
-`ai4bayescode_rhat_summary` + `ai4bayescode_diagnose`.
+`ai4bayescode_rhat_summary` + `ai4bayescode_diagnose` + `predict` +
+`ai4bayescode_close_models`.
 
 ### R runner template
 
@@ -756,7 +773,7 @@ message(sprintf("[timing] %.1fs across %d sweeps (%.3fs / sweep)",
 # ---- (Optional) Predict at new data ------------------------------------
 # pred <- c1 model-call equivalent at new X:
 # model <- new(<ClassName>, <data_args>, rng_seed = 42L, keep_history = TRUE)
-# model$step(n_burnin); model$step(n_keep)
+# model$step(n_burnin); model$clear_history(); model$step(n_keep)
 # pred <- model$predict_at(list(X = X_test))  # see wrapper's predict_at doc
 ```
 
@@ -960,7 +977,7 @@ list-of-lists that the user has to manually aggregate.
 Multi-chain R-hat in the DELIVERED example is always the shipped pair
 `ai4bayescode_run_chains(function(seed) new(<ClassName>, ...), n_chains = ...)`
 + `ai4bayescode_rhat_summary(run)` (histories are keep-only; run_chains
-strips the warmup draws) -- never a hand-rolled loop or a
+clears each model's history after the warmup sweeps) -- never a hand-rolled loop or a
 hand-assembled `posterior::rhat` call.
 Over-dispersed initial values, when needed, go through `set_current()`
 inside the inline constructor closure. (The Layer-3 harness computes its R2

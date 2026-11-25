@@ -540,7 +540,8 @@ Deliverable on PASS:
   load-bearing points: readability is the highest rule (the audience has
   no programming background); the example defines NO helper functions at
   all -- the constructor goes INLINE into `ai4bayescode_run_chains` /
-  `AI4BayesCode.run_chains`, followed by `rhat_summary` and `diagnose`;
+  `AI4BayesCode.run_chains`, followed by `rhat_summary`, `diagnose`,
+  `predict` and `close_models`;
   a compact constructor reference plus a `doc()` pointer replaces any
   long comment wall; and no skill text, validator vocabulary, or
   reliability hedging appears in the file.
@@ -1368,7 +1369,7 @@ run, and produce reasonable samples out of the box.
   do not exist on the R interface. The R interface is the **core-six
   state contract** (`step`, `get_current`, `set_current`, `predict_at`,
   `get_dag`, `get_history`) plus the **kernel-control category**
-  (`freeze`, `unfreeze`, `get_frozen` on every wrapper; plus
+  (`freeze`, `unfreeze`, `get_frozen`, `clear_history` on every wrapper; plus
   `readapt_NUTS` on any wrapper whose composite contains a NUTS-family
   child; plus BART-family `get_tree` / `set_tree` / `get_tree_history`
   on any wrapper with a BART/genBART/softBART child). See

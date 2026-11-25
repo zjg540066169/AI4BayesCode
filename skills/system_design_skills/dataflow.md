@@ -373,8 +373,12 @@ vector history -> `NumericMatrix` of (n_draws x dim)).
   can return EITHER the current-state prediction OR the full
   (n_draws x n_test) matrix over history -- document which in the
   wrapper's header.
-- History buffers are NEVER cleared by user calls. If a test needs
-  to drop them, reconstruct the wrapper.
+- `clear_history()` (interface.md Sec.1) empties the history buffers
+  of every block and the wrapper's own per-sweep members
+  (`clear_extra_history_()`); the current state, the RNG streams and
+  the tuning are unchanged, and the next `step()` records the first
+  draw of the new history. `ai4bayescode_run_chains()` /
+  `run_chains()` call it after the warmup sweeps.
 
 ---
 

@@ -1,3 +1,37 @@
+# AI4BayesCode 1.1.3
+
+* Every model class has `clear_history()`. It empties the stored draws and
+  leaves the current state, the random number streams and the tuning
+  unchanged, so the next `step()` records the first draw of a new history. A
+  model class that records per-sweep values in members of its own defines a
+  public `clear_extra_history_()` that empties them.
+* `ai4bayescode_run_chains()` returns the models (`keep_models = TRUE`). It calls
+  `clear_history()` after the `n_burn` warmup sweeps, so each model's
+  `get_history()` and `predict_at()` cover the `n_keep` kept draws only. In a
+  parallel run each model is in a worker process that is not stopped at the
+  end of the run, and `run$models[[i]]$f(...)` calls `f` on the model of chain
+  `i` in that process; in a sequential run `run$models[[i]]` is the model
+  itself. The result has class `"ai4bayescode_run"` with `histories`,
+  `models`, `seeds`, `wall`, `n_burn`, `n_keep` and `history_cleared`, and
+  prints a summary. A model compiled against older headers has no
+  `clear_history()`: its histories are stripped as before, and a message is
+  printed that its own `get_history()` and `predict_at()` include the warmup
+  draws. With `keep_models = FALSE` the chains run as before and
+  `run$models` is `NULL`.
+* `ai4bayescode_run_chains()` takes the number of worker processes as
+  `n_cores`; `mc.cores` is still accepted.
+* `ai4bayescode_predict(run, newdata)` and `predict(run, newdata)` call
+  `predict_at(newdata)` on the model of every chain and stack the chains for
+  each output; `pool = FALSE` returns one list per chain, and
+  `newdata = list()` gives the posterior predictive at the training data.
+* `ai4bayescode_close_models(run)` stops the worker processes that hold the
+  models of a run. The worker processes are also stopped when the worker pool
+  of the run is garbage-collected or R exits.
+* Python: `run_chains()` takes `n_cores` (`n_jobs` is still accepted) and
+  `keep_models`, puts the model of each chain under `"model"`, and returns a
+  `ChainsResult`; `AI4BayesCode.predict(chains, newdata)` and
+  `AI4BayesCode.close_models(chains)` correspond to the R functions.
+
 # AI4BayesCode 1.1.2
 
 * `bart_block` has a collapsed CHANGE move, which runs in every sweep and has

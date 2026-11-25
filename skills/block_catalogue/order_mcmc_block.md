@@ -98,7 +98,7 @@ keep_history)` -- `structure_prior` is the 3rd argument and is
 REQUIRED: `"uniform"` or `"fk_eq2"`)
 with the core-6 R state contract (step / get_current /
 set_current / predict_at / get_dag / get_history) plus the kernel-control
-category (freeze / unfreeze / get_frozen) per interface.md Sec.1.
+category (freeze / unfreeze / get_frozen / clear_history) per interface.md Sec.1.
 
 **Scope (v1.2 ship):**
 - **Discrete data** with per-column cardinality vector (BDeu with
