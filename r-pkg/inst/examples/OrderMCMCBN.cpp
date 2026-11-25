@@ -98,8 +98,9 @@
 //                                    get_current()'s sampled_DAG. With
 //                                    keep_history and last_draw_only = false:
 //                                    one row per stored sweep, row t the DAG
-//                                    the block drew in sweep t (read from the
-//                                    block's DAG history; nothing is drawn),
+//                                    stored for sweep t (see "Stored DAGs"
+//                                    below; read from the block's DAG
+//                                    history, nothing is drawn),
 //                                    and one row, the current DAG, before the
 //                                    first sweep or right after
 //                                    clear_history(). With keep_history off or
@@ -113,9 +114,16 @@
 //                                    sequence), "order_log_score" (one row
 //                                    per sweep with keep_history),
 //                                    "order_sampled_DAG" (one row per sweep
-//                                    with keep_history: the DAG drawn in that
-//                                    sweep, n*n column-major as
+//                                    with keep_history: the DAG stored for
+//                                    that sweep, n*n column-major as
 //                                    get_current()'s sampled_DAG) }.
+//    Stored DAGs: the DAG stored for a sweep is the DAG sampled by the
+//    block's step() in that sweep. In a held sweep of the frozen block
+//    (freeze(), ai4bayescode_new_frozen() / new_frozen()) the block's step()
+//    is not called, and the stored DAG is the held DAG: get_current()'s
+//    sampled_DAG at the freeze, or after a later load. The rows of held
+//    sweeps are therefore copies of one DAG, not draws from
+//    P(G | partition, D).
 //  Constructor takes arma::mat data (N x n, integer-valued, rounded to
 //  category indices 0..r-1), arma::vec cardinalities (length n), and an
 //  arma::vec initial_order that must be EMPTY: partition MCMC starts from the
@@ -143,7 +151,7 @@
 //       function(seed) new(OrderMCMCBN, data, cards, "fk_eq2", 1.0, 3L, 20L, 4000L, 10.0, 0.5, numeric(0), seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 10000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
-//   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   ai4bayescode_diagnose(run$histories[[1]][c("order", "order_log_score")])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(OrderMCMCBN, data, cards, "fk_eq2", 1.0, 3L, 20L, 4000L, 10.0, 0.5,
 //            numeric(0), 7L, TRUE)   # structure_prior,bdeu_alpha,max_parents,top_C,cache_F,prune,p_adj,init_order=empty,seed,keep_history
@@ -165,7 +173,7 @@
 //       lambda seed: Mod.OrderMCMCBN(data, cards, "fk_eq2", 1.0, 3, 20, 4000, 10.0, 0.5, np.zeros(0), seed, True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=10000, n_jobs=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
-//   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   AI4BayesCode.diagnose({k: chains[0]["hist"][k] for k in ("order", "order_log_score")})   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.OrderMCMCBN(data, cards, "fk_eq2", 1.0, 3, 20, 4000, 10.0, 0.5,
 //                       np.zeros(0), 7, True)
@@ -475,11 +483,16 @@ public:
     /// "sampled_DAG": sampled DAGs, one per row, each flattened column-major
     /// as get_current()'s sampled_DAG (column i + j*n is 1 when j is a parent
     /// of i). With keep_history and last_draw_only = false, row t is the DAG
-    /// that the block drew in stored sweep t, read from its DAG history
-    /// (order_mcmc_block::sampled_dag_history()); before the first sweep and
-    /// right after clear_history() there is no stored sweep, and the single
-    /// row is the current DAG. With keep_history off or last_draw_only =
-    /// true, the single row is the current DAG (the block's sampled_dag()).
+    /// stored for sweep t, read from the block's DAG history
+    /// (order_mcmc_block::sampled_dag_history()): the DAG sampled in the
+    /// block's step() in that sweep, or, in a held sweep of the frozen block
+    /// (composite_block::step() calls record_held_history() in place of
+    /// step()), the held DAG, i.e. the block's sampled_dag() at the freeze
+    /// or after a later load, so the rows of held sweeps are copies of one
+    /// DAG. Before the first sweep and right after clear_history() there is
+    /// no stored sweep, and the single row is the current DAG. With
+    /// keep_history off or last_draw_only = true, the single row is the
+    /// current DAG (the block's sampled_dag()).
     /// Neither form changes the stored history or the state, and nothing is
     /// drawn: predict_rng_ is not used.
     /// OrderMCMCBN has no covariate inputs, so new_data must be empty.
@@ -656,10 +669,14 @@ RCPP_MODULE(OrderMCMCBN_module) {
                 "predict_at(list()) returns list(sampled_DAG = matrix): one "
                 "sampled DAG per row, n*n flattened COLUMN-MAJOR as "
                 "get_current()$sampled_DAG. keep_history = TRUE: one row per "
-                "stored sweep, the DAG drawn in that sweep (nothing is drawn "
-                "here); one row, the current DAG, before the first sweep or "
-                "right after clear_history(). keep_history = FALSE: one row, "
-                "the current DAG. No covariate inputs: the list must be empty.")
+                "stored sweep, the DAG stored for that sweep (nothing is drawn "
+                "here): the DAG sampled in that sweep, or, in a held sweep of "
+                "the frozen block (freeze(), ai4bayescode_new_frozen()), the "
+                "held DAG, get_current()$sampled_DAG at the freeze or after a "
+                "later load, so the rows of held sweeps are copies of one DAG; "
+                "one row, the current DAG, before the first sweep or right "
+                "after clear_history(). keep_history = FALSE: one row, the "
+                "current DAG. No covariate inputs: the list must be empty.")
         .method("predict_at",
                 (AI4BayesCode::history_map (OrderMCMCBN::*)(const AI4BayesCode::state_map&, bool) const)
                     &OrderMCMCBN::predict_at,
@@ -668,7 +685,7 @@ RCPP_MODULE(OrderMCMCBN_module) {
                 "the history; FALSE is predict_at(list()).")
         .method("get_dag",     &OrderMCMCBN::get_dag)
         .method("get_history", &OrderMCMCBN::get_history,
-                "Returns list(order = node sequences, 1-based as in get_current(), one row per sweep when keep_history = TRUE, else the current sequence; order_log_score = log P(D | partition), one row per sweep when keep_history = TRUE; order_sampled_DAG = the DAG drawn in each sweep, n*n flattened COLUMN-MAJOR as get_current()$sampled_DAG, one row per sweep when keep_history = TRUE).")
+                "Returns list(order = node sequences, 1-based as in get_current(), one row per sweep when keep_history = TRUE, else the current sequence; order_log_score = log P(D | partition), one row per sweep when keep_history = TRUE; order_sampled_DAG = the DAG stored for each sweep (the DAG sampled in that sweep, or, in a held sweep of the frozen block, the held DAG, get_current()$sampled_DAG at the freeze or after a later load, so the rows of held sweeps are copies of one DAG), n*n flattened COLUMN-MAJOR as get_current()$sampled_DAG, one row per sweep when keep_history = TRUE).")
         AI4BAYESCODE_BIND_KERNEL_CONTROL(OrderMCMCBN);
 }
 #endif
@@ -733,20 +750,27 @@ PYBIND11_MODULE(OrderMCMCBN, m) {
              "predict_at({}) returns {'sampled_DAG': array}: one sampled DAG "
              "per row, n*n flattened COLUMN-MAJOR as get_current()"
              "['sampled_DAG'] (reshape a row with order='F'). keep_history="
-             "True: one row per stored sweep, the DAG drawn in that sweep "
-             "(nothing is drawn here); one row, the current DAG, before the "
-             "first sweep or right after clear_history(). keep_history=False "
-             "or last_draw_only=True: one row, the current DAG; the stored "
-             "history is not changed. No covariate inputs: new_data must be "
-             "empty.")
+             "True: one row per stored sweep, the DAG stored for that sweep "
+             "(nothing is drawn here): the DAG sampled in that sweep, or, in "
+             "a held sweep of the frozen block (freeze(), new_frozen()), the "
+             "held DAG, get_current()['sampled_DAG'] at the freeze or after a "
+             "later load, so the rows of held sweeps are copies of one DAG; "
+             "one row, the current DAG, before the first sweep or right after "
+             "clear_history(). keep_history=False or last_draw_only=True: "
+             "one row, the current DAG; the stored history is not changed. "
+             "No covariate inputs: new_data must be empty.")
         .def("get_dag",     &OrderMCMCBN::get_dag)
         .def("get_history", &OrderMCMCBN::get_history,
              "Returns {'order': node sequences, 1-based as in get_current(), "
              "one row per sweep when keep_history=True, else the current "
              "sequence; 'order_log_score': log P(D | partition), one row per "
-             "sweep when keep_history=True; 'order_sampled_DAG': the DAG drawn "
-             "in each sweep, n*n flattened COLUMN-MAJOR as get_current()"
-             "['sampled_DAG'], one row per sweep when keep_history=True}.")
+             "sweep when keep_history=True; 'order_sampled_DAG': the DAG "
+             "stored for each sweep (the DAG sampled in that sweep, or, in a "
+             "held sweep of the frozen block, the held DAG, get_current()"
+             "['sampled_DAG'] at the freeze or after a later load, so the rows "
+             "of held sweeps are copies of one DAG), n*n flattened "
+             "COLUMN-MAJOR as get_current()['sampled_DAG'], one row per sweep "
+             "when keep_history=True}.")
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(OrderMCMCBN);
 }
 #endif

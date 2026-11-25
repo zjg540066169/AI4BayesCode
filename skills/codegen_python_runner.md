@@ -894,10 +894,14 @@ crashed at first use.)
 
 **Former known case:** `order_mcmc_block` now stores its sampled DAGs.
 With `keep_history=True` its `get_history()` returns `order`,
-`order_log_score`, `order_sampled_DAG` (T x p^2, row t the DAG drawn in
-stored sweep t; in the `OrderMCMCBN` wrapper each row is flattened
-column-major as `get_current()['sampled_DAG']`), and (when a Tier-A
-wrapper adds it) `y_rep`; with no stored sweep, only `order`.
+`order_log_score`, `order_sampled_DAG` (T x p^2, row t the DAG stored for
+sweep t: the DAG sampled in that sweep, or, in a held sweep of a frozen
+block (`freeze()`, `new_frozen()`), the held DAG (`sampled_DAG` at the
+freeze or after a later load), so the rows of held sweeps are copies of
+one DAG, not draws from P(G | partition, D); in the `OrderMCMCBN` wrapper
+each row is flattened column-major as `get_current()['sampled_DAG']`), and
+(when a Tier-A wrapper adds it) `y_rep`; with no stored sweep, only
+`order`.
 `get_history()` builds the T x p^2 matrix on each call: p=20, T=40000
 ~= 128 MB; p=64 (block ceiling) ~= 1.3 GB.
 

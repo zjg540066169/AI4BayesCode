@@ -887,10 +887,14 @@ call).
 
 - `order` (T x p)
 - `order_log_score` (T x 1)
-- `order_sampled_DAG` (T x p^2): row t is the DAG drawn in stored sweep
-   t; element i*p + j of the block's row (element i + j*p in the
-   `OrderMCMCBN` wrapper, as in `get_current()$sampled_DAG`) is 1 when
-   j is a parent of i
+- `order_sampled_DAG` (T x p^2): row t is the DAG stored for sweep t,
+   i.e. the DAG sampled in that sweep, or, in a held sweep of a frozen
+   block (`freeze()`, `ai4bayescode_new_frozen()`), the held DAG
+   (`sampled_DAG` at the freeze or after a later load), so the rows of
+   held sweeps are copies of one DAG, not draws from P(G | partition, D);
+   element i*p + j of the block's row (element i + j*p in the
+   `OrderMCMCBN` wrapper, as in `get_current()$sampled_DAG`) is 1 when j
+   is a parent of i
 - `y_rep` (T x N*p)   <- only when the Tier-A wrapper adds a `y_rep`
    refresher; for a bare `order_mcmc_block` it is absent.
 

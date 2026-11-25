@@ -191,17 +191,21 @@ loads it, and `<name>_log_score` is log P(D | order).
 
 **Block history.** With `keep_history`, each `step()` and each held sweep
 of a frozen block (`record_held_history()`) appends the order (node
-sequence), its log-score and `sampled_dag()` -- the DAG that `step()` drew
-from the sweep's order or partition with its rng -- so `get_history()`
+sequence), its log-score and `sampled_dag()`, so `get_history()`
 returns `<name>` (T x n), `<name>_log_score` (T x 1) and
 `<name>_sampled_DAG` (T x n*n; row t is the DAG of stored sweep t, element
 i*n + j is 1 when j is a parent of i, as in the `<name>_sampled_DAG`
-output). No random number is drawn for the history. The DAGs are stored as
-n 64-bit parent masks per sweep (`sampled_dag_history()`);
-`get_history()` builds the T x n*n matrix of doubles on each call (n = 20,
-T = 40000: 128 MB). `clear_history()` empties the three buffers, and with
-no stored sweep `get_history()` returns only `<name>`, the current order,
-as one row. Tested in `tests/test_fix_order-mcmc_dag_history.cpp`.
+output). After a `step()`, `sampled_dag()` is the DAG sampled in it from
+the sweep's order or partition with its rng. In a held sweep `step()` is
+not called, and the stored DAG is the held DAG (`sampled_dag()` at the
+freeze or after a later load), so the rows of held sweeps are copies of
+one DAG, not draws from P(G | partition, D). No random number is drawn
+for the history. The DAGs are stored as n 64-bit parent masks per sweep
+(`sampled_dag_history()`); `get_history()` builds the T x n*n matrix of
+doubles on each call (n = 20, T = 40000: 128 MB). `clear_history()`
+empties the three buffers, and with no stored sweep `get_history()`
+returns only `<name>`, the current order, as one row. Tested in
+`tests/test_fix_order-mcmc_dag_history.cpp`.
 
 **Tier C kernels:**
 - `include/AI4BayesCode/bde_scorer.hpp` -- BDe / BDeu family-score
@@ -235,15 +239,21 @@ partition method):
   freezes the block at it.
 - `predict_at(list())` -- `list(sampled_DAG = ...)`, one sampled DAG
   per row, n*n column-major as in `get_current()`. With `keep_history =
-  TRUE`: one row per stored sweep, the DAG drawn in that sweep (read from
-  the block's DAG history; nothing is drawn); one row, the current DAG,
-  before the first sweep or right after `clear_history()`. With
-  `keep_history = FALSE`, or `predict_at(list(), TRUE)`
+  TRUE`: one row per stored sweep, the DAG stored for that sweep (read
+  from the block's DAG history; nothing is drawn): the DAG sampled in that
+  sweep, or, in a held sweep of the frozen block (`freeze()`,
+  `ai4bayescode_new_frozen()`), the held DAG, `get_current()$sampled_DAG`
+  at the freeze or after a later load, so the rows of held sweeps are
+  copies of one DAG, not draws from P(G | partition, D); one row, the
+  current DAG, before the first sweep or right after `clear_history()`.
+  With `keep_history = FALSE`, or `predict_at(list(), TRUE)`
   (`last_draw_only`): one row, the current DAG.
 - `get_dag()` -- sampling DAG topology (block-level).
 - `get_history()` -- `list(order = M x n matrix, 1-based as in
   get_current(), order_log_score = M x 1, order_sampled_DAG = M x n*n,
-  each row column-major as in get_current())` when `keep_history = TRUE`.
+  each row column-major as in get_current())` when `keep_history = TRUE`;
+  row t of `order_sampled_DAG` is the DAG stored for sweep t, as in
+  `predict_at(list())` above (held sweeps: the held DAG).
 
 **Vendored kernel:** none. Pure C++17 + Armadillo + 64-bit
 bitmasks for parent sets (caps n <= 64; FK Sec.4.2 already requires

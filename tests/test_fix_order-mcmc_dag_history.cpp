@@ -2,7 +2,8 @@
 // Licensed under the GNU General Public License v2.0 or later.
 // ============================================================================
 //  test_fix_order-mcmc_dag_history.cpp -- order_mcmc_block stores the DAG
-//  that step() draws in each stored sweep, and the OrderMCMCBN wrapper
+//  that step() draws in each stored sweep (in a held sweep of a frozen
+//  block, the held DAG), and the OrderMCMCBN wrapper
 //  (examples/OrderMCMCBN.cpp, standalone C++ build) returns the stored DAGs
 //  from get_history() and predict_at().
 //
