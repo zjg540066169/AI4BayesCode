@@ -927,7 +927,11 @@ public:
                                   arma::vec(N_new, arma::fill::zeros));
                 impl_->data().set("N",
                                   arma::vec{static_cast<double>(N_new)});
-                if (keep_history_ && impl_->history_size() > 1) {
+                // Every stored draw is discarded when N changes; the condition
+                // is keep_history_ alone, because history_size() returns 1
+                // with 0 and with 1 stored draw. The mixin's clear_history()
+                // calls impl_->clear_history() and then clear_extra_history_().
+                if (keep_history_) {
                     // Non-fatal warning. backend_neutral.hpp's installed R
                     // copy only guarantees ai4b::stop (not ai4b::warning),
                     // so guard the warning by backend: Rcpp::warning under R
@@ -943,7 +947,7 @@ public:
                                  "from %zu to %zu; clearing history (mixed-N "
                                  "history is unsupported).\n", N_, N_new);
 #endif
-                    impl_->clear_history();
+                    clear_history();
                 }
             }
             N_ = N_new;

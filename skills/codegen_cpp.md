@@ -2084,7 +2084,8 @@ appears as a `set_current` key:
   `N` dynamically from `y.n_elem` / `X.n_elem / p` inside their
   log-density / refresher lambdas. The dispatcher MUST update the
   cached `N_` field whenever `X` changes, resize the `y_rep` slot,
-  and clear history if mid-run in `keep_history_` mode.
+  and clear the history (the mixin's `clear_history()`) in
+  `keep_history_` mode.
 - **Cross-check** `X.nrow` against `y.length` when both are in the
   same call.
 
@@ -2184,11 +2185,17 @@ void set_current(const AI4BayesCode::state_map& params) {
             // X.n_elem / p; do NOT capture N from constructor scope.
             impl_->data().set("y_rep", arma::vec(N_new, arma::fill::zeros));
             // History buffers from the previous N are now incomparable.
-            if (keep_history_ && impl_->history_size() > 1) {
+            // The condition is keep_history_ alone: do NOT add
+            // `impl_->history_size() > 1`, which is false with 1 stored
+            // draw (history_size() returns 1 with 0 and with 1 stored draw).
+            // Call the mixin's clear_history(), NOT impl_->clear_history():
+            // it also calls clear_extra_history_(), which empties the
+            // wrapper's own per-sweep members.
+            if (keep_history_) {
                 ai4b::warning(
                     "set_current: X row count changed -- clearing history "
                     "buffers (mixed-N history is unsupported).");
-                impl_->clear_history();
+                clear_history();
             }
         }
         N_ = N_new;   // refresh cached N (system_design.md Sec.7 rule 6)
@@ -2384,8 +2391,10 @@ invent others:**
   joint block: `dynamic_cast<joint_nuts_block&>(impl_->child(0)).set_slot(...)`.
   This is what `GaussianLocationScale.cpp` and every joint example do, and it
   is the only documented route to `set_current` for joint sub-parameters.
-- `impl_->history_size()` and `impl_->clear_history()` -- both called by
-  Sec.7a's own `set_current` template.
+- `impl_->history_size()` and `impl_->clear_history()` -- NOT called by
+  Sec.7a's `set_current` template, which calls the mixin's `clear_history()`
+  (`impl_->clear_history()`, then `clear_extra_history_()`). `history_size()`
+  returns 1 with 0 and with 1 stored draw.
 - `impl_->freeze(...)` / `unfreeze(...)` / `get_frozen()` are reached through
   the kernel_control_mixin, not called directly. `freeze("<block>")` emits a
   warning that the keys of `<block>`'s `declare_invalidates` list are held

@@ -304,13 +304,17 @@ public:
             if (N_new != N_) {
                 impl_->data().set("y_rep",
                                   arma::vec(N_new, arma::fill::zeros));
-                if (keep_history_ && impl_->history_size() > 1) {
+                // Every stored draw is discarded when N changes; the condition
+                // is keep_history_ alone, because history_size() returns 1
+                // with 0 and with 1 stored draw. The mixin's clear_history()
+                // calls impl_->clear_history() and then clear_extra_history_().
+                if (keep_history_) {
 #ifdef AI4BAYESCODE_RCPP_MODULE
                     Rcpp::warning("set_current: N changed from %zu to %zu; "
                                   "clearing history (mixed-N is unsupported).",
                                   N_, N_new);
 #endif
-                    impl_->clear_history();
+                    clear_history();
                 }
             }
             N_ = N_new;
