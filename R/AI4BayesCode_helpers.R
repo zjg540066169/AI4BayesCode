@@ -824,8 +824,9 @@ ai4bayescode_new_frozen <- function(module_class, ...,
 #   persistent forked worker processes after a parallel run, the objects
 #   themselves after a sequential one. For chain i, set.seed(seeds[i]) is
 #   called immediately before model_ctor(seeds[i]) in every path; a
-#   sequential run restores the caller's .Random.seed (or its absence)
-#   afterwards.
+#   sequential run and the parallel::mclapply call (keep_models = FALSE),
+#   which evaluates the chains in this session when as.integer(n_cores) < 2,
+#   restore the caller's .Random.seed (or its absence) afterwards.
 # ai4bayescode_predict() / predict(run): predict_at() over all chains.
 # ai4bayescode_close_models(): terminates the worker processes of a run.
 # ai4bayescode_rhat_summary(): per-key rhat + ess_bulk across chains; needs the
@@ -902,13 +903,21 @@ ai4bayescode_run_chains <- function(model_ctor,
     }
 
     # .ai4b_rc_one_chain() calls set.seed(seeds[i]) before it constructs
-    # chain i. In the sequential paths below the chains run in this R
-    # session, so the caller's .Random.seed (NULL when it does not exist) is
-    # saved here, before the run, and restored on exit from run_sequential().
+    # chain i. The caller's .Random.seed (NULL when it does not exist) is
+    # saved here, before the run, and restored on exit from run_sequential()
+    # and from run_mclapply(): parallel::mclapply() evaluates the chains in
+    # this R session, without forking, when as.integer(mc.cores) < 2, and
+    # with RNGkind "L'Ecuyer-CMRG" it creates .Random.seed when none exists
+    # (mc.reset.stream()).
     rng_caller <- .ai4b_rc_rng_get()
     run_sequential <- function(keep) {
         on.exit(.ai4b_rc_rng_set(rng_caller))
         lapply(seeds, one_chain, keep = keep)
+    }
+    run_mclapply <- function() {
+        on.exit(.ai4b_rc_rng_set(rng_caller))
+        parallel::mclapply(seeds, one_chain, mc.cores = n_cores,
+                           mc.set.seed = TRUE)
     }
 
     models <- NULL
@@ -938,13 +947,12 @@ ai4bayescode_run_chains <- function(model_ctor,
             results <- run_sequential(keep = TRUE)
             models  <- lapply(results, `[[`, "model")
         }
-    } else if (!keep_models && use_parallel && n_cores > 1) {
+    } else if (!keep_models && use_parallel && n_cores > 1 && n_chains > 1) {
         if (verbose)
             message("ai4bayescode_run_chains: running ", n_chains,
                     " chains on ", n_cores, " cores (parallel)")
         warn_if_blas_unpinned()
-        results <- parallel::mclapply(seeds, one_chain, mc.cores = n_cores,
-                                      mc.set.seed = TRUE)
+        results <- run_mclapply()
         if (!all(vapply(results, chain_ok, logical(1)))) {
             # Second line of defence: a forked worker returned no history.
             # With the BLAS pinned above the fork-unsafety is gone, so this is

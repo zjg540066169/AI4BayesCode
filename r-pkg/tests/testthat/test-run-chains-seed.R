@@ -2,8 +2,9 @@
 # model_ctor(seeds[i]) for chain i in every path (persistent worker
 # processes, mclapply with keep_models = FALSE, sequential, and the
 # sequential re-run after a failed parallel attempt), and a sequential run
-# restores the caller's .Random.seed. The fork tests are skipped on Windows;
-# the BartNoise test compiles the model and is skipped on CRAN.
+# and the mclapply call restore the caller's .Random.seed. The fork tests
+# are skipped on Windows; the BartNoise test compiles the model and is
+# skipped on CRAN.
 
 # A model written in R that draws from R's random-number generator, as the
 # BART kernels do under the Rcpp backend: each sweep appends one runif().
@@ -87,6 +88,45 @@ test_that("a sequential run leaves the caller's .Random.seed unchanged", {
     expect_identical(caller_seed(), before)
 })
 
+test_that("keep_models = FALSE: chains run in this session restore .Random.seed", {
+    skip_on_os("windows"); skip_if_not_installed("withr")
+    withr::local_preserve_seed()
+    run_k <- function(n_chains, ...)
+        ai4bayescode_run_chains(rng_ctor, n_chains = n_chains, n_burn = 2,
+                                n_keep = 5, seeds = rng_seeds[seq_len(n_chains)],
+                                keep_models = FALSE, ...)
+    # One chain runs sequentially in this session, also with n_cores = 2.
+    set.seed(9); before <- caller_seed()
+    expect_message(run_1 <- run_k(1, n_cores = 2),
+                   "running 1 chains sequentially")
+    expect_identical(caller_seed(), before)
+    expect_identical(draws_u(run_1), rng_expected()[1])
+    # Two chains with n_cores = 1.5: parallel::mclapply evaluates them in
+    # this session (as.integer(mc.cores) < 2).
+    run_2 <- run_k(2, n_cores = 1.5, verbose = FALSE)
+    expect_identical(caller_seed(), before)
+    expect_identical(draws_u(run_2), rng_expected()[1:2])
+    # Two chains in forked processes.
+    run_f <- run_k(2, n_cores = 2, verbose = FALSE)
+    expect_identical(caller_seed(), before)
+    expect_identical(draws_u(run_f), rng_expected()[1:2])
+    # The caller's next draws equal the draws without the runs.
+    set.seed(9); ref <- stats::runif(3)
+    set.seed(9)
+    run_k(1, n_cores = 2, verbose = FALSE)
+    run_k(2, n_cores = 1.5, verbose = FALSE)
+    expect_identical(stats::runif(3), ref)
+    # RNGkind "L'Ecuyer-CMRG" and no .Random.seed: mc.reset.stream() in
+    # parallel::mclapply() creates .Random.seed; it is removed after the run.
+    withr::local_seed(1, .rng_kind = "L'Ecuyer-CMRG")
+    for (nc in c(1.5, 2)) {
+        if (!is.null(caller_seed())) rm(".Random.seed", envir = globalenv())
+        run_l <- run_k(2, n_cores = nc, verbose = FALSE)
+        expect_null(caller_seed())
+        expect_identical(draws_u(run_l), rng_expected("L'Ecuyer-CMRG")[1:2])
+    }
+})
+
 test_that("the sequential re-run after a failed parallel attempt uses the same seeds", {
     skip_on_os("windows"); skip_if_not_installed("withr")
     withr::local_preserve_seed()
@@ -161,5 +201,16 @@ test_that("BartNoise chains: same seeds, same draws, in every path", {
     # .Random.seed (Rcpp::RNGScope); after the run that state is the one
     # restored, so .Random.seed is still the one of set.seed(4).
     rm(run_s, m); invisible(gc())
+    expect_identical(caller_seed(), before)
+
+    # One chain with keep_models = FALSE and n_cores = 2 runs in this
+    # session: chain 1 of the 3-chain runs (seed 101), .Random.seed restored.
+    set.seed(5); before <- caller_seed()
+    run_1 <- ai4bayescode_run_chains(ctor, n_chains = 1, n_burn = 20,
+                                     n_keep = 20, n_cores = 2,
+                                     keep_models = FALSE, verbose = FALSE)
+    expect_identical(caller_seed(), before)
+    expect_identical(run_1$histories, run_p1$histories[1])
+    invisible(gc())
     expect_identical(caller_seed(), before)
 })
