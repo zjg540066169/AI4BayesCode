@@ -278,6 +278,53 @@ class _RemoteTraceback(Exception):
         return self.tb
 
 
+class _Fields(dict):
+    """The fields of a pybind11 record (a DagInfo, an AdaptationInfo) that a
+    ChainModel call returns: the record does not pickle, so the worker process
+    sends its fields instead. Item access and attribute access both return a
+    field, so ``get_dag()["predict_edges"]``, ``get_dag().predict_edges`` and
+    ``plot_dag()`` work as on the record."""
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+    def __reduce__(self):
+        return (_Fields, (dict(self),))
+
+
+def _is_record(value) -> bool:
+    """True for a pybind11 object whose public attributes are data fields
+    (plus a keys() method), such as DagInfo and AdaptationInfo."""
+    if type(type(value)).__name__ != "pybind11_type":
+        return False
+    names = [a for a in dir(value) if not a.startswith("_")]
+    return bool(names) and all(a == "keys" or not callable(getattr(value, a, None))
+                               for a in names)
+
+
+def _with_record_fields(value, depth=0):
+    """``value`` with every pybind11 record in it (also inside dicts, lists
+    and tuples) replaced by a _Fields of its fields."""
+    if depth > 50:
+        return value
+    if isinstance(value, dict):
+        return {k: _with_record_fields(v, depth + 1) for k, v in value.items()}
+    if type(value) in (list, tuple):
+        return type(value)(_with_record_fields(v, depth + 1) for v in value)
+    if _is_record(value):
+        keys = getattr(value, "keys", None)
+        names = (list(keys()) if callable(keys)
+                 else [a for a in dir(value) if not a.startswith("_")])
+        return _Fields({a: _with_record_fields(getattr(value, a), depth + 1)
+                        for a in names})
+    return value
+
+
 class _DeferSigint:
     """Hold back SIGINT (KeyboardInterrupt) until the block ends.
 
@@ -396,9 +443,18 @@ def _worker_main(conn, parent_end, chain_ids, seeds, n_burn, n_keep,
         try:
             out = _dumps(reply)
         except Exception as e:  # noqa: BLE001
-            out = _dumps(("err", None, (type(e).__name__,
-                          f"the value returned by {name}() cannot be sent to the "
-                          f"calling process ({e})"), ""))
+            out = None
+            if reply[0] == "ok":
+                # A pybind11 record (get_dag() returns a DagInfo) does not
+                # pickle; its fields do.
+                try:
+                    out = _dumps(("ok", _with_record_fields(reply[1])))
+                except Exception:  # noqa: BLE001
+                    out = None
+            if out is None:
+                out = _dumps(("err", None, (type(e).__name__,
+                              f"the value returned by {name}() cannot be sent to the "
+                              f"calling process ({e})"), ""))
         try:
             conn.send_bytes(out)
         except OSError:
@@ -685,9 +741,11 @@ class ChainModel:
     holding the model, runs ``model.name(*args, **kwargs)`` there and returns
     the result. An exception raised there is raised here: with its own type
     when it can be pickled, else as RuntimeError carrying its type name and
-    message; its ``__cause__`` holds the traceback text from the worker.
-    Calls from several threads run one at a time per worker process. Names
-    that start with "_" are not forwarded.
+    message; its ``__cause__`` holds the traceback text from the worker. A
+    returned pybind11 record, which does not pickle (``get_dag()`` returns a
+    DagInfo), arrives as a dict of its fields that also allows attribute
+    access. Calls from several threads run one at a time per worker process.
+    Names that start with "_" are not forwarded.
 
     After :func:`close_models` every call raises RuntimeError. A handle
     restored from a pickle is detached: its calls raise RuntimeError, because
@@ -717,6 +775,15 @@ class ChainModel:
         method.__name__ = name
         method.__qualname__ = f"{self._cls}.{name}"
         return method
+
+    def __setattr__(self, name, value):
+        # A public attribute set here would shadow the forwarded method of the
+        # same name and would not reach the model in the worker process.
+        if not name.startswith("_"):
+            raise AttributeError(
+                f"cannot set {name!r}: the {self._cls} model of chain {self._chain} "
+                "is in a worker process, and only its methods can be called")
+        object.__setattr__(self, name, value)
 
     def __dir__(self):
         return sorted(set(super().__dir__()) | set(self._methods or ()))

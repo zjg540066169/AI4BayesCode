@@ -579,6 +579,9 @@ def test_exceptions_in_the_worker_are_raised_here():
             m.no_such_method
         assert not hasattr(m, "no_such_method") and hasattr(m, "clear_history")
         assert "predict_at" in dir(m)
+        with pytest.raises(AttributeError, match="cannot set 'step'"):
+            m.step = None
+        assert m.add(3) == 3
     finally:
         chains.close()
 
@@ -886,6 +889,22 @@ def test_compiled_model_end_to_end(gls):
             assert c["model"].predict_at({})["y_rep"].shape == (nk, y.size)
         sep = AI4BayesCode.predict(chains, pool=False)
         assert [s["y_rep"].shape for s in sep] == [(nk, y.size)] * 2
+        # get_dag() returns a DagInfo, which does not pickle: through a handle
+        # it arrives as its fields, with item and attribute access.
+        from AI4BayesCode.plot_dag import _dag_to_edges
+        dag, ref = chains[0]["model"].get_dag(), seq[0]["model"].get_dag()
+        assert sorted(dag) == sorted(ref.keys())
+        assert all(dag[k] == ref[k] for k in ref.keys())
+        assert dag.predict_edges == ref.predict_edges
+        assert _dag_to_edges(dag) == _dag_to_edges(ref)
+        m0 = chains[0]["model"]
+        m0.freeze(["mu"])
+        assert m0.get_frozen() == seq[0]["model"].get_frozen() + ["mu_sigma_joint.mu"]
+        m0.unfreeze()
+        assert m0.get_frozen() == []
+        assert m0.predict_at({}, last_draw_only=True)["y_rep"].shape == (1, y.size)
+        with pytest.raises(RuntimeError, match="no covariate inputs"):
+            m0.predict_at({"x": np.ones(3)})       # a C++ exception in the worker
         chains[0]["model"].step(5)
         assert chains[0]["model"].get_history()["mu"].shape == (nk + 5, 1)
         assert chains[1]["model"].get_history()["mu"].shape == (nk, 1)
