@@ -11,6 +11,8 @@
 #   * ai4bayescode_perf_hint() -- post-run per-sweep performance hint.
 #   * ai4bayescode_plot_dag()               -- render the model prediction DAG.
 #   * ai4bayescode_run_chains() -- multi-chain runner for any wrapper class.
+#   * ai4bayescode_predict() / ai4bayescode_close_models() -- prediction from,
+#                                 and shutdown of, the models of a run.
 #   * ai4bayescode_rhat_summary() -- R-hat / ESS summary across chains.
 #
 # Ported verbatim (behavior-preserving) from the standalone scripts
@@ -635,14 +637,38 @@ ai4bayescode_diagnose <- function(hist, n_burn = 0, plot = TRUE, order_component
 
 #' Run multiple MCMC chains for an AI4BayesCode wrapper class
 #'
-#' @description Spawns `n_chains` chains (parallel via `parallel::mclapply` on
-#'   POSIX, or sequential) from a deterministic constructor closure, runs warmup
-#'   + keep on each, and returns the per-chain histories (KEEP-ONLY: the first
-#'   `n_burn` draws of every history entry are stripped along its first axis,
+#' @description Runs `n_chains` chains from a deterministic constructor
+#'   closure and returns the per-chain histories, the models, the seeds used,
+#'   and the per-chain wall time. Each chain builds a fresh model with
+#'   `model_ctor(seed)`, runs `n_burn` warmup sweeps, discards the stored draws
+#'   with the model's `clear_history()`, and runs `n_keep` sweeps, so the
+#'   model's own `get_history()` and `predict_at()` cover the `n_keep`
+#'   post-warmup draws only. The histories in `run$histories` are KEEP-ONLY,
 #'   so downstream `ai4bayescode_rhat_summary()` / `ai4bayescode_diagnose()`
-#'   need no `drop_burn` / `n_burn` bookkeeping), the seeds used, and the
-#'   per-chain wall time. Each chain instantiates a fresh Rcpp module object
-#'   in its own worker, so object ownership is handled cleanly.
+#'   need no `drop_burn` / `n_burn` bookkeeping.
+#'
+#'   The chains run in forked worker processes on POSIX when
+#'   `parallel = TRUE` and `n_cores > 1` (with `keep_models = TRUE`, also
+#'   `n_chains > 1`), and sequentially in this session otherwise. With
+#'   `keep_models = TRUE` (default) a parallel run uses persistent worker
+#'   processes (`parallel::makeForkCluster`): chain `i` runs in worker
+#'   `((i - 1) %% n_workers) + 1`, and its model is kept in that process.
+#'   `run$models[[i]]` is then a handle of class `"ai4bayescode_chain_model"`:
+#'   `run$models[[i]]$predict_at(newdata)`, or any other method call, is
+#'   evaluated on chain `i`'s model in its worker process and returns the
+#'   result (an error there is raised here with the worker's message). The
+#'   worker processes are terminated by `ai4bayescode_close_models(run)`,
+#'   when the run and every handle taken from it are garbage-collected, or
+#'   when R exits. A handle restored with `readRDS()` in another R session
+#'   raises an error. A sequential run returns the model objects themselves in
+#'   `run$models`. With `keep_models = FALSE` a parallel run uses
+#'   `parallel::mclapply` and `run$models` is `NULL`.
+#'
+#'   A model without `clear_history()` (compiled against AI4BayesCode older
+#'   than 1.1.3, or a custom object) gives the same `run$histories`, with the
+#'   first `n_burn` draws dropped here, but its own `get_history()` and
+#'   `predict_at()` include the warmup draws; a message says so, and
+#'   `ai4bayescode_predict()` drops them.
 #' @param model_ctor Function of one argument (the integer seed, passed positionally; the parameter name is irrelevant) returning a fresh wrapper
 #'   object exposing `step()` and `get_history()`. Must be deterministic in
 #'   `seed`.
@@ -651,15 +677,26 @@ ai4bayescode_diagnose <- function(hist, n_burn = 0, plot = TRUE, order_component
 #' @param n_keep Kept iterations per chain. Defaults to 10000.
 #' @param seeds Optional integer vector of length `n_chains`; auto-generated if
 #'   `NULL`.
-#' @param parallel Logical; use `parallel::mclapply` on POSIX. Defaults to
-#'   `TRUE` (silently sequential on Windows).
-#' @param mc.cores Number of cores; auto-chosen if `NULL`.
+#' @param parallel Logical; run the chains in forked worker processes on
+#'   POSIX. Defaults to `TRUE` (sequential on Windows).
+#' @param mc.cores Alias of `n_cores`; an error is raised when both are given
+#'   and differ.
 #' @param verbose Logical; print a progress message. Defaults to `TRUE`.
-#' @return A list with `histories` (list of per-chain histories, keep-only:
-#'   each entry -- vector, matrix, or higher-dimensional array -- has its
-#'   first `n_burn` draws dropped along the first axis; an entry with a
-#'   single stored draw, i.e. `keep_history = FALSE`, is returned unchanged),
-#'   `seeds`, and `wall` (per-chain seconds).
+#' @param n_cores Number of worker processes; defaults to
+#'   `min(n_chains, max(1, parallel::detectCores() - 1))` for a parallel run.
+#' @param keep_models Logical; return the models in `run$models`. Defaults to
+#'   `TRUE`.
+#' @return An object of class `"ai4bayescode_run"` (a list) with `histories`
+#'   (list of per-chain histories, keep-only: each entry -- vector, matrix, or
+#'   higher-dimensional array -- holds the `n_keep` post-warmup draws along
+#'   its first axis; an entry with a single stored draw, i.e.
+#'   `keep_history = FALSE`, is returned unchanged), `models` (list of the
+#'   `n_chains` models -- handles after a parallel run, model objects after a
+#'   sequential one -- or `NULL` when `keep_models = FALSE`), `seeds`, `wall`
+#'   (per-chain seconds), `n_burn`, `n_keep`, and `history_cleared` (logical,
+#'   one per chain: `TRUE` when `clear_history()` was called after the
+#'   warmup). See `ai4bayescode_predict()` for prediction from all chains and
+#'   `ai4bayescode_close_models()` to terminate the worker processes.
 #' @export
 ai4bayescode_run_chains <- function(model_ctor,
                                  n_chains  = 4,
@@ -668,7 +705,9 @@ ai4bayescode_run_chains <- function(model_ctor,
                                  seeds     = NULL,
                                  parallel  = TRUE,
                                  mc.cores  = NULL,
-                                 verbose   = TRUE) {
+                                 verbose   = TRUE,
+                                 n_cores   = NULL,
+                                 keep_models = TRUE) {
     stopifnot(is.function(model_ctor),
               n_chains >= 1, n_burn >= 0, n_keep >= 1)
 
@@ -679,44 +718,29 @@ ai4bayescode_run_chains <- function(model_ctor,
         stop("length(seeds) must equal n_chains")
     }
 
-    # Drop the first `nb` draws along the FIRST axis of one history entry.
-    # Entries can be plain vectors (n), matrices (n x d), or higher-D
-    # arrays (n x r x c, ...); the slice runs along axis 1 only and keeps
-    # every other axis (and names/dimnames) intact. An entry with <= nb
-    # rows is returned unchanged: with keep_history disabled get_history()
-    # holds a single, already post-warmup, current draw -- emptying it
-    # would be worse than keeping it.
-    strip_burn_1 <- function(x, nb) {
-        d   <- dim(x)
-        len <- if (is.null(d)) length(x) else d[1L]
-        if (nb <= 0L || len <= nb) return(x)
-        keep <- (nb + 1L):len
-        if (is.null(d)) return(x[keep])
-        args <- c(list(x, keep),
-                  rep(list(quote(expr = )), length(d) - 1L),
-                  list(drop = FALSE))
-        do.call(`[`, args)
-    }
+    # mc.cores is the earlier name of n_cores and is still accepted.
+    if (!is.null(n_cores) && !is.null(mc.cores) &&
+        !identical(as.numeric(n_cores), as.numeric(mc.cores)))
+        stop("ai4bayescode_run_chains(): n_cores = ", n_cores,
+             " and mc.cores = ", mc.cores, " differ; mc.cores is an alias ",
+             "of n_cores, so pass only one of them.", call. = FALSE)
+    if (is.null(n_cores)) n_cores <- mc.cores
+    n_burn <- as.integer(n_burn)
+    n_keep <- as.integer(n_keep)
 
-    one_chain <- function(seed_val) {
-        t0 <- Sys.time()
-        m <- model_ctor(seed_val)
-        m$step(as.integer(n_burn))
-        m$step(as.integer(n_keep))
-        t1 <- Sys.time()
-        # get_history() spans EVERY stepped iteration (warmup + keep);
-        # return keep-only draws, matching this function's documentation.
-        h <- lapply(m$get_history(), strip_burn_1, nb = as.integer(n_burn))
-        list(history = h,
-             seed    = seed_val,
-             wall    = as.numeric(difftime(t1, t0, units = "secs")))
+    # keep = FALSE drops the model object from the result, so that it is not
+    # serialized back from a forked mclapply worker.
+    one_chain <- function(seed_val, keep = FALSE) {
+        r <- .ai4b_rc_one_chain(model_ctor, seed_val, n_burn, n_keep)
+        if (!keep) r$model <- NULL
+        r
     }
 
     use_parallel <- parallel && .Platform$OS.type != "windows" &&
                     requireNamespace("parallel", quietly = TRUE)
 
-    if (is.null(mc.cores)) {
-        mc.cores <- if (use_parallel)
+    if (is.null(n_cores)) {
+        n_cores <- if (use_parallel)
             min(n_chains, max(1, parallel::detectCores() - 1))
         else 1
     }
@@ -743,12 +767,39 @@ ai4bayescode_run_chains <- function(model_ctor,
                     "parallel = FALSE.", call. = FALSE, immediate. = TRUE)
     }
 
-    if (use_parallel && mc.cores > 1) {
+    models <- NULL
+    if (keep_models && use_parallel && n_cores > 1 && n_chains > 1) {
+        # Persistent forked workers: the model of each chain is kept in its
+        # worker process, and run$models holds handles to them.
+        n_workers <- as.integer(min(n_cores, n_chains))
         if (verbose)
             message("ai4bayescode_run_chains: running ", n_chains,
-                    " chains on ", mc.cores, " cores (parallel)")
+                    " chains on ", n_workers, " cores (parallel)")
         warn_if_blas_unpinned()
-        results <- parallel::mclapply(seeds, one_chain, mc.cores = mc.cores,
+        pr <- .ai4b_rc_pool_run(model_ctor, seeds, n_burn, n_keep, n_workers)
+        if (is.null(pr$error)) {
+            results <- pr$results
+            models  <- pr$handles
+        } else {
+            # The pool could not be started, or a chain or a worker process
+            # failed (a fork-unsafe multithreaded BLAS -- notably macOS
+            # Accelerate -- makes a forked chain segfault). The pool is closed
+            # by now; every chain is re-run sequentially in this session.
+            warning("ai4bayescode_run_chains: ", pr$error, "; re-running all ",
+                    "chains sequentially in this session. If a fork-unsafe ",
+                    "multithreaded BLAS (e.g. macOS Accelerate) is the cause, ",
+                    "set VECLIB_MAXIMUM_THREADS=1 before starting R to keep ",
+                    "parallelism, or pass parallel = FALSE.",
+                    call. = FALSE, immediate. = TRUE)
+            results <- lapply(seeds, one_chain, keep = TRUE)
+            models  <- lapply(results, `[[`, "model")
+        }
+    } else if (!keep_models && use_parallel && n_cores > 1) {
+        if (verbose)
+            message("ai4bayescode_run_chains: running ", n_chains,
+                    " chains on ", n_cores, " cores (parallel)")
+        warn_if_blas_unpinned()
+        results <- parallel::mclapply(seeds, one_chain, mc.cores = n_cores,
                                       mc.set.seed = TRUE)
         if (!all(vapply(results, chain_ok, logical(1)))) {
             # A forked worker died before returning a history. The usual cause
@@ -767,7 +818,8 @@ ai4bayescode_run_chains <- function(model_ctor,
         if (verbose)
             message("ai4bayescode_run_chains: running ", n_chains,
                     " chains sequentially")
-        results <- lapply(seeds, one_chain)
+        results <- lapply(seeds, one_chain, keep = keep_models)
+        if (keep_models) models <- lapply(results, `[[`, "model")
     }
 
     # Detect failures (after any sequential fallback -- a real model/data error).
@@ -776,12 +828,716 @@ ai4bayescode_run_chains <- function(model_ctor,
             stop("ai4bayescode_run_chains: chain ", i, " failed")
         }
     }
+    .ai4b_rc_history_notes(results, n_burn, n_keep)
 
-    list(
-        histories = lapply(results, `[[`, "history"),
-        seeds     = sapply(results, `[[`, "seed"),
-        wall      = sapply(results, `[[`, "wall")
-    )
+    structure(list(
+        histories       = lapply(results, `[[`, "history"),
+        models          = models,
+        seeds           = sapply(results, `[[`, "seed"),
+        wall            = sapply(results, `[[`, "wall"),
+        n_burn          = n_burn,
+        n_keep          = n_keep,
+        history_cleared = vapply(results, function(r) isTRUE(r$cleared),
+                                 logical(1))
+    ), class = "ai4bayescode_run")
+}
+
+
+#' Posterior prediction from every chain of a run
+#'
+#' @description Calls `predict_at(newdata)` on the model of every chain of a
+#'   run made by `ai4bayescode_run_chains(..., keep_models = TRUE)` and
+#'   returns the draws of all chains stacked (`pool = TRUE`) or per chain.
+#'   After a parallel run, one request goes to each worker process and the
+#'   worker processes compute their chains concurrently. Each chain gives the
+#'   draws its model's `predict_at()` returns, i.e. one row per post-warmup
+#'   draw; for a chain whose model has no `clear_history()`
+#'   (`run$history_cleared[i]` is `FALSE`) the first `n_burn` rows of every
+#'   entry with `n_burn + n_keep` rows are dropped. `predict(run, newdata)`
+#'   is the same call.
+#' @param run An object returned by `ai4bayescode_run_chains()`.
+#' @param newdata Named list passed to each model's `predict_at()`. The
+#'   default `list()` gives the posterior predictive at the training data.
+#' @param pool Logical. `TRUE` (default) returns, for each output key, one
+#'   matrix with the rows of all chains in chain order (an error is raised
+#'   when the chains give different keys or numbers of columns); `FALSE`
+#'   returns a list with one named list per chain.
+#' @param object An object returned by `ai4bayescode_run_chains()`.
+#' @param ... Unused.
+#' @return With `pool = TRUE`, a named list with one matrix per output key
+#'   (`n_chains * n_keep` rows for models built with keep_history = TRUE); with
+#'   `pool = FALSE`, a list of `n_chains` named lists as returned by
+#'   `predict_at()`.
+#' @examples
+#' \dontrun{
+#' run  <- ai4bayescode_run_chains(function(seed) new(MyModel, X, y, seed, TRUE),
+#'                                 n_chains = 4, n_burn = 1000, n_keep = 2000)
+#' yrep <- predict(run)                    # posterior predictive at the data
+#' pred <- predict(run, list(X = X_test))  # at new covariates
+#' by_chain <- ai4bayescode_predict(run, list(X = X_test), pool = FALSE)
+#' ai4bayescode_close_models(run)          # terminate the worker processes
+#' }
+#' @export
+ai4bayescode_predict <- function(run, newdata = list(), pool = TRUE) {
+    models <- if (is.list(run)) run$models
+    if (is.null(models))
+        stop("ai4bayescode_predict(): the run holds no models (run$models is ",
+             "NULL). Rerun ai4bayescode_run_chains() with keep_models = TRUE.",
+             call. = FALSE)
+    n_chains <- length(models)
+    preds <- vector("list", n_chains)
+    is_handle <- vapply(models, inherits, logical(1),
+                        what = "ai4bayescode_chain_model")
+    if (any(is_handle)) {
+        # One request per worker process for all of its chains.
+        hidx  <- which(is_handle)
+        pools <- lapply(models[hidx], .subset2, "pool")
+        for (p in unique(pools)) {
+            sel  <- hidx[vapply(pools, identical, logical(1), p)]
+            caps <- .ai4b_rc_remote(p, vapply(models[sel], .subset2, integer(1),
+                                              "chain"),
+                                    "predict_at", list(newdata))
+            for (k in seq_along(sel))
+                preds[sel[k]] <- list(.ai4b_rc_relay(caps[[k]], sel[k]))
+        }
+    }
+    for (i in which(!is_handle)) {
+        preds[i] <- list(tryCatch(models[[i]]$predict_at(newdata),
+            error = function(e) stop(structure(
+                class = unique(c(class(e), "error", "condition")),
+                list(message = sprintf("chain %d: %s", i, conditionMessage(e)),
+                     call = NULL)))))
+    }
+
+    # A model without clear_history() predicts from its warmup draws too.
+    n_burn  <- if (is.null(run$n_burn)) 0L else as.integer(run$n_burn)
+    n_keep  <- if (is.null(run$n_keep)) 0L else as.integer(run$n_keep)
+    cleared <- run$history_cleared
+    if (n_burn > 0L && length(cleared) == n_chains) {
+        for (i in which(!cleared)) {
+            preds[[i]] <- lapply(preds[[i]], function(x)
+                if (.ai4b_rc_n_rows(x) == n_burn + n_keep)
+                    .ai4b_rc_strip_burn(x, n_burn) else x)
+        }
+    }
+    if (!isTRUE(pool)) return(preds)
+
+    keys <- names(preds[[1L]])
+    for (i in seq_len(n_chains)[-1L]) {
+        if (!setequal(names(preds[[i]]), keys))
+            stop(sprintf(paste0("ai4bayescode_predict(): chain 1 gives the keys ",
+                                "(%s) and chain %d the keys (%s); use pool = FALSE."),
+                         paste(keys, collapse = ", "), i,
+                         paste(names(preds[[i]]), collapse = ", ")), call. = FALSE)
+    }
+    out <- lapply(keys, function(k) {
+        parts <- lapply(preds, function(p) .ai4b_rc_as_rows(p[[k]]))
+        cols  <- lapply(parts, function(x) dim(x)[-1L])
+        same  <- vapply(cols, identical, logical(1), cols[[1L]])
+        if (!all(same))
+            stop(sprintf(paste0("ai4bayescode_predict(): '%s' has %s columns in ",
+                                "chain 1 and %s in chain %d; use pool = FALSE."),
+                         k, paste(cols[[1L]], collapse = " x "),
+                         paste(cols[[which(!same)[1L]]], collapse = " x "),
+                         which(!same)[1L]), call. = FALSE)
+        .ai4b_rc_bind_rows(parts)
+    })
+    names(out) <- keys
+    out
+}
+
+#' @rdname ai4bayescode_predict
+#' @exportS3Method stats::predict
+predict.ai4bayescode_run <- function(object, newdata = list(), pool = TRUE, ...)
+    ai4bayescode_predict(object, newdata = newdata, pool = pool)
+
+
+#' Terminate the worker processes that hold the models of a run
+#'
+#' @description After a parallel `ai4bayescode_run_chains()` with
+#'   `keep_models = TRUE`, the model of each chain is held in a worker
+#'   process, and the worker processes are terminated only by this function,
+#'   by garbage collection of the run and of every handle taken from it, or
+#'   when R exits. A method call through a handle of the run afterwards raises
+#'   the error "the worker processes holding the models of this run were
+#'   closed (ai4bayescode_close_models)". A second call does nothing, and so
+#'   does a call on a run whose models are objects in this session or that was
+#'   made with `keep_models = FALSE`.
+#' @param run An object returned by `ai4bayescode_run_chains()`.
+#' @return Invisibly `NULL`.
+#' @export
+ai4bayescode_close_models <- function(run) {
+    for (p in .ai4b_rc_run_pools(run)) .ai4b_rc_pool_close(p)
+    invisible(NULL)
+}
+
+
+#' Compact print for an ai4bayescode_run result
+#'
+#' Shows the run settings, the dimensions of the history entries, the wall
+#' time, and where the models are, instead of the draws. The draws are
+#' accessible by name (`x$histories`, `x$models`).
+#'
+#' @param x An `ai4bayescode_run` result (from `ai4bayescode_run_chains()`).
+#' @param ... Unused.
+#' @return `x`, invisibly.
+#' @exportS3Method base::print
+print.ai4bayescode_run <- function(x, ...) {
+    n_chains <- length(x$histories)
+    cat(sprintf("AI4BayesCode run: %d chain%s, n_burn = %s warmup + n_keep = %s kept sweeps per chain\n",
+                n_chains, if (n_chains == 1L) "" else "s",
+                format(x$n_burn), format(x$n_keep)))
+    h <- if (n_chains > 0L) x$histories[[1L]] else list()
+    if (length(h)) {
+        nm <- names(h)
+        if (is.null(nm)) nm <- rep("", length(h))
+        nm[!nzchar(nm)] <- sprintf("[[%d]]", which(!nzchar(nm)))
+        dims <- vapply(h, function(e)
+            paste(if (is.null(dim(e))) length(e) else dim(e), collapse = " x "),
+            character(1))
+        show <- seq_len(min(length(h), 10L))
+        cat("History entries (draws along the first axis):\n")
+        cat(sprintf("  %s  %s\n", formatC(nm[show], width = -max(nchar(nm[show]))),
+                    dims[show]), sep = "")
+        if (length(h) > 10L) cat(sprintf("  ... and %d more\n", length(h) - 10L))
+    }
+    if (length(x$wall))
+        cat("Wall time per chain: ", format(signif(min(x$wall), 3)), " to ",
+            format(signif(max(x$wall), 3)), " s (sum ",
+            format(signif(sum(x$wall), 3)), " s)\n", sep = "")
+    cat("Models: ", .ai4b_rc_models_where(x$models), "\n", sep = "")
+    if (!is.null(x$models) && isTRUE(x$n_burn > 0) &&
+        !all(x$history_cleared))
+        cat("  (models without clear_history(): their get_history() and",
+            "predict_at() include the warmup draws)\n")
+    invisible(x)
+}
+
+
+#' Handle to the model of one chain in a worker process
+#'
+#' After a parallel `ai4bayescode_run_chains()` with `keep_models = TRUE`,
+#' `run$models[[i]]` is a handle of class `"ai4bayescode_chain_model"`.
+#' `h$method(...)` calls `method` on chain `i`'s model in the worker process
+#' that holds it, and returns the result; output, messages and warnings of the
+#' call are shown here, and an error is raised here with the worker's message.
+#' Calls are evaluated in order and change the model as the same call on the
+#' model object would (`h$step(5)` adds five draws to its history).
+#'
+#' @param x A handle (an element of `run$models`).
+#' @param name Name of the model's method.
+#' @param value Unused; assignment through a handle raises an error.
+#' @param pattern Regular expression for tab completion.
+#' @param ... Unused.
+#' @return `$` returns a function that calls the method in the worker process;
+#'   `print` returns `x` invisibly.
+#' @name ai4bayescode_chain_model
+NULL
+
+#' @rdname ai4bayescode_chain_model
+#' @export
+`$.ai4bayescode_chain_model` <- function(x, name) {
+    force(name)
+    function(...) .ai4b_rc_handle_call(x, name, list(...))
+}
+
+#' @rdname ai4bayescode_chain_model
+#' @export
+`$<-.ai4bayescode_chain_model` <- function(x, name, value)
+    stop("assignment through an ai4bayescode_chain_model handle is not ",
+         "supported; call a method of the model instead, e.g. ",
+         "h$set_current(list(...)).", call. = FALSE)
+
+#' @rdname ai4bayescode_chain_model
+#' @exportS3Method utils::.DollarNames
+.DollarNames.ai4bayescode_chain_model <- function(x, pattern = "") {
+    nms <- .subset2(x, "methods")
+    tryCatch(grep(pattern, nms, value = TRUE), error = function(e) nms)
+}
+
+#' @rdname ai4bayescode_chain_model
+#' @exportS3Method base::print
+print.ai4bayescode_chain_model <- function(x, ...) {
+    pool  <- .subset2(x, "pool")
+    chain <- .subset2(x, "chain")
+    cat(sprintf("<ai4bayescode_chain_model: chain %d of %d, %s>\n", chain,
+                pool$n_chains, .subset2(x, "class_name")))
+    cat(switch(.ai4b_rc_pool_state(pool),
+        open   = sprintf(paste0("  The model is in worker process %d of this R ",
+                                "session; x$<method>(...) is evaluated there.\n"),
+                         pool$pids[pool$node_of[chain]]),
+        closed = paste0("  The worker processes holding the models of this run ",
+                        "were closed (ai4bayescode_close_models).\n"),
+        other  = paste0("  Created in another R session or process; the model is ",
+                        "not available here.\n")))
+    invisible(x)
+}
+
+
+# ---------------------------------------------------------------------------
+# Internals of ai4bayescode_run_chains() / ai4bayescode_predict().
+#
+# A parallel run with keep_models = TRUE forks one pool of worker processes
+# with parallel::makeForkCluster(). The constructor is passed to the workers
+# through fork() (it is stored in .ai4b_rc_env immediately before forking and
+# removed from the parent right after), never through serialization: its
+# environment can hold an Rcpp class generator, whose external pointer would
+# be NULL after unserialize(). Only seeds, chain indices, method names and
+# arguments are sent to the workers; the models of a worker's chains are
+# stored in that worker's own copy of .ai4b_rc_env$models.
+#
+# In the parent, .ai4b_rc_env$pools maps the token of every open pool to its
+# connections, worker pids and request counters. A handle refers to a "pool"
+# environment holding the token, the session id and the chain-to-worker map,
+# but not the connections, so a handle restored with readRDS() in another
+# session contains no connection. A finalizer on the pool environment
+# (onexit = TRUE) closes the pool when the run and its handles are
+# garbage-collected, or when R exits.
+# ---------------------------------------------------------------------------
+.ai4b_rc_env <- new.env(parent = emptyenv())
+
+# Id of this R process: pid, temporary directory and creation time. A forked
+# child gets a new id at its first call, because its pid differs.
+.ai4b_rc_session <- function() {
+    s <- .ai4b_rc_env$session
+    if (is.null(s) || !identical(s$pid, Sys.getpid())) {
+        s <- list(pid = Sys.getpid(),
+                  id  = paste(Sys.getpid(), tempdir(),
+                              format(Sys.time(), "%Y%m%d%H%M%OS6"), sep = "|"))
+        .ai4b_rc_env$session <- s
+    }
+    s$id
+}
+
+.ai4b_rc_registry <- function() {
+    r <- .ai4b_rc_env$pools
+    if (is.null(r)) {
+        r <- new.env(parent = emptyenv())
+        .ai4b_rc_env$pools <- r
+    }
+    r
+}
+
+# Number of draws of one history entry: the length of its first axis.
+.ai4b_rc_n_rows <- function(x) {
+    d <- dim(x)
+    if (is.null(d)) length(x) else d[1L]
+}
+
+# Drop the first `nb` draws along the FIRST axis of one history entry.
+# Entries can be plain vectors (n), matrices (n x d), or higher-D
+# arrays (n x r x c, ...); the slice runs along axis 1 only and keeps
+# every other axis (and names/dimnames) intact. An entry with <= nb
+# rows is returned unchanged: with keep_history disabled get_history()
+# holds a single, already post-warmup, current draw -- emptying it
+# would be worse than keeping it.
+.ai4b_rc_strip_burn <- function(x, nb) {
+    d   <- dim(x)
+    len <- if (is.null(d)) length(x) else d[1L]
+    if (nb <= 0L || len <= nb) return(x)
+    keep <- (nb + 1L):len
+    if (is.null(d)) return(x[keep])
+    args <- c(list(x, keep),
+              rep(list(quote(expr = )), length(d) - 1L),
+              list(drop = FALSE))
+    do.call(`[`, args)
+}
+
+# TRUE when `name` is a method of `m`. The lookup uses `$`, which finds the
+# methods of an Rcpp module object as well as the functions of a list or an
+# environment.
+.ai4b_rc_has_method <- function(m, name)
+    is.function(tryCatch(eval(call("$", m, name)), error = function(e) NULL))
+
+.ai4b_rc_class_name <- function(m) sub("^Rcpp_", "", class(m)[1L])
+
+# One chain: construct, warm up, clear the warmup draws, sample. The history
+# returned is keep-only; `model` is the model object itself.
+.ai4b_rc_one_chain <- function(model_ctor, seed_val, n_burn, n_keep) {
+    t0 <- Sys.time()
+    m <- model_ctor(seed_val)
+    m$step(n_burn)
+    has_clear <- .ai4b_rc_has_method(m, "clear_history")
+    cleared   <- n_burn > 0L && has_clear
+    if (cleared) m$clear_history()
+    m$step(n_keep)
+    t1 <- Sys.time()
+    h <- lapply(m$get_history(), identity)
+    extra <- character(0)
+    if (cleared) {
+        # After clear_history() every entry holds n_keep draws (1 when the
+        # model stores a single draw). An entry with more rows was not
+        # emptied: drop its warmup draws here and report it.
+        idx <- which(vapply(h, .ai4b_rc_n_rows, numeric(1)) > n_keep)
+        h[idx] <- lapply(h[idx], .ai4b_rc_strip_burn, nb = n_burn)
+        extra  <- if (is.null(names(h))) sprintf("[[%d]]", idx) else names(h)[idx]
+    } else {
+        # get_history() spans EVERY stepped iteration (warmup + keep);
+        # return keep-only draws, matching this function's documentation.
+        h <- lapply(h, .ai4b_rc_strip_burn, nb = n_burn)
+    }
+    list(history   = h,
+         seed      = seed_val,
+         wall      = as.numeric(difftime(t1, t0, units = "secs")),
+         cleared   = cleared,
+         has_clear = has_clear,
+         extra     = extra,
+         class     = .ai4b_rc_class_name(m),
+         model     = m)
+}
+
+# The message for models without clear_history() and the warning for entries
+# that clear_history() left non-empty, each emitted once per run.
+.ai4b_rc_history_notes <- function(results, n_burn, n_keep) {
+    cls <- function(rs) paste(unique(vapply(rs, `[[`, character(1), "class")),
+                              collapse = ", ")
+    no_clear <- Filter(function(r) !isTRUE(r$has_clear), results)
+    if (n_burn > 0L && length(no_clear))
+        message("ai4bayescode_run_chains: ", cls(no_clear), " has no ",
+                "clear_history() method, so the model's own get_history() and ",
+                "predict_at() include the n_burn = ", n_burn, " warmup draws ",
+                "(run$histories exclude them, and ai4bayescode_predict() drops ",
+                "them). Recompiling the model with AI4BayesCode >= 1.1.3 adds ",
+                "clear_history().")
+    with_extra <- Filter(function(r) length(r$extra) > 0L, results)
+    if (length(with_extra))
+        warning("ai4bayescode_run_chains: after clear_history(), the history ",
+                "entries ", paste(unique(unlist(lapply(with_extra, `[[`, "extra"))),
+                                  collapse = ", "),
+                " of ", cls(with_extra), " have more than n_keep = ", n_keep,
+                " rows. Their first n_burn = ", n_burn, " rows are dropped in ",
+                "run$histories, but the model's own get_history() and ",
+                "predict_at() still contain the warmup draws for them: the ",
+                "class needs a clear_extra_history_() hook that empties them.",
+                call. = FALSE)
+    invisible(NULL)
+}
+
+# R random-number state of each worker, as parallel::mclapply(mc.set.seed =
+# TRUE) sets it in each forked child: with RNGkind "L'Ecuyer-CMRG", worker w
+# gets the w-th stream after the current seed; with any other kind the entry
+# is NULL and the worker removes .Random.seed, so that R seeds it afresh.
+.ai4b_rc_worker_rng <- function(n_workers) {
+    out <- vector("list", n_workers)
+    if (RNGkind()[1L] != "L'Ecuyer-CMRG") return(out)
+    if (!exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+        sample.int(1L)
+    s <- get(".Random.seed", envir = globalenv(), inherits = FALSE)
+    for (w in seq_len(n_workers)) out[[w]] <- s <- parallel::nextRNGStream(s)
+    out
+}
+
+# Evaluate fun() and return its value with the printed output, messages,
+# warnings and error it produced, so that the parent can show them.
+.ai4b_rc_capture <- function(fun) {
+    value <- NULL; visible <- FALSE; err <- NULL
+    warns <- character(0); msgs <- character(0)
+    out <- utils::capture.output(invisible(withCallingHandlers(
+        tryCatch({
+            v <- withVisible(fun())
+            value   <- v$value
+            visible <- v$visible
+        }, error = function(e)
+            err <<- list(message = conditionMessage(e), class = class(e))),
+        warning = function(w) {
+            warns <<- c(warns, conditionMessage(w))
+            invokeRestart("muffleWarning")
+        },
+        message = function(m) {
+            msgs <<- c(msgs, conditionMessage(m))
+            invokeRestart("muffleMessage")
+        })))
+    list(value = value, visible = visible, error = err,
+         warnings = warns, messages = msgs, output = out)
+}
+
+# Show the output, messages and warnings of a captured call of chain `chain`,
+# then raise its error (with the error's classes) or return its value.
+.ai4b_rc_relay <- function(cap, chain) {
+    if (length(cap$output)) cat(cap$output, sep = "\n")
+    for (m in cap$messages) message(m, appendLF = FALSE)
+    for (w in cap$warnings) warning(w, call. = FALSE)
+    if (!is.null(cap$error))
+        stop(structure(class = unique(c(cap$error$class, "error", "condition")),
+                       list(message = sprintf("chain %d: %s", chain,
+                                              cap$error$message),
+                            call = NULL)))
+    if (isTRUE(cap$visible)) cap$value else invisible(cap$value)
+}
+
+# Worker side: run the chains of one worker and store their models.
+.ai4b_rc_worker_run <- function(job, n_burn, n_keep) {
+    if (is.null(job$rng)) {
+        if (exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+            rm(".Random.seed", envir = globalenv(), inherits = FALSE)
+    } else {
+        assign(".Random.seed", job$rng, envir = globalenv())
+    }
+    ctor <- get0("ctor", envir = .ai4b_rc_env, inherits = FALSE)
+    models <- list()
+    out <- list()
+    for (j in seq_along(job$chains)) {
+        cap <- .ai4b_rc_capture(function() {
+            if (!is.function(ctor))
+                stop("the model constructor is not available in this worker ",
+                     "process")
+            .ai4b_rc_one_chain(ctor, job$seeds[[j]], n_burn, n_keep)
+        })
+        if (is.null(cap$error)) {
+            m <- cap$value$model
+            models[[as.character(job$chains[[j]])]] <- m
+            cap$value$model   <- NULL
+            cap$value$methods <- tryCatch(as.character(utils::.DollarNames(m, "")),
+                                          error = function(e) character(0))
+        }
+        out[[j]] <- cap
+        if (!is.null(cap$error)) break   # the run falls back to sequential
+    }
+    .ai4b_rc_env$models <- models
+    list(seq = job$seq, out = out)
+}
+
+# Worker side: call `job$method` with `job$args` on the model of each chain
+# in `job$chains`.
+.ai4b_rc_worker_call <- function(job) {
+    models <- .ai4b_rc_env$models
+    list(seq = job$seq, out = lapply(job$chains, function(i)
+        .ai4b_rc_capture(function() {
+            m <- models[[as.character(i)]]
+            if (is.null(m))
+                stop("this worker process holds no model of chain ", i)
+            f <- eval(call("$", m, job$method))
+            if (!is.function(f))
+                stop("'", job$method, "' is not a method of ",
+                     .ai4b_rc_class_name(m))
+            do.call(f, job$args, quote = TRUE)
+        })))
+}
+
+# Fork the worker processes of a pool and register the pool.
+.ai4b_rc_pool_open <- function(model_ctor, n_workers, n_chains) {
+    # Pools of earlier runs that are no longer reachable are closed by their
+    # finalizers; collect them first, so that their connections are free (R
+    # allows about 128 open connections, and each worker process uses one).
+    gc()
+    assign("ctor", model_ctor, envir = .ai4b_rc_env)
+    on.exit(rm(list = "ctor", envir = .ai4b_rc_env), add = TRUE)
+    cl <- parallel::makeForkCluster(n_workers)
+    pids <- tryCatch(as.integer(unlist(parallel::clusterCall(cl, Sys.getpid))),
+                     error = function(e) {
+                         try(parallel::stopCluster(cl), silent = TRUE)
+                         stop(e)
+                     })
+    n <- if (is.null(.ai4b_rc_env$n_pools)) 1L else .ai4b_rc_env$n_pools + 1L
+    .ai4b_rc_env$n_pools <- n
+    token <- paste0("pool", n)
+    entry <- new.env(parent = emptyenv())
+    entry$cl   <- cl
+    entry$pids <- pids
+    entry$seq  <- 0L                   # number of the last request
+    entry$sent <- integer(n_workers)   # last request sent to each worker
+    entry$recv <- integer(n_workers)   # last request whose result was read
+    assign(token, entry, envir = .ai4b_rc_registry())
+    pool <- new.env(parent = emptyenv())
+    pool$token     <- token
+    pool$session   <- .ai4b_rc_session()
+    pool$pids      <- pids
+    pool$n_workers <- n_workers
+    pool$n_chains  <- n_chains
+    pool$node_of   <- ((seq_len(n_chains) - 1L) %% n_workers) + 1L
+    reg.finalizer(pool, .ai4b_rc_pool_close, onexit = TRUE)
+    pool
+}
+
+# "open", "closed", or "other" (created in another R session or process).
+.ai4b_rc_pool_state <- function(pool) {
+    if (!identical(pool$session, .ai4b_rc_session())) return("other")
+    if (exists(pool$token, envir = .ai4b_rc_registry(), inherits = FALSE))
+        "open" else "closed"
+}
+
+# The registry entry of an open pool of this session, or an error.
+.ai4b_rc_pool_entry <- function(pool) {
+    switch(.ai4b_rc_pool_state(pool),
+        other = stop("this ai4bayescode_chain_model handle was created in ",
+                     "another R session or process. The models of a parallel ",
+                     "run exist only in the worker processes of the R session ",
+                     "that ran ai4bayescode_run_chains(), and saveRDS() / ",
+                     "readRDS() does not transfer them; rerun ",
+                     "ai4bayescode_run_chains() in this session.", call. = FALSE),
+        closed = stop(if (is.null(pool$closed_reason))
+                          paste0("the worker processes holding the models of ",
+                                 "this run were closed (ai4bayescode_close_models)")
+                      else pool$closed_reason, call. = FALSE),
+        get(pool$token, envir = .ai4b_rc_registry(), inherits = FALSE))
+}
+
+# Terminate the worker processes of a pool; a no-op for a closed pool or a
+# pool of another session. Idle workers exit on the "DONE" message of
+# parallel::stopCluster(); a worker whose result of the last request was not
+# read (an interrupted call), or every worker when force = TRUE, is sent
+# SIGTERM.
+.ai4b_rc_pool_close <- function(pool, force = FALSE, reason = NULL) {
+    if (!identical(.ai4b_rc_pool_state(pool), "open")) return(invisible(FALSE))
+    reg   <- .ai4b_rc_registry()
+    entry <- get(pool$token, envir = reg, inherits = FALSE)
+    rm(list = pool$token, envir = reg)
+    if (!is.null(reason)) pool$closed_reason <- reason
+    busy <- force | entry$sent > entry$recv
+    for (w in seq_along(entry$cl)) {
+        if (busy[w]) tools::pskill(entry$pids[w], tools::SIGTERM)
+        done <- !busy[w] && !inherits(try(parallel::stopCluster(entry$cl[w]),
+                                          silent = TRUE), "try-error")
+        if (!done) try(close(entry$cl[[w]]$con), silent = TRUE)
+    }
+    invisible(TRUE)
+}
+
+# Send one job to each worker in `nodes` (they compute concurrently) and
+# return their results in the order of `nodes`. Every request carries a
+# number that the worker returns with its result. A call interrupted before
+# its results arrived leaves those results unread; a result with an earlier
+# number is such a result and is discarded, and the result of this request
+# is the next one on that connection. A failed connection closes the pool.
+.ai4b_rc_exchange <- function(pool, nodes, jobs, fun, ...) {
+    entry <- .ai4b_rc_pool_entry(pool)
+    s <- entry$seq + 1L
+    entry$seq <- s
+    entry$sent[nodes] <- s
+    for (k in seq_along(jobs)) jobs[[k]]$seq <- s
+    fail <- function(e) {
+        msg <- paste0("the connection to a worker process of this run failed (",
+                      conditionMessage(e), ")")
+        .ai4b_rc_pool_close(pool, force = TRUE, reason = paste0(
+            "the worker processes holding the models of this run were closed ",
+            "after ", msg))
+        stop(msg, "; the worker processes of this run were closed.",
+             call. = FALSE)
+    }
+    out <- tryCatch(parallel::clusterApply(entry$cl[nodes], jobs, fun, ...),
+                    error = function(e) e)
+    if (inherits(out, "error")) fail(out)
+    seq_of <- function(r) if (is.list(r)) r$seq else NA
+    for (k in seq_along(nodes)) {
+        r <- out[[k]]
+        while (!identical(seq_of(r), s)) {
+            # A worker's reply on a socket node is one serialized list whose
+            # `value` is the result of the function sent.
+            r <- tryCatch(unserialize(entry$cl[[nodes[k]]]$con)$value,
+                          error = function(e) e)
+            if (inherits(r, "error")) fail(r)
+        }
+        out[[k]] <- r$out
+    }
+    entry$recv[nodes] <- s
+    out
+}
+
+# Run all chains in a new pool. Returns list(results, handles) or, when the
+# pool cannot be started or a chain fails, list(error = <message>) with the
+# pool closed.
+.ai4b_rc_pool_run <- function(model_ctor, seeds, n_burn, n_keep, n_workers) {
+    n_chains <- length(seeds)
+    pool <- tryCatch(.ai4b_rc_pool_open(model_ctor, n_workers, n_chains),
+                     error = function(e) e)
+    if (inherits(pool, "error"))
+        return(list(error = paste0("the worker processes could not be started (",
+                                   conditionMessage(pool), ")")))
+    finished <- FALSE
+    on.exit(if (!finished) .ai4b_rc_pool_close(pool, force = TRUE), add = TRUE)
+    rng  <- .ai4b_rc_worker_rng(n_workers)
+    jobs <- lapply(seq_len(n_workers), function(w) {
+        idx <- which(pool$node_of == w)
+        list(chains = idx, seeds = seeds[idx], rng = rng[[w]])
+    })
+    out <- tryCatch(.ai4b_rc_exchange(pool, seq_len(n_workers), jobs,
+                                      .ai4b_rc_worker_run,
+                                      n_burn = n_burn, n_keep = n_keep),
+                    error = function(e) e)
+    if (inherits(out, "error"))
+        return(list(error = conditionMessage(out)))
+    caps <- vector("list", n_chains)
+    for (w in seq_len(n_workers))
+        caps[jobs[[w]]$chains[seq_along(out[[w]])]] <- out[[w]]
+    bad <- which(vapply(caps, function(cp) is.null(cp) || !is.null(cp$error),
+                        logical(1)))
+    if (length(bad))
+        return(list(error = sprintf("a parallel chain failed (chain %d: %s)",
+                                    bad[1L], caps[[bad[1L]]]$error$message)))
+    results <- lapply(seq_len(n_chains), function(i) .ai4b_rc_relay(caps[[i]], i))
+    handles <- lapply(seq_len(n_chains), function(i)
+        .ai4b_rc_handle(pool, i, results[[i]]$class, results[[i]]$methods))
+    finished <- TRUE
+    list(results = results, handles = handles, error = NULL)
+}
+
+.ai4b_rc_handle <- function(pool, chain, class_name, methods) {
+    h <- new.env(parent = emptyenv())
+    h$pool       <- pool
+    h$chain      <- as.integer(chain)
+    h$class_name <- class_name
+    h$methods    <- methods
+    lockEnvironment(h, bindings = TRUE)
+    class(h) <- "ai4bayescode_chain_model"
+    h
+}
+
+# Call `method` on the models of `chains` of a pool; returns the captured
+# results in the order of `chains`.
+.ai4b_rc_remote <- function(pool, chains, method, args) {
+    nodes <- unique(pool$node_of[chains])
+    jobs  <- lapply(nodes, function(w)
+        list(chains = chains[pool$node_of[chains] == w], method = method,
+             args = args))
+    out  <- .ai4b_rc_exchange(pool, nodes, jobs, .ai4b_rc_worker_call)
+    caps <- vector("list", length(chains))
+    for (k in seq_along(nodes)) caps[match(jobs[[k]]$chains, chains)] <- out[[k]]
+    caps
+}
+
+.ai4b_rc_handle_call <- function(h, method, args) {
+    chain <- .subset2(h, "chain")
+    .ai4b_rc_relay(.ai4b_rc_remote(.subset2(h, "pool"), chain, method,
+                                   args)[[1L]], chain)
+}
+
+# The pools of the handles in run$models.
+.ai4b_rc_run_pools <- function(run) {
+    models <- if (is.list(run)) run$models
+    hs <- Filter(function(m) inherits(m, "ai4bayescode_chain_model"), models)
+    unique(lapply(hs, .subset2, "pool"))
+}
+
+.ai4b_rc_models_where <- function(models) {
+    if (is.null(models)) return("not kept (keep_models = FALSE)")
+    pools <- .ai4b_rc_run_pools(list(models = models))
+    if (!length(pools)) return("in this R session (run$models[[i]])")
+    st <- vapply(pools, .ai4b_rc_pool_state, character(1))
+    if (all(st == "open")) {
+        pids <- unlist(lapply(pools, function(p) p$pids))
+        return(sprintf(paste0("in %d worker process%s of this R session (pid %s); ",
+                              "run$models[[i]]$<method>(...) is evaluated there, ",
+                              "and ai4bayescode_close_models(run) terminates them"),
+                       length(pids), if (length(pids) == 1L) "" else "es",
+                       paste(pids, collapse = ", ")))
+    }
+    if (all(st == "closed")) return("closed (ai4bayescode_close_models)")
+    if (all(st == "other"))
+        return("in worker processes of another R session (not available here)")
+    "partly closed or in another R session"
+}
+
+# One prediction entry as rows = draws: a vector becomes one column.
+.ai4b_rc_as_rows <- function(x) if (is.null(dim(x))) matrix(x, ncol = 1L) else x
+
+# Stack per-chain entries along the first axis.
+.ai4b_rc_bind_rows <- function(parts) {
+    if (length(dim(parts[[1L]])) <= 2L) return(do.call(rbind, parts))
+    d    <- dim(parts[[1L]])
+    perm <- c(seq_along(d)[-1L], 1L)
+    n    <- sum(vapply(parts, function(x) dim(x)[1L], integer(1)))
+    arr  <- array(unlist(lapply(parts, aperm, perm)), dim = c(d[-1L], n))
+    aperm(arr, c(length(d), seq_len(length(d) - 1L)))
 }
 
 #' R-hat / ESS summary across chains

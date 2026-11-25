@@ -1,8 +1,9 @@
 # ----------------------------------------------------------------------------
 # Pin the native BLAS to one thread, as early as possible.
 #
-# ai4bayescode_run_chains() parallelises with parallel::mclapply(), i.e.
-# fork(). A multithreaded BLAS -- macOS Accelerate/vecLib above all, but also
+# ai4bayescode_run_chains() parallelises with fork(): worker processes of
+# parallel::makeForkCluster(), or parallel::mclapply() when keep_models =
+# FALSE. A multithreaded BLAS -- macOS Accelerate/vecLib above all, but also
 # OpenBLAS with pthreads and MKL -- keeps a worker-thread pool; fork() copies
 # only the calling thread, so the child inherits a pool whose threads do not
 # exist and the first heavy BLAS call there dies. On macOS the crash is inside
