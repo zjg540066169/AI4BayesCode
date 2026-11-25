@@ -534,6 +534,9 @@ public:
 
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
 
+    // Called by clear_history() after impl_ is cleared: empties phi_hist_.
+    void clear_extra_history_() { phi_hist_.clear(); }
+
     // Per-draw serialized genBART forest snapshots. In stateful mode this
     // is length 1 (the current forest); in tree-history mode (keep_tree=
     // true) it has one entry per stored draw.

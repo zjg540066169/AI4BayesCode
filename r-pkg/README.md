@@ -41,14 +41,18 @@ ai4bayescode_example("GaussianLocationScale")
 # (ai4bayescode_doc(GaussianLocationScale) prints it.)
 y <- rnorm(100, mean = 2, sd = 1.5)
 
-# run_chains drops the first n_burn draws, so the summary below is over the
-# POSTERIOR only. m$get_history() returns EVERY stepped draw, warmup included.
+# run_chains drops the first n_burn draws, also inside each kept model, so the
+# summary below is over the POSTERIOR only. m$get_history() on a model stepped
+# outside run_chains returns EVERY stepped draw, warmup included.
 run <- ai4bayescode_run_chains(
   function(s) new(GaussianLocationScale, y, as.integer(s), TRUE),
   n_chains = 4, n_burn = 4000, n_keep = 4000)
 
 ai4bayescode_rhat_summary(run)                  # convergence across chains
 ai4bayescode_diagnose(run$histories[[1]])$summary
+pred <- predict(run)                            # posterior predictive, chains pooled
+run$models[[1]]$get_current()                   # chain 1's model after the run
+ai4bayescode_close_models(run)                  # stop the worker processes
 
 # Compile a .cpp you generated elsewhere -- no AI4BayesCode checkout needed,
 # the headers ship inside the installed package.

@@ -12,7 +12,9 @@ ai4bayescode_run_chains(
   seeds = NULL,
   parallel = TRUE,
   mc.cores = NULL,
-  verbose = TRUE
+  verbose = TRUE,
+  n_cores = NULL,
+  keep_models = TRUE
 )
 }
 \arguments{
@@ -29,27 +31,64 @@ object exposing `step()` and `get_history()`. Must be deterministic in
 \item{seeds}{Optional integer vector of length `n_chains`; auto-generated if
 `NULL`.}
 
-\item{parallel}{Logical; use `parallel::mclapply` on POSIX. Defaults to
-`TRUE` (silently sequential on Windows).}
+\item{parallel}{Logical; run the chains in forked worker processes on
+POSIX. Defaults to `TRUE` (sequential on Windows).}
 
-\item{mc.cores}{Number of cores; auto-chosen if `NULL`.}
+\item{mc.cores}{Alias of `n_cores`; an error is raised when both are given
+and differ.}
 
 \item{verbose}{Logical; print a progress message. Defaults to `TRUE`.}
+
+\item{n_cores}{Number of worker processes; defaults to
+`min(n_chains, max(1, parallel::detectCores() - 1))` for a parallel run.}
+
+\item{keep_models}{Logical; return the models in `run$models`. Defaults to
+`TRUE`.}
 }
 \value{
-A list with `histories` (list of per-chain histories, keep-only:
-  each entry -- vector, matrix, or higher-dimensional array -- has its
-  first `n_burn` draws dropped along the first axis; an entry with a
-  single stored draw, i.e. `keep_history = FALSE`, is returned unchanged),
-  `seeds`, and `wall` (per-chain seconds).
+An object of class `"ai4bayescode_run"` (a list) with `histories`
+  (list of per-chain histories, keep-only: each entry -- vector, matrix, or
+  higher-dimensional array -- holds the `n_keep` post-warmup draws along
+  its first axis; an entry with a single stored draw, i.e.
+  `keep_history = FALSE`, is returned unchanged), `models` (list of the
+  `n_chains` models -- handles after a parallel run, model objects after a
+  sequential one -- or `NULL` when `keep_models = FALSE`), `seeds`, `wall`
+  (per-chain seconds), `n_burn`, `n_keep`, and `history_cleared` (logical,
+  one per chain: `TRUE` when `clear_history()` was called after the
+  warmup). See `ai4bayescode_predict()` for prediction from all chains and
+  `ai4bayescode_close_models()` to terminate the worker processes.
 }
 \description{
-Spawns `n_chains` chains (parallel via `parallel::mclapply` on
-  POSIX, or sequential) from a deterministic constructor closure, runs warmup
-  + keep on each, and returns the per-chain histories (KEEP-ONLY: the first
-  `n_burn` draws of every history entry are stripped along its first axis,
+Runs `n_chains` chains from a deterministic constructor
+  closure and returns the per-chain histories, the models, the seeds used,
+  and the per-chain wall time. Each chain builds a fresh model with
+  `model_ctor(seed)`, runs `n_burn` warmup sweeps, discards the stored draws
+  with the model's `clear_history()`, and runs `n_keep` sweeps, so the
+  model's own `get_history()` and `predict_at()` cover the `n_keep`
+  post-warmup draws only. The histories in `run$histories` are KEEP-ONLY,
   so downstream `ai4bayescode_rhat_summary()` / `ai4bayescode_diagnose()`
-  need no `drop_burn` / `n_burn` bookkeeping), the seeds used, and the
-  per-chain wall time. Each chain instantiates a fresh Rcpp module object
-  in its own worker, so object ownership is handled cleanly.
+  need no `drop_burn` / `n_burn` bookkeeping.
+
+  The chains run in forked worker processes on POSIX when
+  `parallel = TRUE` and `n_cores > 1` (with `keep_models = TRUE`, also
+  `n_chains > 1`), and sequentially in this session otherwise. With
+  `keep_models = TRUE` (default) a parallel run uses persistent worker
+  processes (`parallel::makeForkCluster`): chain `i` runs in worker
+  `((i - 1) %% n_workers) + 1`, and its model is kept in that process.
+  `run$models[[i]]` is then a handle of class `"ai4bayescode_chain_model"`:
+  `run$models[[i]]$predict_at(newdata)`, or any other method call, is
+  evaluated on chain `i`'s model in its worker process and returns the
+  result (an error there is raised here with the worker's message). The
+  worker processes are terminated by `ai4bayescode_close_models(run)`,
+  when the run and every handle taken from it are garbage-collected, or
+  when R exits. A handle restored with `readRDS()` in another R session
+  raises an error. A sequential run returns the model objects themselves in
+  `run$models`. With `keep_models = FALSE` a parallel run uses
+  `parallel::mclapply` and `run$models` is `NULL`.
+
+  A model without `clear_history()` (compiled against AI4BayesCode older
+  than 1.1.3, or a custom object) gives the same `run$histories`, with the
+  first `n_burn` draws dropped here, but its own `get_history()` and
+  `predict_at()` include the warmup draws; a message says so, and
+  `ai4bayescode_predict()` drops them.
 }

@@ -527,7 +527,7 @@ self-contained license reference.
 #include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/constraints.hpp"
 #include "AI4BayesCode/backend_neutral.hpp"       // ai4b::stop / ai4b::warning
-#include "AI4BayesCode/kernel_control_mixin.hpp"  // freeze / unfreeze / get_frozen
+#include "AI4BayesCode/kernel_control_mixin.hpp"  // freeze / unfreeze / get_frozen / clear_history
 #include "AI4BayesCode/rcpp_wrap.hpp"             // Sec.9 module declarations
 #include <cmath>
 #include <cstdint>
@@ -2300,7 +2300,7 @@ public:
     // backward-compat forwarder are required; see Sec.9.
     void readapt_NUTS(int n, bool reset, int max_tree_depth, double target_accept);
     void readapt_NUTS(int n, bool reset = false, int max_tree_depth = -1);
-    // Kernel-control category (freeze / unfreeze / get_frozen) is provided
+    // Kernel-control category (freeze / unfreeze / get_frozen / clear_history) is provided
     // automatically by the kernel_control_mixin<Derived> base class -- do NOT
     // declare them here. The mixin's forwarders read this->impl_ (composite
     // pointer) via the CRTP static_cast; ensure `impl_` is a member named
@@ -2422,6 +2422,25 @@ member `mutable std::mt19937_64 readapt_rng_;` (seeded once in the ctor
 init list). See Sec.9 "Conditional kernel-control method `readapt_NUTS`"
 below for the exact wrapper-class additions and the
 `examples/GaussianLocationScale.cpp` reference.
+
+**History reset -- `clear_history()` and the `clear_extra_history_()` hook.**
+`clear_history()` is provided by `kernel_control_mixin` and bound by both
+`AI4BAYESCODE_BIND_KERNEL_CONTROL` and `AI4BAYESCODE_PYBIND_KERNEL_CONTROL` --
+do NOT declare or bind it. It calls `impl_->clear_history()` and then the
+wrapper's `clear_extra_history_()`; the current state, the RNG streams and the
+tuning are unchanged. A wrapper that records per-sweep values in members
+outside `impl_` (e.g. a `std::vector` that `step()` appends to and that
+`get_history()` or `predict_at()` uses) MUST define a PUBLIC
+
+```cpp
+void clear_extra_history_() { <every such member>.clear(); }
+```
+
+that empties every such member, so that after `clear_history()` and `k` steps
+every `get_history()` / `predict_at()` entry has `k` rows (`keep_history =
+true`). A private hook is a compile error in a wrapper that does not declare
+the mixin a friend. A wrapper without such members defines no hook; the
+mixin's no-op default applies.
 
 Expose via `RCPP_MODULE(<ClassName>_module) { ... }`.
 
@@ -2805,8 +2824,8 @@ child, the wrapper MUST expose a conditional kernel-control method
 3rd RNG member `readapt_rng_`. If the composite has no NUTS-family
 child (pure BART, pure Gibbs, pure VI, pure HMM, pure SBP, pure
 RJMCMC, pure slice), the wrapper has core-6 state methods + the
-always-present kernel-control category (`freeze / unfreeze / get_frozen`
-via the mixin macro), 2 RNGs, and no `readapt_NUTS`. See
+always-present kernel-control category (`freeze / unfreeze / get_frozen /
+clear_history` via the mixin macro), 2 RNGs, and no `readapt_NUTS`. See
 `system_design.md Sec.1` (core-6 + kernel-control formula, including
 conditional `readapt_NUTS`), Sec.8 (3rd RNG), Sec.13 NUTS-family
 contract, and `validator.md Sec.23` + `Sec.26`.
@@ -2890,7 +2909,7 @@ choice selects only the runner file, never which binding block(s) to write.
 **Class declaration (all wrappers inherit `kernel_control_mixin`).**
 Every wrapper class must inherit `AI4BayesCode::kernel_control_mixin<Derived>`
 (CRTP) so it gets the R-facing forwarders for `freeze` / `unfreeze` /
-`get_frozen` for free. Include the mixin header alongside the other
+`get_frozen`, and `clear_history()`, for free. Include the mixin header alongside the other
 AI4BayesCode headers:
 
 ```cpp
@@ -2938,7 +2957,7 @@ RCPP_MODULE(<ClassName>_module) {
         AI4BAYESCODE_BIND_READAPT_NUTS(ClassName)
         // ALWAYS -- kernel-control category (interface.md Sec.1).
         // The macro emits `.method("freeze", ...)`, `.method("unfreeze", ...)`,
-        // `.method("get_frozen", ...)` bound to the mixin's forwarders. It is
+        // `.method("get_frozen", ...)`, `.method("clear_history", ...)` bound to the mixin's forwarders. It is
         // separate from AI4BAYESCODE_BIND_READAPT_NUTS because THIS one is
         // unconditional -- every wrapper inherits the mixin -- while
         // readapt_NUTS exists only on models that have a NUTS kernel.
@@ -3035,7 +3054,7 @@ PYBIND11_MODULE(<ClassName>, m) {
     // ALWAYS -- kernel-control category (interface.md Sec.1). No ';' before
     // it: the macro CONTINUES the .def chain and terminates the statement.
     // The macro emits `.def("freeze", ...)`, `.def("unfreeze", ...)`,
-    // `.def("get_frozen", ...)` bound to the mixin's forwarders.
+    // `.def("get_frozen", ...)`, `.def("clear_history", ...)` bound to the mixin's forwarders.
     AI4BAYESCODE_PYBIND_KERNEL_CONTROL(ClassName);
 }
 #endif

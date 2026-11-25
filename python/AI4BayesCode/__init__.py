@@ -60,7 +60,7 @@ from .install_block import (
     install_block, available_blocks, installed_blocks, remove_block, blocks_path)
 from .install_skill import install_skill
 from .plot_dag import plot_dag
-from .run_chains import run_chains
+from .run_chains import run_chains, predict, close_models
 from .perf_hint import perf_hint
 from .diagnose import diagnose
 from .rhat_summary import rhat_summary
@@ -96,6 +96,8 @@ __all__ = [
     "blocks_path",
     "plot_dag",
     "run_chains",
+    "predict",
+    "close_models",
     "perf_hint",
     "diagnose",
     "rhat",

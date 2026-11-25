@@ -52,7 +52,7 @@ stays in core skills and the block-local skill **CITES** them. The one-line rule
 | this block's routing row * WHEN-to-use * WHEN-NOT * geometry class * config-struct snippet * example path * **its specific** failure modes | **block-local** (`skills/<Block>.md`) | -- |
 | constraint-transform table, the 15 `joint_constraint` kinds | core | `constraints.md` |
 | block-selection framework / Exception taxonomy | core | `codegen_priors.md Sec.2b` |
-| three-tier interface contract (core-6 R methods + kernel-control category: freeze/unfreeze/get_frozen + readapt_NUTS iff NUTS-family child) | core | `system_design Sec.1` (`interface.md`) |
+| three-tier interface contract (core-6 R methods + kernel-control category: freeze/unfreeze/get_frozen/clear_history + readapt_NUTS iff NUTS-family child) | core | `system_design Sec.1` (`interface.md`) |
 | metric (diagonal->dense) + warmup policy | core | `system_design Sec.13` (`families.md`) |
 | general validator check DEFINITIONS (#1-#26) | core | `validator.md` -- EXCEPT #15-#17, defined in `codegen_priors.md Sec.2c-Sec.2e` |
 | target-geometry legality (Sec.11.1's three shapes) | core | `system_design Sec.11` (`geometry.md`) |
@@ -160,7 +160,7 @@ visibly obeys the delimitation rule:
 
 ```
 ## Shared conventions (cited, not restated)
-- interface contract (core-6 R methods + kernel-control: freeze/unfreeze/get_frozen + readapt_NUTS iff NUTS-family child): system_design Sec.1 (interface.md)
+- interface contract (core-6 R methods + kernel-control: freeze/unfreeze/get_frozen/clear_history + readapt_NUTS iff NUTS-family child): system_design Sec.1 (interface.md)
 - constraint transforms / the 15 joint_constraint kinds: constraints.md
 - block-selection / Exception taxonomy: codegen_priors.md Sec.2b
 - metric + warmup policy: system_design Sec.13 (families.md)

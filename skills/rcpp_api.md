@@ -175,3 +175,16 @@ std::gamma_distribution<double> gam(shape, 1.0 / scale);  // scale param = 1/rat
 double x = 1.0 / gam(rng);
 // E[X] = scale / (shape - 1)
 ```
+
+### 12. A model object exists only in the process that created it
+A model object is an external pointer: `saveRDS()` and the transfer between
+processes in `parallel` deliver it as a NULL pointer. `ai4bayescode_run_chains()`
+therefore builds each chain's model in the worker process that runs the chain.
+With `keep_models = TRUE` (the default) the worker processes of a parallel run
+are not stopped at the end of the run, and `run$models[[i]]` is a handle:
+`run$models[[i]]$get_current()` calls `get_current()` on chain i's model in its
+worker and returns the result. `predict(run, newdata)` (=
+`ai4bayescode_predict()`) calls `predict_at(newdata)` on every chain's model and
+stacks the chains; `ai4bayescode_close_models(run)` stops the workers. A
+sequential run returns the model objects themselves. Calls on a handle restored
+by `readRDS()` in another session stop with an error.

@@ -86,6 +86,11 @@ run <- ai4bayescode_run_chains(
   function(s) new(BayesLinReg, y, X, as.integer(s), TRUE),
   n_chains = 4, n_burn = 5000, n_keep = 5000)
 ai4bayescode_rhat_summary(run)
+
+# 4. Predict at new data X_new from the draws of all chains, then close the
+#    worker processes that hold the models.
+pred <- predict(run, list(X = X_new))
+ai4bayescode_close_models(run)
 ```
 
 See the [API reference](https://ai4bayescode.com/api.html) for `get_history`,

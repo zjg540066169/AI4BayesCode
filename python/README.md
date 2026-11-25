@@ -11,6 +11,8 @@ Python equivalent of the R package's exported helpers:
 | `ai4bayescode_doc(...)`         | `AI4BayesCode.doc(...)`           |
 | `ai4bayescode_plot_dag(model)`               | `AI4BayesCode.plot_dag(model)`    |
 | `ai4bayescode_run_chains(...)`  | `AI4BayesCode.run_chains(...)`    |
+| `ai4bayescode_predict(run, ...)` | `AI4BayesCode.predict(chains, ...)` |
+| `ai4bayescode_close_models(run)` | `AI4BayesCode.close_models(chains)` |
 | `posterior::rhat(x)`            | `AI4BayesCode.rhat(x)`            |
 | `posterior::ess_bulk(x)`        | `AI4BayesCode.ess_bulk(x)`        |
 | `posterior::ess_tail(x)`        | `AI4BayesCode.ess_tail(x)`        |
@@ -65,6 +67,7 @@ if __name__ == "__main__":
 
     # Standard MCMC workflow:
     m.step(5000)          # warmup
+    m.clear_history()     # drop the warmup draws
     m.step(5000)          # keep
     hist = m.get_history()
 
@@ -76,15 +79,20 @@ if __name__ == "__main__":
     # Visualize the model DAG:
     AI4BayesCode.plot_dag(m, out_path="dag.png")
 
-    # Run 4 parallel chains from different seeds (without n_jobs, Windows
+    # Run 4 parallel chains from different seeds (without n_cores, Windows
     # runs the chains one after another):
     chains = AI4BayesCode.run_chains(
         factory=build,
         seeds=[101, 202, 303, 404],
         n_burn=5000,
         n_keep=5000,
-        n_jobs=4,
+        n_cores=4,
     )
+
+    # Predict at new data X_new from the draws of all chains. chains[i]["model"]
+    # is chain i's model; its method calls run in the worker process that holds it.
+    pred = AI4BayesCode.predict(chains, {"X": X_new})
+    AI4BayesCode.close_models(chains)   # stop the worker processes
 ```
 
 ## Generate a sampler from natural language
