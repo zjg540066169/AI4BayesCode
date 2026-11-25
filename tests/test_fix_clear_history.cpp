@@ -19,9 +19,9 @@
 //    4. Blocks with more than one per-draw buffer: gmrf_gaussian_joint_block
 //       (x, kappa), lda_collapsed_gibbs_block (z, theta, phi),
 //       niw_cluster_gibbs_block (mu, sigma), order_mcmc_block (order,
-//       log-score) and bart_block (fits; stored forests, sigma, split counts
-//       and split probabilities of the kernel; predictions over the stored
-//       forests).
+//       log-score, sampled DAG) and bart_block (fits; stored forests, sigma,
+//       split counts and split probabilities of the kernel; predictions over
+//       the stored forests).
 //    5. The wrappers with per-sweep members of their own: ARDLasso (no
 //       composite_block, so a clear_history() of its own) and VCBart (sigma).
 //  genbart_block with GBartHeteroscedastic, and softbart_block, are checked in

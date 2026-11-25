@@ -889,18 +889,22 @@ intermediate scratch -- that breaks the Sec.1 invariant.
 documented `get_history()` output. If a field is only under
 `get_current()`, route it through `get_current()` per step -- do NOT
 pretend it lives in `hist`. (Motivating bug: a runner referenced
-`hist['order_sampled_DAG']`, which does not exist -- it compiled but
+`hist['order_sampled_DAG']`, which did not exist then -- it compiled but
 crashed at first use.)
 
-**Known case:** `order_mcmc_block` exposes `sampled_DAG` (a pxp adjacency
-matrix) ONLY via `get_current()`; its `get_history()` returns only
-`order`, `order_log_score`, and (when a Tier-A wrapper adds it) `y_rep`.
-The DAG is history-omitted because it is heavy: p=20, T=40000 ~= 130 MB;
-p=64 (block ceiling) ~= 1.3 GB.
+**Former known case:** `order_mcmc_block` now stores its sampled DAGs.
+With `keep_history=True` its `get_history()` returns `order`,
+`order_log_score`, `order_sampled_DAG` (T x p^2, row t the DAG drawn in
+stored sweep t; in the `OrderMCMCBN` wrapper each row is flattened
+column-major as `get_current()['sampled_DAG']`), and (when a Tier-A
+wrapper adds it) `y_rep`; with no stored sweep, only `order`.
+`get_history()` builds the T x p^2 matrix on each call: p=20, T=40000
+~= 128 MB; p=64 (block ceiling) ~= 1.3 GB.
 
-**Collection-loop pattern** -- step through burn-in, then collect the
-per-step `get_current()` field draw-by-draw, storing the result at the
-TOP LEVEL of `out` (parallel to `"hist"`, NOT inside it):
+**Collection-loop pattern** (without `keep_history`, or for a subset of
+the DAGs) -- step through burn-in, then collect the per-step
+`get_current()` field draw-by-draw, storing the result at the TOP LEVEL
+of `out` (parallel to `"hist"`, NOT inside it):
 
 ```python
 model.step(int(n_burn))

@@ -37,7 +37,9 @@
 //  --------------------
 //  get_dag() returns AI4BayesCode's INTERNAL Gibbs/Predict DAG (one node,
 //  "order_mcmc"), NOT the learned Bayesian network DAG. The learned BN
-//  DAG is in `get_current()$sampled_DAG`.
+//  DAG is in `get_current()$sampled_DAG`, and with keep_history one per
+//  stored sweep in `get_history()$order_sampled_DAG` and
+//  `predict_at(list())$sampled_DAG`.
 //
 //  KNOWN BIAS (FK 2003 Sec.4.1)
 //  -------------------------
@@ -90,16 +92,30 @@
 //                                    {"order": ..., "order_party": ...}))
 //                                    loads the partition and freezes the
 //                                    block at it.
-//    * predict_at(const state_map&) -> history_map { "sampled_DAG" } : v1
-//                                    stub returning the current sampled DAG
-//                                    as a 1 x n² matrix (column-major). Full
-//                                    posterior-predictive simulation deferred
-//                                    to v1.2.1 per spec Sec.5.5.
+//    * predict_at(const state_map&[, bool last_draw_only = false])
+//                     -> history_map { "sampled_DAG" }: sampled DAGs, each
+//                                    row n*n flattened column-major as
+//                                    get_current()'s sampled_DAG. With
+//                                    keep_history and last_draw_only = false:
+//                                    one row per stored sweep, row t the DAG
+//                                    the block drew in sweep t (read from the
+//                                    block's DAG history; nothing is drawn),
+//                                    and one row, the current DAG, before the
+//                                    first sweep or right after
+//                                    clear_history(). With keep_history off or
+//                                    last_draw_only = true: one row, the
+//                                    current DAG (get_current()'s
+//                                    sampled_DAG). new_data must be empty (no
+//                                    covariate inputs).
 //    * get_history()  -> history_map { "order" (node sequences, 1-based as
 //                                    in get_current(); one row per sweep
 //                                    with keep_history, else the current
 //                                    sequence), "order_log_score" (one row
-//                                    per sweep with keep_history) }.
+//                                    per sweep with keep_history),
+//                                    "order_sampled_DAG" (one row per sweep
+//                                    with keep_history: the DAG drawn in that
+//                                    sweep, n*n column-major as
+//                                    get_current()'s sampled_DAG) }.
 //  Constructor takes arma::mat data (N x n, integer-valued, rounded to
 //  category indices 0..r-1), arma::vec cardinalities (length n), and an
 //  arma::vec initial_order that must be EMPTY: partition MCMC starts from the
@@ -450,38 +466,62 @@ public:
         impl_->sync_child(0);
     }
 
+    /// predict_at(new_data) is predict_at(new_data, false).
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
-        // v1: stub. Returns the current sampled_DAG as a 1 x n² matrix
-        // (column-major flattening, matching get_current()'s "sampled_DAG").
-        // Full posterior-predictive simulation deferred to v1.2.1 per
-        // spec Sec.5.5. OrderMCMCBN has no covariate inputs.
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// "sampled_DAG": sampled DAGs, one per row, each flattened column-major
+    /// as get_current()'s sampled_DAG (column i + j*n is 1 when j is a parent
+    /// of i). With keep_history and last_draw_only = false, row t is the DAG
+    /// that the block drew in stored sweep t, read from its DAG history
+    /// (order_mcmc_block::sampled_dag_history()); before the first sweep and
+    /// right after clear_history() there is no stored sweep, and the single
+    /// row is the current DAG. With keep_history off or last_draw_only =
+    /// true, the single row is the current DAG (the block's sampled_dag()).
+    /// Neither form changes the stored history or the state, and nothing is
+    /// drawn: predict_rng_ is not used.
+    /// OrderMCMCBN has no covariate inputs, so new_data must be empty.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
         if (!new_data.empty())
             ai4b::stop("OrderMCMCBN has no covariate inputs. "
                        "predict_at() takes an empty map/list.");
+        const bool use_history = keep_history_ && !last_draw_only;
 
         const auto* blk = dynamic_cast<const order_mcmc_block*>(
             &impl_->child(0));
         if (!blk) ai4b::stop("internal: child 0 is not order_mcmc_block");
-        const auto& dag = blk->sampled_dag();
 
-        arma::mat dag_m(1, n_ * n_, arma::fill::zeros);
-        for (std::size_t i = 0; i < n_; ++i)
-            for (std::size_t j = 0; j < n_; ++j)
-                dag_m(0, i + j * n_) = (dag[i] & (1ULL << j)) ? 1.0 : 0.0;
-
+        const std::vector<std::uint64_t>& stored = blk->sampled_dag_history();
         AI4BayesCode::history_map out;
-        out.emplace("sampled_DAG", std::move(dag_m));
+        out.emplace("sampled_DAG", (use_history && !stored.empty())
+                                       ? dag_rows_(stored)
+                                       : dag_rows_(blk->sampled_dag()));
         return out;
     }
 
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag(); }
 
-    // The composite's history with "order" 1-based, as in get_current().
+    // The composite's history with "order" 1-based, as in get_current(), and
+    // each row of "order_sampled_DAG" flattened column-major as
+    // get_current()'s sampled_DAG: column i + j*n is column i*n + j of the
+    // block's row (the block stores element i*n + j = 1 when j is a parent
+    // of i).
     AI4BayesCode::history_map  get_history() const {
         AI4BayesCode::history_map h = impl_->get_history();
         const auto it = h.find("order");
         if (it != h.end()) it->second += 1.0;
+        const auto it_dag = h.find("order_sampled_DAG");
+        if (it_dag != h.end()) {
+            arma::uvec from(n_ * n_);
+            for (std::size_t i = 0; i < n_; ++i)
+                for (std::size_t j = 0; j < n_; ++j)
+                    from[i + j * n_] = i * n_ + j;
+            arma::mat col_major = it_dag->second.cols(from);
+            it_dag->second = std::move(col_major);
+        }
         return h;
     }
 
@@ -515,6 +555,22 @@ public:
 
 private:
     using mixin_ = AI4BayesCode::kernel_control_mixin<OrderMCMCBN>;
+
+    // DAGs given as n parent masks each (element r*n + i of `masks`: bit j
+    // set when j is a parent of node i in DAG r), as a (number of DAGs) x n*n
+    // matrix whose row r is DAG r flattened column-major as get_current()'s
+    // sampled_DAG: column i + j*n is 1 when j is a parent of i.
+    arma::mat dag_rows_(const std::vector<std::uint64_t>& masks) const {
+        const std::size_t rows = masks.size() / n_;
+        arma::mat out(rows, n_ * n_, arma::fill::zeros);
+        for (std::size_t r = 0; r < rows; ++r)
+            for (std::size_t i = 0; i < n_; ++i) {
+                const std::uint64_t pa = masks[r * n_ + i];
+                for (std::size_t j = 0; j < n_; ++j)
+                    if (pa & (1ULL << j)) out(r, i + j * n_) = 1.0;
+            }
+        return out;
+    }
 
     // Freeze names with "order_party" replaced by "order"; the replacement
     // is dropped when "order" is also given or was already added.
@@ -594,12 +650,25 @@ RCPP_MODULE(OrderMCMCBN_module) {
                 "ai4bayescode_new_frozen(..., fixed = list(order = ..., "
                 "order_party = ...)) loads the partition and freezes the "
                 "block at it.")
-        .method("predict_at",  &OrderMCMCBN::predict_at,
-                "v1: stub returning current sampled_DAG (1 x n² matrix). "
-                "Full posterior-predictive simulation deferred to v1.2.1.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (OrderMCMCBN::*)(const AI4BayesCode::state_map&) const)
+                    &OrderMCMCBN::predict_at,
+                "predict_at(list()) returns list(sampled_DAG = matrix): one "
+                "sampled DAG per row, n*n flattened COLUMN-MAJOR as "
+                "get_current()$sampled_DAG. keep_history = TRUE: one row per "
+                "stored sweep, the DAG drawn in that sweep (nothing is drawn "
+                "here); one row, the current DAG, before the first sweep or "
+                "right after clear_history(). keep_history = FALSE: one row, "
+                "the current DAG. No covariate inputs: the list must be empty.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (OrderMCMCBN::*)(const AI4BayesCode::state_map&, bool) const)
+                    &OrderMCMCBN::predict_at,
+                "predict_at(list(), last_draw_only): TRUE returns one row, the "
+                "current DAG (get_current()$sampled_DAG), without discarding "
+                "the history; FALSE is predict_at(list()).")
         .method("get_dag",     &OrderMCMCBN::get_dag)
         .method("get_history", &OrderMCMCBN::get_history,
-                "Returns list(order = node sequences, 1-based as in get_current(), one row per sweep when keep_history = TRUE, else the current sequence; order_log_score = log P(D | partition), one row per sweep when keep_history = TRUE).")
+                "Returns list(order = node sequences, 1-based as in get_current(), one row per sweep when keep_history = TRUE, else the current sequence; order_log_score = log P(D | partition), one row per sweep when keep_history = TRUE; order_sampled_DAG = the DAG drawn in each sweep, n*n flattened COLUMN-MAJOR as get_current()$sampled_DAG, one row per sweep when keep_history = TRUE).")
         AI4BAYESCODE_BIND_KERNEL_CONTROL(OrderMCMCBN);
 }
 #endif
@@ -656,13 +725,28 @@ PYBIND11_MODULE(OrderMCMCBN, m) {
              "accept 'order_party' as a name of the 'order' block, so "
              "new_frozen(..., fixed={'order': ..., 'order_party': ...}) "
              "loads the partition and freezes the block at it.")
-        .def("predict_at",  &OrderMCMCBN::predict_at,  pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (OrderMCMCBN::*)(const AI4BayesCode::state_map&, bool) const)
+                 &OrderMCMCBN::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false,
+             "predict_at({}) returns {'sampled_DAG': array}: one sampled DAG "
+             "per row, n*n flattened COLUMN-MAJOR as get_current()"
+             "['sampled_DAG'] (reshape a row with order='F'). keep_history="
+             "True: one row per stored sweep, the DAG drawn in that sweep "
+             "(nothing is drawn here); one row, the current DAG, before the "
+             "first sweep or right after clear_history(). keep_history=False "
+             "or last_draw_only=True: one row, the current DAG; the stored "
+             "history is not changed. No covariate inputs: new_data must be "
+             "empty.")
         .def("get_dag",     &OrderMCMCBN::get_dag)
         .def("get_history", &OrderMCMCBN::get_history,
              "Returns {'order': node sequences, 1-based as in get_current(), "
              "one row per sweep when keep_history=True, else the current "
              "sequence; 'order_log_score': log P(D | partition), one row per "
-             "sweep when keep_history=True}.")
+             "sweep when keep_history=True; 'order_sampled_DAG': the DAG drawn "
+             "in each sweep, n*n flattened COLUMN-MAJOR as get_current()"
+             "['sampled_DAG'], one row per sweep when keep_history=True}.")
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(OrderMCMCBN);
 }
 #endif

@@ -28,7 +28,9 @@
 //    W6  invalid input is an error and leaves the state unchanged
 //    W7  get_history(): "order" is 1-based, as in get_current(): with
 //        keep_history, row t equals get_current()$order after sweep t (also
-//        after a load); without, the single row is get_current()$order
+//        after a load), and rows t of order_log_score and order_sampled_DAG
+//        equal get_current()$log_score and $sampled_DAG; without, the single
+//        row is get_current()$order
 //    W8  the composite inside the wrapper: at construction and after loads,
 //        the shared data keys order, order_party, order_sampled_DAG and
 //        order_log_score hold the state of get_current() (the DAG is
@@ -458,7 +460,7 @@ void W7_history_is_one_based() {
     const state_map saved = stepped_model(41, 300)->get_current();
     // keep_history: one row per sweep; a partition is loaded before sweep 201.
     auto m = make_model(17, 3, arma::vec(), true);
-    std::vector<arma::vec> orders;
+    std::vector<arma::vec> orders, dags;
     std::vector<double> scores;
     std::string e;
     for (int s = 0; s < 400; ++s) {
@@ -467,27 +469,34 @@ void W7_history_is_one_based() {
         const state_map cur = m->get_current();
         orders.push_back(value_of(cur, "order"));
         scores.push_back(value_of(cur, "log_score")[0]);
+        dags.push_back(value_of(cur, "sampled_DAG"));
     }
     const history_map h = m->get_history();
-    const auto ho = h.find("order"), hl = h.find("order_log_score");
-    const bool shape = ho != h.end() && hl != h.end()
+    const auto ho = h.find("order"), hl = h.find("order_log_score"),
+               hd = h.find("order_sampled_DAG");
+    const bool shape = ho != h.end() && hl != h.end() && hd != h.end()
         && ho->second.n_rows == orders.size() && ho->second.n_cols == kN
-        && hl->second.n_rows == orders.size() && hl->second.n_cols == 1;
-    int bad_order = 0, bad_score = 0;
+        && hl->second.n_rows == orders.size() && hl->second.n_cols == 1
+        && hd->second.n_rows == orders.size() && hd->second.n_cols == kN * kN;
+    int bad_order = 0, bad_score = 0, bad_dag = 0;
     for (std::size_t t = 0; shape && t < orders.size(); ++t) {
         const arma::vec row = ho->second.row(t).t();
         if (!same_bits(row, orders[t])) ++bad_order;
         if (!same_bits(arma::vec{hl->second(t, 0)}, arma::vec{scores[t]})) ++bad_score;
+        const arma::vec drow = hd->second.row(t).t();
+        if (!same_bits(drow, dags[t])) ++bad_dag;
     }
     check(e.empty() && shape && bad_order == 0,
           "W7 keep_history: row t of 'order' equals get_current()$order (1-based) after "
           "sweep t, before and after a load",
           e + "rows = " + std::to_string(shape ? ho->second.n_rows : 0)
           + ", mismatching rows = " + std::to_string(bad_order));
-    check(shape && bad_score == 0 && h.size() == 2,
-          "W7 keep_history: the keys are order and order_log_score, and row t of "
-          "order_log_score is get_current()$log_score after sweep t",
-          "mismatching rows = " + std::to_string(bad_score));
+    check(shape && bad_score == 0 && bad_dag == 0 && h.size() == 3,
+          "W7 keep_history: the keys are order, order_log_score and order_sampled_DAG, "
+          "and rows t of order_log_score and order_sampled_DAG are get_current()$log_score "
+          "and get_current()$sampled_DAG (column-major) after sweep t",
+          "mismatching rows = " + std::to_string(bad_score) + " (log_score), "
+          + std::to_string(bad_dag) + " (sampled_DAG)");
     // keep_history off: one row, the current node sequence.
     auto q = make_model(17);
     auto single_row_ok = [&]() {
