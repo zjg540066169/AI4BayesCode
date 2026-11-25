@@ -78,10 +78,15 @@
 //  std::mt19937_64 passed to step(). Under the pybind / standalone backend
 //  that stream is bart_rng::engine() (bart_pure_cpp/src/r_compat.h), a
 //  thread-local std::mt19937_64 shared by the BART-family models of the
-//  thread, and a non-zero rng_seed seeds it (bart_rng::set_seed) in the
-//  constructor: the same seed gives the same chain, different seeds give
-//  different chains. Under the Rcpp backend the kernel draws from R's RNG;
-//  call set.seed() before construction for a reproducible R run.
+//  thread in one compiled binary (each pybind extension module has its
+//  own), and a non-zero rng_seed seeds it (bart_rng::set_seed) in the
+//  constructor. A model reproduces the chain of its seed, and models with
+//  different seeds give different chains, when no other BART-family model
+//  of the thread in the same binary is constructed or stepped between the
+//  model's construction and its last sweep (run_chains constructs and runs
+//  one chain at a time in each process). Under the Rcpp backend the kernel
+//  draws from R's RNG; call set.seed() before construction for a
+//  reproducible R run.
 // ============================================================================
 //
 // @example:R
