@@ -4,7 +4,8 @@
 //  test_fix_examples_GPTimeSeries.cpp
 //
 //  examples/GPTimeSeries.cpp: celerite_logp (log p(y | amp, tau, sigma),
-//  reported by get_current() as "logp") and predict_at at new times.
+//  reported by get_current() as "logp") and predict_at at new times and at
+//  the training times.
 //  Reference values are computed densely in this test: K = a exp(-c |dt|)
 //  + (sigma^2 + 1e-10) I with a = amp^2, c = 1 / tau.
 //    C1  after construction, logp equals log N(y; 0, K) at the initial
@@ -19,7 +20,22 @@
 //        posterior mean K(t*, t) K^-1 y at (amp_d, tau_d, sigma_d)
 //        (relative tolerance 1e-6);
 //    C6  set_current with an empty amp, tau or sigma throws and leaves
-//        get_current() unchanged.
+//        get_current() unchanged;
+//    C7  in history mode, predict_at({}) returns f_mean, f_sd, f_star and
+//        y_rep with one row per stored draw at the training t; f_mean and
+//        f_sd^2 of draw d equal the dense GP posterior mean and variance of
+//        f(t) given y at (amp_d, tau_d, sigma_d) (relative tolerance 1e-6,
+//        absolute 1e-8 * amp_d^2), and f_star = f_mean + f_sd * z, y_rep =
+//        f_star + sigma_d * e bit for bit, with z, e drawn from an engine
+//        seeded as predict_rng_ in the order z_1, e_1, z_2, ...;
+//    C8  predict_at({}, last_draw_only = true) gives the same at the
+//        current state in one row;
+//    C9  the y_rep stochastic refresher, run by composite_block::predict_at
+//        from an engine seeded as predict_rng_, equals the y_rep of the
+//        single-draw predict_at bit for bit, at the training t and at new
+//        times;
+//    C10 get_dag() declares the one data input "t", and predict_at with any
+//        other key throws an error that names the key.
 // ============================================================================
 #include <armadillo>
 #include <cmath>
@@ -169,6 +185,106 @@ int main() {
                 ok = ok && after.count(kv.first) && same_bits(kv.second, after.at(kv.first));
         }
         check(ok, "C6 set_current with an empty amp, tau or sigma throws and leaves get_current() unchanged");
+    }
+
+    // C7, C8: the posterior predictive at the training t.
+    const std::uint64_t pred_xor = 0x9E3779B97F4A7C15ULL;   // predict_rng_ seed
+    {
+        GPTimeSeries h7(t, y, 13, true);
+        h7.step(15);
+        const auto hist7 = h7.get_history();
+        const auto p7 = h7.predict_at(AI4BayesCode::state_map{});
+        GPTimeSeries h8(t, y, 15, true);
+        h8.step(10);
+        const auto cur8 = h8.get_current();
+        const auto p8 = h8.predict_at(AI4BayesCode::state_map{}, /*last_draw_only=*/true);
+
+        // amp, tau, sigma of each row of p (hist rows, or the current state).
+        auto run = [&](const AI4BayesCode::history_map& p, const arma::mat& A,
+                       const arma::mat& T, const arma::mat& S, std::uint64_t seed,
+                       const char* label) {
+            const std::size_t nr = A.n_rows;
+            bool shape = p.size() == 4;
+            for (const char* k : {"f_mean", "f_sd", "f_star", "y_rep"})
+                shape = shape && p.count(k) && p.at(k).n_rows == nr && p.at(k).n_cols == N;
+            if (!shape) return false;
+            const arma::mat& M = p.at("f_mean");
+            const arma::mat& SD = p.at("f_sd");
+            const arma::mat& FS = p.at("f_star");
+            const arma::mat& YR = p.at("y_rep");
+            double worst_m = 0.0, worst_v = 0.0;
+            bool bits = true;
+            std::mt19937_64 r(seed ^ pred_xor);
+            std::normal_distribution<double> z01(0.0, 1.0);
+            for (std::size_t d = 0; d < nr; ++d) {
+                const arma::mat Kf = cov(t, t, A(d, 0), T(d, 0));
+                arma::mat Ky = Kf;
+                Ky.diag() += S(d, 0) * S(d, 0) + 1e-10;
+                const arma::vec mu = Kf * arma::solve(Ky, y);
+                const arma::mat KiK = arma::solve(Ky, Kf);
+                const double k0 = A(d, 0) * A(d, 0);
+                for (std::size_t i = 0; i < N; ++i) {
+                    const double v = k0 - arma::dot(Kf.row(i), KiK.col(i));
+                    worst_m = std::max(worst_m, rel(M(d, i), mu[i]));
+                    worst_v = std::max(worst_v, std::abs(SD(d, i) * SD(d, i) - v) / k0);
+                    const double fs = M(d, i) + SD(d, i) * z01(r);
+                    const double yr = fs + S(d, 0) * z01(r);
+                    const double fs_out = FS(d, i), yr_out = YR(d, i);
+                    bits = bits && std::memcmp(&fs, &fs_out, sizeof(double)) == 0 &&
+                           std::memcmp(&yr, &yr_out, sizeof(double)) == 0;
+                }
+            }
+            std::printf("%s: %zu row(s); max rel |f_mean - dense| = %.3g, "
+                        "max |f_sd^2 - dense var| / amp^2 = %.3g, replay %s\n",
+                        label, nr, worst_m, worst_v, bits ? "bit-identical" : "DIFFERS");
+            return worst_m <= 1e-6 && worst_v <= 1e-8 && bits;
+        };
+        check(run(p7, hist7.at("amp"), hist7.at("tau"), hist7.at("sigma"), 13, "C7 history"),
+              "C7 history-mode predict_at({}) draws f from p(f | y, theta_d) at the training t "
+              "and y_rep = f_star + sigma_d * e");
+        check(run(p8, arma::mat(1, 1, arma::fill::value(cur8.at("amp")[0])),
+                  arma::mat(1, 1, arma::fill::value(cur8.at("tau")[0])),
+                  arma::mat(1, 1, arma::fill::value(cur8.at("sigma")[0])), 15, "C8 single draw"),
+              "C8 single-draw predict_at({}) gives the same at the current state");
+    }
+
+    // C9: the y_rep refresher of the composite equals the single-draw path.
+    {
+        GPTimeSeries wa(t, y, 17, false), wb(t, y, 17, false);
+        wa.step(5);
+        wb.step(5);
+        auto& cb = *(wb.*member_of(impl_tag{}));
+        std::mt19937_64 r9(static_cast<std::uint64_t>(17) ^ pred_xor);
+        const arma::mat w_tr = wa.predict_at(AI4BayesCode::state_map{}).at("y_rep");
+        const arma::vec c_tr = cb.predict_at(AI4BayesCode::block_context{}, r9).at("y_rep");
+        AI4BayesCode::state_map tn;
+        tn["t"] = arma::vec{1.1, 3.3, 7.7, 12.0, 20.0};
+        const arma::mat w_new = wa.predict_at(tn).at("y_rep");
+        const arma::vec c_new = cb.predict_at(tn, r9).at("y_rep");
+        const bool ok_tr = w_tr.n_rows == 1 && same_bits(w_tr.row(0).t(), c_tr);
+        const bool ok_new = w_new.n_rows == 1 && same_bits(w_new.row(0).t(), c_new);
+        std::printf("C9 refresher vs single-draw predict_at: training t %s, new t %s\n",
+                    ok_tr ? "bit-identical" : "DIFFERS", ok_new ? "bit-identical" : "DIFFERS");
+        check(ok_tr && ok_new,
+              "C9 the y_rep refresher equals the single-draw predict_at at the training and new t");
+    }
+
+    // C10: the declared data input and the unknown-key error.
+    {
+        GPTimeSeries m10(t, y, 19, true);
+        m10.step(3);
+        const auto dag = m10.get_dag();
+        bool named = true;
+        for (const char* key : {"t_new_flag", "y"}) {
+            AI4BayesCode::state_map bad;
+            bad[key] = arma::vec{1.0};
+            std::string msg;
+            try { (void)m10.predict_at(bad); } catch (const std::exception& e) { msg = e.what(); }
+            std::printf("C10 predict_at({%s}): %s\n", key, msg.empty() ? "(no error)" : msg.c_str());
+            named = named && msg.find(std::string("'") + key + "'") != std::string::npos;
+        }
+        check(dag.data_inputs == std::vector<std::string>{"t"} && named,
+              "C10 data_inputs is {t}; predict_at with another key throws naming the key");
     }
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail,
