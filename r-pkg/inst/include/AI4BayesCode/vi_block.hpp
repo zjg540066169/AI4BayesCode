@@ -297,6 +297,10 @@ public:
         // "<name>__vi_history", where vi_history_t's own note explains why it
         // is not a posterior sample.
         if (keep_history_) q_draw_hist_.push_back(draw);
+        // The value stored in the composite's shared_data for this key until
+        // the next step; record_held_history() appends it while no row is
+        // stored or held.
+        last_published_ = draw;
         out.emplace(nm, std::move(draw));
         return out;
     }
@@ -316,30 +320,43 @@ public:
      * child stays aligned with its siblings.
      *
      * Both buffers have to advance: q_draw_hist_ (the per-sweep draw the
-     * composite published) and the vi_history_t trajectory. A buffer that
-     * clear_history() emptied repeats the last row it held before the call,
-     * which is the row a run without the call repeats.
+     * composite published) and the vi_history_t trajectory. While a buffer
+     * is empty after clear_history(), record_held_history() appends the row
+     * that was last in that buffer before the call (held_q_draw_,
+     * held_row_), which is the row it appends in a run without the call.
+     * When a buffer has neither a stored nor a held row (the block was held
+     * from before its first recorded sweep), the row comes from the current
+     * state: the q-draw the composite last published for this block, or,
+     * before any, the value add_child() seeded (current_named_outputs()),
+     * and the trajectory row push_state_row_() appends. This case occurs in
+     * the same state in a run with clear_history() and in the same run
+     * without it.
      */
     void record_held_history() override {
         if (!keep_history_) return;
         if (!q_draw_hist_.empty()) q_draw_hist_.push_back(q_draw_hist_.back());
         else if (!held_q_draw_.is_empty()) q_draw_hist_.push_back(held_q_draw_);
+        else q_draw_hist_.push_back(published_value_());
         if (vi_history_t* h = vi_history_buffer()) {
             const vi_history_t& src = h->elbo.empty() ? held_row_ : *h;
-            if (!src.elbo.empty())   h->elbo.push_back(src.elbo.back());
-            if (!src.mu.empty())     h->mu.push_back(src.mu.back());
-            if (!src.log_sd.empty()) h->log_sd.push_back(src.log_sd.back());
-            if (!src.gamma.empty())  h->gamma.push_back(src.gamma.back());
-            if (!src.epoch.empty())  h->epoch.push_back(src.epoch.back());
+            if (src.elbo.empty()) {
+                push_state_row_(*h);
+            } else {
+                h->elbo.push_back(src.elbo.back());
+                if (!src.mu.empty())     h->mu.push_back(src.mu.back());
+                if (!src.log_sd.empty()) h->log_sd.push_back(src.log_sd.back());
+                if (!src.gamma.empty())  h->gamma.push_back(src.gamma.back());
+                if (!src.epoch.empty())  h->epoch.push_back(src.epoch.back());
+            }
         }
     }
 
     /**
      * Discards the stored rows: the q-draws and the vi_history_t trajectory.
      * final_khat is kept: terminate_() computes it once, from the converged
-     * q, so it is not a per-sweep row, and a run without the call carries it
-     * in the rows recorded after the call. The last row of each buffer is
-     * kept for record_held_history().
+     * q, so it is not a per-sweep row, and in a run without the call the
+     * history recorded after this point also contains it. The last row of
+     * each buffer is kept for record_held_history().
      */
     void clear_history() override {
         if (!q_draw_hist_.empty()) held_q_draw_ = q_draw_hist_.back();
@@ -368,17 +385,41 @@ protected:
      */
     virtual vi_history_t* vi_history_buffer() { return nullptr; }
 
+    /**
+     * Appends to h one trajectory row from the current state (ELBO, mean,
+     * log-sd or its packing, gamma, epoch): the row a converged block appends
+     * per sweep. record_held_history() calls it when there is no stored or
+     * held row to repeat. The default (a subclass that keeps no trajectory)
+     * appends nothing.
+     */
+    virtual void push_state_row_(vi_history_t& /*h*/) const {}
+
     /// Filled by current_named_outputs(rng); mutable because that method is
     /// const by the block_sampler contract while still being the one place
     /// the published draw exists.
     mutable std::vector<arma::vec> q_draw_hist_;
 
 private:
+    /// The value stored in the composite's shared_data for this block: the
+    /// last q-draw it published, or the value add_child() seeded before any
+    /// (the no-rng current_named_outputs(), called through the base class so
+    /// that a subclass override applies).
+    arma::vec published_value_() const {
+        if (!last_published_.is_empty()) return last_published_;
+        const block_sampler& base = *this;
+        const state_map seeded = base.current_named_outputs();
+        const auto it = seeded.find(name());
+        return it != seeded.end() ? it->second : current();
+    }
+
     /// The last q-draw and the last trajectory row that clear_history()
     /// removed; record_held_history() appends them while the buffers are
     /// empty.
     arma::vec    held_q_draw_;
     vi_history_t held_row_;
+    /// The last draw current_named_outputs(rng) returned, whether or not
+    /// keep_history is on; mutable for the same reason as q_draw_hist_.
+    mutable arma::vec last_published_;
 };
 
 } // namespace AI4BayesCode

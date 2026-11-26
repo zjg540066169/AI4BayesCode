@@ -265,7 +265,8 @@ public:
     /// Survival function of group g, S(t_q | g) = exp(-w_g H_0(t_q)), at the
     /// query times new_data["t"] (n_q values), with H_0(t) = sum_k lambda_k
     /// max(0, min(t, e_k) - e_{k-1}); new_data["g"] is one 0-based group
-    /// index, an integer with 0 <= g < G (anything else raises an error).
+    /// index, an integer with 0 <= g < G (anything else raises an error, also
+    /// when t is not given).
     /// Returns "S" with one row per draw:
     ///   keep_history TRUE, last_draw_only FALSE: row d from lambda and w of
     ///     stored draw d (row d of get_history()), n_draws x n_q;
@@ -284,11 +285,10 @@ public:
         const bool use_history = keep_history_ && !last_draw_only;
         AI4BayesCode::history_map out;
         auto it_tq = new_data.find("t"); auto it_g = new_data.find("g");
-        if (it_tq == new_data.end() || it_g == new_data.end()) return out;
-        const arma::vec& t_q = it_tq->second;
+        if (it_g == new_data.end()) return out;
 
         // g indexes w; G = number of frailties = dim of the frailty block
-        // (child 0).
+        // (child 0). g is checked whenever it is given, also without t.
         const std::size_t G = impl_->child(0).dim();
         const arma::vec& g_in = it_g->second;
         if (g_in.n_elem != 1)
@@ -302,6 +302,9 @@ public:
                        "g must be an integer with 0 <= g < G = %d.",
                        g_val, static_cast<int>(G));
         const std::size_t g = static_cast<std::size_t>(g_val);
+
+        if (it_tq == new_data.end()) return out;
+        const arma::vec& t_q = it_tq->second;
 
         const arma::vec& edges_local = impl_->data().get("edges");
         const std::size_t K = edges_local.n_elem - 1;

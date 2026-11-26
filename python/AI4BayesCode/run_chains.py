@@ -21,10 +21,10 @@ that derives the seeds:
 Each chain runs `step(n_burn)`, `clear_history()` and `step(n_keep)`, so the
 model's own `get_history()` and `predict_at()` cover the n_keep kept draws.
 With `keep_models=True` (the default) and parallel chains, the worker
-processes stay alive after the run: `chains[i]["model"]` is a `ChainModel`
-handle, and each method call on it runs in the worker process that holds
-chain i, until `close_models(chains)` or until the result and its handles are
-garbage-collected.
+processes are not stopped when run_chains() returns: `chains[i]["model"]`
+is a `ChainModel` handle, and each method call on it runs in the worker
+process that holds chain i, until `close_models(chains)` or until the result
+and its handles are garbage-collected.
 
 Why multiprocessing (and not threading): the pybind11 modules hold
 Armadillo state per-instance and Rcpp/pybind11 instances are not
@@ -95,7 +95,7 @@ def _run_chain(factory: Callable[[int], Any], seed: int,
                history_keys: Optional[list[str]] = None) -> tuple[dict, Any]:
     """Run one chain; return ``(result, model)``, with model None on failure.
 
-    Besides "seed", "wall" and "hist", a successful result carries the
+    Besides "seed", "wall" and "hist", a successful result contains the
     private fields "_cleared", "_class", "_unclear" and "_no_clear", which
     `_finish` removes in the calling process after reporting on them once
     for the whole run.
@@ -740,11 +740,12 @@ class ChainModel:
     ``handle.name(*args, **kwargs)`` sends the call to the worker process
     holding the model, runs ``model.name(*args, **kwargs)`` there and returns
     the result. An exception raised there is raised here: with its own type
-    when it can be pickled, else as RuntimeError carrying its type name and
-    message; its ``__cause__`` holds the traceback text from the worker. A
+    when it can be pickled, else as RuntimeError whose message gives its type
+    name and message; its ``__cause__`` holds the traceback text from the worker. A
     returned pybind11 record, which does not pickle (``get_dag()`` returns a
-    DagInfo), arrives as a dict of its fields that also allows attribute
-    access. Calls from several threads run one at a time per worker process.
+    DagInfo), is converted in the worker into a dict of its fields that also
+    allows attribute access. Calls from several threads run one at a time per
+    worker process.
     Names that start with "_" are not forwarded.
 
     After :func:`close_models` every call raises RuntimeError. A handle
@@ -922,7 +923,8 @@ def _finish(results, n_burn, n_keep, *, pool=None, walls=False,
         print(f"run_chains: {', '.join(no_clear)} has no clear_history(), so the "
               f"model's own get_history() and predict_at() include the {n_burn} "
               "warmup draws (the histories returned here do not). Recompiling the "
-              "model with AI4BayesCode >= 1.1.3 adds clear_history().")
+              "model with AI4BayesCode >= 1.1.3 adds clear_history() (a hand-written "
+              "PYBIND11_MODULE binds it with AI4BAYESCODE_PYBIND_KERNEL_CONTROL).")
     if unclear:
         warnings.warn(
             "run_chains: after clear_history(), "
@@ -930,8 +932,10 @@ def _finish(results, n_burn, n_keep, *, pool=None, walls=False,
                         for cls, ks in unclear.items())
             + f" still hold more than n_keep = {n_keep} rows. The returned histories "
             f"drop their first {n_burn} rows, but the model's own get_history() and "
-            "predict_at() still contain the warmup draws for them: the class has no "
-            "clear_extra_history_() hook that empties these entries.")
+            "predict_at() still contain the warmup draws for them: clear_history() "
+            "did not empty them. clear_history() calls the clear_extra_history_() "
+            "hook declared in the class named in kernel_control_mixin<...>; a class "
+            "derived from a wrapper declares clear_history() itself.")
     out = ChainsResult(results, n_burn=n_burn, n_keep=n_keep, history_cleared=cleared)
     out._pool = pool
     return out
@@ -940,7 +944,8 @@ def _finish(results, n_burn, n_keep, *, pool=None, walls=False,
 def _run_in_workers(kind, factory, seeds, n_burn, n_keep, history_keys, n_workers):
     """Run the chains in ``n_workers`` persistent worker processes.
 
-    Chain i runs in worker ``i % n_workers`` and its model stays there. Returns
+    Chain i runs in worker ``i % n_workers`` and its model is kept in that
+    worker. Returns
     ``(results, pool)``, each result with "model": a ChainModel handle, or None
     for a failed chain (``pool`` is None when no chain has a model). Returns
     None, after a warning, when a worker process cannot be started or exits
@@ -1168,8 +1173,8 @@ def run_chains(
     keep_models : bool, default True
         Return the models in ``chains[i]["model"]``. When the chains run in
         parallel (fork available, or a picklable factory on Windows,
-        ``n_cores > 1`` and more than one chain), the worker processes stay
-        alive after the run and ``chains[i]["model"]`` is a
+        ``n_cores > 1`` and more than one chain), the worker processes are
+        not stopped when run_chains() returns, and ``chains[i]["model"]`` is a
         :class:`ChainModel` handle whose method calls run in the worker
         process holding chain i; they stop at :func:`close_models`, when the
         result and its handles are garbage-collected, or at interpreter exit.
@@ -1239,7 +1244,7 @@ def run_chains(
         return _finish(_sequential(), n_burn, n_keep, verbose=verbose)
 
     if keep_models:
-        # The models stay alive after the run: in persistent worker processes
+        # The models are kept after the run: in persistent worker processes
         # when the chains run in parallel, else as objects in this process.
         results, pool = None, None
         if n_jobs > 1 and len(seeds) > 1:

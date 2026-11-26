@@ -291,10 +291,11 @@ Before any PR touching Tier A / B / C lands:
       passes bitwise. See Sec.13 NUTS-family + `validator.md Sec.23`.
 - [ ] **Check #26 (a) -- kernel-control methods bound.** RCPP_MODULE
       contains `.method("freeze", ...)`, `.method("unfreeze", ...)`,
-      and `.method("get_frozen", ...)` -- either explicitly or via the
+      `.method("get_frozen", ...)` and `.method("clear_history", ...)` --
+      either explicitly or via the
       `AI4BAYESCODE_BIND_KERNEL_CONTROL(ClassName)` macro from
       `include/AI4BayesCode/kernel_control_mixin.hpp`. Companion
-      PYBIND11_MODULE contains the three `.def(...)` lines or the
+      PYBIND11_MODULE contains the four `.def(...)` lines or the
       `AI4BAYESCODE_PYBIND_KERNEL_CONTROL(ClassName)` macro. See
       Sec.1 kernel-control category + `validator.md Sec.26 (a)`.
 - [ ] **Check #26 (b) -- freeze() strict error paths.** R-level test:

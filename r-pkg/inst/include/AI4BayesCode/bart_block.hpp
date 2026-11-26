@@ -35,7 +35,10 @@
  *  appends the current forest + sigma + var probs/counts + fmean to the
  *  internal bart_model history buffers. This is
  *  required by predict_history() so that wrapper-level predict_at can
- *  walk every stored draw of the BART forest. clear_history() forwards
+ *  walk every stored draw of the BART forest; with keep_tree off,
+ *  predict_history() returns one row from the current forest.
+ *  set_keep_history(true) controls only history_fit_buf_ (the per-step fit
+ *  at x_train that get_history() returns). clear_history() forwards
  *  to both the internal model buffers and the external fit buffer.
  *
  *  TREE SERIALIZATION
@@ -275,8 +278,8 @@ public:
                 cfg_.name.c_str());
         }
 
-        // Kernel history recording is OFF by default; turned ON only when
-        // the wrapper opts into history via set_keep_history(true).
+        // Kernel history recording is OFF by default; turned ON only by
+        // set_keep_tree(true) (set_keep_history(true) controls history_fit_buf_).
         // Previously this was UNCONDITIONALLY ON, which made every
         // update_step() call record_history_() — serializing the entire
         // forest into a history string EVERY step, even when the user
@@ -397,9 +400,10 @@ public:
         } else {
             impl_->update_step();
         }
-        // update_step() records into bart_model's internal history
-        // (set_history(true) in ctor). Refresh our cached fit on
-        // x_train + append to history_fit_buf_ if keep_history_.
+        // update_step() appends the forest, sigma, split counts/probabilities
+        // and fmean to the kernel history buffers while keep_tree is on
+        // (set_keep_tree -> impl_->set_history). Then refresh the cached fit
+        // at x_train and append it to history_fit_buf_ when keep_history_ is on.
         refresh_current_fit_();
     }
 

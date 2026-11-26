@@ -248,6 +248,28 @@ public:
     AI4BayesCode::history_map predict_at_r(Rcpp::List new_data) const {
         return predict_at(ai4b::predict_input(new_data, "X", p_));
     }
+
+    /// Same trailing switch as predict_at, for the R entry point.
+    AI4BayesCode::history_map predict_at_r(Rcpp::List new_data,
+                                           bool last_draw_only) const {
+        return predict_at(ai4b::predict_input(new_data, "X", p_), last_draw_only);
+    }
+
+    /// m$predict_at() == m$predict_at(list()): the posterior predictive at
+    /// the training X.
+    AI4BayesCode::history_map predict_at_r() const {
+        return predict_at(AI4BayesCode::state_map{});
+    }
+#endif
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+    // Python-facing predict_at: the column count of a 2-D new_data["X"] is
+    // checked against the training p before it is flattened column-major,
+    // as predict_at_r does for an R matrix. See rcpp_predict_guard.hpp.
+    AI4BayesCode::history_map predict_at_py(const AI4BayesCode::py_new_data& new_data,
+                                            bool last_draw_only) const {
+        return predict_at(ai4b::predict_input(new_data, "X", p_), last_draw_only);
+    }
 #endif
 
     AI4BayesCode::dag_info get_dag() const {
@@ -269,18 +291,32 @@ public:
     // predict_at (backend-neutral):
     //   INPUT  new_data["X"] : vectorised N_new*p arma::vec, COLUMN-MAJOR
     //          (element (i,j) at index i + j*N_new), matching arma::vectorise
-    //          of an N_new x p design. R/Python callers pass as.vector(X_new) /
-    //          X_new flattened column-major. Empty map -> posterior predictive
+    //          of an N_new x p design. R/Python callers pass the N_new x p
+    //          matrix / 2-D array (its column count is checked against p and
+    //          it is flattened column-major on the way in) or as.vector(X_new)
+    //          / X_new.ravel(order="F"). Empty map -> posterior predictive
     //          at the TRAINING X.
-    //   OUTPUT every key is an arma::mat. keep_history = FALSE returns 1-row
-    //          matrices (single predict at the current draw); keep_history =
-    //          TRUE returns n_draws-row matrices (over all stored draws).
+    //   OUTPUT every key is an arma::mat. keep_history = FALSE, or
+    //          last_draw_only = TRUE, returns 1-row matrices (single predict
+    //          at the current draw); keep_history = TRUE returns n_draws-row
+    //          matrices, row d from stored draw d (beta_d, alpha_d, sigma2_d).
     //            $y_hat (only when X is supplied) = X_use * beta + alpha
     //            $y_rep                           = y_hat + sigma * Normal(0,1)
     //
     // Uses predict_rng_ for reproducible posterior-predictive sampling.
+    /// Unchanged one-argument form: predict_at(new_data) means exactly what
+    /// it always did. The overload below adds the trailing switch.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data, bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
 
         // ---- Parse optional X (vectorised N_new*p, column-major) ----------
         for (const auto& kv : new_data) {
@@ -308,7 +344,7 @@ public:
         std::normal_distribution<double> norm01(0.0, 1.0);
         AI4BayesCode::history_map out;
 
-        if (keep_history_ && !beta_hist_.empty()) {
+        if (use_history && !beta_hist_.empty()) {
             const std::size_t n = beta_hist_.size();
             const std::size_t m = X_use.n_rows;
             arma::mat Y_hat(n, m);
@@ -442,11 +478,22 @@ RCPP_MODULE(ARDLasso_module) {
         .method("get_dag",     &ARDLasso::get_dag,
                 "Full model DAG (gibbs_reads / gibbs_invalidates / "
                 "predict_edges / data_inputs).")
-        .method("predict_at",  &ARDLasso::predict_at_r,
-                "Predict: list(X = as.vector(X_new)) -> list(y_hat, y_rep). "
+        .method("predict_at",
+                static_cast<AI4BayesCode::history_map (ARDLasso::*)(Rcpp::List) const>(
+                    &ARDLasso::predict_at_r),
+                "Predict: list(X = X_new) -> list(y_hat, y_rep). "
                 "Returns 1-row matrices in stateful mode, n_draws-row matrices "
                 "in history mode. Empty list -> posterior predictive at "
                 "training X.")
+        .method("predict_at",
+                static_cast<AI4BayesCode::history_map (ARDLasso::*)(Rcpp::List, bool) const>(
+                    &ARDLasso::predict_at_r),
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
+        .method("predict_at",
+                static_cast<AI4BayesCode::history_map (ARDLasso::*)() const>(
+                    &ARDLasso::predict_at_r),
+                "No-argument form: predict_at() == predict_at(list())")
         .method("get_history", &ARDLasso::get_history,
                 "History as a named list: beta (n_draws x p), alpha "
                 "(n_draws x 1), sigma2 (n_draws x 1), psi2 (n_draws x p).")
@@ -471,7 +518,9 @@ PYBIND11_MODULE(ARDLasso, m) {
         .def("get_current", &ARDLasso::get_current)
         .def("set_current", &ARDLasso::set_current, pybind11::arg("params"))
         .def("get_dag",     &ARDLasso::get_dag)
-        .def("predict_at",  &ARDLasso::predict_at,  pybind11::arg("new_data"))
+        .def("predict_at",  &ARDLasso::predict_at_py,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false)
         .def("get_history", &ARDLasso::get_history)
         .def("clear_history", &ARDLasso::clear_history,
              "Discard the stored draws; the current state is kept, and the "

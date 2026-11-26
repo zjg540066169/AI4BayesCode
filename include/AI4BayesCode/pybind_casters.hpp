@@ -19,7 +19,12 @@
  *    - arma::vec          <-> py::array_t<double>  (1-D, writable copy)
  *    - arma::mat          <-> py::array_t<double>  (2-D, column-major numpy
  *                                                   copied to row-major Python)
- *    - state_map          <-> dict[str, np.ndarray]
+ *    - state_map          <-> dict[str, np.ndarray]  (input: any Mapping; each
+ *                                                   value converted as Rcpp
+ *                                                   converts an R value, see
+ *                                                   state_value_from_python)
+ *    - py_new_data        <-  the same Mapping, plus the column count of
+ *                             each 2-D value (predict_at's covariate check)
  *    - history_map        <-> dict[str, np.ndarray]  (2-D)
  *    - dag_info           -> dict[str, Any]  (via py::class_ binding in module)
  *    - adaptation_info    -> dict[str, Any]  (via py::class_ binding in module)
@@ -45,7 +50,126 @@
 
 #include <armadillo>
 
+#include <cstddef>
+#include <string>
+#include <unordered_map>
+
 namespace py = pybind11;
+
+namespace AI4BayesCode {
+
+/**
+ * predict_at's new_data as it came from Python: the values, converted as for
+ * a state_map argument, and the number of columns of every value that was a
+ * 2-D array or a nested sequence. ai4b::predict_input (rcpp_predict_guard.hpp)
+ * compares the covariate's column count with the model's p before the column
+ * count is lost, as it does for an R matrix.
+ */
+struct py_new_data {
+    state_map values;
+    std::unordered_map<std::string, std::size_t> ncol;
+};
+
+namespace detail {
+
+/**
+ * One value of a state_map argument, converted as Rcpp converts an R value
+ * to arma::vec: a number or 0-d array gives one element, a 1-D array or
+ * sequence its elements, and a 2-D array or nested sequence its elements in
+ * column-major order (element (i, j) of an n x p value at index i + j*n, the
+ * order of as.vector() of an R matrix). *ncol is set to p for a 2-D value
+ * and to 0 otherwise. Returns false, and converts nothing, for None, str,
+ * bytes, a value numpy cannot convert to float64, and an array of more than
+ * two dimensions.
+ */
+inline bool state_value_from_python(pybind11::handle src, arma::vec& out,
+                                    std::size_t* ncol) {
+    if (ncol) *ncol = 0;
+    if (!src || src.is_none()) return false;
+    PyObject* p = src.ptr();
+    if (PyUnicode_Check(p) || PyBytes_Check(p) || PyByteArray_Check(p))
+        return false;
+    // ensure() returns a null handle, and clears the Python error, when numpy
+    // cannot convert the value.
+    auto arr = pybind11::array_t<double, pybind11::array::forcecast>::ensure(src);
+    if (!arr) return false;
+    if (arr.ndim() == 0) {
+        out.set_size(1);
+        out[0] = *arr.data();
+    } else if (arr.ndim() == 1) {
+        const auto r = arr.unchecked<1>();
+        out.set_size(static_cast<arma::uword>(r.shape(0)));
+        for (pybind11::ssize_t i = 0; i < r.shape(0); ++i)
+            out[static_cast<arma::uword>(i)] = r(i);
+    } else if (arr.ndim() == 2) {
+        const auto r = arr.unchecked<2>();
+        const auto n_row = r.shape(0), n_col = r.shape(1);
+        out.set_size(static_cast<arma::uword>(n_row * n_col));
+        for (pybind11::ssize_t j = 0; j < n_col; ++j)
+            for (pybind11::ssize_t i = 0; i < n_row; ++i)
+                out[static_cast<arma::uword>(i + j * n_row)] = r(i, j);
+        if (ncol) *ncol = static_cast<std::size_t>(n_col);
+    } else {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * The (key, value) pairs of a Python mapping converted into `values` (and
+ * the column counts of the 2-D values into `ncol` when it is not null).
+ * Accepts what pybind11's own map caster accepts: a dict, an object with
+ * __getitem__ and a callable items(), and, in convert mode, an instance of
+ * collections.abc.Mapping. Returns false for anything else, a key that is
+ * not a string, or a value state_value_from_python rejects.
+ */
+inline bool state_map_from_python(
+        pybind11::handle src, bool convert, state_map& values,
+        std::unordered_map<std::string, std::size_t>* ncol) {
+    if (!src) return false;
+    PyObject* p = src.ptr();
+    bool is_mapping = PyDict_Check(p) != 0;
+    if (!is_mapping && PyMapping_Check(p) != 0) {
+        PyObject* items = PyObject_GetAttrString(p, "items");
+        if (items != nullptr) {
+            is_mapping = PyCallable_Check(items) != 0;
+            Py_DECREF(items);
+        } else {
+            PyErr_Clear();
+        }
+    }
+    if (!is_mapping && convert) {
+        is_mapping = pybind11::isinstance(
+            src, pybind11::module_::import("collections.abc").attr("Mapping"));
+    }
+    if (!is_mapping) return false;
+
+    auto items = pybind11::reinterpret_steal<pybind11::object>(PyMapping_Items(p));
+    if (!items) throw pybind11::error_already_set();
+    values.clear();
+    if (ncol) ncol->clear();
+    for (pybind11::handle item : items) {
+        if (PySequence_Check(item.ptr()) == 0 || PySequence_Size(item.ptr()) != 2) {
+            PyErr_Clear();
+            return false;
+        }
+        const auto kv = pybind11::reinterpret_borrow<pybind11::sequence>(item);
+        const pybind11::object k = kv[0];
+        const pybind11::object v = kv[1];
+        pybind11::detail::make_caster<std::string> key_conv;
+        if (!key_conv.load(k, convert)) return false;
+        std::string key = pybind11::detail::cast_op<std::string&&>(std::move(key_conv));
+        arma::vec value;
+        std::size_t n_col = 0;
+        if (!state_value_from_python(v, value, &n_col)) return false;
+        if (ncol && n_col > 0) ncol->emplace(key, n_col);
+        values.emplace(std::move(key), std::move(value));
+    }
+    return true;
+}
+
+} // namespace detail
+} // namespace AI4BayesCode
 
 namespace pybind11 { namespace detail {
 
@@ -130,6 +254,72 @@ public:
         std::copy(v.memptr(), v.memptr() + v.n_elem, out.mutable_data());
         return out.release();
     }
+};
+
+// ---- state_map <-> dict[str, numpy 1D] -----------------------------------
+// A partial specialization for unordered_map<std::string, arma::vec, ...>.
+// It is more specialized than the unordered_map caster of pybind11/stl.h, so
+// it is the one used whether or not stl.h was included first. Input: a
+// Mapping whose values are converted by state_value_from_python (numbers,
+// 0-d / 1-D / 2-D arrays, sequences; a 2-D value column-major, as Rcpp
+// flattens an R matrix). The arma::vec caster above, which constructor and
+// other arguments use, is unchanged. Output: a dict of 1-D arrays, the same
+// as the stl.h caster with the arma::vec caster gave.
+template <typename Hash, typename Equal, typename Alloc>
+struct type_caster<std::unordered_map<std::string, arma::Col<double>, Hash, Equal, Alloc>> {
+    using map_type = std::unordered_map<std::string, arma::Col<double>, Hash, Equal, Alloc>;
+
+    bool load(handle src, bool convert) {
+        AI4BayesCode::state_map tmp;
+        if (!AI4BayesCode::detail::state_map_from_python(src, convert, tmp, nullptr))
+            return false;
+        value.clear();
+        for (auto& kv : tmp) value.emplace(kv.first, std::move(kv.second));
+        return true;
+    }
+
+    template <typename T>
+    static handle cast(T&& src, return_value_policy policy, handle parent) {
+        dict d;
+        for (auto&& kv : src) {
+            auto key = reinterpret_steal<object>(
+                make_caster<std::string>::cast(kv.first, policy, parent));
+            auto val = reinterpret_steal<object>(
+                make_caster<arma::vec>::cast(kv.second, policy, parent));
+            if (!key || !val) return handle();
+            d[std::move(key)] = std::move(val);
+        }
+        return d.release();
+    }
+
+#if defined(PYBIND11_VERSION_MAJOR) && PYBIND11_VERSION_MAJOR >= 3
+    PYBIND11_TYPE_CASTER(map_type,
+                         io_name("collections.abc.Mapping[str, numpy.typing.ArrayLike]",
+                                 "dict[str, numpy.ndarray]"));
+#else
+    PYBIND11_TYPE_CASTER(map_type, const_name("dict[str, numpy.ndarray]"));
+#endif
+};
+
+// ---- py_new_data <- Mapping (predict_at input with column counts) --------
+template <> struct type_caster<AI4BayesCode::py_new_data> {
+    bool load(handle src, bool convert) {
+        return AI4BayesCode::detail::state_map_from_python(src, convert, value.values,
+                                                           &value.ncol);
+    }
+
+    static handle cast(const AI4BayesCode::py_new_data& src, return_value_policy policy,
+                       handle parent) {
+        return make_caster<AI4BayesCode::state_map>::cast(src.values, policy, parent);
+    }
+
+#if defined(PYBIND11_VERSION_MAJOR) && PYBIND11_VERSION_MAJOR >= 3
+    PYBIND11_TYPE_CASTER(AI4BayesCode::py_new_data,
+                         io_name("collections.abc.Mapping[str, numpy.typing.ArrayLike]",
+                                 "dict[str, numpy.ndarray]"));
+#else
+    PYBIND11_TYPE_CASTER(AI4BayesCode::py_new_data, const_name("dict[str, numpy.ndarray]"));
+#endif
 };
 
 } } // namespace pybind11::detail

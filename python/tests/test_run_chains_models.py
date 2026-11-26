@@ -1,9 +1,9 @@
 """run_chains() keeps the models of the chains: keep_models, predict, close_models.
 
 Each chain runs step(n_burn), clear_history(), step(n_keep). With parallel
-chains the worker processes stay alive after the run and chains[i]["model"] is
-a ChainModel handle whose calls run in the worker holding chain i; otherwise
-it is the model object.
+chains the worker processes are not stopped when run_chains() returns, and
+chains[i]["model"] is a ChainModel handle whose calls run in the worker
+holding chain i; otherwise it is the model object.
 
 Most tests use a pure-Python model (fast, no compiler). The end-to-end test
 compiles GaussianLocationScale and is marked ``compile`` (deselect with
@@ -330,7 +330,7 @@ def test_workers_stop_when_the_result_and_its_handles_are_collected():
     handle = chains[1]["model"]
     del chains
     gc.collect()
-    assert handle.add(1, 1) == 2               # a handle keeps the workers alive
+    assert handle.add(1, 1) == 2               # the handle references the pool, so the workers are not stopped
     assert not gone(pids[0], timeout=0.3)
     del handle
     gc.collect()
@@ -565,7 +565,7 @@ def test_exceptions_in_the_worker_are_raised_here():
         with pytest.raises(ValueError, match="boom") as ei:
             m.fail("boom")
         assert "in fail" in str(ei.value.__cause__)    # the traceback in the worker
-        assert m.add(1, 2) == 3                         # the handle stays usable
+        assert m.add(1, 2) == 3                         # a call after the exception returns its result
         with pytest.raises(RuntimeError, match=r"TwoArgError: a\+b"):
             m.fail_unpicklable()
         with pytest.raises(RuntimeError, match="cannot be sent to the calling process"):
@@ -890,7 +890,7 @@ def test_compiled_model_end_to_end(gls):
         sep = AI4BayesCode.predict(chains, pool=False)
         assert [s["y_rep"].shape for s in sep] == [(nk, y.size)] * 2
         # get_dag() returns a DagInfo, which does not pickle: through a handle
-        # it arrives as its fields, with item and attribute access.
+        # the worker returns it as a dict of its fields, with item and attribute access.
         from AI4BayesCode.plot_dag import _dag_to_edges
         dag, ref = chains[0]["model"].get_dag(), seq[0]["model"].get_dag()
         assert sorted(dag) == sorted(ref.keys())

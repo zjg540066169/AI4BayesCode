@@ -1231,7 +1231,8 @@ print.ai4bayescode_chain_model <- function(x, ...) {
                 "predict_at() include the n_burn = ", n_burn, " warmup draws ",
                 "(run$histories exclude them, and ai4bayescode_predict() drops ",
                 "them). Recompiling the model with AI4BayesCode >= 1.1.3 adds ",
-                "clear_history().")
+                "clear_history() (a hand-written RCPP_MODULE binds it with ",
+                "AI4BAYESCODE_BIND_KERNEL_CONTROL).")
     with_extra <- Filter(function(r) length(r$extra) > 0L, results)
     if (length(with_extra))
         warning("ai4bayescode_run_chains: after clear_history(), the history ",
@@ -1240,8 +1241,11 @@ print.ai4bayescode_chain_model <- function(x, ...) {
                 " of ", cls(with_extra), " have more than n_keep = ", n_keep,
                 " rows. Their first n_burn = ", n_burn, " rows are dropped in ",
                 "run$histories, but the model's own get_history() and ",
-                "predict_at() still contain the warmup draws for them: the ",
-                "class needs a clear_extra_history_() hook that empties them.",
+                "predict_at() still contain the warmup draws for them: ",
+                "clear_history() did not empty them. clear_history() calls the ",
+                "clear_extra_history_() hook declared in the class named in ",
+                "kernel_control_mixin<...>; a class derived from a wrapper ",
+                "declares clear_history() itself.",
                 call. = FALSE)
     invisible(NULL)
 }
@@ -1430,9 +1434,9 @@ print.ai4bayescode_chain_model <- function(x, ...) {
 }
 
 # Send one job to each worker in `nodes` (they compute concurrently) and
-# return their results in the order of `nodes`. Every request carries a
+# return their results in the order of `nodes`. Every request contains a
 # number that the worker returns with its result. A call interrupted before
-# its results arrived leaves those results unread; a result with an earlier
+# its results were received leaves those results unread; a result with an earlier
 # number is such a result and is discarded, and the result of this request
 # is the next one on that connection. A failed connection closes the pool.
 .ai4b_rc_exchange <- function(pool, nodes, jobs, fun, ...) {
