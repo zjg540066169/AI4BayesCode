@@ -368,7 +368,9 @@ on `-I` and need no per-block declaration.
 - **RNG separation** (Sec.8): the wrapper carries `rng_` (MCMC, advanced by `step()`),
  `mutable predict_rng_` (predict_at only), and -- iff NUTS-family -- `mutable readapt_rng_`. Seeds
  are the documented SplitMix64-mixed constants (Sec.8). Conflating streams is a silent reproducibility
- bug (Check #13 / Check #23). Note: BART-family uses R's RNG; the mt19937 arg is ignored.
+ bug (Check #13 / Check #23). Note: BART-family blocks use R's RNG under the Rcpp backend (the
+ mt19937 arg is not used there); under pybind / standalone their first step() seeds the kernel stream
+ from a copy of the mt19937 arg and the block name.
 - **History / memory** (Sec.9, Sec.12): `keep_history` set once at construction; leaves never store a
  raw `shared_data_t*` (copy or use the per-sweep `ctx` reference).
 

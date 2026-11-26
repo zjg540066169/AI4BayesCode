@@ -47,8 +47,12 @@
  *  ---
  *  The pure-C++ genBART kernel draws from its own seedable RNG stream
  *  (bart_rng in bart_pure_cpp/src/r_compat.h, driven through the `arn`
- *  adapter). The `std::mt19937_64&` argument passed to step() is IGNORED.
- *  To reproduce a run, seed the kernel stream before the run starts.
+ *  adapter). In a pybind or standalone build the first step() of the block
+ *  seeds that stream from the `std::mt19937_64&` passed to step()
+ *  (detail::kernel_stream_seed: a copy of it, so it is not advanced, and the
+ *  block name), so a chain's kernel draws follow from the chain's seed;
+ *  later steps do not use the argument. The Rcpp build draws from R's RNG
+ *  (set.seed() in R).
  *================================================================================*/
 
 #ifndef AI4BAYESCODE_GENBART_BLOCK_HPP
@@ -227,9 +231,21 @@ public:
         }
     }
 
-    void step(std::mt19937_64& /*rng*/) override {
-        // genBART uses its own RNG (genbart::arn), seeded via the kernel
-        // RNG stream. The mt19937 argument is ignored.
+    void step(std::mt19937_64& rng) override {
+        // pybind / standalone build: the kernel draws from the thread-local
+        // stream bart_rng. The first step() of this block seeds it from the
+        // chain generator rng (detail::kernel_stream_seed; rng is not
+        // advanced), so the kernel draws of a chain depend on that chain's
+        // seed only, also when chains run one after another in one thread or
+        // in forked worker processes. The Rcpp build uses R's RNG instead.
+#if !defined(AI4BAYESCODE_RCPP_MODULE)
+        if (!kernel_seeded_) {
+            ::bart_rng::set_seed(detail::kernel_stream_seed(rng, cfg_.name));
+            kernel_seeded_ = true;
+        }
+#else
+        (void)rng;
+#endif
         impl_->update_step(gen_);
         refresh_current_r_();
         if (keep_history_) {
@@ -536,6 +552,9 @@ private:
     genbart::arn                            gen_;
     arma::vec                               current_r_;
     std::vector<arma::vec>                  history_r_buf_;
+    // Set at the first step(): the kernel stream bart_rng has been seeded
+    // from the chain generator (pybind / standalone build; see step()).
+    bool                                    kernel_seeded_ = false;
 
     // Cached static info (xinfo for posterior walk over history).
     int cached_p_ = 0;

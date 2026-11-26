@@ -3,16 +3,16 @@
 // ============================================================================
 //  test_fix_order-mcmc_dag_history.cpp -- order_mcmc_block stores the DAG
 //  that step() draws in each stored sweep (in a held sweep of a frozen
-//  block, the held DAG), and the OrderMCMCBN wrapper
-//  (examples/OrderMCMCBN.cpp, standalone C++ build) returns the stored DAGs
-//  from get_history() and predict_at().
+//  block, the held DAG) outside get_history(), whose keys stay those of
+//  1.1.2, and the OrderMCMCBN wrapper (examples/OrderMCMCBN.cpp, standalone
+//  C++ build) returns the stored DAGs from predict_at().
 //
 //  Block, method = partition and method = order, n = 5:
 //    H1  keep_history, in a composite_block: after T sweeps, get_history()
-//        has the keys order, order_log_score and order_sampled_DAG, each
+//        has exactly the keys order and order_log_score (as in 1.1.2), each
 //        with T rows, and history_size() is T for the block and the
-//        composite; row t of order_sampled_DAG (element i*n + j = 1 when j
-//        is a parent of i) and masks t*n .. t*n + n - 1 of
+//        composite; row t of sampled_dag_history_matrix() (T x n*n, element
+//        i*n + j = 1 when j is a parent of i) and masks t*n .. t*n + n - 1 of
 //        sampled_dag_history() equal sampled_dag() after sweep t, rows t of
 //        order and order_log_score equal current() and current_log_score()
 //        after sweep t, and the DAG of row t fits the node sequence of row t
@@ -27,13 +27,15 @@
 //        unfreeze the rows are the sweeps again, and every buffer holds one
 //        entry per composite sweep
 //    H4  clear_history() (clear_history_contract.hpp), with the masks of
-//        sampled_dag_history() as an extra per-draw buffer; right after the
-//        call get_history() has the single key order (one row) and
-//        sampled_dag_history() is empty
+//        sampled_dag_history() and sampled_dag_history_matrix() as extra
+//        per-draw buffers; right after the call get_history() has the single
+//        key order (one row), sampled_dag_history() is empty and
+//        sampled_dag_history_matrix() has 0 rows
 //  Wrapper OrderMCMCBN (method = partition):
 //    P1  keep_history: predict_at({}) has one row per stored sweep and n*n
-//        columns, row t equal to get_current()$sampled_DAG after sweep t and
-//        to row t of get_history()$order_sampled_DAG; predict_at({}, false)
+//        columns, row t equal to get_current()$sampled_DAG after sweep t;
+//        get_history() has exactly the keys order and order_log_score (as in
+//        1.1.2); predict_at({}, false)
 //        equals predict_at({}); predict_at({}, true) is one row,
 //        get_current()$sampled_DAG; get_current() and get_history() are the
 //        same after these calls, and the next 100 sweeps equal those of a
@@ -206,21 +208,22 @@ void H1_rows_are_the_sweeps(bool partition) {
                "changes over the sweeps (" + std::to_string(distinct.size()) + " distinct DAGs)");
 
     const ab::history_map h = root->get_history();
-    const auto ho = h.find("order"), hl = h.find("order_log_score"),
-               hd = h.find("order_sampled_DAG");
-    const bool keys = h.size() == 3 && ho != h.end() && hl != h.end() && hd != h.end();
+    const auto ho = h.find("order"), hl = h.find("order_log_score");
+    const arma::mat Dm = blk->sampled_dag_history_matrix();
+    const bool keys = h.size() == 2 && ho != h.end() && hl != h.end();
     const bool shape = keys && ho->second.n_rows == T && ho->second.n_cols == kN &&
                        hl->second.n_rows == T && hl->second.n_cols == 1 &&
-                       hd->second.n_rows == T && hd->second.n_cols == kN * kN;
+                       Dm.n_rows == T && Dm.n_cols == kN * kN;
     const std::vector<std::uint64_t>& buf = blk->sampled_dag_history();
     check(shape && blk->history_size() == T && root->history_size() == T &&
                buf.size() == T * kN,
-               label("H1", partition) + "keys order, order_log_score, order_sampled_DAG with "
-               "T rows; history_size() T; sampled_dag_history() T*n masks",
+               label("H1", partition) + "get_history() keys order and order_log_score (as in "
+               "1.1.2) with T rows; history_size() T; sampled_dag_history_matrix() T x n*n; "
+               "sampled_dag_history() T*n masks",
                "T = " + std::to_string(T) + ", buffer = " + std::to_string(buf.size()));
     int bad_dag = 0, bad_mask = 0, bad_order = 0, bad_score = 0, bad_fit = 0;
     for (std::size_t t = 0; shape && t < T; ++t) {
-        if (!same_row(hd->second, t, dag_flat(dags[t], true))) ++bad_dag;
+        if (!same_row(Dm, t, dag_flat(dags[t], true))) ++bad_dag;
         if (masks_of(buf, t, kN) != dags[t]) ++bad_mask;
         if (!same_row(ho->second, t, orders[t].t())) ++bad_order;
         if (!chk::same_bits(arma::mat(1, 1, arma::fill::value(hl->second(t, 0))),
@@ -228,8 +231,8 @@ void H1_rows_are_the_sweeps(bool partition) {
         if (!dag_fits_sequence(dags[t], ho->second.row(t), !partition)) ++bad_fit;
     }
     check(shape && bad_dag == 0 && bad_mask == 0,
-               label("H1", partition) + "row t of order_sampled_DAG and masks t of "
-               "sampled_dag_history() are sampled_dag() after sweep t",
+               label("H1", partition) + "row t of sampled_dag_history_matrix() and masks t "
+               "of sampled_dag_history() are sampled_dag() after sweep t",
                "mismatching rows = " + std::to_string(bad_dag) + ", masks = " +
                std::to_string(bad_mask));
     check(shape && bad_order == 0 && bad_score == 0 && bad_fit == 0,
@@ -287,7 +290,7 @@ void H3_held_rows(bool partition) {
     const ab::history_map h = root->get_history();
     const arma::mat& H = h.at("order");
     const arma::mat& L = h.at("order_log_score");
-    const arma::mat& D = h.at("order_sampled_DAG");
+    const arma::mat D = blk->sampled_dag_history_matrix();
     const std::vector<std::uint64_t>& buf = blk->sampled_dag_history();
     const bool sizes = H.n_rows == T && L.n_rows == T && D.n_rows == T &&
                        buf.size() == T * kN && root->history_size() == T;
@@ -319,9 +322,12 @@ void H4_clear_history(bool partition) {
         const ab::history_map h = root->get_history();
         const auto it = h.find("order");
         check(h.size() == 1 && it != h.end() && it->second.n_rows == 1 &&
-                   blk->sampled_dag_history().empty() && root->history_size() == 1,
+                   blk->sampled_dag_history().empty() &&
+                   blk->sampled_dag_history_matrix().n_rows == 0 &&
+                   root->history_size() == 1,
                    label("H4", partition) + "right after clear_history(): get_history() is "
-                   "{order: 1 row}, sampled_dag_history() is empty, history_size() is 1");
+                   "{order: 1 row}, sampled_dag_history() is empty, "
+                   "sampled_dag_history_matrix() has 0 rows, history_size() is 1");
     }
     auto make = [partition]() {
         ab::order_mcmc_block* blk = nullptr;
@@ -329,6 +335,8 @@ void H4_clear_history(bool partition) {
         return chk::composite_model(root, 505, [blk](chk::buffers& b) {
             b.mats["order: sampled_dag_history() masks"] =
                 masks_as_rows(blk->sampled_dag_history(), kN);
+            b.mats["order: sampled_dag_history_matrix()"] =
+                blk->sampled_dag_history_matrix();
         });
     };
     chk::run(label("H4", partition) + "clear_history_contract", make, K1, K2);
@@ -388,13 +396,13 @@ void P1_history_mode() {
     int bad = 0;
     for (std::size_t t = 0; t < T; ++t)
         if (!same_row(P, t, cur[t])) ++bad;
-    const auto hd = hist_before.find("order_sampled_DAG");
     check(P.n_rows == T && P.n_cols == kN * kN && bad == 0,
                "P1 predict_at({}): T x n*n, row t is get_current()$sampled_DAG after sweep t",
                "rows = " + std::to_string(P.n_rows) + ", mismatching rows = " +
                std::to_string(bad));
-    check(hd != hist_before.end() && chk::same_bits(P, hd->second),
-               "P1 predict_at({}) equals get_history()$order_sampled_DAG");
+    check(hist_before.size() == 2 && hist_before.count("order") &&
+               hist_before.count("order_log_score"),
+               "P1 get_history() has exactly the keys order and order_log_score (as in 1.1.2)");
     check(chk::same_bits(Pf, P), "P1 predict_at({}, false) equals predict_at({})");
     check(Pt.n_rows == 1 && same_row(Pt, 0, cur.back()),
                "P1 predict_at({}, true): one row, get_current()$sampled_DAG");

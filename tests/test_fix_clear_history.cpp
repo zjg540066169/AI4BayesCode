@@ -374,9 +374,14 @@ chk::model order_mcmc_case() {
     c.family_cache_F = 200;
     c.init_rng_seed = 12345;
     auto root = std::make_shared<ab::composite_block>("root");
-    root->add_child(std::make_unique<ab::order_mcmc_block>(std::move(c)));
+    auto blk_owner = std::make_unique<ab::order_mcmc_block>(std::move(c));
+    const ab::order_mcmc_block* blk = blk_owner.get();
+    root->add_child(std::move(blk_owner));
     root->set_keep_history(true);
-    return chk::composite_model(root, 606);
+    // The stored DAGs are not in get_history(): an extra per-draw buffer.
+    return chk::composite_model(root, 606, [blk](chk::buffers& b) {
+        b.mats["order: sampled_dag_history_matrix()"] = blk->sampled_dag_history_matrix();
+    });
 }
 
 // bart_block with an internal sigma, the kernel's history recording on

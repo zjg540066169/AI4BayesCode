@@ -92,19 +92,19 @@
  *  <name>_sampled_DAG and <name>_log_score, with <name> = cfg.name.
  *
  *  History (keep_history on): each step() and each record_held_history()
- *  appends one entry to each of three buffers, so get_history() returns one
- *  row per stored sweep under
+ *  appends one entry to each of three buffers. get_history() returns the
+ *  first two, with the keys of 1.1.2, one row per stored sweep:
  *      "<name>"             T x n    order / node sequence after the sweep
  *      "<name>_log_score"   T x 1    its log-score
- *      "<name>_sampled_DAG" T x n*n  sampled_dag() after the sweep, i.e. the
- *                                    DAG that step() drew from the sweep's
- *                                    order or partition with step()'s rng (in
- *                                    a held row, the held DAG); layout of the
- *                                    "sampled_DAG" output above
- *  The DAG buffer holds n parent bitmasks per sweep
- *  (sampled_dag_history()). With no stored sweep (keep_history off, before
- *  the first sweep, or from clear_history() to the next sweep),
- *  get_history() returns only "<name>", the current order, as one row.
+ *  The third buffer holds the DAG of each stored sweep, sampled_dag() after
+ *  the sweep, i.e. the DAG that step() drew from the sweep's order or
+ *  partition with step()'s rng (in a held row, the held DAG). It is not
+ *  part of get_history(): sampled_dag_history() returns it as n parent
+ *  bitmasks per sweep, and sampled_dag_history_matrix() as a T x n*n
+ *  matrix in the layout of the "sampled_DAG" output above. With no stored
+ *  sweep (keep_history off, before the first sweep, or from clear_history()
+ *  to the next sweep), get_history() returns only "<name>", the current
+ *  order, as one row, and the DAG buffer is empty.
  *
  *  KNOWN BIAS (per spec §1.6, FK §4.1 last 3 paragraphs)
  *  ====================================================
@@ -793,17 +793,8 @@ public:
         arma::mat ls(T, 1);
         for (std::size_t t = 0; t < T; ++t) ls(t, 0) = history_log_score_[t];
         out.emplace(cfg_.name + "_log_score", std::move(ls));
-        // Pack the DAG history as (T, n*n): element i*n + j of row t is 1 when
-        // bit j of parent mask i of stored sweep t is set (j is a parent of i),
-        // the layout of the "<name>_sampled_DAG" output.
-        arma::mat dags(T, n_ * n_, arma::fill::zeros);
-        for (std::size_t t = 0; t < T; ++t)
-            for (std::size_t i = 0; i < n_; ++i) {
-                const std::uint64_t pa = history_dag_[t * n_ + i];
-                for (std::size_t j = 0; j < n_; ++j)
-                    if (pa & (1ULL << j)) dags(t, i * n_ + j) = 1.0;
-            }
-        out.emplace(cfg_.name + "_sampled_DAG", std::move(dags));
+        // The stored DAGs are not returned here (the keys stay those of
+        // 1.1.2); see sampled_dag_history() and sampled_dag_history_matrix().
         return out;
     }
 
@@ -814,7 +805,8 @@ public:
         // happens with keep_history off, which is the default.
         // append_history_() appends to the order, log-score and DAG buffers
         // together and clear_history() empties all three, so they hold the
-        // same number of sweeps: the row count of every get_history() entry.
+        // same number of sweeps: the row count of every get_history() entry
+        // and of sampled_dag_history_matrix().
         return history_order_.empty() ? 1 : history_order_.size();
     }
 
@@ -838,10 +830,27 @@ public:
     /// The stored DAGs, n parent bitmasks per stored sweep: element t*n + i is
     /// the parent mask of node i (bit j set when j is a parent of i) in sweep
     /// t, i.e. sampled_dag() after that sweep. Size n times the number of
-    /// stored sweeps; empty with no stored sweep. Row t of the
-    /// "<name>_sampled_DAG" history entry holds the same DAG.
+    /// stored sweeps; empty with no stored sweep. Row t of
+    /// sampled_dag_history_matrix() holds the same DAG.
     const std::vector<std::uint64_t>& sampled_dag_history() const noexcept {
         return history_dag_;
+    }
+
+    /// The stored DAGs as a T x n*n matrix, T the number of stored sweeps (0
+    /// rows with no stored sweep): element i*n + j of row t is 1 when j is a
+    /// parent of i in the DAG of sweep t, the layout of the
+    /// "<name>_sampled_DAG" output. Built from sampled_dag_history() on each
+    /// call (n = 20, T = 40000: 128 MB of doubles).
+    arma::mat sampled_dag_history_matrix() const {
+        const std::size_t T = history_order_.size();
+        arma::mat dags(T, n_ * n_, arma::fill::zeros);
+        for (std::size_t t = 0; t < T; ++t)
+            for (std::size_t i = 0; i < n_; ++i) {
+                const std::uint64_t pa = history_dag_[t * n_ + i];
+                for (std::size_t j = 0; j < n_; ++j)
+                    if (pa & (1ULL << j)) dags(t, i * n_ + j) = 1.0;
+            }
+        return dags;
     }
 
 

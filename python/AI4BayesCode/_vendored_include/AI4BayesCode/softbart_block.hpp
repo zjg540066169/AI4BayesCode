@@ -82,10 +82,12 @@
  *  ---
  *  The pure-C++ SoftBart kernel draws from its own seedable RNG stream
  *  (bart_rng in bart_pure_cpp/src/r_compat.h, reached via the vendored
- *  Forest's bare unif_rand()/norm_rand() calls). The `std::mt19937_64&`
- *  argument passed to step() is IGNORED. To reproduce a run, seed the
- *  kernel stream (bart_rng::set_seed(seed)) before the run starts;
- *  under the Rcpp backend, call set.seed() in R instead.
+ *  Forest's bare unif_rand()/norm_rand() calls). In a pybind or standalone
+ *  build the first step() of the block seeds that stream from the
+ *  `std::mt19937_64&` passed to step() (detail::kernel_stream_seed: a copy
+ *  of it, so it is not advanced, and the block name), so a chain's kernel
+ *  draws follow from the chain's seed; later steps do not use the argument.
+ *  Under the Rcpp backend the kernel draws from R's RNG (set.seed() in R).
  *================================================================================*/
 
 #ifndef AI4BAYESCODE_SOFTBART_BLOCK_HPP
@@ -284,7 +286,21 @@ public:
         }
     }
 
-    void step(std::mt19937_64& /*rng*/) override {
+    void step(std::mt19937_64& rng) override {
+        // pybind / standalone build: the kernel draws from the thread-local
+        // stream bart_rng. The first step() of this block seeds it from the
+        // chain generator rng (detail::kernel_stream_seed; rng is not
+        // advanced), so the kernel draws of a chain depend on that chain's
+        // seed only, also when chains run one after another in one thread or
+        // in forked worker processes. The Rcpp build uses R's RNG instead.
+#if !defined(AI4BAYESCODE_RCPP_MODULE)
+        if (!kernel_seeded_) {
+            ::bart_rng::set_seed(detail::kernel_stream_seed(rng, cfg_.name));
+            kernel_seeded_ = true;
+        }
+#else
+        (void)rng;
+#endif
         if (sigma_override_ > 0.0) {
             impl_->update_step(sigma_override_);
         } else {
@@ -696,6 +712,9 @@ private:
     std::unique_ptr<softbart::softbart_model> impl_;
     arma::vec                                current_fit_;
     std::vector<arma::vec>                   history_fit_buf_;
+    // Set at the first step(): the kernel stream bart_rng has been seeded
+    // from the chain generator (pybind / standalone build; see step()).
+    bool                                     kernel_seeded_ = false;
     std::uint64_t                            model_x_key_ = 0;
     std::vector<std::vector<double>>         x_knots_;    // see make_x_map_
     arma::mat                                xn_train_;   // x_train mapped to [0, 1]

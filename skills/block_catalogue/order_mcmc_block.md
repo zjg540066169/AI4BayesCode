@@ -191,20 +191,22 @@ loads it, and `<name>_log_score` is log P(D | order).
 
 **Block history.** With `keep_history`, each `step()` and each held sweep
 of a frozen block (`record_held_history()`) appends the order (node
-sequence), its log-score and `sampled_dag()`, so `get_history()`
-returns `<name>` (T x n), `<name>_log_score` (T x 1) and
-`<name>_sampled_DAG` (T x n*n; row t is the DAG of stored sweep t, element
-i*n + j is 1 when j is a parent of i, as in the `<name>_sampled_DAG`
-output). After a `step()`, `sampled_dag()` is the DAG sampled in it from
-the sweep's order or partition with its rng. In a held sweep `step()` is
-not called, and the stored DAG is the held DAG (`sampled_dag()` at the
-freeze or after a later load), so the rows of held sweeps are copies of
-one DAG, not draws from P(G | partition, D). No random number is drawn
+sequence), its log-score and `sampled_dag()`. `get_history()` returns
+`<name>` (T x n) and `<name>_log_score` (T x 1), the keys of 1.1.2; the
+stored DAGs are not in `get_history()` but in
+`sampled_dag_history_matrix()` (T x n*n; row t is the DAG of stored sweep
+t, element i*n + j is 1 when j is a parent of i, as in the
+`<name>_sampled_DAG` output). After a `step()`, `sampled_dag()` is the DAG
+sampled in it from the sweep's order or partition with its rng. In a held
+sweep `step()` is not called, and the stored DAG is the held DAG
+(`sampled_dag()` at the freeze or after a later load), so the rows of held
+sweeps are copies of one DAG, not draws from P(G | partition, D). No random number is drawn
 for the history. The DAGs are stored as n 64-bit parent masks per sweep
-(`sampled_dag_history()`); `get_history()` builds the T x n*n matrix of
-doubles on each call (n = 20, T = 40000: 128 MB). `clear_history()`
-empties the three buffers, and with no stored sweep `get_history()`
-returns only `<name>`, the current order, as one row. Tested in
+(`sampled_dag_history()`); `sampled_dag_history_matrix()` builds the
+T x n*n matrix of doubles on each call (n = 20, T = 40000: 128 MB).
+`clear_history()` empties the three buffers, and with no stored sweep
+`get_history()` returns only `<name>`, the current order, as one row, and
+`sampled_dag_history_matrix()` has 0 rows. Tested in
 `tests/test_fix_order-mcmc_dag_history.cpp`.
 
 **Tier C kernels:**
@@ -250,10 +252,9 @@ partition method):
   (`last_draw_only`): one row, the current DAG.
 - `get_dag()` -- sampling DAG topology (block-level).
 - `get_history()` -- `list(order = M x n matrix, 1-based as in
-  get_current(), order_log_score = M x 1, order_sampled_DAG = M x n*n,
-  each row column-major as in get_current())` when `keep_history = TRUE`;
-  row t of `order_sampled_DAG` is the DAG stored for sweep t, as in
-  `predict_at(list())` above (held sweeps: the held DAG).
+  get_current(), order_log_score = M x 1)` when `keep_history = TRUE`,
+  the keys of 1.1.2; the DAG stored for each sweep is in
+  `predict_at(list())` above.
 
 **Vendored kernel:** none. Pure C++17 + Armadillo + 64-bit
 bitmasks for parent sets (caps n <= 64; FK Sec.4.2 already requires
