@@ -19,7 +19,9 @@
 //   f             ~  GP(0, k_amp_tau(t, t')),
 //          k(dt)  =  amp^2 * exp(-|dt| / tau)
 //   amp           ~  half-Normal(0, sd(y))
-//   tau           ~  InverseGamma(5, 5 * median_dt)   [timescale]
+//   tau           ~  InverseGamma(a, b)   [timescale; a, b give prior
+//                    probability 0.01 below the smallest time gap and
+//                    0.01 above the time span]
 //   sigma (noise) ~  Jeffreys p(sigma) oc 1/sigma
 //
 // Latent f is MARGINALIZED OUT (conjugate Gaussian-Gaussian); no explicit

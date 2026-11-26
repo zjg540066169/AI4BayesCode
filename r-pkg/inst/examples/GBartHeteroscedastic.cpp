@@ -731,7 +731,7 @@ RCPP_MODULE(GBartHeteroscedastic_module) {
                 "Return the predict DAG as a named list of edges.")
         .method("get_history", &GBartHeteroscedastic::get_history,
                 "Return the history as a named list of matrices "
-                "(r [n_draws x N]).")
+                "(r [n_draws x N], phi [n_draws x 1]).")
         .method("get_tree_history", &GBartHeteroscedastic::get_tree_history,
                 "Return per-draw serialized genBART forests (one per stored "
                 "draw when keep_tree=TRUE; else the current forest).")
