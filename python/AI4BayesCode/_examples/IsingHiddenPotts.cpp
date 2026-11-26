@@ -30,10 +30,16 @@
 //              state (get_current() returns {"z"}). The synthetic truth
 //              z* is NOT a parameter and is not exposed in get_current().
 //
-//  No observation likelihood is *sampled* here (μ, σ are fixed, the emission
-//  field is precomputed once), so predict_at() returns an empty map and
-//  rejects non-empty input, matching IsingPrior. Documented exception per
-//  system_design.md Sec.5.
+//  Posterior predictive (predict_at)
+//  ---------------------------------
+//      y_rep_i | z  ~  N(μ_{z_i}, σ²),   i = 1..N,
+//  the emission model at the N training sites, with μ = (μ0, μ1) and σ the
+//  fixed constructor values (shared keys "mu", "sigma"); every value is drawn
+//  with predict_rng_ by the stochastic refresher of "y_rep" (predict edges
+//  z, mu, sigma -> y_rep). keep_history = TRUE: one row per stored draw d,
+//  from the labels z_d of that draw (row d of get_history()$z). keep_history
+//  = FALSE, or last_draw_only = TRUE: one row, from the current labels. The
+//  model has no covariate inputs, so predict_at() takes an empty map/list.
 //
 //  Validation (demo, not a unit test): with a well-separated, spatially
 //  coherent truth the posterior label marginals recover the segmentation
@@ -62,6 +68,9 @@
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   yrep <- predict(run)$y_rep    # posterior predictive y_rep_i ~ N(mu_{z_i}, sigma^2):
+//                                 # 8000 x 256, one row per kept draw of the 4 chains
+//   ai4bayescode_close_models(run)                 # stop the worker processes
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(IsingHiddenPotts,
 //            16L,        # L: lattice side (N = 256 sites)
@@ -75,6 +84,7 @@
 //   m$step(2000)
 //   z <- m$get_current()$z            # length-256 recovered labels in {0,1}
 //   matrix(z, 16, 16)                 # segmentation: left half 0, right half 1
+//   y_rep <- m$predict_at(list())$y_rep   # 1 x 256, drawn from the current z
 // @example:python
 //   import numpy as np, AI4BayesCode
 //   # Hidden-Potts image segmentation on a 16x16 lattice: latent labels z with
@@ -90,6 +100,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   yrep = AI4BayesCode.predict(chains)["y_rep"]   # posterior predictive y_rep:
+//                                                  # (8000, 256), one row per kept draw
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.IsingHiddenPotts(16,        # L: lattice side (N = 256 sites)
 //                            0.7,       # beta: spatial interaction (>= 0)
@@ -102,6 +114,7 @@
 //   m.step(2000)
 //   z = np.asarray(m.get_current()["z"])   # length-256 recovered labels {0,1}
 //   print(z.reshape(16, 16))               # left half 0, right half 1
+//   y_rep = m.predict_at({})["y_rep"]      # (1, 256), drawn from the current z
 // @example:end
 
 // [[Rcpp::depends(RcppArmadillo)]]
@@ -146,8 +159,11 @@ public:
                      int data_seed, int rng_seed = 1, int init_label = 0,
                      bool keep_history = false)
         : rng_(static_cast<std::uint64_t>(rng_seed)),
+          predict_rng_(static_cast<std::uint64_t>(rng_seed)
+                       ^ 0x9E3779B97F4A7C15ULL),
           impl_(std::make_unique<composite_block>("IsingHiddenPotts")),
-          L_(L)
+          L_(L),
+          keep_history_(keep_history)
     {
         if (L_ < 2)                          ai4b::stop("L must be >= 2");
         if (!(beta >= 0.0))                  ai4b::stop("beta must be >= 0");
@@ -186,6 +202,29 @@ public:
         impl_->data().declare_dependencies("z", {"beta", "log_lik"});
         impl_->data().declare_context_edges("beta", {"z"});
         impl_->data().declare_context_edges("log_lik", {"z"});
+
+        // ---- posterior predictive y_rep_i ~ N(μ_{z_i}, σ²) ------------------
+        // μ and σ are fixed; no block reads "mu" or "sigma", so the sweeps are
+        // unchanged. predict_at() samples y_rep from the z of its scratch copy
+        // of the shared data: the current labels, or a stored draw's labels.
+        impl_->data().set("mu",    arma::vec{mu0, mu1});
+        impl_->data().set("sigma", arma::vec{sigma});
+        impl_->data().set("y_rep", arma::vec(N_, arma::fill::zeros));
+        impl_->data().declare_predict_edges("z",     {"y_rep"});
+        impl_->data().declare_predict_edges("mu",    {"y_rep"});
+        impl_->data().declare_predict_edges("sigma", {"y_rep"});
+        impl_->data().register_stochastic_refresher(
+            "y_rep",
+            [](const AI4BayesCode::shared_data_t& d, std::mt19937_64& rng) {
+                const arma::vec& z  = d.get("z");
+                const arma::vec& mu = d.get("mu");
+                const double     s  = d.get("sigma")[0];
+                std::normal_distribution<double> nd(0.0, 1.0);
+                arma::vec y_rep(z.n_elem);
+                for (std::size_t i = 0; i < z.n_elem; ++i)
+                    y_rep[i] = ((z[i] > 0.5) ? mu[1] : mu[0]) + s * nd(rng);
+                return y_rep;
+            });
 
         // ---- ising_cluster_block with external field + partial decoupling --
         ising_cluster_block_config cfg;
@@ -256,16 +295,54 @@ public:
         }
     }
 
+    /// Posterior predictive y_rep at the N training sites. One-argument form:
+    /// predict_at(new_data, false).
     AI4BayesCode::history_map predict_at(
-        const AI4BayesCode::state_map& new_data) const {
-        // No *sampled* observation model -- μ, σ are fixed and the emission
-        // field is precomputed once at construction. predict_at always
-        // returns an empty map. Documented exception per system_design.md Sec.5.
+            const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// keep_history = true and last_draw_only = false: y_rep with one row per
+    /// stored draw d, y_rep[d, i] ~ N(μ_{z_d[i]}, σ²) with z_d the labels of
+    /// draw d (row d of get_history()$z). Otherwise one row, drawn from the
+    /// current labels. Every value is drawn with predict_rng_.
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
         if (!new_data.empty()) {
-            ai4b::stop("IsingHiddenPotts::predict_at: no valid keys to replace "
-                       "(no sampled observation model); pass an empty map/list.");
+            ai4b::stop("IsingHiddenPotts::predict_at: the model has no covariate "
+                       "inputs; pass an empty map/list (y_rep at the training "
+                       "sites).");
         }
-        return AI4BayesCode::history_map();
+        const bool use_history = keep_history_ && !last_draw_only;
+        AI4BayesCode::history_map out;
+
+        if (!use_history) {
+            const block_context result =
+                impl_->predict_at(block_context{}, predict_rng_);
+            for (const auto& kv : result)
+                out.emplace(kv.first, arma::mat(kv.second.t()));
+            return out;
+        }
+
+        // History mode: the labels of each stored draw replace the shared z
+        // in predict_at's scratch copy; μ and σ are the fixed shared values.
+        const AI4BayesCode::history_map hist = impl_->get_history();
+        const arma::mat& z_hist = hist.at("z");          // n_draws x N
+        const arma::uword n_draws = z_hist.n_rows;
+        for (arma::uword d = 0; d < n_draws; ++d) {
+            block_context replaced;
+            replaced["z"] = z_hist.row(d).t();
+            const block_context result = impl_->predict_at(replaced, predict_rng_);
+            for (const auto& kv : result) {
+                auto it = out.find(kv.first);
+                if (it == out.end())
+                    it = out.emplace(kv.first,
+                                     arma::mat(n_draws, kv.second.n_elem)).first;
+                it->second.row(d) = kv.second.t();
+            }
+        }
+        return out;
     }
 
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag();     }
@@ -279,10 +356,12 @@ public:
 
 private:
     std::mt19937_64                  rng_;
+    mutable std::mt19937_64          predict_rng_;
     std::unique_ptr<composite_block> impl_;
     int                              L_ = 0;
     std::size_t                      N_ = 0;
     arma::vec                        z_true_;
+    bool                             keep_history_ = false;
 };
 
 #ifdef AI4BAYESCODE_RCPP_MODULE
@@ -306,9 +385,24 @@ RCPP_MODULE(IsingHiddenPotts_module) {
         .method("set_current", &IsingHiddenPotts::set_current,
                 "Overwrite z (length L*L, entries in {0,1}) from a named list. "
                 "Unknown keys are silently ignored.")
-        .method("predict_at",  &IsingHiddenPotts::predict_at,
-                "Returns empty list — no sampled observation model. "
-                "Pass an empty list; non-empty input is rejected.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (IsingHiddenPotts::*)(const AI4BayesCode::state_map&) const)
+                    &IsingHiddenPotts::predict_at,
+                "predict_at(list()) returns list(y_rep = matrix): the posterior "
+                "predictive y_rep_i ~ N(mu_{z_i}, sigma^2) at the N = L*L "
+                "sites, with mu = (mu0, mu1) and sigma the fixed constructor "
+                "values. keep_history = TRUE: one row per stored draw, drawn "
+                "from the labels z of that draw (the same row of "
+                "get_history()$z); one row, from the current labels, before "
+                "the first sweep or right after clear_history(). "
+                "keep_history = FALSE: one row, from the current labels. No "
+                "covariate inputs: the list must be empty.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (IsingHiddenPotts::*)(const AI4BayesCode::state_map&, bool) const)
+                    &IsingHiddenPotts::predict_at,
+                "predict_at(list(), last_draw_only): TRUE returns one row, "
+                "drawn from the current labels, without discarding the "
+                "history; FALSE is predict_at(list()).")
         .method("get_dag",     &IsingHiddenPotts::get_dag)
         .method("get_history", &IsingHiddenPotts::get_history)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(IsingHiddenPotts);
@@ -336,7 +430,19 @@ PYBIND11_MODULE(IsingHiddenPotts, m) {
         .def("step", (void (IsingHiddenPotts::*)(int)) &IsingHiddenPotts::step, pybind11::arg("n_steps"))
         .def("get_current", &IsingHiddenPotts::get_current)
         .def("set_current", &IsingHiddenPotts::set_current, pybind11::arg("params"))
-        .def("predict_at",  &IsingHiddenPotts::predict_at, pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (IsingHiddenPotts::*)(const AI4BayesCode::state_map&, bool) const)
+                 &IsingHiddenPotts::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false,
+             "predict_at({}, last_draw_only=False) returns {'y_rep': array}: "
+             "the posterior predictive y_rep_i ~ N(mu_{z_i}, sigma^2) at the "
+             "N = L*L sites, with mu = (mu0, mu1) and sigma the fixed "
+             "constructor values. keep_history=True: one row per stored draw, "
+             "drawn from the labels z of that draw (the same row of "
+             "get_history()['z']). keep_history=False, or "
+             "last_draw_only=True: one row, from the current labels. No "
+             "covariate inputs: new_data must be empty.")
         .def("get_dag",     &IsingHiddenPotts::get_dag)
         .def("get_history", &IsingHiddenPotts::get_history)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(IsingHiddenPotts);
