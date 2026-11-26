@@ -1,6 +1,6 @@
 ## vi_optimizer.hpp (helper utilities, NOT a block)
 
-Header-only port of Welandawe et al. 2022 RAABBVI. Exposes:
+Header-only implementation of Welandawe et al. 2022 RAABBVI. Exposes:
 
 - `vi_optimizer::raabbvi_config` -- POD struct with `gamma_0` (initial
   learning rate, default 0.1), `rho` (geometric decay between epochs,

@@ -87,3 +87,50 @@ test_that("every bundled example renders a usable doc card", {
     }
     expect_equal(bad, character(0))
 })
+
+test_that("the Methods list covers clear_history and the macro-bound methods", {
+    card_methods <- function(f) {
+        out <- utils::capture.output(invisible(ai4bayescode_doc(f)))
+        i <- which(out == "Methods:"); j <- which(out == "Example:")
+        out[(i + 1L):(if (length(j)) j[1L] - 1L else length(out))]
+    }
+    has <- function(lines, nm) any(startsWith(lines, paste0("  $", nm, "(")))
+
+    # AI4BAYESCODE_BIND_KERNEL_CONTROL / AI4BAYESCODE_BIND_READAPT_NUTS register
+    # their methods although no .method("...") names them in the source; a
+    # macro name in a comment registers nothing.
+    src <- c(
+        "//  M.cpp -- m",
+        "// [[Rcpp::depends(RcppArmadillo)]]",
+        "#include <RcppArmadillo.h>",
+        "class M {",
+        "public:",
+        "    M(const arma::vec& y) {}",
+        "    void step(int n) {}",
+        "};",
+        "RCPP_MODULE(M_module){ Rcpp::class_<M>(\"M\").constructor<arma::vec>()",
+        "    .method(\"step\", &M::step)",
+        "    .method(\"get_history\", &M::get_history)",
+        "    AI4BAYESCODE_BIND_READAPT_NUTS(M)",
+        "    AI4BAYESCODE_BIND_KERNEL_CONTROL(M); }")
+    f <- tempfile(fileext = ".cpp"); on.exit(unlink(f), add = TRUE)
+    writeLines(src, f)
+    m <- card_methods(f)
+    for (nm in c("clear_history", "freeze", "unfreeze", "get_frozen", "readapt_NUTS"))
+        expect_true(has(m, nm), info = nm)
+    expect_false(any(grepl("warmup included", m, fixed = TRUE)))
+
+    g <- tempfile(fileext = ".cpp"); on.exit(unlink(g), add = TRUE)
+    writeLines(c(src[1:10], "    // AI4BAYESCODE_BIND_KERNEL_CONTROL(M)", "    ; }"), g)
+    m <- card_methods(g)
+    for (nm in c("clear_history", "freeze", "unfreeze", "get_frozen", "readapt_NUTS"))
+        expect_false(has(m, nm), info = nm)
+
+    # Every bundled example lists clear_history().
+    files <- list.files(ai4bayescode_examples_path(), pattern = "\\.cpp$",
+                        full.names = TRUE)
+    skip_if(length(files) == 0L, "no bundled examples")
+    without <- basename(files)[!vapply(files, function(x)
+        has(card_methods(x), "clear_history"), logical(1))]
+    expect_equal(without, character(0))
+})

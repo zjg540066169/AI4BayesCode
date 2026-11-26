@@ -3,7 +3,7 @@
 R package for the AI4BayesCode block-composite MCMC + variational
 inference library. After install, all C++ headers, vendored
 dependencies (`mcmclib`, `eigen`, `autodiff`, `libgp`, `celerite`,
-`bart`), the AI codegen skill workflow, and 42 reference examples
+`bart`), the AI codegen skill workflow, and 43 reference examples
 ship as package data — **no local `AI4BayesCode/` folder needed**.
 
 ## Install (from GitHub)
@@ -41,9 +41,10 @@ ai4bayescode_example("GaussianLocationScale")
 # (ai4bayescode_doc(GaussianLocationScale) prints it.)
 y <- rnorm(100, mean = 2, sd = 1.5)
 
-# run_chains drops the first n_burn draws, also inside each kept model, so the
-# summary below is over the POSTERIOR only. m$get_history() on a model stepped
-# outside run_chains returns EVERY stepped draw, warmup included.
+# run_chains drops the first n_burn draws, also inside each kept model that has
+# clear_history() (models built with 1.1.3 do), so the summary below is over the
+# POSTERIOR only. m$get_history() on a model stepped outside run_chains returns
+# EVERY stepped draw, warmup included.
 run <- ai4bayescode_run_chains(
   function(s) new(GaussianLocationScale, y, as.integer(s), TRUE),
   n_chains = 4, n_burn = 4000, n_keep = 4000)
@@ -60,6 +61,14 @@ ai4bayescode_source("./my_model.cpp")          # file path ...
 ai4bayescode_source(my_generated_cpp_string)   # ... or a source string
 m <- new(MyModel, ...)
 ```
+
+`ai4bayescode_run_chains()` takes the number of worker processes as `n_cores`
+(`mc.cores` is still accepted). The option `ai4bayescode.max_workers` (or the
+environment variable `AI4BAYESCODE_MAX_WORKERS`) limits the number of worker
+processes of kept runs; when a new run would exceed it, those of the least
+recently used runs are closed first. With `keep_models = FALSE` no models are
+kept and the result is a plain list that starts with `histories`, `seeds` and
+`wall`, as in 1.1.2.
 
 `ai4bayescode_source()` compiles against the headers bundled inside the
 installed package -- there is no path to configure and no source checkout to

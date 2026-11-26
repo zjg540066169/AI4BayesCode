@@ -206,12 +206,16 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
    print(AI4BayesCode.rhat_summary(chains))   # convergence across chains
    tbl, plot = AI4BayesCode.diagnose(chains[0]["hist"])
    pred = AI4BayesCode.predict(chains, {"<X>": X_test})   # pooled over the chains
-   chains[0]["model"].get_current()                       # chain 1's model after the run
+   chains.models[0].get_current()                        # chain 1's model after the run
    AI4BayesCode.close_models(chains)
    ```
 
    Single-chain use is `seeds=[1]` (or the stateful API below); never
-   a bespoke wrapper.
+   a bespoke wrapper. For a model with a `bart_block` / `genbart_block` /
+   `softbart_block` child, the lambda also passes `keep_tree=True` (the
+   constructor argument of `examples/BartNoise.cpp`):
+   `AI4BayesCode.predict()` at `X_test` computes each kept draw from that
+   draw's forest, and the forests are stored only with `keep_tree=True`.
 7. **Stateful-API usage**, in order: `model.step()`,
    `model.get_history()`, `model.get_current()`,
    `model.predict_at({"<X>": X_test})`, then
@@ -264,10 +268,10 @@ if plot is not None:
 # Posterior predictions at the held-out inputs, using the draws of all chains.
 pred = AI4BayesCode.predict(chains, {"<X>": X_test})
 
-# chains[i]["model"] is the model of chain i after the run.
-print(chains[0]["model"].get_current())     # the last draw of chain 1
+# chains.models[i] is the model of chain i after the run.
+print(chains.models[0].get_current())      # the last draw of chain 1
 
-# Close the background processes that hold the models (chains[i]["model"])
+# Close the background processes that hold the models (chains.models)
 # when you no longer need them.
 AI4BayesCode.close_models(chains)
 

@@ -88,10 +88,15 @@ run <- ai4bayescode_run_chains(
 ai4bayescode_rhat_summary(run)
 
 # 4. Predict at new data X_new from the draws of all chains, then close the
-#    worker processes that hold the models.
+#    worker processes that hold the models (run$models). A BART sampler
+#    predicts at new X from its draws only when built with keep_tree = TRUE.
 pred <- predict(run, list(X = X_new))
 ai4bayescode_close_models(run)
 ```
+
+With `keep_models = FALSE`, `ai4bayescode_run_chains()` keeps no models and
+returns a plain list that starts with `histories`, `seeds` and `wall`, as in
+1.1.2.
 
 See the [API reference](https://ai4bayescode.com/api.html) for `get_history`,
 `predict_at` (posterior-predictive), diagnostics, and the Python equivalents.

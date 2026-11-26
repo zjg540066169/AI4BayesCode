@@ -1522,7 +1522,7 @@ prior context). These are VIZ-ONLY: predict_at's BFS never reads
 
 Gold standard: `examples/BartNoise.cpp` (hyperprior slots
 `sigma_nu`/`sigma_lambda` -> `sigma`, forest `BART` -> `f_bart`, all
-disjoint from its three predict edges). 33 of the 42 shipped examples
+disjoint from its three predict edges). 31 of the 43 shipped examples
 declare context edges.
 
 ---
@@ -2421,7 +2421,9 @@ AI4BayesCode::state_map get_current() const {
 Do NOT `return impl_->current_named_outputs();`: `composite_block` does not
 override it, so the base default returns `{ name() -> current() }` -- ONE entry
 keyed by the wrapper's class name, holding the concatenation of every child's
-vector. All 42 shipped examples assemble from `data().get(...)`.
+vector. 41 of the 43 shipped examples assemble from `data().get(...)`
+(ARDLasso from its members, OrderMCMCBN from its block's accessors); none
+returns `current_named_outputs()`.
 The canonical, copy-this reference is `examples/GaussianLocationScale.cpp`
 (its `get_current` / `get_history` / `predict_at` / `get_dag` bodies).
 
@@ -2442,7 +2444,9 @@ below for the exact wrapper-class additions and the
 `AI4BAYESCODE_BIND_KERNEL_CONTROL` and `AI4BAYESCODE_PYBIND_KERNEL_CONTROL` --
 do NOT declare or bind it. It calls `impl_->clear_history()` and then the
 wrapper's `clear_extra_history_()`; the current state, the RNG streams and the
-tuning are unchanged. A wrapper that records per-sweep values in members
+tuning are unchanged. Until the next `step()`, `get_history()` and
+`predict_at()` return the current draw as one row. A wrapper that records
+per-sweep values in members
 outside `impl_` (e.g. a `std::vector` that `step()` appends to and that
 `get_history()` or `predict_at()` uses) MUST define a PUBLIC
 
@@ -2450,7 +2454,7 @@ outside `impl_` (e.g. a `std::vector` that `step()` appends to and that
 void clear_extra_history_() { <every such member>.clear(); }
 ```
 
-that empties every such member, so that after `clear_history()` and `k` steps
+that empties every such member, so that after `clear_history()` and `k >= 1` steps
 every `get_history()` / `predict_at()` entry has `k` rows (`keep_history =
 true`). A private hook is a compile error in a wrapper that does not declare
 the mixin a friend. A wrapper without such members defines no hook; the
@@ -3077,7 +3081,7 @@ PYBIND11_MODULE(<ClassName>, m) {
 Python users invoke via `AI4BayesCode.source("MyModel.cpp")` (packaged; no path),
 which sets `-DAI4BAYESCODE_PYBIND_MODULE` at compile time.
 
-#### Dual-module (R + Python from the same .cpp -- all 42 shipped examples)
+#### Dual-module (R + Python from the same .cpp -- all 43 shipped examples)
 
 Guard both blocks; the active backend's `-D` define picks which one
 compiles. See `examples/ODE_SIR.cpp` for a full dual-module reference.
@@ -3121,7 +3125,7 @@ On Windows, use one of the two one-line recipes in "The validator runs it" above
 from the "MSYS2 UCRT64" terminal, or with `C:/msys64/ucrt64/bin` first on PATH).
 
 The `int main()` goes in ADDITION to both module blocks, each under its own
-`#ifdef`, exactly as all 42 shipped examples do -- the `#if !defined(...)` fence
+`#ifdef`, exactly as all 43 shipped examples do -- the `#if !defined(...)` fence
 already keeps `main` out of the module builds. Never gate the binding blocks on
 the runtime-backend answer. Useful
 for benchmarking, embedding into a larger C++ program, or Docker
@@ -3129,7 +3133,7 @@ deployment.
 
 ### BART examples are dual-module like everything else
 
-The BART kernels were ported to pure C++ (`bart_pure_cpp/`): they store
+The BART kernels are pure C++ (`bart_pure_cpp/`): they store
 data as `arma::mat` / `arma::vec` and draw from a seedable
 `std::mt19937_64` (`bart_rng::set_seed`), so nothing about them is
 R-specific. Every BART-using example (BartNoise, SoftBartNoise, the four

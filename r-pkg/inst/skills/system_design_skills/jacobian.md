@@ -22,8 +22,8 @@ layers:
   dimensional bijection between old and new parameter spaces in
   Green 1995 MH acceptance ratio. OWNED by library or auto-computed:
   using identity-coordinate proposals (Jacobian = 1 by construction);
-  library-provided transforms (`include/AI4BayesCode/rjmcmc_transforms.hpp`
-  -- ported from librjmcmc); and runtime autodiff on a user-supplied
+  library-provided transforms (`include/AI4BayesCode/rjmcmc_transforms.hpp`);
+  and runtime autodiff on a user-supplied
   templated forward + analytic inverse
   (`include/AI4BayesCode/rjmcmc_custom_bijection.hpp`).
 
@@ -144,7 +144,7 @@ unchanged. All existing identity-only examples work as-is; the library transform
 additive.
 
 `include/AI4BayesCode/rjmcmc_transforms.hpp` hosts both the N-dim
-templated transforms (from the T4 librjmcmc port, CeCILL-B
+templated transforms (derived from librjmcmc, CeCILL-B
 attribution) and the new 1D type-erased wrappers (library transforms).
 Multi-dim birth (birthing a block of coefs at once via a single
 transform) is a future multi-dim extension not required for per-

@@ -94,12 +94,16 @@ clear_history () -> void -- always
      calls clear_history() on every child), then calls the wrapper's
      clear_extra_history_() hook;
    * the current state, the RNG streams and the tuning quantities are
-     unchanged; the next step() records the first draw of the new history;
+     unchanged; the next step() records the first draw of the new history
+     (until then get_history() / predict_at() return the current draw as
+     one row; history_size() is 1);
    * a wrapper that records per-sweep values in members outside impl_
      defines a PUBLIC void clear_extra_history_() that empties them
      (codegen_cpp.md Sec.8);
    * ai4bayescode_run_chains() / run_chains() call it after the warmup
-     sweeps.
+     sweeps when the model has it; for a model compiled against 1.1.2
+     (no clear_history) they leave the warmup draws out of the returned
+     histories and of predict().
 
 readapt_NUTS (int n, bool reset, int max_tree_depth, double target_accept) -> void
              (a 3-arg forwarder without target_accept is also bound)

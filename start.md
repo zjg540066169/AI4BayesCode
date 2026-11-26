@@ -508,7 +508,8 @@ PowerShell):
   has both. Ask the user for the checkout path once and reuse it.
 - Everything after the compile is IDENTICAL to the installed branch:
   `ai4bayescode_run_chains` / `ai4bayescode_rhat_summary` /
-  `ai4bayescode_diagnose` are all provided by the checkout helpers too, so the
+  `ai4bayescode_diagnose` / `predict` / `ai4bayescode_close_models` are all
+  provided by the checkout helpers too, so the
   delivered example has the same shape in both modes -- only the first one or
   two lines differ. Never generate a different example structure for checkout
   users.

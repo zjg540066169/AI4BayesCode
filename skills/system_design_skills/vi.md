@@ -267,7 +267,7 @@ replacement. It combines:
    lambda-bar_gamma estimate vs Monte Carlo bound), default tau = 0.1.
 
 Reference implementation: Python package `viabel` (Welandawe et
-al.). v1 ports the algorithm to header-only C++ in
+al.). v1 implements the algorithm in header-only C++ in
 `include/AI4BayesCode/vi_optimizer.hpp` (Phase 3).
 
 **get_history() shape for VI blocks** (per child):
