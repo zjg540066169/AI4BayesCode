@@ -3,7 +3,9 @@
 Public API mirrors the R package's exported helpers:
 
     plot_dag(model, ...)                 # visualize the model DAG
-    run_chains(model_ctor, ...)          # parallel multi-chain MCMC
+    run_chains(factory, ...)             # parallel multi-chain MCMC
+    predict(chains, newdata)             # posterior prediction from all chains
+    close_models(chains)                 # stop the worker processes of a run
     rhat(samples), ess_bulk(samples)     # convergence diagnostics
 
 Typical workflow (self-contained -- no AI4BayesCode checkout needed, the
@@ -13,7 +15,7 @@ headers ship inside the installed package):
     mod = AI4BayesCode.source("MyModel.cpp")   # file path ...
     mod = AI4BayesCode.source(cpp_source_str)  # ... or a string
     m = mod.MyModel(y, X, rng_seed=1, keep_history=True)
-    m.step(5000); m.step(5000)
+    m.step(5000); m.clear_history(); m.step(5000)
     hist = m.get_history()
     AI4BayesCode.plot_dag(m)
 
@@ -28,12 +30,12 @@ block. For a reference model, see AI4BayesCode.examples_path("ODE_SIR").
 # Accelerate/vecLib above all, but also OpenBLAS with pthreads and MKL --
 # keeps a worker-thread pool; fork() copies only the calling thread, so the
 # child inherits a pool whose threads do not exist and the first heavy BLAS
-# call there dies. On macOS the crash is inside libdispatch
+# call there terminates the process. On macOS the crash is inside libdispatch
 # (`_dispatch_root_queue_push` under a LAPACK entry point, reported as
-# "crashed on child side of fork pre-exec") and it takes every worker with it.
+# "crashed on child side of fork pre-exec") and it terminates every worker.
 #
 # The cap has to be in place BEFORE the first BLAS call, because that is when
-# Accelerate decides whether to use its dispatch queues -- setting it later,
+# Accelerate determines whether its dispatch queues are used -- setting it later,
 # for instance inside run_chains(), has no effect at all. Hence: here, at
 # import, above every other import in this package.
 #
@@ -41,7 +43,7 @@ block. For a reference model, see AI4BayesCode.examples_path("ODE_SIR").
 # environment wins.
 #
 # The cap costs nothing in practice. The chains are separate processes
-# already, so n_jobs workers x k BLAS threads each would only oversubscribe
+# already, so n_cores workers x k BLAS threads each would only oversubscribe
 # the machine; measured on the GP examples, per-chain wall time is the same
 # or slightly better at one thread.
 import os as _os
