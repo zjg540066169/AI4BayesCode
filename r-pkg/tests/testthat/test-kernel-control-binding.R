@@ -51,6 +51,14 @@ public:                                                                         
         return {};                                                              \
     }                                                                           \
     int own_calls = 0;                                                          \
+    std::vector<double> readapt_args;                                           \
+    void readapt_NUTS(int n, bool reset, int depth, double target) {            \
+        readapt_args = {double(n), double(reset), double(depth), target};       \
+    }                                                                           \
+    void readapt_NUTS(int n, bool reset = false, int depth = -1) {             \
+        readapt_NUTS(n, reset, depth, -2.0);                                    \
+    }                                                                           \
+    std::vector<double> last_readapt() const { return readapt_args; }          \
     std::mt19937_64 rng_;                                                       \
     std::unique_ptr<AI4BayesCode::composite_block> impl_;
 )---"
@@ -92,7 +100,9 @@ public:
         AI4BAYESCODE_BIND_KERNEL_CONTROL(CLS)
 
 RCPP_MODULE(KcToysR_module) {
-    KC_BIND(KcPlain);
+    KC_BIND(KcPlain)
+        .method("last_readapt", &KcPlain::last_readapt)
+        AI4BAYESCODE_BIND_READAPT_NUTS(KcPlain);
     KC_BIND(KcBoolClear);
     KC_BIND(KcStringClear);
     KC_BIND(KcPrivateClear);
@@ -136,6 +146,19 @@ test_that("clear_history binding calls the wrapper's own no-argument clear_histo
     sub$clear_history()
     sub$step(2L)
     expect_identical(c(sub$n_rows(), sub$own_rows()), c(2L, 2L))
+})
+
+test_that("readapt_NUTS binding selects the 3- and 4-argument overloads", {
+    skip_on_cran()
+    skip_if_not_installed("Rcpp")
+    skip_if_not_installed("RcppArmadillo")
+    e <- new.env()
+    suppressMessages(ai4bayescode_source(.kc_toys, env = e, quiet = TRUE))
+    m <- methods::new(e$KcPlain)
+    m$readapt_NUTS(5L, TRUE, 3L)
+    expect_identical(m$last_readapt(), c(5, 1, 3, -2))
+    m$readapt_NUTS(6L, FALSE, -1L, 0.8)
+    expect_identical(m$last_readapt(), c(6, 0, -1, 0.8))
 })
 
 test_that("a redeclared mixin forwarder with another signature does not compile", {

@@ -75,6 +75,14 @@ public:                                                                         
         return {};                                                              \
     }                                                                           \
     int own_calls = 0;                                                          \
+    std::vector<double> readapt_args;                                           \
+    void readapt_NUTS(int n, bool reset, int depth, double target) {            \
+        readapt_args = {double(n), double(reset), double(depth), target};       \
+    }                                                                           \
+    void readapt_NUTS(int n, bool reset = false, int depth = -1) {             \
+        readapt_NUTS(n, reset, depth, -2.0);                                    \
+    }                                                                           \
+    std::vector<double> last_readapt() const { return readapt_args; }          \
     std::mt19937_64 rng_;                                                       \
     std::unique_ptr<AI4BayesCode::composite_block> impl_;
 
@@ -118,7 +126,9 @@ public:
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(CLS)
 
 PYBIND11_MODULE(KcToysPy, m) {
-    KC_BIND(KcPlain);
+    KC_BIND(KcPlain)
+        .def("last_readapt", &KcPlain::last_readapt)
+        AI4BAYESCODE_PYBIND_READAPT_NUTS(KcPlain);
     KC_BIND(KcBoolClear);
     KC_BIND(KcStringClear);
     KC_BIND(KcPrivateClear);
@@ -179,6 +189,14 @@ def test_clear_history_binding_dispatch(toys):
     sub.clear_history()
     sub.step(2)
     assert (sub.n_rows(), sub.own_rows()) == (2, 2)
+
+
+def test_readapt_binding_selects_the_overload(toys):
+    m = toys.KcPlain()
+    m.readapt_NUTS(5)
+    assert m.last_readapt() == [5.0, 0.0, -1.0, -1.0]
+    m.readapt_NUTS(6, True, 2, 0.7)
+    assert m.last_readapt() == [6.0, 1.0, 2.0, 0.7]
 
 
 # ---- freeze / unfreeze warnings (PyErr_WarnEx return value) ----------------

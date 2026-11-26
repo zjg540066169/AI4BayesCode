@@ -389,7 +389,7 @@ protected:
      * Appends to h one trajectory row from the current state (ELBO, mean,
      * log-sd or its packing, gamma, epoch): the row a converged block appends
      * per sweep. record_held_history() calls it when there is no stored or
-     * held row to repeat. The default (a subclass that keeps no trajectory)
+     * held row to repeat. The default (a subclass that stores no trajectory)
      * appends nothing.
      */
     virtual void push_state_row_(vi_history_t& /*h*/) const {}
