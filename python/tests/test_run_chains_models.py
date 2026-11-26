@@ -1457,8 +1457,13 @@ def test_a_nested_run_runs_in_parallel_and_is_closed_with_its_worker():
 # The bound on the worker processes kept by earlier runs
 # --------------------------------------------------------------------------
 @needs_fork
-def test_forty_kept_runs_stay_within_the_bound():
-    bound = max(8, 4 * (os.cpu_count() or 1))
+def test_forty_kept_runs_stay_within_the_bound(monkeypatch):
+    monkeypatch.delenv("AI4BAYESCODE_MAX_WORKERS", raising=False)
+    bound = rc._max_workers()
+    assert bound == max(8, 4 * (os.cpu_count() or 1))
+    if bound > 64:                      # 40 runs of 4 workers must exceed the bound
+        monkeypatch.setenv("AI4BAYESCODE_MAX_WORKERS", "64")
+        bound = 64
     for p in rc._open_pools():          # runs that earlier tests left open
         p.close()
     kept, evictions = [], 0
@@ -1474,7 +1479,9 @@ def test_forty_kept_runs_stay_within_the_bound():
             live = sum(len(p.workers) for p in rc._open_pools())
             assert live <= bound
             assert len(chain_workers()) <= bound
-        assert evictions == 40 - bound // 4
+        # One run closed per run beyond the bound; more when the soft limit on
+        # open files is the tighter one.
+        assert evictions >= 40 - bound // 4
         # The least recently used runs were closed; their handles say why.
         with pytest.raises(RuntimeError, match="closed by a later run_chains"):
             kept[0].models[0].get_history()
