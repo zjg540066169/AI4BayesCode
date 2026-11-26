@@ -103,6 +103,14 @@
 //   m  <- new(GBartMultinomial, X, as.numeric(y), 3L, 50L, 42L, FALSE, TRUE)
 //   #          X,    y,  n_classes, ntrees, seed, keep_tree, keep_history
 //   m$step(2000); str(m$get_current())            # $r, $probs, $log_phi
+//   # ---- Posterior at new X from every stored draw: keep_tree = TRUE ----
+//   # (predict(run, list(X = Xn)) requires keep_tree = TRUE in the factory as well)
+//   mh <- new(GBartMultinomial, X, as.numeric(y), 3L, 50L, 42L, TRUE, TRUE)  # keep_tree, keep_history
+//   mh$step(500L); mh$clear_history(); mh$step(500L)     # 500 stored draws, forests of each
+//   Xn <- cbind(seq(-1.5, 1.5, by = 0.5), 0, 0)          # 7 new points on the x1 axis
+//   pn <- mh$predict_at(list(X = Xn))                    # $r 500 x 14, $probs 500 x 21, $y_rep 500 x 7
+//   matrix(colMeans(pn$probs), ncol = 3L, byrow = TRUE)  # posterior mean P(y = 0, 1, 2) per point
+//   Et <- cbind(1, exp(1.2 * Xn[, 1]), exp(-Xn[, 1])); Et / rowSums(Et)   # truth
 // @example:python
 //   import numpy as np, AI4BayesCode
 //   rng = np.random.default_rng(42); N = 900       # well-identified C=3 DGP
@@ -121,6 +129,15 @@
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GBartMultinomial(X, y, n_classes=3, rng_seed=42, keep_history=True)
 //   m.step(2000); print(m.get_current())            # r, probs, log_phi
+//   # ---- Posterior at new X from every stored draw: keep_tree=True ----
+//   # (AI4BayesCode.predict(chains, {"X": ...}) requires keep_tree=True in the factory as well)
+//   mh = Mod.GBartMultinomial(X, y, 3, 50, 42, True, True)  # keep_tree, keep_history
+//   mh.step(500); mh.clear_history(); mh.step(500)          # 500 stored draws, forests of each
+//   Xn = np.column_stack([np.linspace(-1.5, 1.5, 7), np.zeros(7), np.zeros(7)])  # 7 new points
+//   pn = mh.predict_at({"X": Xn.flatten(order="F")})        # r (500, 14), probs (500, 21), y_rep (500, 7)
+//   print(pn["probs"].mean(axis=0).reshape(7, 3))           # posterior mean P(y = 0, 1, 2) per point
+//   Et = np.column_stack([np.ones(7), np.exp(1.2 * Xn[:, 0]), np.exp(-Xn[:, 0])])
+//   print(Et / Et.sum(1, keepdims=True))                    # truth
 // @example:end
 // ============================================================================
 
@@ -612,7 +629,7 @@ public:
     // Predict at new data. Takes a state_map with optional key "X"
     // (flattened column-major N_new x p matrix). Returns a history_map.
     //
-    //   * keep_history = FALSE, X supplied:
+    //   * keep_history = FALSE (or last_draw_only = TRUE), X supplied:
     //       r     : 1 x (N_new*(C-1)) flattened column-major r_j(X_new)
     //       probs : 1 x (N_new*C)     flattened-per-observation probs
     //   * keep_history = FALSE, empty map:
@@ -621,7 +638,16 @@ public:
     //   * keep_history = TRUE, empty map:
     //       y_rep : n_draws x N_train posterior-predictive samples, drawn
     //               from each stored draw's softmaxed r history.
-    //   New-X prediction in history mode is not implemented.
+    //   * keep_history = TRUE, X supplied: one row per stored draw d.
+    //       r     : n_draws x (N_new*(C-1)); r_{j,d} = the forest of class j
+    //               stored at sweep d evaluated at X_new
+    //               (genbart_block::predict_history; the augmentation offset
+    //               log_phi is not part of r_j), same layout as above
+    //       probs : n_draws x (N_new*C); softmax(0, r_{1,d}, ..., r_{C-1,d})
+    //               per point (reference class 0), same layout as above
+    //       y_rep : n_draws x N_new; y_rep_{d,i} ~ Categorical(probs_d[i, ])
+    //       Requires keep_tree = TRUE (the forests of the stored draws are
+    //       stored only then); without it the call raises an error.
     //
     // Uses predict_rng_ (const-preserving, persistent, seeded at
     // construction). Does NOT modify MCMC state in any mode.
@@ -720,12 +746,6 @@ public:
         }
 
         // ---- New-X prediction --------------------------------------
-        if (use_history) {
-            ai4b::stop("GBartMultinomial::predict_at: new-X prediction in "
-                       "history mode is not yet implemented. Use empty map "
-                       "or construct with keep_history = FALSE.");
-        }
-
         const arma::vec& x_flat = new_data.at("X");
         if (x_ncol_ == 0 || (x_flat.n_elem % x_ncol_) != 0) {
             ai4b::stop("GBartMultinomial::predict_at: flattened X length "
@@ -734,6 +754,73 @@ public:
         }
         const std::size_t N_new = x_flat.n_elem / x_ncol_;
         arma::mat X_new = arma::reshape(x_flat, N_new, x_ncol_);
+
+        if (use_history) {
+            // History mode: one row per stored draw d, computed from the C-1
+            // class forests stored at sweep d.
+            if (!keep_tree_) {
+                ai4b::stop("GBartMultinomial::predict_at: prediction at new X "
+                           "with keep_history = TRUE requires keep_tree = TRUE "
+                           "at construction (the forests of the stored draws "
+                           "are stored only then). Construct with keep_tree = "
+                           "TRUE, or pass last_draw_only = TRUE to predict "
+                           "from the current forests.");
+            }
+            // r_hist[j](d, i): forest of class j + 1 stored at sweep d, at
+            // row i of X_new.
+            std::vector<arma::mat> r_hist(C_ - 1);
+            for (std::size_t j = 0; j < C_ - 1; ++j) {
+                auto& g = dynamic_cast<genbart_block&>(impl_->child(1 + j));
+                r_hist[j] = g.predict_history(X_new);
+            }
+            const std::size_t n_draws = r_hist[0].n_rows;
+            for (std::size_t j = 0; j < C_ - 1; ++j) {
+                auto& g = dynamic_cast<genbart_block&>(impl_->child(1 + j));
+                if (r_hist[j].n_rows != n_draws || g.history_size() != n_draws) {
+                    ai4b::stop("GBartMultinomial::predict_at: inconsistent "
+                               "history sizes (forests of r_1=%d, forests of "
+                               "r_%d=%d, r_%d=%d)",
+                               (int)n_draws, (int)(j + 1),
+                               (int)r_hist[j].n_rows, (int)(j + 1),
+                               (int)g.history_size());
+                }
+            }
+            arma::mat r_mat(n_draws, N_new * (C_ - 1));
+            arma::mat probs_mat(n_draws, N_new * C_);
+            arma::mat yrep_mat(n_draws, N_new);
+            std::uniform_real_distribution<double> unif(0.0, 1.0);
+            std::vector<arma::vec> r_d(C_ - 1);
+            std::vector<const arma::vec*> ptrs(C_ - 1);
+            arma::vec probs;
+            for (std::size_t d = 0; d < n_draws; ++d) {
+                for (std::size_t j = 0; j < C_ - 1; ++j) {
+                    r_d[j] = r_hist[j].row(d).t();
+                    ptrs[j] = &r_d[j];
+                    for (std::size_t i = 0; i < N_new; ++i)
+                        r_mat(d, j * N_new + i) = r_d[j][i];
+                }
+                // Same softmax and categorical draw as the "probs" and
+                // "y_rep" refreshers.
+                softmax_with_ref(N_new, C_, ptrs, probs);
+                for (std::size_t k = 0; k < probs.n_elem; ++k)
+                    probs_mat(d, k) = probs[k];
+                for (std::size_t i = 0; i < N_new; ++i) {
+                    const double u = unif(predict_rng_);
+                    double acc = 0.0;
+                    std::size_t chosen = C_ - 1;
+                    for (std::size_t c = 0; c < C_; ++c) {
+                        acc += probs[i * C_ + c];
+                        if (u < acc) { chosen = c; break; }
+                    }
+                    yrep_mat(d, i) = static_cast<double>(chosen);
+                }
+            }
+            AI4BayesCode::history_map out;
+            out.emplace("r",     std::move(r_mat));
+            out.emplace("probs", std::move(probs_mat));
+            out.emplace("y_rep", std::move(yrep_mat));
+            return out;
+        }
 
         std::vector<arma::vec> r_new(C_ - 1);
         for (std::size_t j = 0; j < C_ - 1; ++j) {
@@ -804,11 +891,13 @@ RCPP_MODULE(GBartMultinomial_module) {
             "Short ctor: X (N x p), y in {0..n_classes-1}, n_classes, ntrees, seed; "
             "keep_tree and keep_history default FALSE.")
         .constructor<arma::mat, arma::vec, int, int, int, bool>(
-            "Ctor with keep_tree only (EXPENSIVE; for predict_history).")
+            "Ctor with keep_tree only (EXPENSIVE; required by predict_at at "
+            "new X with keep_history = TRUE).")
         .constructor<arma::mat, arma::vec, int, int, int, bool, bool>(
             "Full ctor: X (N x p), y in {0..n_classes-1}, n_classes (>= 2), ntrees, "
             "seed, keep_tree (forest snapshots; EXPENSIVE; default "
-            "FALSE), keep_history (numeric buffers; cheap; default "
+            "FALSE; required by predict_at at new X with keep_history = "
+            "TRUE), keep_history (numeric buffers; cheap; default "
             "FALSE).")
         .method("step", (void (GBartMultinomial::*)())    &GBartMultinomial::step, "Run one sweep.")
         .method("step", (void (GBartMultinomial::*)(int)) &GBartMultinomial::step,
@@ -832,7 +921,9 @@ RCPP_MODULE(GBartMultinomial_module) {
                     &GBartMultinomial::predict_at_r,
                 "Predict at new data. Pass list(X = as.vector(X_new)) "
                 "(flattened column-major) or an empty list for posterior "
-                "predictive at training X. Const, no state mutation.")
+                "predictive at training X. keep_history = TRUE: one row per "
+                "stored draw (at new X r, probs and y_rep, which requires "
+                "keep_tree = TRUE). Const, no state mutation.")
         .method("predict_at",
                 (AI4BayesCode::history_map (GBartMultinomial::*)(Rcpp::List, bool) const)
                     &GBartMultinomial::predict_at_r,

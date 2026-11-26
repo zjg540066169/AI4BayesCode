@@ -20,6 +20,21 @@
 //        equals sigmoid(fit);
 //    C4  set_current with an X whose length is not a multiple of p throws
 //        and leaves r, prob and X unchanged.
+//  predict_at at new X with keep_history = TRUE and keep_tree = TRUE:
+//    C5  r, p and y_rep have one row per stored draw; row d of r and p
+//        equals the single-draw prediction of a second model loaded with
+//        get_tree_history()[d] (set_tree, then predict_at(X, TRUE)), bit for
+//        bit; y_rep is 0/1 and T = sum_{d,i} (y_rep - p) / sqrt(sum p (1 - p))
+//        has |T| < 5; the last row equals the last_draw_only prediction bit
+//        for bit;
+//    C6  with the training X as new data, row d of r equals row d of
+//        get_history() r (relative tolerance 1e-12);
+//    C7  without keep_tree, the history-mode prediction at new X throws with
+//        a message that names keep_tree = TRUE, and last_draw_only gives one
+//        row;
+//    C8  a model with clear_history() after K1 sweeps and K2 more sweeps
+//        gives K2 rows of r and p, equal to the last K2 rows of a model
+//        built and stepped with the same seed without the call, bit for bit.
 //  The forest's fit is the block's own current value; prob is compared with
 //  sigmoid(fit) computed in this test (relative tolerance 1e-12).
 // ============================================================================
@@ -30,6 +45,7 @@
 #include <memory>
 #include <random>
 #include <string>
+#include <vector>
 
 #include "AI4BayesCode/composite_block.hpp"
 
@@ -71,6 +87,19 @@ double max_rel(const arma::vec& a, const arma::vec& b) {
     double e = 0.0;
     for (std::size_t i = 0; i < a.n_elem; ++i)
         e = std::max(e, std::abs(a[i] - b[i]) / std::max(1.0, std::abs(b[i])));
+    return e;
+}
+
+bool same_bits(const arma::mat& a, const arma::mat& b) {
+    return a.n_rows == b.n_rows && a.n_cols == b.n_cols &&
+           std::memcmp(a.memptr(), b.memptr(), a.n_elem * sizeof(double)) == 0;
+}
+
+double max_rel(const arma::mat& a, const arma::mat& b) {
+    if (a.n_rows != b.n_rows || a.n_cols != b.n_cols) return INFINITY;
+    double e = 0.0;
+    for (arma::uword k = 0; k < a.n_elem; ++k)
+        e = std::max(e, std::abs(a[k] - b[k]) / std::max(1.0, std::abs(b[k])));
     return e;
 }
 
@@ -151,6 +180,90 @@ int main() {
     check(threw && same_bits(r0, d.get("r")) && same_bits(p0, d.get("prob")) &&
           same_bits(X0, d.get("X")),
           "C4 a failing set_current leaves r, prob and X unchanged");
+
+    // ---- predict_at at new X in history mode ------------------------------
+    const std::size_t K = 25, K1 = 6, K2 = 9, Nn = 40;
+    arma::mat Xn(Nn, p);
+    for (std::size_t i = 0; i < Nn; ++i)
+        for (std::size_t j = 0; j < p; ++j) Xn(i, j) = unif(gen);
+    AI4BayesCode::state_map nd, nd_train;
+    nd["X"] = arma::vec(arma::vectorise(Xn));
+    nd_train["X"] = arma::vec(arma::vectorise(X));
+
+    // C5
+    GBartLogistic mh(X, y, 20, 5, true, true);
+    mh.step(static_cast<int>(K));
+    const auto pn = mh.predict_at(nd);
+    const arma::mat& R5 = pn.at("r");
+    const arma::mat& P5 = pn.at("p");
+    const arma::mat& Y5 = pn.at("y_rep");
+    const std::vector<std::string> th = mh.get_tree_history();
+    GBartLogistic probe(X, y, 20, 99, false, false);
+    bool rows_ok = th.size() == K;
+    for (std::size_t dd = 0; rows_ok && dd < K; ++dd) {
+        probe.set_tree(th[dd]);
+        const auto q = probe.predict_at(nd, true);
+        rows_ok = same_bits(arma::mat(R5.row(dd)), q.at("r")) &&
+                  same_bits(arma::mat(P5.row(dd)), q.at("p"));
+    }
+    double T5 = 0.0, V5 = 0.0;
+    bool binary = true;
+    for (arma::uword k = 0; k < Y5.n_elem; ++k) {
+        binary = binary && (Y5[k] == 0.0 || Y5[k] == 1.0);
+        T5 += Y5[k] - P5[k];
+        V5 += P5[k] * (1.0 - P5[k]);
+    }
+    const auto pl = mh.predict_at(nd, true);
+    const bool last5 = R5.n_rows == K && same_bits(arma::mat(R5.row(K - 1)), pl.at("r")) &&
+                       same_bits(arma::mat(P5.row(K - 1)), pl.at("p"));
+    std::printf("C5 history, new X: r %d x %d, p %d x %d, y_rep %d x %d; rows = stored "
+                "forests: %d; y_rep T/sd = %.3f; last row = last_draw_only: %d\n",
+                (int)R5.n_rows, (int)R5.n_cols, (int)P5.n_rows, (int)P5.n_cols,
+                (int)Y5.n_rows, (int)Y5.n_cols, rows_ok ? 1 : 0, T5 / std::sqrt(V5),
+                last5 ? 1 : 0);
+    check(R5.n_rows == K && R5.n_cols == Nn && P5.n_rows == K && P5.n_cols == Nn &&
+          Y5.n_rows == K && Y5.n_cols == Nn && rows_ok,
+          "C5 row d of r and p comes from the forest stored at sweep d");
+    check(binary && std::abs(T5 / std::sqrt(V5)) < 5.0,
+          "C5 y_rep of row d is drawn from Bernoulli(p of row d)");
+    check(last5, "C5 the last row equals the last_draw_only prediction");
+
+    // C6
+    const arma::mat R6 = mh.predict_at(nd_train).at("r");
+    const double e6 = max_rel(R6, mh.get_history().at("r"));
+    std::printf("C6 training X as new data: max rel |r - get_history() r| = %.3g\n", e6);
+    check(R6.n_rows == K && e6 <= 1e-12,
+          "C6 the forests stored at sweep d reproduce the stored r of draw d");
+
+    // C7
+    GBartLogistic mn(X, y, 20, 5, false, true);
+    mn.step(3);
+    std::string msg;
+    try { mn.predict_at(nd); } catch (const std::exception& e) { msg = e.what(); }
+    const arma::mat R7 = mn.predict_at(nd, true).at("r");
+    check(msg.find("keep_tree = TRUE") != std::string::npos && R7.n_rows == 1 &&
+          R7.n_cols == Nn,
+          "C7 without keep_tree the history-mode prediction at new X names keep_tree = TRUE");
+
+    // C8: the models are built and stepped one after the other (they share
+    // the thread's kernel stream, which each constructor seeds).
+    GBartLogistic mA(X, y, 20, 5, true, true);
+    mA.step(static_cast<int>(K1));
+    mA.clear_history();
+    mA.step(static_cast<int>(K2));
+    const auto pA = mA.predict_at(nd);
+    GBartLogistic mB(X, y, 20, 5, true, true);
+    mB.step(static_cast<int>(K1 + K2));
+    const auto pB = mB.predict_at(nd);
+    const arma::mat& RA = pA.at("r");
+    const arma::mat& RB = pB.at("r");
+    const bool tail8 = RA.n_rows == K2 && RB.n_rows == K1 + K2 &&
+                       same_bits(RA, arma::mat(RB.rows(K1, K1 + K2 - 1))) &&
+                       same_bits(pA.at("p"), arma::mat(pB.at("p").rows(K1, K1 + K2 - 1))) &&
+                       pA.at("y_rep").n_rows == K2;
+    std::printf("C8 clear_history(): rows %d (model without the call: %d)\n",
+                (int)RA.n_rows, (int)RB.n_rows);
+    check(tail8, "C8 after clear_history() the rows are the draws of the later sweeps");
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail,
                 g_fail == 1 ? "" : "s");

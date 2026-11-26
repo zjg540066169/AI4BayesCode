@@ -141,9 +141,10 @@ r_true <- 1 + 2 * X_lbp[, 1] - X_lbp[, 2]
 y_lbp  <- rpois(N_lbp, exp(r_true))
 
 # keep_history = FALSE on purpose: this section wants the LIVE-TREE
-# (stateful) predict_at at new X. In history mode GBartPoisson refuses a
-# new-X prediction ("not yet implemented"), so turning history on here breaks
-# the very thing the section tests.
+# (stateful) predict_at at new X. In history mode GBartPoisson predicts at new
+# X from the forest of every stored draw instead (and requires keep_tree =
+# TRUE for it), so turning history on here changes the very thing the section
+# tests.
 m <- new(GBartPoisson, X_lbp, as.numeric(y_lbp), 50L, 101L, FALSE, FALSE)
 m$step(500L)
 m$step(500L)

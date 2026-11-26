@@ -75,6 +75,13 @@
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GBartLogistic, X, y, rng_seed = 42L)   # ntrees 50 -- single chain
 //   m$step(2000L); str(m$get_current())         # $r linear predictor, $p fitted prob
+//   # ---- Posterior at new X from every stored draw: keep_tree = TRUE ----
+//   # (predict(run, list(X = Xn)) requires keep_tree = TRUE in the factory as well)
+//   mh <- new(GBartLogistic, X, y, rng_seed = 42L, keep_tree = TRUE, keep_history = TRUE)
+//   mh$step(500L); mh$clear_history(); mh$step(500L)      # 500 stored draws, forest of each
+//   Xn <- cbind(seq(-1.5, 1.5, by = 0.5), 0, 0)           # 7 new points on the x1 axis
+//   pn <- mh$predict_at(list(X = Xn)); dim(pn$p)          # $r, $p, $y_rep: 500 x 7 each
+//   rbind(colMeans(pn$p), 1 / (1 + exp(-1.5 * Xn[, 1])))  # posterior mean P(y = 1) vs truth
 // @example:python
 //   import numpy as np, AI4BayesCode
 //   rng = np.random.default_rng(42); N, p = 800, 3          # well-identified DGP (= int main)
@@ -91,6 +98,13 @@
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GBartLogistic(X, y, rng_seed=42)                # X, y, seed (ntrees 50)
 //   m.step(2000); print(m.get_current())                   # 'r' linear predictor, 'p' fitted prob
+//   # ---- Posterior at new X from every stored draw: keep_tree=True ----
+//   # (AI4BayesCode.predict(chains, {"X": ...}) requires keep_tree=True in the factory as well)
+//   mh = Mod.GBartLogistic(X, y, rng_seed=42, keep_tree=True, keep_history=True)
+//   mh.step(500); mh.clear_history(); mh.step(500)          # 500 stored draws, forest of each
+//   Xn = np.column_stack([np.linspace(-1.5, 1.5, 7), np.zeros(7), np.zeros(7)])  # 7 new points
+//   pn = mh.predict_at({"X": Xn.flatten(order="F")})        # r, p, y_rep: (500, 7) each
+//   print(pn["p"].mean(axis=0), 1 / (1 + np.exp(-1.5 * Xn[:, 0])))  # posterior mean vs truth
 // @example:end
 
 // [[Rcpp::depends(RcppArmadillo)]]
@@ -372,10 +386,15 @@ public:
     //              draw's r history (documented genBART shadow loop -- forests
     //              cannot be injected through predict_at's replaced-key
     //              validation, so this iterates the stored r directly).
-    //   * X supplied, keep_history = FALSE:
+    //   * X supplied, keep_history = FALSE (or last_draw_only = TRUE):
     //       r, p:  linear predictor + fitted probability at X_new from the
-    //              CURRENT forest.
-    //   * X supplied, keep_history = TRUE: not implemented (see error).
+    //              CURRENT forest (1 x N_new).
+    //   * X supplied, keep_history = TRUE: n_draws x N_new, one row per
+    //       stored draw d. r_d = the forest stored at sweep d evaluated at
+    //       X_new (genbart_block::predict_history; no offset), p_d =
+    //       sigmoid(r_d), y_rep_d ~ Bernoulli(p_d) per point. Requires
+    //       keep_tree = TRUE (the forests of the stored draws are stored only
+    //       then); without it the call raises an error.
     //
     // X is passed as a FLATTENED column-major vector under key "X"
     // (length N_new * p); reshaped here back into an N_new x p matrix.
@@ -444,11 +463,6 @@ public:
         }
 
         // ---- New-X prediction ------------------------------------------
-        if (use_history) {
-            ai4b::stop("GBartLogistic::predict_at: new-X prediction in "
-                       "history mode is not yet implemented. Use an empty map "
-                       "or construct with keep_history = FALSE.");
-        }
         const arma::vec& x_flat = new_data.at("X");
         if (x_ncol_ == 0 || (x_flat.n_elem % x_ncol_) != 0) {
             ai4b::stop("GBartLogistic::predict_at: flattened X length %d "
@@ -459,6 +473,41 @@ public:
         arma::mat X_new = arma::reshape(x_flat, n_new, x_ncol_);
 
         auto& blk = dynamic_cast<genbart_block&>(impl_->child(0));
+
+        if (use_history) {
+            // History mode: one row per stored draw d, computed from the
+            // forest stored at sweep d (no offset in this model).
+            if (!keep_tree_) {
+                ai4b::stop("GBartLogistic::predict_at: prediction at new X "
+                           "with keep_history = TRUE requires keep_tree = TRUE "
+                           "at construction (the forests of the stored draws "
+                           "are stored only then). Construct with keep_tree = "
+                           "TRUE, or pass last_draw_only = TRUE to predict "
+                           "from the current forest.");
+            }
+            arma::mat r_hist = blk.predict_history(X_new);  // n_draws x N_new
+            const std::size_t n_draws = r_hist.n_rows;
+            if (n_draws != blk.history_size()) {
+                ai4b::stop("GBartLogistic::predict_at: inconsistent history "
+                           "sizes (forests=%d, r=%d)",
+                           (int)n_draws, (int)blk.history_size());
+            }
+            arma::mat p_mat(n_draws, n_new), yrep_mat(n_draws, n_new);
+            for (std::size_t d = 0; d < n_draws; ++d) {
+                for (std::size_t i = 0; i < n_new; ++i) {
+                    const double p = safe_sigmoid(r_hist(d, i));
+                    p_mat(d, i) = p;
+                    std::bernoulli_distribution bern(p);
+                    yrep_mat(d, i) = bern(predict_rng_) ? 1.0 : 0.0;
+                }
+            }
+            AI4BayesCode::history_map out;
+            out.emplace("r",     std::move(r_hist));
+            out.emplace("p",     std::move(p_mat));
+            out.emplace("y_rep", std::move(yrep_mat));
+            return out;
+        }
+
         arma::vec r = blk.predict_r(X_new);
 
         arma::mat r_mat(1, r.n_elem), p_mat(1, r.n_elem);
@@ -514,10 +563,12 @@ RCPP_MODULE(GBartLogistic_module) {
             "default FALSE.")
         .constructor<arma::mat, arma::vec, int, int, bool>(
             "Ctor with keep_tree only: X, y, ntrees, seed, keep_tree "
-            "(EXPENSIVE; required for predict_history).")
+            "(EXPENSIVE; required by predict_at at new X with "
+            "keep_history = TRUE).")
         .constructor<arma::mat, arma::vec, int, int, bool, bool>(
             "Full ctor: X (N x p), y (0/1), ntrees, seed, keep_tree "
-            "(forest snapshots per step; EXPENSIVE; default FALSE), "
+            "(forest snapshots per step; EXPENSIVE; default FALSE; "
+            "required by predict_at at new X with keep_history = TRUE), "
             "keep_history (numeric per-step buffers; cheap; default FALSE).")
         .method("step", (void (GBartLogistic::*)())    &GBartLogistic::step, "Run one sweep.")
         .method("step", (void (GBartLogistic::*)(int)) &GBartLogistic::step,
@@ -541,7 +592,9 @@ RCPP_MODULE(GBartLogistic_module) {
                     &GBartLogistic::predict_at_r,
                 "Predict at new data. Pass list(X = as.vector(X_new)) "
                 "(flattened column-major) for r/p at X_new, or list() for "
-                "posterior-predictive y_rep at training X. Const, no state "
+                "posterior-predictive y_rep at training X. keep_history = "
+                "TRUE: one row per stored draw (at new X r, p and y_rep, "
+                "which requires keep_tree = TRUE). Const, no state "
                 "mutation.")
         .method("predict_at",
                 (AI4BayesCode::history_map (GBartLogistic::*)(Rcpp::List, bool) const)

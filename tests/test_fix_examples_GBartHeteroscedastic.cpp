@@ -24,6 +24,22 @@
 //        draw d with the phi of sweep d (phi_d from get_current() after
 //        that sweep): v_d = mean_i (y_rep - m)^2 / m over the N training
 //        points satisfies |v_d / phi_d - 1| < 6 sqrt(2 / N) for every d.
+//  predict_at at new X with keep_history = TRUE and keep_tree = TRUE:
+//    C6  r, mean, mean_r and y_rep have one row per stored draw; row d of r
+//        and mean equals the single-draw prediction of a second model loaded
+//        with get_tree_history()[d] (set_tree, then predict_at(X, TRUE)), bit
+//        for bit, and mean_r equals mean; y_rep of draw d uses the phi of
+//        sweep d: v_d = mean_i (y_rep - m)^2 / m over the Nn new points
+//        satisfies |v_d / phi_d - 1| < 6 sqrt(2 / Nn) for every d; the last
+//        row of r and mean equals the last_draw_only prediction bit for bit;
+//    C7  with the training X as new data, row d of r equals row d of
+//        get_history() r (relative tolerance 1e-12);
+//    C8  without keep_tree, the history-mode prediction at new X throws with
+//        a message that names keep_tree = TRUE, and last_draw_only gives one
+//        row;
+//    C9  a model with clear_history() after K1 sweeps and K2 more sweeps
+//        gives K2 rows of r and mean, equal to the last K2 rows of a model
+//        built and stepped with the same seed without the call, bit for bit.
 //  The forest's fit is the block's own current value; mean_r is compared
 //  with exp(fit) computed in this test (relative tolerance 1e-12).
 // ============================================================================
@@ -34,6 +50,7 @@
 #include <memory>
 #include <random>
 #include <string>
+#include <vector>
 
 #include "AI4BayesCode/composite_block.hpp"
 
@@ -75,6 +92,19 @@ double max_rel(const arma::vec& a, const arma::vec& b) {
     double e = 0.0;
     for (std::size_t i = 0; i < a.n_elem; ++i)
         e = std::max(e, std::abs(a[i] - b[i]) / std::max(1.0, std::abs(b[i])));
+    return e;
+}
+
+bool same_bits(const arma::mat& a, const arma::mat& b) {
+    return a.n_rows == b.n_rows && a.n_cols == b.n_cols &&
+           std::memcmp(a.memptr(), b.memptr(), a.n_elem * sizeof(double)) == 0;
+}
+
+double max_rel(const arma::mat& a, const arma::mat& b) {
+    if (a.n_rows != b.n_rows || a.n_cols != b.n_cols) return INFINITY;
+    double e = 0.0;
+    for (arma::uword k = 0; k < a.n_elem; ++k)
+        e = std::max(e, std::abs(a[k] - b[k]) / std::max(1.0, std::abs(b[k])));
     return e;
 }
 
@@ -193,6 +223,98 @@ int main() {
         check(worst < 6.0 * std::sqrt(2.0 / Nh),
               "C5 history-mode y_rep of each draw uses the phi of that sweep");
     }
+
+    // ---- predict_at at new X in history mode ------------------------------
+    const std::size_t K = 25, K1 = 6, K2 = 9, Nn = 1000;
+    arma::mat Xn(Nn, p);
+    for (std::size_t i = 0; i < Nn; ++i)
+        for (std::size_t j = 0; j < p; ++j) Xn(i, j) = unif(gen);
+    AI4BayesCode::state_map nx, nx_train;
+    nx["X"] = arma::vec(arma::vectorise(Xn));
+    nx_train["X"] = arma::vec(arma::vectorise(X));
+
+    // C6: phi starts far from its posterior, so it changes over the sweeps.
+    GBartHeteroscedastic mh(X, y, 20, 20.0, 5, true, true);
+    std::vector<double> phi_d;
+    for (std::size_t t = 0; t < K; ++t) {
+        mh.step(1);
+        phi_d.push_back(mh.get_current().at("phi")[0]);
+    }
+    const auto pn = mh.predict_at(nx);
+    const arma::mat& R6 = pn.at("r");
+    const arma::mat& M6 = pn.at("mean");
+    const arma::mat& Y6 = pn.at("y_rep");
+    const std::vector<std::string> th = mh.get_tree_history();
+    GBartHeteroscedastic probe(X, y, 20, 1.0, 99, false, false);
+    bool rows_ok = th.size() == K;
+    for (std::size_t dd = 0; rows_ok && dd < K; ++dd) {
+        probe.set_tree(th[dd]);
+        const auto q = probe.predict_at(nx, true);
+        rows_ok = same_bits(arma::mat(R6.row(dd)), q.at("r")) &&
+                  same_bits(arma::mat(M6.row(dd)), q.at("mean"));
+    }
+    double worst = 0.0;
+    for (std::size_t dd = 0; dd < Y6.n_rows && dd < phi_d.size(); ++dd) {
+        double v = 0.0;
+        for (std::size_t i = 0; i < Nn; ++i) {
+            const double mm = M6(dd, i);
+            v += (Y6(dd, i) - mm) * (Y6(dd, i) - mm) / mm;
+        }
+        v /= static_cast<double>(Nn);
+        worst = std::max(worst, std::abs(v / phi_d[dd] - 1.0));
+    }
+    const auto pl = mh.predict_at(nx, true);
+    const bool last6 = R6.n_rows == K && same_bits(arma::mat(R6.row(K - 1)), pl.at("r")) &&
+                       same_bits(arma::mat(M6.row(K - 1)), pl.at("mean"));
+    std::printf("C6 history, new X: r %d x %d, mean %d x %d, y_rep %d x %d; rows = stored "
+                "forests: %d; phi_d from %.3f to %.3f, max |v_d / phi_d - 1| = %.3f "
+                "(bound %.3f); last row = last_draw_only: %d\n",
+                (int)R6.n_rows, (int)R6.n_cols, (int)M6.n_rows, (int)M6.n_cols,
+                (int)Y6.n_rows, (int)Y6.n_cols, rows_ok ? 1 : 0, phi_d.front(),
+                phi_d.back(), worst, 6.0 * std::sqrt(2.0 / Nn), last6 ? 1 : 0);
+    check(R6.n_rows == K && R6.n_cols == Nn && M6.n_rows == K && Y6.n_rows == K &&
+          Y6.n_cols == Nn && rows_ok && same_bits(pn.at("mean_r"), M6),
+          "C6 row d of r and mean comes from the forest stored at sweep d");
+    check(worst < 6.0 * std::sqrt(2.0 / Nn),
+          "C6 y_rep of row d is drawn with the phi of sweep d");
+    check(last6, "C6 the last row equals the last_draw_only prediction");
+
+    // C7
+    const arma::mat R7 = mh.predict_at(nx_train).at("r");
+    const double e7 = max_rel(R7, mh.get_history().at("r"));
+    std::printf("C7 training X as new data: max rel |r - get_history() r| = %.3g\n", e7);
+    check(R7.n_rows == K && e7 <= 1e-12,
+          "C7 the forests stored at sweep d reproduce the stored r of draw d");
+
+    // C8
+    GBartHeteroscedastic mn(X, y, 20, 1.0, 5, false, true);
+    mn.step(3);
+    std::string msg;
+    try { mn.predict_at(nx); } catch (const std::exception& e) { msg = e.what(); }
+    const arma::mat R8 = mn.predict_at(nx, true).at("r");
+    check(msg.find("keep_tree = TRUE") != std::string::npos && R8.n_rows == 1 &&
+          R8.n_cols == Nn,
+          "C8 without keep_tree the history-mode prediction at new X names keep_tree = TRUE");
+
+    // C9: the models are built and stepped one after the other (they share
+    // the thread's kernel stream, which each constructor seeds).
+    GBartHeteroscedastic mA(X, y, 20, 1.0, 5, true, true);
+    mA.step(static_cast<int>(K1));
+    mA.clear_history();
+    mA.step(static_cast<int>(K2));
+    const auto pA = mA.predict_at(nx);
+    GBartHeteroscedastic mB(X, y, 20, 1.0, 5, true, true);
+    mB.step(static_cast<int>(K1 + K2));
+    const auto pB = mB.predict_at(nx);
+    const arma::mat& RA = pA.at("r");
+    const arma::mat& RB = pB.at("r");
+    const bool tail9 = RA.n_rows == K2 && RB.n_rows == K1 + K2 &&
+                       same_bits(RA, arma::mat(RB.rows(K1, K1 + K2 - 1))) &&
+                       same_bits(pA.at("mean"), arma::mat(pB.at("mean").rows(K1, K1 + K2 - 1))) &&
+                       pA.at("y_rep").n_rows == K2;
+    std::printf("C9 clear_history(): rows %d (model without the call: %d)\n",
+                (int)RA.n_rows, (int)RB.n_rows);
+    check(tail9, "C9 after clear_history() the rows are the draws of the later sweeps");
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail,
                 g_fail == 1 ? "" : "s");
