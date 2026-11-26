@@ -20,6 +20,24 @@
 //        loaded theta;
 //    C5  set_current with an empty beta, gamma or sigma throws and leaves
 //        get_current() unchanged.
+//  predict_at with new t_obs / y0 (history mode unless stated):
+//    C6  predict_at({}), predict_at({t_obs}) and predict_at({y0, t_obs}) with
+//        the training values give the same I_traj and y_rep bit for bit;
+//    C7  at new times starting after 0 and a new y0: one row per stored
+//        draw; row d of I_traj equals sir_I_at(y0, t, theta_d) bit for bit
+//        and a solve with rtol = atol = 1e-10 to 1e-5 relative; y_rep[d, i]
+//        equals I_traj[d, i] * exp(sigma_d * z) bit for bit, with z the
+//        standard normals of a copy of predict_rng_ (a new
+//        std::normal_distribution per draw, as in the y_rep refresher); the
+//        call leaves get_history(), get_current() and the shared data
+//        unchanged;
+//    C8  at times 0..9 (a prefix of the training times): I_traj[d, 0] = I0;
+//    C9  single-draw path (keep_history = false, and last_draw_only = true):
+//        one row from the current theta and sigma, the same formulas;
+//    C10 after clear_history() (no stored draw): one row from the current
+//        state;
+//    C11 invalid t_obs / y0 / keys throw std::invalid_argument and leave the
+//        model unchanged.
 //  The solution is recomputed in this test with the example's own sir_rhs
 //  and solver settings (relative tolerance 1e-12). Centred: the mean of
 //  log(I_rep / I_traj) / sigma over the 15 times lies within
@@ -27,12 +45,16 @@
 // ============================================================================
 #include <armadillo>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <random>
+#include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "AI4BayesCode/composite_block.hpp"
 
@@ -93,6 +115,71 @@ double yrep_z(const ODE_SIR& m) {
 bool same_bits(const arma::vec& a, const arma::vec& b) {
     return a.n_elem == b.n_elem &&
            std::memcmp(a.memptr(), b.memptr(), a.n_elem * sizeof(double)) == 0;
+}
+
+bool same_bits_mat(const arma::mat& a, const arma::mat& b) {
+    return a.n_rows == b.n_rows && a.n_cols == b.n_cols &&
+           std::memcmp(a.memptr(), b.memptr(), a.n_elem * sizeof(double)) == 0;
+}
+
+bool same_maps(const AI4BayesCode::history_map& a, const AI4BayesCode::history_map& b) {
+    if (a.size() != b.size()) return false;
+    for (const auto& kv : a) {
+        auto it = b.find(kv.first);
+        if (it == b.end() || !same_bits_mat(kv.second, it->second)) return false;
+    }
+    return true;
+}
+
+// The stream of predict_rng_ of a model built with rng_seed (nonzero).
+std::mt19937_64 predict_stream(int rng_seed) {
+    return std::mt19937_64{static_cast<std::uint64_t>(rng_seed) ^ 0x9E3779B97F4A7C15ULL};
+}
+
+// Checks rows of I_traj / y_rep against the per-draw formulas: row r uses
+// theta = thetas.row(r), sigma = sigmas(r, 0), and one new normal_distribution
+// per row on `g`. Returns {max bitwise mismatches, max rel error vs the
+// rtol = atol = 1e-10 solve}.
+struct row_check { int I_mismatch = 0; int y_mismatch = 0; double rel_err = 0.0; };
+row_check check_rows(const arma::mat& I_traj, const arma::mat& y_rep,
+                     const arma::mat& thetas, const arma::mat& sigmas,
+                     const arma::vec& y0, const arma::vec& t, std::mt19937_64& g) {
+    row_check rc;
+    arma::vec ts = t;
+    if (t[0] > 0.0) { ts.set_size(t.n_elem + 1); ts[0] = 0.0; ts.subvec(1, t.n_elem) = t; }
+    const arma::uword off = ts.n_elem - t.n_elem;
+    for (arma::uword r = 0; r < I_traj.n_rows; ++r) {
+        const arma::vec th = thetas.row(r).t();
+        const arma::vec ref = sir_I_at(y0, t, th);
+        const arma::vec I_r = I_traj.row(r).t();
+        if (!same_bits(I_r, ref)) ++rc.I_mismatch;
+        const arma::mat tight = AI4BayesCode::ode::rk45(sir_rhs, y0, ts, th, 1e-10, 1e-10);
+        for (arma::uword i = 0; i < t.n_elem; ++i)
+            rc.rel_err = std::max(rc.rel_err, std::abs(I_r[i] - tight(i + off, 1)) /
+                                                  std::max(1e-300, std::abs(tight(i + off, 1))));
+        std::normal_distribution<double> nd(0.0, 1.0);
+        for (arma::uword i = 0; i < t.n_elem; ++i) {
+            const double expect = I_r[i] * std::exp(sigmas(r, 0) * nd(g));
+            if (std::memcmp(&expect, &y_rep(r, i), sizeof(double)) != 0) ++rc.y_mismatch;
+        }
+    }
+    return rc;
+}
+
+// Runs one group of checks; an exception counts as a failure of the group
+// instead of ending the test process.
+template <class F>
+void guarded(const char* label, F&& f) {
+    try { f(); }
+    catch (const std::exception& e) { check(false, std::string(label) + " threw: " + e.what()); }
+    catch (...) { check(false, std::string(label) + " threw a non-std exception"); }
+}
+
+bool throws_invalid(const ODE_SIR& m, const AI4BayesCode::state_map& nd, bool single) {
+    try { (void)m.predict_at(nd, single); }
+    catch (const std::invalid_argument&) { return true; }
+    catch (...) { return false; }
+    return false;
 }
 
 }  // namespace
@@ -182,6 +269,138 @@ int main() {
         }
         check(ok, "C5 set_current with an empty beta, gamma or sigma throws and leaves get_current() unchanged");
     }
+
+    // ---- predict_at with new t_obs / y0 -----------------------------------
+    const int seed_p = 23;
+    const int n_sweeps = 25;
+    auto fitted = [&](bool keep) {
+        auto mp = std::make_unique<ODE_SIR>(990.0, 10.0, 0.0, t_obs, I_obs, seed_p, keep);
+        mp->step(n_sweeps);
+        return mp;
+    };
+    guarded("C6", [&] {
+        AI4BayesCode::state_map nd_t;  nd_t["t_obs"] = t_obs;
+        AI4BayesCode::state_map nd_ty; nd_ty["t_obs"] = t_obs; nd_ty["y0"] = y0;
+        const auto pa = fitted(true)->predict_at(AI4BayesCode::state_map{});
+        const auto pb = fitted(true)->predict_at(nd_t);
+        const auto pc = fitted(true)->predict_at(nd_ty);
+        std::printf("C6 keys %zu, I_traj %llu x %llu\n", pa.size(),
+                    (unsigned long long)pa.at("I_traj").n_rows,
+                    (unsigned long long)pa.at("I_traj").n_cols);
+        check(pa.size() == 2 && pa.count("I_traj") && pa.count("y_rep") &&
+              pa.at("I_traj").n_rows == static_cast<arma::uword>(n_sweeps) &&
+              same_maps(pa, pb) && same_maps(pa, pc),
+              "C6 predict_at({}), ({t_obs}) and ({y0, t_obs}) at the training values agree bit for bit");
+    });
+
+    const arma::vec t_new{2.5, 7.0, 15.0, 21.0, 28.0};
+    const arma::vec y0_new{800.0, 40.0, 160.0};
+    guarded("C7", [&] {
+        auto mp = fitted(true);
+        const auto hist0 = mp->get_history();
+        const auto cur0  = mp->get_current();
+        const auto vals0 = data_of(*mp).values();
+        AI4BayesCode::state_map nd; nd["t_obs"] = t_new; nd["y0"] = y0_new;
+        const auto p = mp->predict_at(nd);
+        std::mt19937_64 g = predict_stream(seed_p);
+        const row_check rc = check_rows(p.at("I_traj"), p.at("y_rep"), hist0.at("theta"),
+                                        hist0.at("sigma"), y0_new, t_new, g);
+        std::printf("C7 rows %llu x %llu; I_traj mismatches %d, y_rep mismatches %d, "
+                    "max rel err vs 1e-10 solve %.3g\n",
+                    (unsigned long long)p.at("I_traj").n_rows,
+                    (unsigned long long)p.at("I_traj").n_cols,
+                    rc.I_mismatch, rc.y_mismatch, rc.rel_err);
+        check(p.size() == 2 && p.at("I_traj").n_rows == static_cast<arma::uword>(n_sweeps) &&
+              p.at("I_traj").n_cols == t_new.n_elem && p.at("y_rep").n_rows == p.at("I_traj").n_rows &&
+              p.at("y_rep").n_cols == t_new.n_elem,
+              "C7 one row per stored draw, one column per new time");
+        check(rc.I_mismatch == 0 && rc.rel_err < 1e-5,
+              "C7 I_traj row d = solution from the new y0 at time 0 with theta_d");
+        check(rc.y_mismatch == 0, "C7 y_rep row d = I_traj * exp(sigma_d * z), z from predict_rng_");
+        bool same_vals = data_of(*mp).values().size() == vals0.size();
+        for (const auto& kv : vals0)
+            same_vals = same_vals && data_of(*mp).has(kv.first) &&
+                        same_bits(kv.second, data_of(*mp).get(kv.first));
+        const auto cur1 = mp->get_current();
+        bool same_cur = cur1.size() == cur0.size();
+        for (const auto& kv : cur0)
+            same_cur = same_cur && cur1.count(kv.first) && same_bits(kv.second, cur1.at(kv.first));
+        check(same_maps(hist0, mp->get_history()) && same_cur && same_vals,
+              "C7 predict_at at new data leaves the history, the current state and the shared data unchanged");
+    });
+    guarded("C8", [&] {
+        auto mp = fitted(true);
+        AI4BayesCode::state_map nd; nd["t_obs"] = arma::regspace(0.0, 1.0, 9.0);
+        const auto p = mp->predict_at(nd);
+        const arma::mat& I = p.at("I_traj");
+        bool ok = I.n_rows == static_cast<arma::uword>(n_sweeps) && I.n_cols == 10;
+        for (arma::uword r = 0; ok && r < I.n_rows; ++r) ok = I(r, 0) == 10.0;
+        check(ok, "C8 at times 0..9 the first column of I_traj is I0 = 10");
+    });
+    guarded("C9", [&] {
+        AI4BayesCode::state_map nd; nd["t_obs"] = t_new;
+        for (const bool keep : {false, true}) {
+            auto mp = fitted(keep);
+            const auto p = mp->predict_at(nd, /*last_draw_only=*/true);
+            const auto cur = mp->get_current();
+            arma::mat theta_cur(1, 2), sigma_cur(1, 1);
+            theta_cur(0, 0) = cur.at("beta")[0];
+            theta_cur(0, 1) = cur.at("gamma")[0];
+            sigma_cur(0, 0) = cur.at("sigma")[0];
+            std::mt19937_64 g = predict_stream(seed_p);
+            const row_check rc = check_rows(p.at("I_traj"), p.at("y_rep"), theta_cur, sigma_cur,
+                                            y0, t_new, g);
+            check(p.size() == 2 && p.at("I_traj").n_rows == 1 && p.at("y_rep").n_rows == 1 &&
+                  rc.I_mismatch == 0 && rc.y_mismatch == 0 && rc.rel_err < 1e-5,
+                  std::string("C9 single-draw path (keep_history = ") + (keep ? "true" : "false") +
+                  ", last_draw_only): one row from the current theta and sigma, training y0");
+            if (!keep) {
+                const auto p1 = mp->predict_at(nd);   // keep_history = false: same path
+                check(p1.size() == 2 && p1.at("I_traj").n_rows == 1 &&
+                      same_bits_mat(p1.at("I_traj"), p.at("I_traj")),
+                      "C9 keep_history = false: predict_at(nd) takes the single-draw path");
+            }
+        }
+    });
+    guarded("C10", [&] {
+        auto mp = fitted(true);
+        mp->clear_history();
+        AI4BayesCode::state_map nd; nd["t_obs"] = t_new;
+        const auto p = mp->predict_at(nd);
+        const auto cur = mp->get_current();
+        const arma::vec th{cur.at("beta")[0], cur.at("gamma")[0]};
+        check(p.at("I_traj").n_rows == 1 && p.at("y_rep").n_rows == 1 &&
+              same_bits(p.at("I_traj").row(0).t(), sir_I_at(y0, t_new, th)),
+              "C10 after clear_history(): one row from the current state");
+    });
+    guarded("C11", [&] {
+        auto mp = fitted(true);
+        const auto hist0 = mp->get_history();
+        const double inf = std::numeric_limits<double>::infinity();
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        std::vector<std::pair<std::string, arma::vec>> bad = {
+            {"t_obs", arma::vec()}, {"t_obs", arma::vec{-1.0, 2.0}},
+            {"t_obs", arma::vec{1.0, nan}}, {"t_obs", arma::vec{1.0, inf}},
+            {"t_obs", arma::vec{3.0, 2.0}}, {"t_obs", arma::vec{1.0, 1.0}},
+            {"y0", arma::vec{990.0, 10.0}}, {"y0", arma::vec{990.0, 10.0, 0.0, 1.0}},
+            {"y0", arma::vec{990.0, -10.0, 0.0}}, {"y0", arma::vec{nan, 10.0, 0.0}},
+            {"y0", arma::vec{inf, 10.0, 0.0}}, {"y0", arma::vec{0.0, 0.0, 0.0}},
+            {"y0", arma::vec{1e308, 1e308, 0.0}},
+            {"I_obs", I_obs}, {"theta", arma::vec{0.5, 0.2}}, {"t", t_new}};
+        int n_ok = 0;
+        for (const auto& b : bad) {
+            AI4BayesCode::state_map nd; nd[b.first] = b.second;
+            const bool h = throws_invalid(*mp, nd, false);
+            const bool s = throws_invalid(*mp, nd, true);
+            if (h && s) ++n_ok;
+            else std::printf("  C11 not rejected: key %s (history %d, single %d)\n",
+                             b.first.c_str(), h ? 1 : 0, s ? 1 : 0);
+        }
+        const auto p = mp->predict_at(AI4BayesCode::state_map{});
+        check(n_ok == static_cast<int>(bad.size()) && same_maps(hist0, mp->get_history()) &&
+              p.at("I_traj").n_rows == static_cast<arma::uword>(n_sweeps),
+              "C11 invalid new data throws std::invalid_argument; history unchanged, predict_at({}) gives one row per stored draw");
+    });
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail,
                 g_fail == 1 ? "" : "s");
