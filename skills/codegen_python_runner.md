@@ -1,7 +1,7 @@
 ---
 name: AI4BayesCode-codegen-python-runner
 description: |
-  Python runner template for AI4BayesCode samplers -- AI4BayesCode.sourceCpp
+  Python runner template for AI4BayesCode samplers -- AI4BayesCode.source
   setup, constructor-argument reference block, the delivered
   inline-constructor-lambda + shipped AI4BayesCode.run_chains /
   rhat_summary / diagnose flow (NO generated helpers in the example;
@@ -27,7 +27,7 @@ machinery; running it yourself, or before that L2 table exists, is the
 runtime-before-semantic reversal.
 
 Companion skill to `codegen.md`. Load this when writing the generated
-`.py` runner: `AI4BayesCode.sourceCpp` setup, constructor-argument
+`.py` runner: `AI4BayesCode.source` setup, constructor-argument
 reference block, the delivered inline-constructor-lambda + shipped
 `AI4BayesCode.run_chains` / `rhat_summary` / `diagnose` flow, the
 harness-internal `run_chain_<ClassName>()` helper, Layer 3 validator
@@ -43,7 +43,7 @@ This skill mirrors `codegen_r_runner.md` for the Python backend. Where
 the logic is identical between R and Python (prior emission, L2
 semantic check, R3 BPV semantics), refer to the R
 skill rather than duplicating content. This file covers only
-Python-specific patterns (`AI4BayesCode.sourceCpp`, `multiprocessing`
+Python-specific patterns (`AI4BayesCode.source`, `multiprocessing`
 parallel chains, `arviz` diagnostics, numpy / dict idioms).
 
 ---
@@ -131,7 +131,7 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
    check numbers), no explanations of what the example does NOT
    contain -- an acronym with no context, or an absence-explanation,
    only confuses the audience.
-2. **AI4BayesCode.sourceCpp call** -- exact same form as in the runner
+2. **AI4BayesCode.source call** -- exact same form as in the runner
    template below.
 3. **Compact constructor reference + doc() pointer** -- a SHORT
    comment block: the `mod.<ClassName>(...)` call shape with one brief

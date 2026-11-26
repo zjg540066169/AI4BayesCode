@@ -40,7 +40,7 @@
 //      the same slow mode (R-hat 1.74, ESS 6.1). The same coupling holds
 //      between tau and (beta, z). Joint NUTS with a dense metric over all
 //      five groups samples the coupled directions directly; persistent
-//      (between-call) adaptation carries the tuning forward with
+//      (between-call) adaptation reuses the tuning across calls with
 //      n_warmup_per_step = 0.
 //
 //  (c) tau and sigma are carried as log_tau / log_sigma inside REAL
@@ -60,8 +60,8 @@
 //      Ongoing per-step dual-averaging recomputes the step size against
 //      the kept draws, which both violates detailed balance AND can
 //      progressively collapse the step size, locking a chain into one
-//      neighborhood. Persistent between-call adaptation carries the
-//      tuning forward.
+//      neighborhood. Persistent between-call adaptation reuses the
+//      tuning across calls.
 //
 //  BLOCK COMPOSITION (1 block)
 //  ---------------------------
@@ -157,7 +157,7 @@
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HierarchicalLM_MultivariateRE(y, X, group, seed, True),
-//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----

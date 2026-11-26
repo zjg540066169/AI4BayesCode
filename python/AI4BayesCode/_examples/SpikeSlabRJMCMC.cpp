@@ -27,9 +27,9 @@
 //  (ii) Decorrelated posterior: sigma and tau are approximately
 //       posterior-independent under this parametrization (their
 //       conditional posteriors only weakly couple through sum_active
-//       beta^2). Modular NUTS mixes dramatically faster because each
-//       block sees a stable target instead of one that shifts as the
-//       other updates.
+//       beta^2). Modular NUTS mixes dramatically faster because the
+//       target of each block is stable instead of shifting with each
+//       update of the other.
 //  (iii) Jeffreys p(tau) ∝ 1/tau becomes the natural noninformative
 //       choice (tau is a scale parameter and Jeffreys is the
 //       scale-invariant prior). See skills/codegen.md Sec.2a.
@@ -112,7 +112,7 @@
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.SpikeSlabRJMCMC(X, y, rng_seed=seed, keep_history=True),
-//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----

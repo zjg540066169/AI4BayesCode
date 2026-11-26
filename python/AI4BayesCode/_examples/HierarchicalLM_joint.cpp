@@ -56,12 +56,6 @@
 //  is absent). A group g >= G has no training rows; its u_g = tau * z,
 //  z ~ N(0, 1) from predict_rng_, is drawn at the first row of that group and
 //  used for every row of that group in the same draw (with that draw's tau).
-//
-//  Cross-validation against HierarchicalLM_joint.cpp
-//  ---------------------------------------------------
-//  Class name: HierarchicalLM_joint
-//  Module name: HierarchicalLM_joint_module
-//  Coexists with the original; both can be loaded in one R session.
 // ============================================================================
 //
 // @example:R
@@ -92,7 +86,7 @@
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HierarchicalLM_joint(y, X, g.astype(np.int32), G, 1.0, 1.0, seed, True),
-//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----

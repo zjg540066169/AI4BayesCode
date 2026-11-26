@@ -56,9 +56,6 @@
 //      d/d sigma_b  = -sum_{j} sum_{i: (i,j) in Obs} z_b_j*[Y_ij - p_ij] - sigma_b
 //      where p_ij = sigmoid(eta_ij).
 //
-//  Cross-validation target: get_current()["b"] must match IRT1PL_joint's
-//  get_current()["b"] in posterior moments (same generative model).
-//
 //  VALIDATOR CONTRACT
 //  ------------------
 // ============================================================================
@@ -95,7 +92,7 @@
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.IRT1PL_joint(Y, np.zeros(N), np.zeros(J), 1.0, seed, True),
-//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----

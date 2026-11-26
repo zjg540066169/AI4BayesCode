@@ -95,12 +95,12 @@ if __name__ == "__main__":
     AI4BayesCode.close_models(chains)   # stop the worker processes
 
     # chains[i] holds the 1.1.2 keys "seed", "wall" and "hist". The worker
-    # processes are stopped by close_models(chains), when chains is
-    # garbage-collected, or when Python exits. The environment variable
-    # AI4BAYESCODE_MAX_WORKERS limits their number over all runs; when a new
-    # run would exceed it, those of the least recently used runs are closed
-    # first. keep_models=False keeps no models (chains.models is None). A BART
-    # sampler predicts at new X from its draws only when built with
+    # processes are stopped by close_models(chains), when chains and its model
+    # handles are garbage-collected, or when Python exits. The environment
+    # variable AI4BAYESCODE_MAX_WORKERS limits their number over all runs; when
+    # a new run would exceed it, those of the least recently used runs are
+    # closed first. keep_models=False keeps no models (chains.models is None). A
+    # BART sampler predicts at new X from its draws only when built with
     # keep_tree=True.
 ```
 
@@ -209,7 +209,6 @@ python/
 ├── AI4BayesCode/
 │   ├── __init__.py         # public API
 │   ├── source.py           # compile-on-demand pybind11 wrapper
-│   ├── sourceCpp.py        # legacy alias for source.py
 │   ├── generate.py         # LLM-driven sampler generation
 │   ├── plot_dag.py          # networkx + matplotlib DAG viz
 │   ├── run_chains.py       # multiprocessing parallel chains

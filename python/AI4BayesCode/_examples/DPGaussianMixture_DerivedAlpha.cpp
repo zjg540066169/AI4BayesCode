@@ -20,8 +20,8 @@
 //     `declare_invalidates("phi", {"alpha"})`. Whenever phi is updated
 //     by its slice step, alpha is automatically refreshed.
 //   - Downstream blocks (`stick_breaking_block`'s b_fn, etc.) read
-//     `alpha` from ctx UNCHANGED -- they don't know or care that alpha
-//     came from a refresher rather than a sampler. This is the core
+//     `alpha` from ctx UNCHANGED -- their code is the same whether alpha
+//     comes from a refresher or from a sampler. This is the core
 //     of the modular-block architecture.
 //
 //  In real applications, alpha could be any function of any subset of
@@ -113,7 +113,7 @@
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DPGaussianMixture_DerivedAlpha(y, 8, seed, True),
-//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains, keys=["phi", "pi", "stick_V", "mu", "lambda"], order_components=True))  # label-invariant (sorted per draw)
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----

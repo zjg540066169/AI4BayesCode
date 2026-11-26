@@ -44,7 +44,7 @@ y <- rnorm(100, mean = 2, sd = 1.5)
 # run_chains drops the first n_burn draws, also inside each kept model that has
 # clear_history() (models built with 1.1.3 do), so the summary below is over the
 # POSTERIOR only. m$get_history() on a model stepped outside run_chains returns
-# EVERY stepped draw, warmup included.
+# EVERY stepped draw, warmup included, unless m$clear_history() was called.
 run <- ai4bayescode_run_chains(
   function(s) new(GaussianLocationScale, y, as.integer(s), TRUE),
   n_chains = 4, n_burn = 4000, n_keep = 4000)
