@@ -6,8 +6,8 @@
 //  The checks of test_fix_held_history.cpp for softbart_block (internal
 //  sigma, keep_tree), which cannot share a translation unit with bart_block:
 //  in a nested composite frozen within another composite, the fit rows; the
-//  stored forests, sigma, sigma_mu, split probabilities and split counts of
-//  the kernel; predict_history(X_new) -- one entry per sweep of the root, the
+//  stored forests, sigma, sigma_mu, split probabilities, split counts and m
+//  of the kernel; predict_history(X_new) -- one entry per sweep of the root, the
 //  held entries equal to the last one recorded before the freeze
 //  (held_history_check.hpp). Then the clear_history() check of
 //  clear_history_contract.hpp with the same freeze after the call. The kernel
@@ -80,6 +80,7 @@ chk::model softbart_case() {
         b.strings["f: kernel tree_history"] = h.tree_history;
         b.mats["f: kernel sigma_history"] = arma::mat(h.sigma_history);
         b.mats["f: kernel sigma_mu_history"] = arma::mat(h.sigma_mu_history);
+        b.mats["f: kernel center_history"] = arma::mat(h.center_history);
         b.mats["f: kernel s_history"] = h.s_history;
         b.mats["f: kernel var_counts_history"] =
             arma::conv_to<arma::mat>::from(h.var_counts_history);

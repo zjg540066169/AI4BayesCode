@@ -7,7 +7,7 @@
 //  (clear_history_contract.hpp) for softbart_block, which cannot share a
 //  translation unit with bart_block: with an internal sigma and the kernel's
 //  history recording on (keep_tree), the fits; the stored forests, sigma,
-//  sigma_mu, split probabilities and split counts of the kernel; the
+//  sigma_mu, split probabilities, split counts and m of the kernel; the
 //  predictions over the stored forests. Once with DART, whose update of the
 //  split probabilities starts after a number of sweeps the kernel counts
 //  (clear_history() leaves that count unchanged). The kernel draws from the
@@ -68,6 +68,7 @@ chk::model softbart_case(bool dart) {
         b.strings["f: get_tree_history()"] = sb->get_tree_history();
         b.mats["f: kernel sigma_history"] = arma::mat(h.sigma_history);
         b.mats["f: kernel sigma_mu_history"] = arma::mat(h.sigma_mu_history);
+        b.mats["f: kernel center_history"] = arma::mat(h.center_history);
         b.mats["f: kernel s_history"] = h.s_history;
         b.mats["f: kernel var_counts_history"] =
             arma::conv_to<arma::mat>::from(h.var_counts_history);

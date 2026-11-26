@@ -288,6 +288,8 @@ public:
         sb_cfg.k                    = k;
         sb_cfg.tau_rate             = tau_rate;
         sb_cfg.dart                 = dart;
+        // The forest fits (y - mean(y)) / y_scale; f_softbart = mean(y) +
+        // y_scale times the fit of the forest, on the scale of y.
         sb_cfg.center_Y             = true;
         impl_->add_child(
             std::make_unique<softbart_block>(std::move(sb_cfg)));
@@ -474,11 +476,18 @@ public:
     //       y_rep:      posterior-predictive at X_new from CURRENT draw.
     //   * keep_history = FALSE, empty map:
     //       y_rep:      posterior-predictive at TRAINING X from current draw.
-    //   * keep_history = TRUE,  X supplied:
-    //       f_softbart: n_draws x N_new from each stored draw's trees.
-    //       y_rep:      n_draws x N_new posterior-predictive samples.
+    //   * keep_history = TRUE,  X supplied (needs keep_tree = TRUE, which
+    //     stores the forest of every draw; without it this mode stops with
+    //     an error that names keep_tree = TRUE and last_draw_only = TRUE):
+    //       f_softbart: n_draws x N_new; row d = m_d + y_scale * (stored
+    //                   forest d at X_new), m_d = mean(y) of sweep d.
+    //       y_rep:      n_draws x N_new; row d = f_softbart row d +
+    //                   sigma_d * N(0, 1), sigma_d = row d of the sigma
+    //                   history.
     //   * keep_history = TRUE,  empty map:
-    //       y_rep:      n_draws x N_train posterior-predictive at training X.
+    //       y_rep:      n_draws x N_train posterior-predictive at training X
+    //                   (row d = f_softbart row d of the history + sigma_d *
+    //                   N(0, 1)).
     //
     // X is passed as a FLATTENED column-major vector under key "X"
     // (length N_new * p); reshaped here back into an N_new x p matrix.
@@ -553,6 +562,23 @@ public:
         }
 
         // ---- History mode ---------------------------------------------
+        // At new X, row d evaluates the forest stored with draw d; the
+        // forests are stored only with keep_tree = TRUE.
+        if (has_X && !keep_tree_) {
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+            const std::string yes = "True";
+#else
+            const std::string yes = "TRUE";
+#endif
+            ai4b::stop(
+                "SoftBartNoise::predict_at: prediction at new X from the "
+                "stored draws evaluates the forest of every stored draw, and "
+                "the forests are stored only when the model is built with "
+                "keep_tree = " + yes + " (one forest per stored draw, extra "
+                "time and memory). Build the model with keep_tree = " + yes +
+                ", or call predict_at(new_data, last_draw_only = " + yes +
+                ") for the current draw only.");
+        }
         auto& sigma_child = dynamic_cast<univariate_slice_sampling_block&>(impl_->child(1));
         AI4BayesCode::history_map sigma_list = sigma_child.get_history();
         const arma::mat& sigma_hist = sigma_list.at("sigma");
