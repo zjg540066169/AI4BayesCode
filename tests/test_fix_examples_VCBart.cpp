@@ -29,8 +29,20 @@
 //    C8  keep_history without keep_tree: new (X, Z) throws, last_draw_only
 //        gives 1 x N_new; after clear_history() and K more sweeps every
 //        history-mode prediction has K rows.
+//  predict_at y_rep (row d = mu_d + sigma_d * eps, eps iid N(0, 1) drawn
+//  from predict_rng_ with d outer, i inner). Each check copies predict_rng_
+//  before the call and draws the same eps from the copy:
+//    C9  single draw (training data and new (X, Z)): sigma is the current
+//        sigma; history mode (training data, and new (X, Z) with keep_tree):
+//        sigma_d is row d of get_history() sigma; mu is the mu of the same
+//        call; predict_rng_ after the call equals the copy after the replay;
+//    C10 with no sweep stored after clear_history(), history mode gives one
+//        row of y_rep from the current sigma;
+//    C11 predict_at calls between sweeps leave every get_history() and
+//        get_current() entry of the chain bit-identical.
 // ============================================================================
 #include <armadillo>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -55,6 +67,12 @@ struct impl_tag {
     friend type member_of(impl_tag);
 };
 template struct expose_member<impl_tag, &VCBart::impl_>;
+// ... and to the stream of the y_rep noise.
+struct prng_tag {
+    using type = std::mt19937_64 VCBart::*;
+    friend type member_of(prng_tag);
+};
+template struct expose_member<prng_tag, &VCBart::predict_rng_>;
 
 namespace {
 
@@ -89,6 +107,36 @@ double max_rel(const arma::mat& a, const arma::mat& b) {
 }
 
 arma::mat as_row(const arma::vec& v) { return arma::mat(v.t()); }
+
+// mu(d, i) + sig[d] * eps, the eps drawn from g with d outer, i inner.
+arma::mat replay_y_rep(std::mt19937_64& g, const arma::mat& mu, const arma::vec& sig) {
+    std::normal_distribution<double> n01(0.0, 1.0);
+    arma::mat out(mu.n_rows, mu.n_cols);
+    for (arma::uword d = 0; d < mu.n_rows; ++d)
+        for (arma::uword i = 0; i < mu.n_cols; ++i)
+            out(d, i) = mu(d, i) + sig[d] * n01(g);
+    return out;
+}
+
+// predict_at(nd, last) with the y_rep of the call compared to a replay of
+// predict_rng_: max relative error, and whether the stream positions agree.
+struct yrep_check { arma::mat mu, y_rep; double err; bool same_stream; };
+yrep_check check_y_rep(VCBart& m, const AI4BayesCode::state_map& nd, bool last,
+                       const arma::vec& sig_or_empty) {
+    std::mt19937_64 g = m.*member_of(prng_tag{});
+    const AI4BayesCode::history_map pr = m.predict_at(nd, last);
+    yrep_check c;
+    c.mu = pr.at("mu");
+    c.y_rep = pr.at("y_rep");
+    arma::vec sig = sig_or_empty;
+    if (!sig.n_elem) {                       // the current sigma on every row
+        sig.set_size(c.mu.n_rows);
+        sig.fill(m.get_current().at("sigma")[0]);
+    }
+    c.err = (sig.n_elem == c.mu.n_rows) ? max_rel(c.y_rep, replay_y_rep(g, c.mu, sig)) : INFINITY;
+    c.same_stream = g == m.*member_of(prng_tag{});
+    return c;
+}
 
 }  // namespace
 
@@ -230,6 +278,85 @@ int main() {
                 threw ? 1 : 0, (int)p8l.n_rows, (int)p8l.n_cols, (int)K2, (int)r0, (int)r1);
     check(threw && p8l.n_rows == 1 && p8l.n_cols == Nn && r0 == K2 && r1 == K2,
           "C8 new (X, Z) in history mode needs keep_tree; row counts follow clear_history()");
+
+    // C9: m5 is a single-draw model; mh holds the K2 draws stored after C8.
+    const arma::vec none;
+    const yrep_check c9a = check_y_rep(m5, empty, false, none);
+    const yrep_check c9b = check_y_rep(m5, nd_new, false, none);
+    const arma::vec sig9 = mh.get_history().at("sigma").col(0);
+    const yrep_check c9c = check_y_rep(mh, empty, false, sig9);
+    const yrep_check c9d = check_y_rep(mh, nd_new, false, sig9);
+    const yrep_check c9e = check_y_rep(mh, nd_new, true, none);
+    const yrep_check c9f = check_y_rep(mn, empty, false, mn.get_history().at("sigma").col(0));
+    const std::size_t n_sig = arma::vec(arma::unique(sig9)).n_elem;
+    const bool cur_is_last = sig9.n_elem == K2 &&
+        mh.get_current().at("sigma")[0] == sig9[K2 - 1];
+    std::printf("C9 y_rep max rel |y_rep - (mu + sigma_d eps)|: single training %d x %d %.3g, "
+                "single new %d x %d %.3g, history training %d x %d %.3g, history new %d x %d "
+                "%.3g, last_draw_only %d x %d %.3g, keep_tree = false training %d x %d %.3g; "
+                "stream positions agree %d%d%d%d%d%d; %d distinct sigma_d; current sigma = "
+                "last stored sigma %d\n",
+                (int)c9a.y_rep.n_rows, (int)c9a.y_rep.n_cols, c9a.err,
+                (int)c9b.y_rep.n_rows, (int)c9b.y_rep.n_cols, c9b.err,
+                (int)c9c.y_rep.n_rows, (int)c9c.y_rep.n_cols, c9c.err,
+                (int)c9d.y_rep.n_rows, (int)c9d.y_rep.n_cols, c9d.err,
+                (int)c9e.y_rep.n_rows, (int)c9e.y_rep.n_cols, c9e.err,
+                (int)c9f.y_rep.n_rows, (int)c9f.y_rep.n_cols, c9f.err,
+                c9a.same_stream, c9b.same_stream, c9c.same_stream, c9d.same_stream,
+                c9e.same_stream, c9f.same_stream, (int)n_sig, cur_is_last ? 1 : 0);
+    const bool shapes9 = c9a.y_rep.n_rows == 1 && c9a.y_rep.n_cols == N2 &&
+                         c9b.y_rep.n_rows == 1 && c9b.y_rep.n_cols == Nn &&
+                         c9c.y_rep.n_rows == K2 && c9c.y_rep.n_cols == N2 &&
+                         c9d.y_rep.n_rows == K2 && c9d.y_rep.n_cols == Nn &&
+                         c9e.y_rep.n_rows == 1 && c9e.y_rep.n_cols == Nn &&
+                         c9f.y_rep.n_rows == 5 && c9f.y_rep.n_cols == N2;
+    const double err9 = std::max({c9a.err, c9b.err, c9c.err, c9d.err, c9e.err, c9f.err});
+    const bool stream9 = c9a.same_stream && c9b.same_stream && c9c.same_stream &&
+                         c9d.same_stream && c9e.same_stream && c9f.same_stream;
+    check(shapes9 && err9 <= 1e-12 && stream9 && n_sig > 1 && cur_is_last,
+          "C9 y_rep row d = mu_d + sigma_d * eps, sigma_d of stored draw d (current sigma "
+          "for a single draw)");
+
+    // C10
+    mh.clear_history();
+    const yrep_check c10a = check_y_rep(mh, empty, false, none);
+    const yrep_check c10b = check_y_rep(mh, nd_new, false, none);
+    std::printf("C10 after clear_history(), no sweep: y_rep %d x %d (training) and %d x %d "
+                "(new), max rel vs current sigma %.3g / %.3g, stream positions agree %d%d\n",
+                (int)c10a.y_rep.n_rows, (int)c10a.y_rep.n_cols,
+                (int)c10b.y_rep.n_rows, (int)c10b.y_rep.n_cols, c10a.err, c10b.err,
+                c10a.same_stream, c10b.same_stream);
+    check(c10a.y_rep.n_rows == 1 && c10a.y_rep.n_cols == N2 && c10a.err <= 1e-12 &&
+          c10b.y_rep.n_rows == 1 && c10b.y_rep.n_cols == Nn && c10b.err <= 1e-12 &&
+          c10a.same_stream && c10b.same_stream,
+          "C10 history mode with no stored sweep: one row of y_rep with the current sigma");
+
+    // C11: each model is built and run to its last sweep before the next one
+    // is built (the constructor seeds the BART kernel stream of the thread).
+    AI4BayesCode::history_map ha, hb;
+    AI4BayesCode::state_map ca, cb;
+    {
+        VCBart a(X2, Z2, y3, 10, 2.0, 2.0, 0.95, 3.0, 100, 13, true, true);
+        a.step(10);
+        a.predict_at(empty); a.predict_at(nd_new); a.predict_at(nd_new, true);
+        a.predict_at(empty, true);
+        a.step(10);
+        ha = a.get_history(); ca = a.get_current();
+    }
+    {
+        VCBart b(X2, Z2, y3, 10, 2.0, 2.0, 0.95, 3.0, 100, 13, true, true);
+        b.step(20);
+        hb = b.get_history(); cb = b.get_current();
+    }
+    bool same11 = ha.size() == hb.size() && ca.size() == cb.size() && ha.count("sigma") == 1;
+    for (const auto& kv : ha)
+        same11 = same11 && hb.count(kv.first) && same_bits(kv.second, hb.at(kv.first));
+    for (const auto& kv : ca)
+        same11 = same11 && cb.count(kv.first) && same_bits(kv.second, cb.at(kv.first));
+    std::printf("C11 20 sweeps with 4 predict_at calls after sweep 10 vs without: %d history "
+                "keys, %d current keys, all bit-identical %d\n",
+                (int)ha.size(), (int)ca.size(), same11 ? 1 : 0);
+    check(same11, "C11 predict_at between sweeps leaves the chain unchanged");
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail,
                 g_fail == 1 ? "" : "s");

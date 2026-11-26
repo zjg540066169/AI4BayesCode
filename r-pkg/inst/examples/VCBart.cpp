@@ -51,11 +51,12 @@
 //
 //  Prediction (predict_at)
 //  -----------------------
-//  Output key mu. new_data is empty (training data) or holds both Z (N_new x q)
-//  and X (N_new x p), flattened column-major; x_i0 = 1.
+//  Output keys mu and y_rep. new_data is empty (training data) or holds both
+//  Z (N_new x q) and X (N_new x p), flattened column-major; x_i0 = 1.
 //    * single draw (keep_history = FALSE, or last_draw_only = TRUE), 1 x N:
 //        mu_i = sum_{j=0..p} x_ij beta_j(Z_i), each beta_j evaluated from the
-//        current forest of ensemble j at Z.
+//        current forest of ensemble j at Z; y_rep_i = mu_i + sigma * eps_i
+//        with the current sigma.
 //    * keep_history = TRUE, training data, one row per stored draw d:
 //        mu_{d,i} = sum_{j=0..p} x_ij beta_{j,d}(Z_i), from the stored rows of
 //        beta_0..beta_p (get_history()).
@@ -64,6 +65,14 @@
 //        plus the fmean of that sweep (bart_block::predict_history). The
 //        forests are stored only with keep_tree = TRUE; without it the call
 //        raises an error.
+//    In both history modes y_rep_{d,i} = mu_{d,i} + sigma_d * eps_{d,i}, with
+//    sigma_d the sigma of sweep d (row d of get_history()$sigma). With no
+//    sweep stored since construction or clear_history(), history mode gives
+//    one row, from the current forests and the current sigma.
+//    eps are iid N(0, 1) draws from predict_rng_, a std::mt19937_64 seeded at
+//    construction (from rng_seed; from std::random_device when rng_seed = 0)
+//    and used only by predict_at. Each call advances it, so y_rep differs
+//    between calls; the MCMC draws of step() do not depend on it.
 //
 //  BACKEND-NEUTRAL DUAL MODULE
 //  ---------------------------
@@ -108,6 +117,9 @@
 //   dim(mh$predict_at(list())$mu)                         # 500 x 600: per stored draw, training data
 //   dim(mh$predict_at(list(Z = Zn, X = Xn))$mu)           # 500 x 21: per stored draw, new (X, Z)
 //   dim(mh$predict_at(list(Z = Zn, X = Xn), TRUE)$mu)     # 1 x 21: current forests (last_draw_only)
+//   dim(mh$predict_at(list(Z = Zn, X = Xn))$y_rep)        # 500 x 21: row d = mu_d + sigma_d * N(0, 1) noise
+//   pp <- mh$predict_at(list())                           # training data: mu and y_rep, 500 x 600 each
+//   mean(apply(pp$y_rep - pp$mu, 1, sd) / mh$get_history()$sigma)  # about 1: the noise of row d has sd sigma_d
 // @example:python
 //   import numpy as np, AI4BayesCode
 //   rng = np.random.default_rng(1); N, p = 600, 2
@@ -127,6 +139,10 @@
 //   print(mh.predict_at({})["mu"].shape)                  # (500, 600): per stored draw, training data
 //   print(mh.predict_at(nd)["mu"].shape)                  # (500, 21): per stored draw, new (X, Z)
 //   print(mh.predict_at(nd, last_draw_only=True)["mu"].shape)  # (1, 21): current forests
+//   print(mh.predict_at(nd)["y_rep"].shape)               # (500, 21): row d = mu_d + sigma_d * N(0, 1) noise
+//   pp = mh.predict_at({})                                # training data: mu and y_rep, (500, 600) each
+//   sd = (pp["y_rep"] - pp["mu"]).std(axis=1, ddof=1)
+//   print(np.mean(sd / mh.get_history()["sigma"][:, 0]))  # about 1: the noise of row d has sd sigma_d
 // @example:end
 
 // [[Rcpp::depends(RcppArmadillo)]]
@@ -416,20 +432,26 @@ public:
         }
     }
 
-    // Predict mu at new data, or at the training data (empty map).
+    // Predict mu and y_rep at new data, or at the training data (empty map).
     // new_data: Z (N_new x q) and X (N_new x p), each flattened column-major
     // (Rcpp flattens an R matrix that way), or an empty map for the training
-    // Z and X. Output key mu, with x_i0 = 1:
+    // Z and X. Output keys mu and y_rep, with x_i0 = 1:
     //   * keep_history = FALSE, or last_draw_only = TRUE: 1 x N_new,
     //       mu_i = sum_{j=0..p} x_ij beta_j(Z_i), each beta_j evaluated from
-    //       the current forest of ensemble j.
-    //   * keep_history = TRUE, empty map: n_draws x N; row d is computed from
-    //       row d of the stored beta_0..beta_p (get_history()).
-    //   * keep_history = TRUE, Z and X given: n_draws x N_new; row d is
+    //       the current forest of ensemble j; y_rep_i = mu_i + sigma * eps_i
+    //       with the current sigma.
+    //   * keep_history = TRUE, empty map: n_draws x N; row d of mu is
+    //       computed from row d of the stored beta_0..beta_p (get_history()).
+    //   * keep_history = TRUE, Z and X given: n_draws x N_new; row d of mu is
     //       computed from the forests stored at sweep d
     //       (bart_block::predict_history: stored forest d at Z_new plus the
     //       fmean of sweep d). Requires keep_tree = TRUE.
-    // No random numbers are drawn; the MCMC state is not changed.
+    //   In both history modes y_rep_{d,i} = mu_{d,i} + sigma_d * eps_{d,i},
+    //   with sigma_d = row d of the stored sigma (get_history()["sigma"]); with
+    //   no sweep stored, the one row is computed with the current sigma.
+    // eps_{d,i} are iid N(0, 1), drawn from predict_rng_ row by row (d outer,
+    // i inner). The MCMC state and the MCMC random streams (rng_, the BART
+    // kernel stream) are not changed.
     /// const and returning history_map per the core-six contract
     /// (interface.md): predict_at never mutates MCMC state, and its outputs
     /// are matrices so the stateful and history modes share one shape.
@@ -485,6 +507,7 @@ public:
         };
 
         AI4BayesCode::history_map out;
+        std::normal_distribution<double> norm01(0.0, 1.0);   // eps of y_rep
         if (!use_history) {
             // ---- Single draw: the current forest of each ensemble --------
             arma::mat mu(1, n_new, arma::fill::zeros);
@@ -493,7 +516,13 @@ public:
                 const arma::vec beta_j = bj.predict(Z_new);       // beta_j(Z_new)
                 for (std::size_t i = 0; i < n_new; ++i) mu(0, i) += x_of(j, i) * beta_j[i];
             }
+            // y_rep_i = mu_i + sigma * eps_i, sigma the current sigma.
+            const double sigma = impl_->data().get("sigma")[0];
+            arma::mat y_rep(1, n_new);
+            for (std::size_t i = 0; i < n_new; ++i)
+                y_rep(0, i) = mu(0, i) + sigma * norm01(predict_rng_);
             out.emplace("mu", std::move(mu));
+            out.emplace("y_rep", std::move(y_rep));
             return out;
         }
 
@@ -524,6 +553,13 @@ public:
                            "and beta_0 has %d x %d",
                            (int)j, (int)B[j].n_rows, (int)B[j].n_cols,
                            (int)n_draws, (int)B[0].n_cols);
+        // sigma_d: row d of the stored sigma, one per stored sweep. With no
+        // sweep stored, B holds one row from the current forests, and the
+        // y_rep of that row is computed with the current sigma.
+        const bool none_stored = sigma_hist_.empty();
+        if (none_stored ? n_draws != 1 : sigma_hist_.size() != n_draws)
+            ai4b::stop("VCBart::predict_at: %d stored draws of the betas and "
+                       "%d of sigma", (int)n_draws, (int)sigma_hist_.size());
         // mu_{d,i} = sum_{j=0..p} x_ij beta_{j,d}(Z_i), summed over j in the
         // order of the "mu" refresher.
         arma::mat mu(n_draws, n_new, arma::fill::zeros);
@@ -532,7 +568,16 @@ public:
                 const double xij = x_of(j, i);
                 for (std::size_t d = 0; d < n_draws; ++d) mu(d, i) += xij * B[j](d, i);
             }
+        // y_rep_{d,i} = mu_{d,i} + sigma_d * eps_{d,i}.
+        const double sigma_now = impl_->data().get("sigma")[0];
+        arma::mat y_rep(n_draws, n_new);
+        for (std::size_t d = 0; d < n_draws; ++d) {
+            const double sigma_d = none_stored ? sigma_now : sigma_hist_[d];
+            for (std::size_t i = 0; i < n_new; ++i)
+                y_rep(d, i) = mu(d, i) + sigma_d * norm01(predict_rng_);
+        }
         out.emplace("mu", std::move(mu));
+        out.emplace("y_rep", std::move(y_rep));
         return out;
     }
 
@@ -557,7 +602,10 @@ public:
 
 private:
     std::mt19937_64 rng_;
-    std::mt19937_64 predict_rng_;
+    // eps of y_rep. mutable: predict_at() const advances it. Seeded at
+    // construction and used by nothing else, so the MCMC draws do not depend
+    // on it.
+    mutable std::mt19937_64 predict_rng_;
     std::unique_ptr<composite_block> impl_;
     int  p_;
     arma::mat Z_;
@@ -602,11 +650,12 @@ RCPP_MODULE(VCBart_module) {
         .method("predict_at",
                 (AI4BayesCode::history_map (VCBart::*)(const AI4BayesCode::state_map&) const)
                     &VCBart::predict_at,
-                "Predict mu. Pass list(Z = Z_new, X = X_new) (matrices, or "
-                "their column-major vectors), or list() for the training "
-                "data. keep_history = TRUE: one row per stored draw (new "
-                "(X, Z) requires keep_tree = TRUE); else one row from the "
-                "current forests.")
+                "Predict mu and y_rep (mu plus sigma times N(0, 1) noise). "
+                "Pass list(Z = Z_new, X = X_new) (matrices, or their "
+                "column-major vectors), or list() for the training data. "
+                "keep_history = TRUE: one row per stored draw, y_rep with "
+                "the sigma of that draw (new (X, Z) requires keep_tree = "
+                "TRUE); else one row from the current forests and sigma.")
         .method("predict_at",
                 (AI4BayesCode::history_map (VCBart::*)(const AI4BayesCode::state_map&, bool) const)
                     &VCBart::predict_at,
@@ -649,11 +698,12 @@ PYBIND11_MODULE(VCBart, m) {
                  &VCBart::predict_at,
              pybind11::arg("new_data"),
              pybind11::arg("last_draw_only") = false,
-             "Predict mu. new_data: {'Z': Z_new, 'X': X_new} (each flattened "
+             "Predict mu and y_rep (mu plus sigma times N(0, 1) noise). "
+             "new_data: {'Z': Z_new, 'X': X_new} (each flattened "
              "column-major), or {} for the training data. keep_history=True: "
-             "one row per stored draw (new (X, Z) requires keep_tree=True); "
-             "last_draw_only=True or keep_history=False: one row from the "
-             "current forests.")
+             "one row per stored draw, y_rep with the sigma of that draw "
+             "(new (X, Z) requires keep_tree=True); last_draw_only=True or "
+             "keep_history=False: one row from the current forests and sigma.")
         .def("get_dag",      &VCBart::get_dag)
         .def("get_history",  &VCBart::get_history)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(VCBart);
