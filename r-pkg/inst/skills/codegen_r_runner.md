@@ -1152,8 +1152,9 @@ Modular (codegen default):
 - `examples/GPTimeSeries.cpp` -- 1-D time-series GP via celerite
   O(N) Cholesky + `univariate_slice_sampling_block` for amp, tau,
   sigma on celerite-marginalized likelihood. Latent f marginalized
-  out (conjugate Gaussian-Gaussian); predict_at uses
-  `celerite_gp_block::predict_mean_var`.
+  out (conjugate Gaussian-Gaussian); predict_at draws f jointly from
+  p(f | y, theta) for each stored draw through the OU state-space form
+  (Kalman filter, RTS smoother, backward sampling; O(N + N_new)).
 - `examples/DPGaussianMixture.cpp` -- Dirichlet-Process Gaussian
   mixture via the truncated stick-breaking representation
   (Ishwaran-James 2001). Composes `categorical_gibbs_block` (z) +

@@ -41,32 +41,43 @@
 // See skills/codegen.md section 2b.1 for when to use slice vs NUTS.
 //
 // celerite_gp_block is placed LAST in the composite's Gibbs order, so
-// celerite_logp is the log marginal likelihood at the post-sweep state;
-// predict_at calls predict_mean_var on a separate celerite block with the
-// current (history mode: per-draw) kernel coefficients.
+// celerite_logp is the log marginal likelihood at the post-sweep state.
 //
-// POSTERIOR PREDICTIVE (predict_at). t_new is the "t" of new_data, or the
-// training t when new_data is empty. For hyperparameters (amp, tau, sigma),
-// predict_mean_var(t_new) on a celerite block built from the training t, y
-// and those hyperparameters gives the mean m_i and variance v_i of f(t_new_i)
-// given y, and
-//     f_star_i = m_i + sqrt(v_i) * z_i,   y_rep_i = f_star_i + sigma * e_i,
-// with z_i, e_i ~ N(0, 1) from predict_rng_ in the order z_1, e_1, z_2, ...
-// Each f_star_i is drawn from its marginal N(m_i, v_i), independently over
-// i; the covariances of f between time points are not reproduced. History
-// mode evaluates this for every stored draw with that draw's
-// (amp, tau, sigma); the single-draw path uses the current values. Outputs:
-// f_mean = m, f_sd = sqrt(v), f_star, y_rep.
+// POSTERIOR PREDICTIVE (predict_at). t* is the "t" of new_data, or the
+// training t when new_data is empty. Given y and hyperparameters
+// (amp, tau, sigma), f(t*) is Gaussian with mean m and covariance C,
+//     m = K(t*, t) (K + r I)^-1 y,
+//     C = K(t*, t*) - K(t*, t) (K + r I)^-1 K(t, t*),
+// where k(dt) = amp^2 exp(-|dt| / tau) and r = sigma^2 + 1e-10 (the noise
+// variance of the celerite solve, jitter included). predict_at returns
+//     f_mean_i = m_i, f_sd_i = sqrt(C_ii)   (marginal summaries),
+//     f_star   = one draw from N(m, C)      (joint over all times of t*),
+//     y_rep_i  = f_star_i + sigma * e_i,    e_i ~ N(0, 1),
+// so a row of y_rep is a draw from N(m, C + sigma^2 I). History mode
+// evaluates this for every stored draw d with that draw's
+// (amp_d, tau_d, sigma_d), one row per draw; the single-draw path uses the
+// current values, one row.
 //
-// COST per draw. Computing v_i requires one O(N) celerite solve per time
-// point, so the time is O(N_new * N): O(N^2) at the training t
-// (N_new = N). For the n times it receives, predict_mean_var builds an
-// n x N cross-covariance matrix and an N x n matrix of solves;
-// mean_var_by_block calls it on consecutive blocks of at most
-// kPredictBlock = 256 of the N_new times, so these two matrices occupy at
-// most 16 * 256 * N bytes. m and v are filled for all N_new times before
-// z_1 is drawn, so the order of the draws z_1, e_1, z_2, ... does not
-// depend on the block size.
+// The exponential kernel is the covariance function of a stationary
+// Ornstein-Uhlenbeck process, so m, the diagonal of C and the draw of f_star
+// come from its state-space form. The nodes s_0 < s_1 < ... < s_{K-1} are
+// the distinct values of the training times and of t* (K <= N + N*):
+//     f(s_0) ~ N(0, amp^2),
+//     f(s_k) = phi_k f(s_{k-1}) + w_k,  phi_k = exp(-(s_k - s_{k-1}) / tau),
+//              w_k ~ N(0, amp^2 (1 - phi_k^2)),
+//     y_j    = f(t_j) + eps_j,          eps_j ~ N(0, r).
+// The Kalman filter (forward over all nodes) and the Rauch-Tung-Striebel
+// smoother (backward) give m and the diagonal of C; backward sampling gives
+// one joint draw of f at the nodes from s_last (the largest time of t*)
+// down to s_first (the smallest): f(s_last) from
+// N(m(s_last), C(s_last, s_last)), then each f(s_k) from its conditional
+// distribution given f(s_{k+1}) and the observations at s_0, ..., s_k. The
+// standard normal draws come from predict_rng_, for each stored draw in the
+// order: one per node from s_last down to s_first, then e_1, ..., e_{N*} in
+// the order of t*.
+//
+// COST per stored draw: O(N + N*) time and memory; sorting t* adds
+// O(N* log N*) once per call.
 // ============================================================================
 
 // @example:R
@@ -142,8 +153,10 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <numeric>
 #include <random>
 #include <utility>
+#include <vector>
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -230,28 +243,172 @@ double sigma_slice_log_density(const arma::vec& sigma_unc,
         });
 }
 
-// --- mean and variance of f at many times, in blocks ----------------------
-// For the n = t_new.n_elem times it receives, predict_mean_var builds an
-// n x N cross-covariance matrix and an N x n matrix of solves (N training
-// times). mean_var_by_block calls it on consecutive blocks of at most
-// kPredictBlock times and writes each block's m and v into the full-length
-// vectors, so those two matrices occupy at most 16 * kPredictBlock * N
-// bytes for any n. `cel` holds the context (training t and y, a_real,
-// c_real, obs_diag), and its step() has computed the solver.
-constexpr std::size_t kPredictBlock = 256;
+// --- posterior of f at many times: OU state-space form ---------------------
+// POSTERIOR PREDICTIVE in the file header gives the model and the order of
+// the normal draws. Kernel variance a = amp^2 (a_real), rate c = 1 / tau
+// (c_real), noise variance r = obs_diag + jitter of the training
+// observations.
 
-std::pair<arma::vec, arma::vec>
-mean_var_by_block(const celerite_gp_block& cel, const arma::vec& t_new) {
-    const std::size_t n = t_new.n_elem;
-    if (n <= kPredictBlock) return cel.predict_mean_var(t_new);
-    arma::vec m(n), v(n);
-    for (std::size_t lo = 0; lo < n; lo += kPredictBlock) {
-        const std::size_t hi = std::min(n, lo + kPredictBlock) - 1;
-        const auto mv = cel.predict_mean_var(t_new.subvec(lo, hi));
-        m.subvec(lo, hi) = mv.first;
-        v.subvec(lo, hi) = mv.second;
+// Nodes: the distinct values of the training times t_tr (sorted ascending)
+// and of the output times t_out, in increasing order. The training rows
+// obs_begin[k], ..., obs_begin[k + 1] - 1 are the observations at node k;
+// node_of[i] is the node of t_out[i]; first and last are the smallest and
+// the largest node of an output time. Built once per predict_at call.
+struct ou_nodes {
+    std::vector<double>      s;
+    std::vector<std::size_t> obs_begin;   // K + 1 entries
+    std::vector<std::size_t> node_of;     // one per output time
+    std::size_t              first = 0, last = 0;
+};
+
+ou_nodes make_ou_nodes(const arma::vec& t_tr, const arma::vec& t_out) {
+    const std::size_t N = t_tr.n_elem, n = t_out.n_elem;
+    for (std::size_t i = 0; i < n; ++i)
+        if (!std::isfinite(t_out[i]))
+            ai4b::stop("GPTimeSeries::predict_at: entry %zu of t (counting "
+                       "from 1) is %g; every time must be finite",
+                       i + 1, t_out[i]);
+    // Output times in increasing order; they are finite, so operator< is a
+    // strict weak order.
+    std::vector<std::size_t> ord(n);
+    std::iota(ord.begin(), ord.end(), std::size_t{0});
+    std::stable_sort(ord.begin(), ord.end(),
+                     [&t_out](std::size_t p, std::size_t q) {
+                         return t_out[p] < t_out[q];
+                     });
+    ou_nodes g;
+    g.node_of.assign(n, 0);
+    g.s.reserve(N + n);
+    g.obs_begin.reserve(N + n + 1);
+    // Merge. Each pass creates one node and moves i (a training time is the
+    // node) or j (an output time is the node) forward by at least one.
+    std::size_t i = 0, j = 0;
+    while (i < N || j < n) {
+        const bool from_tr = j == n || (i < N && t_tr[i] <= t_out[ord[j]]);
+        const double s = from_tr ? t_tr[i] : t_out[ord[j]];
+        const std::size_t k = g.s.size();
+        g.s.push_back(s);
+        g.obs_begin.push_back(i);
+        if (from_tr) {
+            do ++i; while (i < N && t_tr[i] == s);
+        }
+        while (j < n && t_out[ord[j]] == s) g.node_of[ord[j++]] = k;
     }
-    return {m, v};
+    g.obs_begin.push_back(N);
+    if (n > 0) {
+        g.first = g.node_of[ord.front()];
+        g.last  = g.node_of[ord.back()];
+    }
+    return g;
+}
+
+// Per-node quantities for one value of (a, c, r): phi[k] and q[k], the
+// transition coefficient and innovation variance from node k-1 to node k;
+// Pp[k], the variance of f(s_k) given the observations at nodes < k;
+// (mf[k], Pf[k]) and (ms[k], Ps[k]), the mean and variance of f(s_k) given
+// the observations at nodes <= k (filter) and given all of y (smoother);
+// J[k] and Pc[k], the coefficient and variance of f(s_k) given f(s_{k+1})
+// and the observations at nodes <= k:
+//     f(s_k) | f(s_{k+1}) ~ N(mf[k] + J[k] (f(s_{k+1}) - phi[k+1] mf[k]), Pc[k]);
+// x, the joint draw.
+struct ou_work {
+    std::vector<double> phi, q, Pp, mf, Pf, ms, Ps, J, Pc, x;
+};
+
+// Kalman filter over all nodes, then the Rauch-Tung-Striebel smoother from
+// the last node down to node g.first. Every variance is a sum, product or
+// quotient of nonnegative terms, so none is negative after rounding.
+void ou_smooth(const ou_nodes& g, const arma::vec& y, double a, double c,
+               double r, ou_work& w) {
+    const std::size_t K = g.s.size();           // >= N >= 3
+    for (auto* v : {&w.phi, &w.q, &w.Pp, &w.mf, &w.Pf, &w.ms, &w.Ps, &w.J, &w.Pc})
+        v->resize(K);
+    double m = 0.0, P = a;                      // f(s_0) ~ N(0, a)
+    for (std::size_t k = 0; k < K; ++k) {
+        if (k > 0) {
+            const double dt = g.s[k] - g.s[k - 1];
+            w.phi[k] = std::exp(-c * dt);
+            w.q[k]   = -a * std::expm1(-2.0 * c * dt);   // a (1 - phi_k^2)
+            m = w.phi[k] * m;
+            P = w.phi[k] * w.phi[k] * P + w.q[k];
+        }
+        w.Pp[k] = P;
+        for (std::size_t j = g.obs_begin[k]; j < g.obs_begin[k + 1]; ++j) {
+            const double G = P / (P + r);         // Kalman gain
+            m += G * (y[j] - m);
+            P = G * r;                            // = P - G P
+        }
+        w.mf[k] = m;
+        w.Pf[k] = P;
+    }
+    w.ms[K - 1] = w.mf[K - 1];
+    w.Ps[K - 1] = w.Pf[K - 1];
+    for (std::size_t k = K - 1; k-- > g.first;) {
+        const double Pp1 = w.Pp[k + 1];
+        if (Pp1 > 0.0) {
+            // Pf[k] <= a, so Pp1 = phi^2 Pf[k] + a (1 - phi^2) >= Pf[k] and
+            // the ratio is in [0, 1]; J and Pc then have no overflow.
+            const double ratio = w.Pf[k] / Pp1;
+            w.J[k]  = w.phi[k + 1] * ratio;
+            w.Pc[k] = w.q[k + 1] * ratio;              // = Pf - J phi Pf
+        } else {
+            // Pp1 = 0 implies Pf[k] = 0 (variances underflowed to 0), so
+            // f(s_k) = mf[k] given the observations at nodes <= k.
+            w.J[k]  = 0.0;
+            w.Pc[k] = w.Pf[k];
+        }
+        w.ms[k] = w.mf[k] + w.J[k] * (w.ms[k + 1] - w.phi[k + 1] * w.mf[k]);
+        w.Ps[k] = w.Pc[k] + w.J[k] * w.J[k] * w.Ps[k + 1];
+    }
+}
+
+// One joint draw of f at the nodes g.last, g.last - 1, ..., g.first given
+// y, one standard normal per node in that order: f(s_last) from
+// N(ms, Ps), then f(s_k) given f(s_{k+1}) (see ou_work).
+void ou_sample(const ou_nodes& g, ou_work& w,
+               std::normal_distribution<double>& nd, std::mt19937_64& rng) {
+    w.x.resize(g.s.size());
+    w.x[g.last] = w.ms[g.last] + std::sqrt(w.Ps[g.last]) * nd(rng);
+    for (std::size_t k = g.last; k-- > g.first;)
+        w.x[k] = w.mf[k] + w.J[k] * (w.x[k + 1] - w.phi[k + 1] * w.mf[k])
+               + std::sqrt(w.Pc[k]) * nd(rng);
+}
+
+// One row of the predict_at output at the output times of g: f_mean = m,
+// f_sd = sqrt(diag C), f_star = a draw from N(m, C) and
+// y_rep = f_star + sigma * e, for kernel variance a, rate c, noise variance
+// r of the training observations and noise sd sigma of y_rep. Normal draws:
+// those of ou_sample, then e_1, ..., e_n in the order of the output times.
+void ou_predict(const ou_nodes& g, const arma::vec& y, double a, double c,
+                double r, double sigma, ou_work& w,
+                std::normal_distribution<double>& nd, std::mt19937_64& rng,
+                arma::vec& f_mean, arma::vec& f_sd, arma::vec& f_star,
+                arma::vec& y_rep) {
+    const std::size_t n = g.node_of.size();
+    f_mean.set_size(n);
+    f_sd.set_size(n);
+    f_star.set_size(n);
+    y_rep.set_size(n);
+    if (n == 0) return;
+    ou_smooth(g, y, a, c, r, w);
+    ou_sample(g, w, nd, rng);
+    for (std::size_t i = 0; i < n; ++i) {
+        const std::size_t k = g.node_of[i];
+        f_mean[i] = w.ms[k];
+        f_sd[i]   = std::sqrt(w.Ps[k]);
+        f_star[i] = w.x[k];
+    }
+    for (std::size_t i = 0; i < n; ++i) y_rep[i] = f_star[i] + sigma * nd(rng);
+}
+
+// The single element of a length-1 shared-data key (a_real, c_real,
+// obs_diag, sigma); the state-space form above has one real kernel term.
+double scalar_of(const arma::vec& v, const char* key) {
+    if (v.n_elem != 1)
+        ai4b::stop("GPTimeSeries: '%s' has %zu elements; the posterior "
+                   "predictive takes exactly one",
+                   key, static_cast<std::size_t>(v.n_elem));
+    return v[0];
 }
 
 }  // namespace
@@ -379,13 +536,13 @@ public:
         //   t, a_real, c_real, obs_diag, sigma -> y_rep      (stochastic
         //       refresher below).
         // y_rep at the times "t" (POSTERIOR PREDICTIVE in the file header):
-        // y_rep_i = m_i + sqrt(v_i) * z_i + sigma * e_i, where m_i and v_i
-        // are the mean and variance of f(t_i) given the training t and y
-        // under the kernel coefficients a_real, c_real and the noise
-        // variance obs_diag. The training t and y are fixed inputs of this
-        // conditional and are captured by the refresher, so y is not a node
-        // of the predict DAG. "t" is the one declared data input: predict_at
-        // accepts new times under that key.
+        // y_rep = f + sigma * e, with f one joint draw of f at those times
+        // from its distribution given the training t and y under the kernel
+        // coefficients a_real, c_real and the noise variance obs_diag. The
+        // training t and y are fixed inputs of this conditional and are
+        // captured by the refresher, so y is not a node of the predict DAG.
+        // "t" is the one declared data input: predict_at accepts new times
+        // under that key.
         impl_->data().declare_data_input("t");
         impl_->data().declare_predict_edges("amp",      {"a_real"});
         impl_->data().declare_predict_edges("tau",      {"c_real"});
@@ -410,30 +567,20 @@ public:
                     std::mt19937_64& rng) {
                 // One draw at the times d.get("t") (the training t, or new
                 // times that composite_block::predict_at installs under "t"),
-                // computed as in predict_at's single-draw path: a separate
-                // celerite block on the training t and y (captured here) and
-                // on a_real, c_real and obs_diag gives m and v at those times
-                // (mean_var_by_block); then f_i = m_i + sqrt(v_i) * z_i and
-                // y_rep_i = f_i + sigma * e_i, drawn in the order z_1, e_1,
-                // z_2, e_2, ...
-                celerite_gp_block cel(celerite_config_());
-                block_context ctx;
-                ctx["t"] = t_train;
-                ctx["y"] = y_train;
-                for (const char* k : {"a_real", "c_real", "obs_diag"})
-                    ctx[k] = d.get(k);
-                cel.set_context(ctx);
-                cel.step(rng);             // computes the solver; draws nothing
-                const auto mv = mean_var_by_block(cel, d.get("t"));
-                const double sig = d.get("sigma")[0];
+                // computed by the function of predict_at's single-draw path
+                // (ou_predict) with the training t and y captured here and
+                // a_real, c_real, obs_diag and sigma read from d; the same
+                // engine state gives the same y_rep.
+                const ou_nodes g = make_ou_nodes(t_train, d.get("t"));
+                ou_work w;
                 std::normal_distribution<double> nd(0.0, 1.0);
-                arma::vec out(mv.first.n_elem);
-                for (std::size_t i = 0; i < out.n_elem; ++i) {
-                    const double f_i =
-                        mv.first[i] + std::sqrt(mv.second[i]) * nd(rng);
-                    out[i] = f_i + sig * nd(rng);
-                }
-                return out;
+                arma::vec f_mean, f_sd, f_star, y_rep;
+                ou_predict(g, y_train, scalar_of(d.get("a_real"), "a_real"),
+                           scalar_of(d.get("c_real"), "c_real"),
+                           noise_var_(scalar_of(d.get("obs_diag"), "obs_diag")),
+                           scalar_of(d.get("sigma"), "sigma"), w, nd, rng,
+                           f_mean, f_sd, f_star, y_rep);
+                return y_rep;
             });
 
         // ---- Add child blocks in Gibbs order ---------------------------
@@ -441,8 +588,7 @@ public:
         //   child(0) slice(amp)
         //   child(1) slice(tau)
         //   child(2) slice(sigma)
-        //   child(3) celerite_gp_block   (LAST -- logp at the final state;
-        //                                  predict_at uses a separate block)
+        //   child(3) celerite_gp_block   (LAST -- logp at the final state)
         {
             univariate_slice_sampling_block_config cfg;
             cfg.name         = "amp";
@@ -543,13 +689,16 @@ public:
     }
 
     // predict_at: backend-neutral I/O. INPUT new_data is empty or holds the
-    // key "t" (a flat arma::vec of new time points); any other key is an
-    // error. OUTPUT is a history_map with f_mean, f_sd, f_star and y_rep at
-    // the new times, or at the training t when new_data is empty or its "t"
-    // has no elements; every key is an arma::mat (1-row in stateful mode,
-    // n_draws-row in history mode). Formulas: POSTERIOR PREDICTIVE in the
-    // file header; time and memory: COST there (O(N) time per time point
-    // and draw, O(N^2) per draw at the N training times).
+    // key "t" (a flat arma::vec of finite time points, any order, repeats
+    // allowed); any other key is an error. OUTPUT is a history_map with
+    // f_mean, f_sd, f_star and y_rep at the new times, or at the training t
+    // when new_data is empty or its "t" has no elements; every key is an
+    // arma::mat (1-row in stateful mode, n_draws-row in history mode). Row d
+    // holds the marginal means and sds of f given y, one joint draw of f
+    // from its distribution given y, and y_rep = f_star + sigma * e, all
+    // under the hyperparameters of draw d. Formulas and the order of the
+    // normal draws: POSTERIOR PREDICTIVE in the file header; O(N + N_new)
+    // time per draw (COST there).
     /// One-argument form: predict_at(new_data) equals
     /// predict_at(new_data, false). The overload below adds the switch.
     AI4BayesCode::history_map predict_at(
@@ -573,105 +722,67 @@ public:
                            "Valid: 't' (new times), or an empty map/list for "
                            "the training times.", kv.first.c_str());
 
-        AI4BayesCode::history_map out;
         auto it_t = new_data.find("t");
         const bool has_t = it_t != new_data.end() && it_t->second.n_elem > 0;
 
         // t arrives as a flat (vectorised) arma::vec under key "t". Without
-        // it, t_new_in is the training t; the computation below is the same
-        // for both.
-        const arma::vec t_new_in = has_t ? it_t->second
-                                         : impl_->data().get("t");
+        // it, the output times are the training t; the computation below is
+        // the same for both.
+        const auto& dat = impl_->data();
+        const arma::vec& t_tr = dat.get("t");
+        const arma::vec& y_tr = dat.get("y");
+        const ou_nodes g = make_ou_nodes(t_tr, has_t ? it_t->second : t_tr);
+        const std::size_t N_new = g.node_of.size();
+
+        ou_work w;                                  // reused across draws
+        std::normal_distribution<double> nd(0.0, 1.0);
+        arma::vec f_mean, f_sd, f_star, y_rep;
+        arma::mat mu_mat, sd_mat, fs_mat, yr_mat;
+        auto store_row = [&](std::size_t d) {
+            mu_mat.row(d) = f_mean.t();
+            sd_mat.row(d) = f_sd.t();
+            fs_mat.row(d) = f_star.t();
+            yr_mat.row(d) = y_rep.t();
+        };
 
         if (use_history) {
-            // History mode (t_new = new or training t): per-draw celerite
-            // solver re-build with (amp_d, tau_d, sigma_d) from history, then
-            // m and v at t_new (mean_var_by_block) and draws of f_star and
-            // y_rep.
-            arma::vec t_new_h = t_new_in;
-            const std::size_t N_new_h = t_new_h.n_elem;
-
-            AI4BayesCode::history_map hist = impl_->get_history();
+            // One row per stored draw d, with (amp_d, tau_d, sigma_d) from
+            // the history and the formulas of the a_real, c_real and
+            // obs_diag refreshers.
+            const AI4BayesCode::history_map hist = impl_->get_history();
             const arma::mat& amp_hist   = hist.at("amp");
             const arma::mat& tau_hist   = hist.at("tau");
             const arma::mat& sigma_hist = hist.at("sigma");
             const std::size_t n_draws   = amp_hist.n_rows;
-
-            // A separate celerite block per call, so the child's state and
-            // history are not modified. Its kernel coefficients and noise are
-            // those of draw d (the formulas of the a_real, c_real and
-            // obs_diag refreshers).
-            celerite_gp_block cel(celerite_config_());
-            block_context ctx = impl_->data().build_context_for("celerite_logp");
-
-            arma::mat mu_mat (n_draws, N_new_h);
-            arma::mat sd_mat (n_draws, N_new_h);
-            arma::mat fs_mat (n_draws, N_new_h);
-            arma::mat yr_mat (n_draws, N_new_h);
-            std::normal_distribution<double> nd(0.0, 1.0);
-
+            for (auto* m : {&mu_mat, &sd_mat, &fs_mat, &yr_mat})
+                m->set_size(n_draws, N_new);
             for (std::size_t d = 0; d < n_draws; ++d) {
                 const double amp_d   = amp_hist(d, 0);
                 const double tau_d   = tau_hist(d, 0);
                 const double sigma_d = sigma_hist(d, 0);
-                ctx["a_real"]   = arma::vec{amp_d * amp_d};
-                ctx["c_real"]   = arma::vec{1.0 / std::max(tau_d, 1e-10)};
-                ctx["obs_diag"] = arma::vec{sigma_d * sigma_d};
-                cel.set_context(ctx);
-                cel.step(const_cast<std::mt19937_64&>(predict_rng_));
-                auto [mu, var] = mean_var_by_block(cel, t_new_h);
-                for (std::size_t i = 0; i < N_new_h; ++i) {
-                    const double sd_i = std::sqrt(std::max(var[i], 0.0));
-                    const double fs_i = mu[i] + sd_i * nd(predict_rng_);
-                    mu_mat(d, i) = mu[i];
-                    sd_mat(d, i) = sd_i;
-                    fs_mat(d, i) = fs_i;
-                    yr_mat(d, i) = fs_i + sigma_d * nd(predict_rng_);
-                }
+                ou_predict(g, y_tr, amp_d * amp_d, 1.0 / std::max(tau_d, 1e-10),
+                           noise_var_(sigma_d * sigma_d), sigma_d, w, nd,
+                           predict_rng_, f_mean, f_sd, f_star, y_rep);
+                store_row(d);
             }
-            out.emplace("f_mean", std::move(mu_mat));
-            out.emplace("f_sd",   std::move(sd_mat));
-            out.emplace("f_star", std::move(fs_mat));
-            out.emplace("y_rep",  std::move(yr_mat));
-            return out;
+        } else {
+            // One row at the current state, from the same inputs as the
+            // y_rep refresher.
+            for (auto* m : {&mu_mat, &sd_mat, &fs_mat, &yr_mat})
+                m->set_size(1, N_new);
+            ou_predict(g, y_tr, scalar_of(dat.get("a_real"), "a_real"),
+                       scalar_of(dat.get("c_real"), "c_real"),
+                       noise_var_(scalar_of(dat.get("obs_diag"), "obs_diag")),
+                       scalar_of(dat.get("sigma"), "sigma"), w, nd,
+                       predict_rng_, f_mean, f_sd, f_star, y_rep);
+            store_row(0);
         }
 
-        arma::vec t_new = t_new_in;
-
-        // A separate celerite block with the current context (the
-        // declared dependencies of child(3)), so the child's state and
-        // history are not modified. Its step computes the solver (O(N)).
-        celerite_gp_block cel(celerite_config_());
-        block_context ctx = impl_->data().build_context_for("celerite_logp");
-        cel.set_context(ctx);
-        cel.step(const_cast<std::mt19937_64&>(predict_rng_));
-
-        auto [mu, var] = mean_var_by_block(cel, t_new);
-        const double sig = impl_->data().get("sigma")[0];
-        const std::size_t N_new = t_new.n_elem;
-        arma::vec sd(N_new);
-        for (std::size_t i = 0; i < N_new; ++i) sd[i] = std::sqrt(var[i]);
-
-        std::normal_distribution<double> nd(0.0, 1.0);
-        arma::vec f_star(N_new), y_rep(N_new);
-        for (std::size_t i = 0; i < N_new; ++i) {
-            f_star[i] = mu[i] + sd[i] * nd(predict_rng_);
-            y_rep[i]  = f_star[i] + sig * nd(predict_rng_);
-        }
-
-        // Pack each output as a 1-row matrix (single predict at current draw).
-        arma::mat mu_out(1, N_new), sd_out(1, N_new),
-                  fs_out(1, N_new), yr_out(1, N_new);
-        for (std::size_t i = 0; i < N_new; ++i) {
-            mu_out(0, i) = mu[i];
-            sd_out(0, i) = sd[i];
-            fs_out(0, i) = f_star[i];
-            yr_out(0, i) = y_rep[i];
-        }
-        out.emplace("f_mean", std::move(mu_out));
-        out.emplace("f_sd",   std::move(sd_out));
-        out.emplace("f_star", std::move(fs_out));
-        out.emplace("y_rep",  std::move(yr_out));
+        AI4BayesCode::history_map out;
+        out.emplace("f_mean", std::move(mu_mat));
+        out.emplace("f_sd",   std::move(sd_mat));
+        out.emplace("f_star", std::move(fs_mat));
+        out.emplace("y_rep",  std::move(yr_mat));
         return out;
     }
 
@@ -684,6 +795,13 @@ private:
         celerite_gp_block_config cfg;
         cfg.name = "celerite_logp";
         return cfg;
+    }
+
+    // Noise variance of the training observations in the posterior of f:
+    // obs_diag plus the jitter that the celerite solve adds to the diagonal,
+    // so the posterior of f matches the likelihood the sampler targets.
+    static double noise_var_(double obs_diag) {
+        return obs_diag + celerite_config_().jitter;
     }
 
     // celerite_logp at the current t, y, a_real, c_real and obs_diag,
@@ -723,10 +841,12 @@ RCPP_MODULE(GPTimeSeries_module) {
                 (AI4BayesCode::history_map (GPTimeSeries::*)(const AI4BayesCode::state_map&) const)
                     &GPTimeSeries::predict_at,
                 "predict_at(new_data): new_data = list(t = <new times>), or "
-                "list() for the training times. Returns f_mean, f_sd, f_star "
-                "and y_rep; one row per stored draw with keep_history = TRUE, "
-                "one row otherwise. Time O(N) per time point and draw, "
-                "O(N^2) per draw at the N training times.")
+                "list() for the training times. Returns f_mean and f_sd (the "
+                "marginal posterior mean and sd of f at those times), f_star "
+                "(one joint draw of f at those times from its posterior) and "
+                "y_rep = f_star + sigma * e; one row per stored draw with "
+                "keep_history = TRUE, one row otherwise. Time O(N + N_new) "
+                "per draw.")
         .method("predict_at",
                 (AI4BayesCode::history_map (GPTimeSeries::*)(const AI4BayesCode::state_map&, bool) const)
                     &GPTimeSeries::predict_at,
@@ -759,10 +879,11 @@ PYBIND11_MODULE(GPTimeSeries, m) {
              pybind11::arg("last_draw_only") = false,
              "predict_at(new_data, last_draw_only=False): new_data = "
              "{'t': <new times>}, or {} for the training times. Returns "
-             "f_mean, f_sd, f_star and y_rep; one row per stored draw with "
-             "keep_history=True and last_draw_only=False, one row otherwise. "
-             "Time O(N) per time point and draw, O(N^2) per draw at the N "
-             "training times.")
+             "f_mean and f_sd (the marginal posterior mean and sd of f at "
+             "those times), f_star (one joint draw of f at those times from "
+             "its posterior) and y_rep = f_star + sigma * e; one row per "
+             "stored draw with keep_history=True and last_draw_only=False, "
+             "one row otherwise. Time O(N + N_new) per draw.")
         .def("get_dag",     &GPTimeSeries::get_dag)
         .def("get_history", &GPTimeSeries::get_history)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(GPTimeSeries);
