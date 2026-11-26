@@ -291,7 +291,8 @@ struct has_mixin_base<
  * compiles for every wrapper and never calls a function through a member
  * pointer of another type. A class with neither (it does not derive from
  * kernel_control_mixin) is bound under name() = "clear_history_unavailable_"
- * instead, so the R and Python run_chains find no clear_history() on it.
+ * instead: clear_history is then not a method of the class, and the R and
+ * Python run_chains do not call it.
  */
 template <typename W>
 struct clear_history_binding {

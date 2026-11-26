@@ -24,7 +24,7 @@
  *  Python: the state_map caster (pybind_casters.hpp) flattens a 2-D value
  *  column-major as Rcpp does, so the same check is needed there. A wrapper
  *  binds its Python predict_at through a member taking
- *  AI4BayesCode::py_new_data, which keeps the column count of every 2-D
+ *  AI4BayesCode::py_new_data, which stores the column count of every 2-D
  *  value, and calls the second predict_input below.
  *
  *  Copyright (C) 2026 AI4BayesCode
