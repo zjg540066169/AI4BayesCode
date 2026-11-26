@@ -134,31 +134,136 @@ test_that("the staged copy of a read-only file stays writable and follows edits"
     expect_identical(readLines(p2), "// two")
 })
 
-# A module whose function returns the address modulo 64 of Armadillo heap
-# arrays of 17 to 400 elements. `depends` is the list of packages in its
+# A module with three functions. `depends` is the list of packages in its
 # // [[Rcpp::depends(...)]] line.
+#   ai4b_arma_alignment()  AI4BayesCode::arma_heap_alignment if the build
+#                          force-included AI4BayesCode/arma_aligned_alloc.hpp,
+#                          0 otherwise
+#   ai4b_arma_addresses()  addresses modulo 65536 of Armadillo heap arrays of
+#                          17 to 400 elements
+#   ai4b_offset_results()  results of ddot (n = 5000, 14400), dtrtrs (lower,
+#                          n = 110, one right-hand side) and dgetrf + dgetrs
+#                          (n = 110, one right-hand side) with every operand at
+#                          offset k * 64 bytes from a 16384-byte boundary,
+#                          k = 0, ..., 255: column k + 1 of each matrix is the
+#                          result at offset `offsets[k + 1]`
 arma_probe_file <- function(depends = "RcppArmadillo") {
     f <- tempfile("ai4b_align_", fileext = ".cpp")
     writeLines(c(
         paste0("// [[Rcpp::depends(", depends, ")]]"),
         "#include <RcppArmadillo.h>",
+        "#include <algorithm>",
+        "#include <cmath>",
         "#include <cstdint>",
+        "#include <cstring>",
+        "#include <random>",
         "#include <vector>",
         "// [[Rcpp::export]]",
-        "Rcpp::IntegerVector ai4b_arma_remainders() {",
+        "int ai4b_arma_alignment() {",
+        "#ifdef AI4BAYESCODE_ARMA_ALIGNED_ALLOC_HPP",
+        "    return static_cast<int>(AI4BayesCode::arma_heap_alignment);",
+        "#else",
+        "    return 0;",
+        "#endif",
+        "}",
+        "// [[Rcpp::export]]",
+        "Rcpp::IntegerVector ai4b_arma_addresses() {",
         "    std::vector<int> out;",
         "    std::vector<arma::vec> keep;",
         "    for (arma::uword n = 17; n <= 400; ++n) {",
         "        keep.emplace_back(n, arma::fill::zeros);",
         "        arma::mat A(n, 2, arma::fill::ones);",
         "        arma::vec v = A.col(0) + 1.0;",
-        "        out.push_back(int(reinterpret_cast<std::uintptr_t>(keep.back().memptr()) % 64));",
-        "        out.push_back(int(reinterpret_cast<std::uintptr_t>(A.memptr()) % 64));",
-        "        out.push_back(int(reinterpret_cast<std::uintptr_t>(v.memptr()) % 64));",
+        "        for (const double* p : {keep.back().memptr(), A.memptr(), v.memptr()})",
+        "            out.push_back(int(reinterpret_cast<std::uintptr_t>(p) % 65536));",
         "    }",
         "    return Rcpp::wrap(out);",
+        "}",
+        "// room for n_bytes at every offset k * 64, k = 0..255, from a 16384-byte boundary",
+        "struct OffsetBuffer {",
+        "    std::vector<unsigned char> raw;",
+        "    unsigned char* base;",
+        "    explicit OffsetBuffer(std::size_t n_bytes) : raw(n_bytes + 2 * 16384) {",
+        "        const std::uintptr_t p = reinterpret_cast<std::uintptr_t>(raw.data());",
+        "        base = raw.data() + (16384 - p % 16384) % 16384;",
+        "    }",
+        "    double* at(std::size_t off) { return reinterpret_cast<double*>(base + off); }",
+        "};",
+        "static std::vector<double> draws(std::size_t n, unsigned seed) {",
+        "    std::mt19937_64 rng(seed);",
+        "    std::normal_distribution<double> nd;",
+        "    std::vector<double> v(n);",
+        "    for (auto& x : v) x = nd(rng);",
+        "    return v;",
+        "}",
+        "// [[Rcpp::export]]",
+        "Rcpp::List ai4b_offset_results() {",
+        "    const int K = 256;",
+        "    Rcpp::IntegerVector offsets(K);",
+        "    for (int k = 0; k < K; ++k) offsets[k] = 64 * k;",
+        "    Rcpp::NumericMatrix d1(1, K), d2(1, K);",
+        "    for (int j = 0; j < 2; ++j) {",
+        "        const std::size_t n = (j == 0) ? 5000 : 14400;",
+        "        const std::vector<double> x0 = draws(n, 21), y0 = draws(n, 22);",
+        "        OffsetBuffer bx(n * 8), by(n * 8);",
+        "        for (int k = 0; k < K; ++k) {",
+        "            double* x = bx.at(64 * k); double* y = by.at(64 * k);",
+        "            std::memcpy(x, x0.data(), n * 8); std::memcpy(y, y0.data(), n * 8);",
+        "            (j == 0 ? d1 : d2)(0, k) = arma::blas::dot(arma::uword(n), x, y);",
+        "        }",
+        "    }",
+        "    // not const: Armadillo releases before 15.8 declare the LAPACK",
+        "    // wrappers with non-const pointer parameters",
+        "    arma::blas_int n = 110, n_rhs = 1;",
+        "    const std::size_t nn = 110, n2 = nn * nn;",
+        "    const std::vector<double> a0 = draws(n2, 23), b0 = draws(nn, 24);",
+        "    std::vector<double> L0(n2, 0.0), G0(a0);",
+        "    for (std::size_t j = 0; j < nn; ++j) {",
+        "        for (std::size_t i = j; i < nn; ++i)",
+        "            L0[i + j * nn] = (i == j) ? 5.0 + std::fabs(a0[i + j * nn]) : 0.3 * a0[i + j * nn];",
+        "        G0[j + j * nn] += double(nn);",
+        "    }",
+        "    Rcpp::NumericMatrix tr(nn, K), ge(nn, K);",
+        "    OffsetBuffer bL(n2 * 8), bG(n2 * 8), bb(nn * 8), bp(nn * sizeof(arma::blas_int));",
+        "    for (int k = 0; k < K; ++k) {",
+        "        const std::size_t off = 64 * k;",
+        "        char uplo = 'L', trans = 'N', diag = 'N';",
+        "        arma::blas_int info = 0;",
+        "        double* L = bL.at(off); double* b = bb.at(off);",
+        "        std::memcpy(L, L0.data(), n2 * 8); std::memcpy(b, b0.data(), nn * 8);",
+        "        arma::lapack::trtrs<double>(&uplo, &trans, &diag, &n, &n_rhs, L, &n, b, &n, &info);",
+        "        std::copy(b, b + nn, tr.column(k).begin());",
+        "        double* G = bG.at(off);",
+        "        arma::blas_int* ipiv = reinterpret_cast<arma::blas_int*>(bp.at(off));",
+        "        std::memcpy(G, G0.data(), n2 * 8); std::memcpy(b, b0.data(), nn * 8);",
+        "        arma::lapack::getrf<double>(&n, &n, G, &n, ipiv, &info);",
+        "        arma::lapack::getrs<double>(&trans, &n, &n_rhs, G, &n, ipiv, b, &n, &info);",
+        "        std::copy(b, b + nn, ge.column(k).begin());",
+        "    }",
+        "    return Rcpp::List::create(Rcpp::Named(\"offsets\") = offsets,",
+        "        Rcpp::Named(\"ddot_5000\") = d1, Rcpp::Named(\"ddot_14400\") = d2,",
+        "        Rcpp::Named(\"dtrtrs_110\") = tr, Rcpp::Named(\"dgetrs_110\") = ge);",
         "}"), f)
     f
+}
+
+# Every offset in one class of the offset modulo `alignment` gives the same
+# bits. With an alignment below the period of a routine's dependence on the
+# operand addresses (256 bytes for these routines and data on an Apple M2 Max
+# with macOS 27.0.1 Accelerate), offsets of one class give different results.
+expect_one_result_per_class <- function(res, alignment) {
+    cls <- res$offsets %% alignment
+    for (nm in setdiff(names(res), "offsets")) {
+        M <- res[[nm]]
+        for (cl in unique(cls)) {
+            cols <- which(cls == cl)
+            same <- vapply(cols, function(j) identical(M[, j], M[, cols[1L]], num.eq = FALSE),
+                           logical(1))
+            expect_true(all(same),
+                        label = sprintf("%s: one result for the offsets %d modulo %d",
+                                        nm, cl, alignment))
+        }
+    }
 }
 
 test_that("the build fingerprint follows the flags and the force-included header", {
@@ -175,15 +280,36 @@ test_that("the build fingerprint follows the flags and the force-included header
     expect_false(identical(fp(c("-Iinc", "-DX"), "-lm", hdr), a))
 })
 
-test_that("Armadillo heap arrays of a compiled model lie on 64-byte boundaries", {
+# The probe module built once by ai4bayescode_source() for the two tests below.
+probe_env <- local({
+    e <- NULL
+    function() {
+        if (is.null(e)) {
+            e <<- new.env()
+            ai4bayescode_source(arma_probe_file(), env = e, quiet = TRUE)
+        }
+        e
+    }
+})
+
+test_that("Armadillo heap arrays of a compiled model lie on arma_heap_alignment-byte boundaries", {
     skip_on_cran()
     skip_if_not_installed("Rcpp")
     skip_if_not_installed("RcppArmadillo")
-    e <- new.env()
-    ai4bayescode_source(arma_probe_file(), env = e, quiet = TRUE)
-    rem <- e$ai4b_arma_remainders()
-    expect_length(rem, 3L * 384L)
-    expect_true(all(rem == 0L))
+    e <- probe_env()
+    alignment <- e$ai4b_arma_alignment()
+    expect_gt(alignment, 0L)
+    addr <- e$ai4b_arma_addresses()
+    expect_length(addr, 3L * 384L)
+    expect_true(all(addr %% alignment == 0L))
+})
+
+test_that("ddot, dtrtrs and dgetrs give one result per class of the operand offset modulo arma_heap_alignment", {
+    skip_on_cran()
+    skip_if_not_installed("Rcpp")
+    skip_if_not_installed("RcppArmadillo")
+    e <- probe_env()
+    expect_one_result_per_class(e$ai4b_offset_results(), e$ai4b_arma_alignment())
 })
 
 test_that("a module built earlier in the same cacheDir with other flags is not reused", {
@@ -194,10 +320,14 @@ test_that("a module built earlier in the same cacheDir with other flags is not r
     dir.create(cache)
     f <- arma_probe_file()
     # Rcpp::sourceCpp on its own: no -include, Armadillo's own allocator.
-    Rcpp::sourceCpp(f, cacheDir = cache, env = new.env())
+    e0 <- new.env()
+    Rcpp::sourceCpp(f, cacheDir = cache, env = e0)
+    expect_identical(e0$ai4b_arma_alignment(), 0L)
     e <- new.env()
     ai4bayescode_source(f, env = e, quiet = TRUE, cacheDir = cache)
-    expect_true(all(e$ai4b_arma_remainders() == 0L))
+    alignment <- e$ai4b_arma_alignment()
+    expect_gt(alignment, 0L)
+    expect_true(all(e$ai4b_arma_addresses() %% alignment == 0L))
     expect_length(list.files(cache, pattern = "^ai4b-[0-9a-f]{12}$"), 1L)
 })
 
@@ -208,18 +338,22 @@ test_that("the Rcpp plugin force-includes the alignment header", {
                                         package = "AI4BayesCode")))
 })
 
-test_that("a file compiled through the Rcpp plugin has 64-byte-aligned Armadillo heap arrays", {
+test_that("a file compiled through the Rcpp plugin has aligned Armadillo heap arrays and one routine result per offset class", {
     skip_on_cran()
     skip_if_not_installed("Rcpp")
     skip_if_not_installed("RcppArmadillo")
     # // [[Rcpp::depends(AI4BayesCode)]] makes Rcpp::sourceCpp() call
-    # AI4BayesCode::inlineCxxPlugin() for the compiler flags.
+    # AI4BayesCode::inlineCxxPlugin() for the compiler flags. The module links
+    # R's LAPACK and BLAS (RcppArmadillo's plugin), not -framework Accelerate.
     f <- arma_probe_file("RcppArmadillo, AI4BayesCode")
     e <- new.env()
     Rcpp::sourceCpp(f, env = e, cacheDir = tempfile("ai4b_plugin_cache_"))
-    rem <- e$ai4b_arma_remainders()
-    expect_length(rem, 3L * 384L)
-    expect_true(all(rem == 0L))
+    alignment <- e$ai4b_arma_alignment()
+    expect_gt(alignment, 0L)
+    addr <- e$ai4b_arma_addresses()
+    expect_length(addr, 3L * 384L)
+    expect_true(all(addr %% alignment == 0L))
+    expect_one_result_per_class(e$ai4b_offset_results(), alignment)
 })
 
 test_that("a failed build reports the call Rcpp::sourceCpp(build_file, ...)", {

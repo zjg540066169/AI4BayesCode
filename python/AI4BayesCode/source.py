@@ -14,10 +14,10 @@ build is the module macro (``-DAI4BAYESCODE_PYBIND_MODULE`` instead of
 ``-DAI4BAYESCODE_RCPP_MODULE``).
 
 Both builds force-include ``AI4BayesCode/arma_aligned_alloc.hpp``, so
-Armadillo takes its heap arrays from memory aligned to 64 bytes and the
-results of BLAS and LAPACK routines whose summation order depends on operand
-alignment (macOS Accelerate's ``ddot``, for one) do not depend on where an
-array lies in memory.
+Armadillo allocates its heap arrays on 256-byte boundaries. On an Apple M2 Max
+with macOS 27.0.1, the results of Accelerate routines that Armadillo calls
+(``ddot`` and ``dtrtrs`` among them) depend on the operand addresses modulo
+256 bytes; the header lists the routines and sizes measured.
 
 Standalone Armadillo: unlike R (which gets Armadillo via RcppArmadillo), the
 Python build needs a standalone Armadillo header tree. It is discovered from
@@ -405,14 +405,17 @@ def _compile_flags(include_root: Path, cxx: str | None = None) -> list[str]:
         # compile then opens with a macro-redefinition warning.
         "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_PYBIND_MODULE",   # the only macro that differs from R
-        # Armadillo takes its heap arrays from 64-byte-aligned memory, so BLAS
-        # and LAPACK results do not depend on where an array lies (see
-        # AI4BayesCode/arma_aligned_alloc.hpp). -include reads the header
-        # before the first line of the source, so before <armadillo>. The
-        # header is passed by absolute path: the compiler runs in the caller's
-        # working directory and looks for a relative -include name there
-        # first. The flag is part of the build signature, so modules built
-        # without it are not reused.
+        # Armadillo allocates its heap arrays on 256-byte boundaries (see
+        # AI4BayesCode/arma_aligned_alloc.hpp for the Accelerate routines
+        # whose results depend on the operand addresses modulo 256 bytes).
+        # With -include the preprocessor processes the header before the
+        # first line of the source, so before <armadillo>. The header is
+        # passed by absolute path: the compiler runs in the caller's working
+        # directory and resolves a relative -include name against that
+        # directory first. The flag is part of the build signature, and the
+        # signature covers the size and modification time of every header
+        # under the include root, so a module built without the flag or with
+        # another version of the header is not reused.
         "-include", str((inc / "AI4BayesCode" / "arma_aligned_alloc.hpp").absolute()),
         # MinGW's math.h hides M_PI and the other M_* constants in strict ISO
         # mode, so Windows builds use the GNU dialect, as R itself does.

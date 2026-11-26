@@ -47,12 +47,16 @@
 #'
 #' @section Memory alignment and the build cache:
 #' Every build force-includes `AI4BayesCode/arma_aligned_alloc.hpp`, so
-#' Armadillo takes its heap arrays from memory aligned to 64 bytes. Some BLAS
-#' and LAPACK libraries (macOS Accelerate among them) add up the terms of a
-#' dot product or a triangular solve in an order that depends on the
-#' alignment of the operands; with every heap array on a 64-byte boundary,
-#' the results of these routines, and so the draws of a model built with a
-#' given seed, do not depend on where the arrays lie in memory.
+#' Armadillo allocates its heap arrays on 256-byte boundaries. On an Apple M2
+#' Max with macOS 27.0.1, the results of Accelerate routines that Armadillo
+#' calls, among them ddot (`dot()`, `accu(A % B)`) and dtrtrs
+#' (`solve(trimatl(L), b)`), depend on the addresses of the operands modulo
+#' 256 bytes, and with every operand at a multiple of 256 bytes each routine
+#' gave one result; the header lists the routines and sizes measured. On that
+#' machine `GPRegression` (N = 100, 110, 120), `GPClassification` (N = 100,
+#' 110) and `HSGPRegression` (N = 80, 110), each built six times with one seed
+#' in each of three R sessions, gave bit-identical draws within and across
+#' the sessions.
 #'
 #' Rcpp keys its build cache on the source file alone, so the build is kept
 #' in a subfolder of the cache folder (`cacheDir`, by default
@@ -168,14 +172,16 @@ ai4bayescode_source <- function(code,
         # compile then opens with a macro-redefinition warning.
         "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_RCPP_MODULE",
-        # Armadillo takes its heap arrays from 64-byte-aligned memory, so BLAS
-        # and LAPACK results do not depend on where an array lies (see
-        # AI4BayesCode/arma_aligned_alloc.hpp). -include reads the header
-        # before the first line of the source, so before <RcppArmadillo.h>.
-        # The relative name needs no quoting: the compiler looks for it in its
-        # working directory (Rcpp's build folder), then in R's include folder,
-        # then under AI4BayesCode's include root, the first -I of
-        # PKG_CPPFLAGS, and only the last has an AI4BayesCode folder.
+        # Armadillo allocates its heap arrays on 256-byte boundaries (see
+        # AI4BayesCode/arma_aligned_alloc.hpp for the Accelerate routines
+        # whose results depend on the operand addresses modulo 256 bytes).
+        # With -include the preprocessor processes the header before the
+        # first line of the source, so before <RcppArmadillo.h>. The relative
+        # name needs no quoting: the compiler resolves a relative -include
+        # name against its working directory (Rcpp's build folder) first,
+        # then R's include folder, then the -I folders in order; of these,
+        # only AI4BayesCode's include root, the first -I of PKG_CPPFLAGS,
+        # contains a folder AI4BayesCode.
         "-include AI4BayesCode/arma_aligned_alloc.hpp",
         if (!identical(build_file, cpp_file)) paste0("-I", shQuote(src_dir)),
         # Template-heavy samplers can exceed the COFF limit of 2^15 sections.
