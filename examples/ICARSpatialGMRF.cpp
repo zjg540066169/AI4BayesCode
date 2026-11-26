@@ -46,6 +46,17 @@
 //                                      { "tau",       1, POSITIVE },
 //                                      { "sigma",     1, POSITIVE }]
 //
+//  Posterior predictive (predict_at)
+//  ---------------------------------
+//      y_rep_t ~ N(Intercept + phi_{node_idx[t]}, sigma²),  t = 1..T,
+//  the observation equation at the training node_idx; every value is drawn
+//  with predict_rng_ by the stochastic refresher of "y_rep" (predict edges
+//  Intercept, phi, sigma -> y_rep). keep_history = TRUE: one row per stored
+//  draw d, from Intercept_d and sigma_d of the joint block and phi_d of the
+//  GMRF block (row d of get_history()$Intercept, $sigma, $phi). keep_history
+//  = FALSE, or last_draw_only = TRUE: one row, from the current state. The
+//  model has no covariate inputs, so predict_at() takes an empty map/list.
+//
 //  cross-validation target: ICARSpatialGMRF.cpp (same model, same data,
 //  posteriors must match under R-hat + means/sd/ESS comparison).
 // ============================================================================
@@ -64,9 +75,14 @@
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   yrep <- predict(run)$y_rep    # posterior predictive y_rep_t ~ N(Intercept + phi[node_t], sigma^2):
+//                                 # 8000 x 125, one row per kept draw of the 4 chains
+//   mean(apply(yrep, 1, var) >= var(y))            # posterior predictive p-value of var(y)
+//   ai4bayescode_close_models(run)                 # stop the worker processes
 //   # ---- Advanced: stateful single-chain control ----
 //   m<-new(ICARSpatialGMRF, y, node, N, ei, ej, 7L, TRUE)             # y,node_idx,N,edge_i,edge_j,seed,keep_hist
 //   m$step(2500); str(m$get_current())
+//   dim(m$predict_at(list())$y_rep)                # 2500 x 125: one row per stored draw
 // @example:python
 //   import numpy as np, AI4BayesCode
 //   P = 5; N = P*P
@@ -85,10 +101,14 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   yrep = AI4BayesCode.predict(chains)["y_rep"]   # posterior predictive y_rep:
+//                                                  # (8000, 125), one row per kept draw
+//   print((yrep.var(axis=1, ddof=1) >= y.var(ddof=1)).mean())   # predictive p-value of var(y)
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.ICARSpatialGMRF(y, node.astype(float), N,                  # indices NUMERIC (no arma::ivec caster)
 //                           ei.astype(float), ej.astype(float), 7, True)
 //   m.step(2500); print(m.get_current())                               # Intercept~4, sigma~0.5
+//   print(m.predict_at({})["y_rep"].shape)     # (2500, 125): one row per stored draw
 // @example:end
 
 // [[Rcpp::depends(RcppArmadillo)]]
@@ -122,6 +142,7 @@
 #include <memory>
 #include <random>
 #include <stdexcept>
+#include <string>
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -402,6 +423,31 @@ public:
             "params_joint",
             {"y", "node_idx", "phi", "edge_i", "edge_j", "N", "sigma_prior_sd"});
 
+        // ---- posterior predictive y_rep_t ~ N(Intercept + phi[node_idx[t]],
+        //      sigma²) --------------------------------------------------------
+        // Only predict_at() runs this refresher. It reads Intercept, phi and
+        // sigma from predict_at's scratch copy of the shared data: the current
+        // state, or the values of a stored draw.
+        impl_->data().set("y_rep", arma::vec(T, arma::fill::zeros));
+        impl_->data().declare_predict_edges("Intercept", {"y_rep"});
+        impl_->data().declare_predict_edges("phi",       {"y_rep"});
+        impl_->data().declare_predict_edges("sigma",     {"y_rep"});
+        impl_->data().register_stochastic_refresher(
+            "y_rep",
+            [](const AI4BayesCode::shared_data_t& d, std::mt19937_64& rng) {
+                const arma::vec& node_idx  = d.get("node_idx");   // 0-based
+                const arma::vec& phi       = d.get("phi");
+                const double     Intercept = d.get("Intercept")[0];
+                const double     sigma     = d.get("sigma")[0];
+                std::normal_distribution<double> nd(0.0, 1.0);
+                arma::vec y_rep(node_idx.n_elem);
+                for (std::size_t t = 0; t < node_idx.n_elem; ++t) {
+                    const std::size_t k = static_cast<std::size_t>(node_idx[t]);
+                    y_rep[t] = Intercept + phi[k] + sigma * nd(rng);
+                }
+                return y_rep;
+            });
+
         // ---- gmrf_precision_block for phi ----------------------------------
         // R and node_counts captured by copy to avoid lifetime issues.
         const arma::sp_mat R_copy      = R_;
@@ -534,16 +580,65 @@ public:
         }
     }
 
+    /// Posterior predictive y_rep at the training node_idx. One-argument
+    /// form: predict_at(new_data, false).
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
-        // No y_rep stochastic refresher registered; no covariate inputs.
-        // Matches the original no-op convention: any non-empty input is an
-        // error, and the return is an empty history_map (rcpp_wrap / pybind
-        // glue render this as an empty R list / Python dict).
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// keep_history = true and last_draw_only = false: y_rep with one row per
+    /// stored draw d, y_rep[d, t] ~ N(Intercept_d + phi_d[node_idx[t]],
+    /// sigma_d²) with Intercept_d, sigma_d, phi_d the values of draw d (row d
+    /// of get_history()$Intercept, $sigma, $phi). Otherwise one row, drawn
+    /// from the current state. Every value is drawn with predict_rng_.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
+                                         bool last_draw_only) const {
         if (!new_data.empty()) {
-            ai4b::stop("ICARSpatialGMRF::predict_at: no registered "
-                       "refreshers (no y_rep in v0 scope).");
+            ai4b::stop("ICARSpatialGMRF::predict_at: the model has no covariate "
+                       "inputs; pass an empty map/list (y_rep at the training "
+                       "node_idx).");
         }
-        return AI4BayesCode::history_map{};
+        const bool use_history = keep_history_ && !last_draw_only;
+        AI4BayesCode::history_map out;
+
+        if (!use_history) {
+            const block_context result =
+                impl_->predict_at(block_context{}, predict_rng_);
+            for (const auto& kv : result)
+                out.emplace(kv.first, arma::mat(kv.second.t()));
+            return out;
+        }
+
+        // History mode: the values of each stored draw replace Intercept,
+        // sigma (sub-parameters of the joint block) and phi (the GMRF block)
+        // in predict_at's scratch copy of the shared data.
+        const AI4BayesCode::history_map hist = impl_->get_history();
+        const arma::mat& I_hist   = hist.at("Intercept");   // n_draws x 1
+        const arma::mat& s_hist   = hist.at("sigma");       // n_draws x 1
+        const arma::mat& phi_hist = hist.at("phi");         // n_draws x N
+        const arma::uword n_draws = I_hist.n_rows;
+        if (s_hist.n_rows != n_draws || phi_hist.n_rows != n_draws) {
+            ai4b::stop("ICARSpatialGMRF::predict_at: the stored draws of "
+                       "Intercept, sigma and phi differ in number ("
+                       + std::to_string(n_draws) + ", "
+                       + std::to_string(s_hist.n_rows) + ", "
+                       + std::to_string(phi_hist.n_rows) + ").");
+        }
+        for (arma::uword d = 0; d < n_draws; ++d) {
+            block_context replaced;
+            replaced["Intercept"] = arma::vec{I_hist(d, 0)};
+            replaced["sigma"]     = arma::vec{s_hist(d, 0)};
+            replaced["phi"]       = phi_hist.row(d).t();
+            const block_context result = impl_->predict_at(replaced, predict_rng_);
+            for (const auto& kv : result) {
+                auto it = out.find(kv.first);
+                if (it == out.end())
+                    it = out.emplace(kv.first,
+                                     arma::mat(n_draws, kv.second.n_elem)).first;
+                it->second.row(d) = kv.second.t();
+            }
+        }
+        return out;
     }
 
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag();     }
@@ -600,8 +695,24 @@ RCPP_MODULE(ICARSpatialGMRF_module) {
         .method("set_current",  &ICARSpatialGMRF::set_current,
                 "Overwrite any subset of {Intercept, tau, sigma, phi, y} "
                 "via a named list. Unknown keys silently ignored.")
-        .method("predict_at",   &ICARSpatialGMRF::predict_at,
-                "Returns empty list — no y_rep refresher registered.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (ICARSpatialGMRF::*)(const AI4BayesCode::state_map&) const)
+                    &ICARSpatialGMRF::predict_at,
+                "predict_at(list()) returns list(y_rep = matrix): the posterior "
+                "predictive y_rep_t ~ N(Intercept + phi[node_idx[t]], sigma^2) "
+                "at the T training observations. keep_history = TRUE: one row "
+                "per stored draw, drawn from the Intercept, sigma and phi of "
+                "that draw (the same row of get_history()$Intercept, $sigma, "
+                "$phi); one row, from the current state, before the first "
+                "sweep or right after clear_history(). keep_history = FALSE: "
+                "one row, from the current state. No covariate inputs: the "
+                "list must be empty.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (ICARSpatialGMRF::*)(const AI4BayesCode::state_map&, bool) const)
+                    &ICARSpatialGMRF::predict_at,
+                "predict_at(list(), last_draw_only): TRUE returns one row, "
+                "drawn from the current state, without discarding the history; "
+                "FALSE is predict_at(list()).")
         .method("get_dag",      &ICARSpatialGMRF::get_dag)
         .method("get_history",  &ICARSpatialGMRF::get_history)
         AI4BAYESCODE_BIND_READAPT_NUTS(ICARSpatialGMRF)
@@ -627,7 +738,19 @@ PYBIND11_MODULE(ICARSpatialGMRF, m) {
         .def("step", (void (ICARSpatialGMRF::*)(int)) &ICARSpatialGMRF::step,        pybind11::arg("n_steps"))
         .def("get_current",  &ICARSpatialGMRF::get_current)
         .def("set_current",  &ICARSpatialGMRF::set_current, pybind11::arg("params"))
-        .def("predict_at",   &ICARSpatialGMRF::predict_at,  pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (ICARSpatialGMRF::*)(const AI4BayesCode::state_map&, bool) const)
+                 &ICARSpatialGMRF::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false,
+             "predict_at({}, last_draw_only=False) returns {'y_rep': array}: "
+             "the posterior predictive y_rep_t ~ N(Intercept + "
+             "phi[node_idx[t]], sigma^2) at the T training observations. "
+             "keep_history=True: one row per stored draw, drawn from the "
+             "Intercept, sigma and phi of that draw (the same row of "
+             "get_history()). keep_history=False, or last_draw_only=True: one "
+             "row, from the current state. No covariate inputs: new_data must "
+             "be empty.")
         .def("get_dag",      &ICARSpatialGMRF::get_dag)
         .def("get_history",  &ICARSpatialGMRF::get_history)
         .def("readapt_NUTS", (void (ICARSpatialGMRF::*)(int, bool, int, double)) &ICARSpatialGMRF::readapt_NUTS,
