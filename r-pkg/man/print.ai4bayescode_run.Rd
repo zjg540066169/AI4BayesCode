@@ -16,6 +16,6 @@
 }
 \description{
 Shows the run settings, the dimensions of the history entries, the wall
-time, and where the models are, instead of the draws. The draws are
-accessible by name (`x$histories`, `x$models`).
+time, and where the models are, instead of the draws. The draws are in
+`x$histories` and the models in `x$models`.
 }

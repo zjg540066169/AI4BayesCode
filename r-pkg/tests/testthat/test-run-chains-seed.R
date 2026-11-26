@@ -1,10 +1,10 @@
 # ai4bayescode_run_chains() calls set.seed(seeds[i]) immediately before
 # model_ctor(seeds[i]) for chain i in every path (persistent worker
 # processes, mclapply with keep_models = FALSE, sequential, and the
-# sequential re-run after a failed parallel attempt), and a sequential run
-# and the mclapply call restore the caller's .Random.seed. The fork tests
-# are skipped on Windows; the BartNoise test compiles the model and is
-# skipped on CRAN.
+# sequential re-run after a worker process exited), and restores the
+# caller's .Random.seed after the run in every path. The fork tests are
+# skipped on Windows; the BartNoise test compiles the model and is skipped
+# on CRAN.
 
 # A model written in R that draws from R's random-number generator, as the
 # BART kernels do under the Rcpp backend: each sweep appends one runif().
@@ -127,27 +127,56 @@ test_that("keep_models = FALSE: chains run in this session restore .Random.seed"
     }
 })
 
-test_that("the sequential re-run after a failed parallel attempt uses the same seeds", {
+test_that("the sequential re-run after a worker process exited uses the same seeds", {
     skip_on_os("windows"); skip_if_not_installed("withr")
     withr::local_preserve_seed()
     parent <- Sys.getpid()
-    # The constructor fails in a forked worker process only, so the run
-    # falls back to running every chain in this session.
-    fork_fails <- function(seed) {
-        if (Sys.getpid() != parent) stop("not in this session")
+    # The constructor ends its own process (SIGKILL) in a forked worker
+    # process, so the run falls back to running every chain in this session.
+    fork_dies <- function(seed) {
+        if (Sys.getpid() != parent) tools::pskill(Sys.getpid(), tools::SIGKILL)
         rng_ctor(seed)
     }
     set.seed(9); before <- caller_seed()
-    expect_warning(run_f <- rng_run(fork_fails, n_cores = 2),
+    expect_warning(run_f <- rng_run(fork_dies, n_cores = 2),
                    "re-running all chains sequentially in this session")
     expect_false(inherits(run_f$models[[1]], "ai4bayescode_chain_model"))
     expect_identical(draws_u(run_f), rng_expected())
     expect_identical(caller_seed(), before)
     # The mclapply path (keep_models = FALSE) and its sequential re-run.
-    run_g <- suppressWarnings(rng_run(fork_fails, n_cores = 2,
+    run_g <- suppressWarnings(rng_run(fork_dies, n_cores = 2,
                                       keep_models = FALSE))
     expect_identical(draws_u(run_g), rng_expected())
     expect_identical(caller_seed(), before)
+})
+
+test_that("a run in worker processes restores .Random.seed changed by gc()", {
+    skip_on_os("windows"); skip_if_not_installed("withr")
+    withr::local_preserve_seed()
+    # An unreferenced object whose finalizer draws from R's generator, as the
+    # Rcpp::RNGScope of a garbage BART model writes .Random.seed: the gc()
+    # before the worker processes are started runs it.
+    set.seed(6); before <- caller_seed()
+    local({
+        e <- new.env()
+        reg.finalizer(e, function(e) stats::runif(1))
+        NULL
+    })
+    run_p <- rng_run(n_cores = 2)
+    withr::defer(ai4bayescode_close_models(run_p))
+    expect_s3_class(run_p$models[[1]], "ai4bayescode_chain_model")
+    expect_identical(caller_seed(), before)
+    expect_identical(draws_u(run_p), rng_expected())
+    # No .Random.seed before the run: none after it.
+    rm(".Random.seed", envir = globalenv())
+    local({
+        e <- new.env()
+        reg.finalizer(e, function(e) stats::runif(1))
+        NULL
+    })
+    run_q <- rng_run(n_cores = 2)
+    withr::defer(ai4bayescode_close_models(run_q))
+    expect_null(caller_seed())
 })
 
 test_that("BartNoise chains: same seeds, same draws, in every path", {
@@ -197,11 +226,20 @@ test_that("BartNoise chains: same seeds, same draws, in every path", {
     expect_false(identical(f[[1]], f[[3]]))
     expect_false(identical(f[[2]], f[[3]]))
 
-    # Destroying the last BART model writes R's generator state to
-    # .Random.seed (Rcpp::RNGScope); after the run that state is the one
-    # restored, so .Random.seed is still the one of set.seed(4).
+    # Destroying a BART model writes R's generator state to .Random.seed
+    # (Rcpp::RNGScope); after the run that state is the one restored, so
+    # .Random.seed is still the one of set.seed(4).
     rm(run_s, m); invisible(gc())
     expect_identical(caller_seed(), before)
+
+    # A garbage BART model destroyed by the gc() before the worker processes
+    # of a run are started: .Random.seed is restored after the run.
+    set.seed(6); before <- caller_seed()
+    local({ m6 <- ctor(1L); m6$step(1L) })
+    run_p3 <- run(n_cores = 2)
+    withr::defer(ai4bayescode_close_models(run_p3))
+    expect_identical(caller_seed(), before)
+    expect_identical(run_p3$histories, run_p1$histories)
 
     # One chain with keep_models = FALSE and n_cores = 2 runs in this
     # session: chain 1 of the 3-chain runs (seed 101), .Random.seed restored.

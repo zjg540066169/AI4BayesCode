@@ -38,5 +38,10 @@ After a parallel `ai4bayescode_run_chains()` with `keep_models = TRUE`,
 that holds it, and returns the result; output, messages and warnings of the
 call are shown here, and an error is raised here with the worker's message.
 Calls are evaluated in order and change the model as the same call on the
-model object would (`h$step(5)` adds five draws to its history).
+model object would (`h$step(5)` adds five draws to its history). A handle
+can be called only in the R process that ran `ai4bayescode_run_chains()`:
+in a forked child process of it, or after `readRDS()` in another R
+session, a call raises an error. After the worker processes of the run
+were terminated, or the worker process of the chain exited, a call raises
+an error that names the reason.
 }

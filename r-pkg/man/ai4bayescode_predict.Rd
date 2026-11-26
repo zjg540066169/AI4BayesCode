@@ -12,35 +12,42 @@ ai4bayescode_predict(run, newdata = list(), pool = TRUE)
 \arguments{
 \item{run}{An object returned by `ai4bayescode_run_chains()`.}
 
-\item{newdata}{Named list passed to each model's `predict_at()`. The
-default `list()` gives the posterior predictive at the training data.}
+\item{newdata}{Named list passed to each model's `predict_at()`, e.g.
+`list(X = X_new)`. The default `list()` (or `NULL`) gives the posterior
+predictive at the training data. A matrix, a data frame or a list with
+unnamed elements raises an error.}
 
-\item{pool}{Logical. `TRUE` (default) returns, for each output key, one
-matrix with the rows of all chains in chain order (an error is raised
-when the chains give different keys or numbers of columns); `FALSE`
-returns a list with one named list per chain.}
+\item{pool}{Logical. `TRUE` (default) returns, for each output key, the
+entries of all chains stacked along the first axis in chain order, with
+the number of dimensions of the per-chain entries: a vector for vector
+entries, a matrix for matrix entries, an array for entries with more
+than two dimensions. An error names the key and the chain when the
+chains give different keys, numbers of dimensions or sizes of the other
+dimensions. `FALSE` returns a list with one named list per chain.}
 
 \item{object}{An object returned by `ai4bayescode_run_chains()`.}
 
-\item{...}{Unused.}
+\item{...}{Not used; an argument given here raises an error.}
 }
 \value{
-With `pool = TRUE`, a named list with one matrix per output key
-  (`n_chains * n_keep` rows for models built with keep_history = TRUE); with
-  `pool = FALSE`, a list of `n_chains` named lists as returned by
-  `predict_at()`.
+With `pool = TRUE`, a named list with one vector, matrix or array
+  per output key, with the draws along the first axis (`n_chains * n_keep`
+  of them for models built with keep_history = TRUE); with `pool = FALSE`,
+  a list of `n_chains` named lists as returned by `predict_at()`.
 }
 \description{
 Calls `predict_at(newdata)` on the model of every chain of a
   run made by `ai4bayescode_run_chains(..., keep_models = TRUE)` and
   returns the draws of all chains stacked (`pool = TRUE`) or per chain.
-  After a parallel run, one request goes to each worker process and the
-  worker processes compute their chains concurrently. Each chain gives the
-  draws its model's `predict_at()` returns, i.e. one row per post-warmup
-  draw; for a chain whose model has no `clear_history()`
-  (`run$history_cleared[i]` is `FALSE`) the first `n_burn` rows of every
-  entry with `n_burn + n_keep` rows are dropped. `predict(run, newdata)`
-  is the same call.
+  After a parallel run, `ai4bayescode_predict()` sends one request to each
+  worker process, and the worker processes compute their chains
+  concurrently. Each chain gives the draws its model's `predict_at()`
+  returns, i.e. one row per post-warmup draw; for a chain whose model has
+  no `clear_history()` (`run$history_cleared[i]` is `FALSE`) the first
+  `n_burn` rows of every entry with `n_burn + n_keep` rows are dropped.
+  The value of each chain's `predict_at()` must be a list with unique
+  non-empty names; otherwise an error names the chain. `predict(run,
+  newdata)` is the same call.
 }
 \examples{
 \dontrun{
