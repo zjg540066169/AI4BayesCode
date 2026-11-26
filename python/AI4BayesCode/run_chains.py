@@ -19,7 +19,9 @@ models. `n_chains=` is accepted as an alias that derives the seeds:
     AI4BayesCode.close_models(chains)     # stop the worker processes
 
 Each chain runs `step(n_burn)`, `clear_history()` and `step(n_keep)`, so the
-model's own `get_history()` and `predict_at()` cover the n_keep kept draws.
+model's own `get_history()` and `predict_at()` cover the n_keep kept draws; a
+model without clear_history() (compiled against headers older than 1.1.3)
+runs `step(n_burn)` and `step(n_keep)` as in 1.1.2.
 With `keep_models=True` (the default) and parallel chains, the worker
 processes are not stopped at the end of the run: `chains.models[i]` is a
 `ChainModel` handle, and each method call on it runs in the worker process
@@ -1235,8 +1237,7 @@ def _models_where(models) -> str:
         return "in this Python session (chains.models[i])"
     pools = _pools_of(handles)
     if not pools:
-        return ("detached (restored from a pickle in another process; method calls "
-                "raise RuntimeError)")
+        return "detached (restored from a pickle; method calls raise RuntimeError)"
     if all(p.closed for p in pools):
         reasons = {p.state.get("reason") for p in pools}
         if reasons == {None}:
