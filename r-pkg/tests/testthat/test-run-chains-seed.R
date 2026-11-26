@@ -101,8 +101,8 @@ test_that("keep_models = FALSE: chains run in this session restore .Random.seed"
                    "running 1 chains sequentially")
     expect_identical(caller_seed(), before)
     expect_identical(draws_u(run_1), rng_expected()[1])
-    # Two chains with n_cores = 1.5: parallel::mclapply evaluates them in
-    # this session (as.integer(mc.cores) < 2).
+    # Two chains with n_cores = 1.5 (fewer than 2 cores) run sequentially in
+    # this session.
     run_2 <- run_k(2, n_cores = 1.5, verbose = FALSE)
     expect_identical(caller_seed(), before)
     expect_identical(draws_u(run_2), rng_expected()[1:2])

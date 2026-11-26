@@ -122,6 +122,30 @@ test_that("max_workers: the least recently used runs are closed, with one warnin
     expect_error(kept_run(), "AI4BAYESCODE_MAX_WORKERS must be a positive whole number")
 })
 
+test_that("a run whose worker processes were all lost is not closed to make room", {
+    skip_on_cran(); skip_on_os("windows"); skip_if_not_installed("withr")
+    withr::local_options(ai4bayescode.max_workers = 4)
+    invisible(gc())
+    a <- kept_run()
+    pids_a <- workers_of(a)
+    tools::pskill(pids_a, tools::SIGKILL)
+    expect_true(all_exited(pids_a))
+    expect_error(predict(a), "exited unexpectedly", fixed = TRUE)
+    b <- kept_run(); cc <- kept_run()
+    withr::defer({ ai4bayescode_close_models(b); ai4bayescode_close_models(cc) })
+    w <- character(0)
+    d <- withCallingHandlers(kept_run(), warning = function(x) {
+        w <<- c(w, conditionMessage(x)); invokeRestart("muffleWarning") })
+    withr::defer(ai4bayescode_close_models(d))
+    expect_length(w, 1L)
+    expect_match(w, "the worker processes of 1 earlier run (2 processes) were closed",
+                 fixed = TRUE)
+    expect_match(w, "keep_models = FALSE", fixed = TRUE)
+    expect_error(b$models[[1]]$pid(), "a later run", fixed = TRUE)
+    expect_error(a$models[[2]]$pid(), "exited unexpectedly", fixed = TRUE)
+    expect_identical(cc$models[[1]]$pid(), workers_of(cc)[1])
+})
+
 test_that("too few free connections: earlier runs are closed, or the run is sequential", {
     skip_on_cran(); skip_on_os("windows"); skip_if_not_installed("withr")
     withr::local_options(ai4bayescode.max_workers = 1000)
@@ -212,6 +236,34 @@ test_that("SIGINT while a large request is written or a large reply is read", {
     }
     expect_identical(run$models[[2]]$get_history(), run$histories[[2]])
     expect_length(spill_files(), 0L)
+})
+
+test_that("an unread reply leaves no file after close or garbage collection", {
+    skip_on_cran(); skip_on_os("windows")
+    for (how in c("close", "gc")) {
+        run  <- kept_run()
+        pids <- workers_of(run)
+        # 8 MB reply per worker, written to a file after the call was
+        # interrupted.
+        expect_false(returned_before(predict(run, list(sleep = 0.5, n = 1e6)), 0.2))
+        t0 <- Sys.time()
+        while (length(spill_files()) < 2L &&
+               difftime(Sys.time(), t0, units = "secs") < 20) Sys.sleep(0.1)
+        expect_length(spill_files(), 2L)
+        if (how == "close") ai4bayescode_close_models(run)
+        else { rm(run); invisible(gc()) }
+        expect_true(all_exited(pids))
+        expect_length(spill_files(), 0L)
+    }
+    # Closed while the worker processes compute or write their replies.
+    for (d in c(0.3, 0.8)) {
+        run  <- kept_run()
+        pids <- workers_of(run)
+        returned_before(predict(run, list(n = 2.5e7)), d)
+        ai4bayescode_close_models(run)
+        expect_true(all_exited(pids))
+        expect_length(spill_files(), 0L)
+    }
 })
 
 test_that("SIGINT to the worker processes only: every call gets a reply", {
