@@ -330,7 +330,8 @@ def test_workers_stop_when_the_result_and_its_handles_are_collected():
     handle = chains[1]["model"]
     del chains
     gc.collect()
-    assert handle.add(1, 1) == 2               # the handle references the pool, so the workers are not stopped
+    # The handle references the pool, so the workers are not stopped.
+    assert handle.add(1, 1) == 2
     assert not gone(pids[0], timeout=0.3)
     del handle
     gc.collect()
@@ -890,7 +891,8 @@ def test_compiled_model_end_to_end(gls):
         sep = AI4BayesCode.predict(chains, pool=False)
         assert [s["y_rep"].shape for s in sep] == [(nk, y.size)] * 2
         # get_dag() returns a DagInfo, which does not pickle: through a handle
-        # the worker returns it as a dict of its fields, with item and attribute access.
+        # the worker returns it as a dict of its fields, with item and
+        # attribute access.
         from AI4BayesCode.plot_dag import _dag_to_edges
         dag, ref = chains[0]["model"].get_dag(), seq[0]["model"].get_dag()
         assert sorted(dag) == sorted(ref.keys())
