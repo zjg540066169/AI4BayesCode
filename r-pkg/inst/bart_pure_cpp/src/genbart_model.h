@@ -1,10 +1,9 @@
 /*
  *  genbart_model.h — generalized BART (Linero 2022 RJMCMC, pluggable
- *  likelihoods).  PURE C++ / ARMADILLO PORT (2026-06-21): R-free core for
+ *  likelihoods).  PURE C++ / ARMADILLO: R-free core for
  *  R + Python wrappers.  Depends only on <armadillo> + the (NoRcpp) genBART
- *  kernel.  Class/method names + sampling semantics unchanged from the Rcpp
- *  version; only container types changed Rcpp -> Armadillo, and batch /
- *  history returns became plain structs.  RNG = seedable std::mt19937_64
+ *  kernel.  Containers are Armadillo types, and batch / history returns
+ *  are plain structs.  RNG = seedable std::mt19937_64
  *  (bart_rng::set_seed); the genBART kernel + 10 likelihoods are untouched.
  *
  *  Copyright (C) 2024-2026 Jungang Zou.  GPL-2-or-later.

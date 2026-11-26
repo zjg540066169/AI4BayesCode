@@ -21,7 +21,7 @@
 /*
  * bart_model.h — standard BART (Chipman et al. 2010) model wrapper.
  *
- * PURE C++ / ARMADILLO PORT (2026-06-21).  This is the R-free core: it
+ * PURE C++ / ARMADILLO.  This is the R-free core: it
  * depends only on <armadillo> and the (NoRcpp) BART tree kernel.  No Rcpp,
  * no R headers.  R and Python wrappers attach on top of this arma API:
  *   - data in / out are arma::mat / arma::vec;

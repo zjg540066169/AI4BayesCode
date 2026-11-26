@@ -9,8 +9,8 @@
 /*
  * GENBART/BART/bart_model_matrix.h — pure C++ (Armadillo) per-column
  * cutpoint (xinfo) builder for generalized BART.  R-FREE.
- * Ported 2026-06-21; cutpoint logic byte-identical to the Rcpp version
- * (see BART/bart_model_matrix.h).  `genbart_pp` namespace.
+ * Cutpoint logic identical to BART/bart_model_matrix.h.  `genbart_pp`
+ * namespace.
  */
 
 #ifndef GENBART_BART_MODEL_MATRIX_H_

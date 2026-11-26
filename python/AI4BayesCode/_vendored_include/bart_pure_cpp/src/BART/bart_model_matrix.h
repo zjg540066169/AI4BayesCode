@@ -22,10 +22,9 @@
  * BART/bart_model_matrix.h — pure C++ (Armadillo) per-column cutpoint
  * (xinfo) builder from a numeric design matrix.  R-FREE: no Rcpp types.
  *
- * Ported 2026-06-21 from the Rcpp version to plain Armadillo so the BART
- * model wrapper compiles as a standalone C++ / Python-bindable core.
- * Cutpoint logic is byte-for-byte identical to the prior Rcpp version
- * (bartModelMatrix.R lines 65-110 for the numeric-matrix case):
+ * Plain Armadillo, so the BART model wrapper compiles as a standalone
+ * C++ / Python-bindable core.  Cutpoint logic as in bartModelMatrix.R of
+ * the BART R package (lines 65-110, the numeric-matrix case):
  *   k = #unique(X[,j])
  *   if k <= 1           : constant column, nc[j] = 1, single cutpoint
  *   else if cont==TRUE  : nc[j] = numcut, evenly spaced (endpoints dropped)

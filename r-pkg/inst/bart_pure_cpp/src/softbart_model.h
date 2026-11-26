@@ -1,6 +1,6 @@
 /*
  *  softbart_model.h -- Soft BART (Linero & Yang 2018) wrapper.
- *  PURE C++ / ARMADILLO PORT (2026-06-21): R-free core for R + Python
+ *  PURE C++ / ARMADILLO: R-free core for R + Python
  *  wrappers.  Depends only on <armadillo> + the (NoRcpp) vendored SoftBart
  *  Forest.  Hypers/Opts are built by direct field assignment (the pure path,
  *  via Hypers::finalize_from_group() + Forest(const Hypers&, const Opts&));
