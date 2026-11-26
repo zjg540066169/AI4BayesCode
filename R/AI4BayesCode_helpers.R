@@ -138,10 +138,11 @@ ai4bayescode_source_checkout <- function(cpp_file,
         # compile then opens with a macro-redefinition warning.
         "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_RCPP_MODULE",
-        # Armadillo allocates its heap arrays on 256-byte boundaries (see
-        # include/AI4BayesCode/arma_aligned_alloc.hpp for the Accelerate
-        # routines whose results depend on the operand addresses modulo 256
-        # bytes). With -include the preprocessor processes the header before
+        # On macOS Armadillo allocates its heap arrays on 256-byte
+        # boundaries (see include/AI4BayesCode/arma_aligned_alloc.hpp for the
+        # Accelerate routines whose results depend on the operand addresses
+        # modulo 256 bytes); elsewhere the header leaves Armadillo's
+        # allocation unchanged. With -include the preprocessor processes the header before
         # the first line of the source, so before <RcppArmadillo.h>. The
         # relative name needs no quoting: the compiler resolves a relative
         # -include name against its working directory (Rcpp's build folder)

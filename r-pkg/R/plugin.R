@@ -11,7 +11,8 @@
 #'
 #' The flags include `-include AI4BayesCode/arma_aligned_alloc.hpp`, so, as
 #' with [ai4bayescode_source()], Armadillo allocates its heap arrays on
-#' 256-byte boundaries. Rcpp keys its build cache on the source file alone: a
+#' 256-byte boundaries on macOS; on other systems the header leaves
+#' Armadillo's allocation unchanged. Rcpp keys its build cache on the source file alone: a
 #' module built through this plugin by an earlier version of AI4BayesCode and
 #' kept in a lasting `rcpp.cache.dir` folder is loaded again for an unchanged
 #' file unless `rebuild = TRUE` is passed to [Rcpp::sourceCpp()].
@@ -27,17 +28,11 @@ inlineCxxPlugin <- function() {
     libgp_inc    <- file.path(inc, "libgp_kernels")
 
     # Avoid shQuote: Rcpp's PKG_CPPFLAGS parser only picks up the first
-    # `-I` when paths are single-quoted. Plain unquoted -I works for paths
-    # without spaces. On Windows the default user library sits under
-    # C:/Users/<account>/, which may contain one, so use Rcpp's own convention
-    # there: the 8.3 short name, with forward slashes. Mirror the six include
-    # roots resolved by ai4bayescode_source() so examples needing eigen /
-    # celerite / libgp also compile via the Rcpp plugin path.
-    build_path <- function(p) {
-        if (.Platform$OS.type == "windows" && grepl(" ", p, fixed = TRUE))
-            p <- utils::shortPathName(p)
-        chartr("\\", "/", p)
-    }
+    # `-I` when paths are single-quoted. A path without a space is written
+    # unquoted; see .ai4b_plugin_path() for a path with one. Mirror the six
+    # include roots resolved by ai4bayescode_source() so examples needing
+    # eigen / celerite / libgp also compile via the Rcpp plugin path.
+    build_path <- .ai4b_plugin_path
     cppflags <- paste(
         paste0("-I", build_path(inc)),
         paste0("-I", build_path(mcmclib_inc)),
@@ -52,8 +47,10 @@ inlineCxxPlugin <- function() {
         # compile then opens with a macro-redefinition warning.
         "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_RCPP_MODULE",
-        # Armadillo allocates its heap arrays on 256-byte boundaries, as in
-        # ai4bayescode_source() (see AI4BayesCode/arma_aligned_alloc.hpp).
+        # On macOS Armadillo allocates its heap arrays on 256-byte
+        # boundaries, as in ai4bayescode_source(); elsewhere the header leaves
+        # Armadillo's allocation unchanged (see
+        # AI4BayesCode/arma_aligned_alloc.hpp).
         # With -include the preprocessor processes the header before the
         # first line of the source, so before <RcppArmadillo.h>. The relative
         # name needs no quoting: the compiler resolves a relative -include
@@ -68,4 +65,25 @@ inlineCxxPlugin <- function() {
         includes = "",
         env = list(PKG_CPPFLAGS = cppflags)
     )
+}
+
+# ---------------------------------------------------------------------------
+# Internal: an include root as inlineCxxPlugin() writes it after -I. On
+# Windows a path with a space is replaced by its 8.3 short name (the default
+# user library sits under C:/Users/<account>/, which may contain one), and
+# backslashes become forward slashes. A path that still contains a space (a
+# library folder with a space on macOS or Linux, or a Windows volume without
+# 8.3 names) is enclosed in double quotes, as Rcpp encloses the -I paths of
+# CLINK_CPPFLAGS: unquoted, the compiler receives the parts before and after
+# the space as separate arguments. A path without a space is returned
+# unquoted.
+# ---------------------------------------------------------------------------
+#' @keywords internal
+#' @noRd
+.ai4b_plugin_path <- function(p, windows = .Platform$OS.type == "windows") {
+    if (windows && grepl(" ", p, fixed = TRUE))
+        p <- utils::shortPathName(p)
+    p <- chartr("\\", "/", p)
+    if (grepl(" ", p, fixed = TRUE)) p <- paste0("\"", p, "\"")
+    p
 }

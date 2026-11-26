@@ -91,6 +91,45 @@ public:
     void clear_history() { KcPlain::clear_history(); own_buf.clear(); ++own_calls; }
 };
 
+
+// readapt_NUTS of other shapes, bound by AI4BAYESCODE_BIND_READAPT_NUTS /
+// AI4BAYESCODE_PYBIND_READAPT_NUTS. last() is (n, reset, depth, target) of
+// the last call; target -9 marks a readapt_NUTS without target_accept and -2
+// the 3-argument overload of a class with both.
+#define RX_BODY                                                                 \
+public:                                                                         \
+    mutable std::vector<double> args;                                           \
+    std::vector<double> last() const { return args; }
+class Rx4d {     // 1.1.2 compiled this one; 1.1.3 with static_cast did not
+    RX_BODY
+    void readapt_NUTS(int n, bool r, int d, double t = -1.0) { args = {double(n), double(r), double(d), t}; }
+};
+class Rx4 {
+    RX_BODY
+    void readapt_NUTS(int n, bool r, int d, double t) { args = {double(n), double(r), double(d), t}; }
+};
+class Rx3 {
+    RX_BODY
+    void readapt_NUTS(int n, bool r = false, int d = -1) { args = {double(n), double(r), double(d), -9.0}; }
+};
+class RxBothDef {  // the 3-argument call would be ambiguous
+    RX_BODY
+    void readapt_NUTS(int n, bool r, int d, double t = -1.0) { args = {double(n), double(r), double(d), t}; }
+    void readapt_NUTS(int n, bool r = false, int d = -1) { args = {double(n), double(r), double(d), -2.0}; }
+};
+class RxConst {
+    RX_BODY
+    void readapt_NUTS(int n, bool r, int d, double t) const { args = {double(n), double(r), double(d), t}; }
+};
+class RxSizeT {
+    RX_BODY
+    void readapt_NUTS(std::size_t n, bool r, int d, double t) { args = {double(n), double(r), double(d), t}; }
+};
+class RxNone {   // takes neither argument list: compiles, every call raises
+    RX_BODY
+    void readapt_NUTS(int n) { args = {double(n)}; }
+};
+
 #define KC_BIND(CLS)                                                            \
     Rcpp::class_<CLS>(#CLS)                                                     \
         .constructor()                                                          \
@@ -107,6 +146,13 @@ RCPP_MODULE(KcToysR_module) {
     KC_BIND(KcStringClear);
     KC_BIND(KcPrivateClear);
     KC_BIND(KcSub).method("own_rows", &KcSub::own_rows);
+#define RX_BIND(CLS)                                                            \
+    Rcpp::class_<CLS>(#CLS)                                                     \
+        .constructor()                                                          \
+        .method("last", static_cast<std::vector<double> (CLS::*)() const>(&CLS::last)) \
+        AI4BAYESCODE_BIND_READAPT_NUTS(CLS)
+    RX_BIND(Rx4d); RX_BIND(Rx4); RX_BIND(Rx3); RX_BIND(RxBothDef);
+    RX_BIND(RxConst); RX_BIND(RxSizeT); RX_BIND(RxNone);
 }
 )---")
 
@@ -159,6 +205,32 @@ test_that("readapt_NUTS binding selects the 3- and 4-argument overloads", {
     expect_identical(m$last_readapt(), c(5, 1, 3, -2))
     m$readapt_NUTS(6L, FALSE, -1L, 0.8)
     expect_identical(m$last_readapt(), c(6, 0, -1, 0.8))
+})
+
+test_that("readapt_NUTS binding: a class with one of the two forms calls it", {
+    skip_on_cran()
+    skip_if_not_installed("Rcpp")
+    skip_if_not_installed("RcppArmadillo")
+    e <- new.env()
+    suppressMessages(ai4bayescode_source(.kc_toys, env = e, quiet = TRUE))
+    call3 <- function(cls) { m <- methods::new(e[[cls]]); m$readapt_NUTS(5L, TRUE, 3L); m$last() }
+    call4 <- function(cls, t) { m <- methods::new(e[[cls]]); m$readapt_NUTS(6L, FALSE, -1L, t); m$last() }
+    # only the 4-argument form: the 3-argument call passes target_accept = -1
+    for (cls in c("Rx4d", "Rx4", "RxConst", "RxSizeT")) {
+        expect_identical(call3(cls), c(5, 1, 3, -1), info = cls)
+        expect_identical(call4(cls, 0.7), c(6, 0, -1, 0.7), info = cls)
+    }
+    # both forms, the 3-argument call ambiguous: each overload as before
+    expect_identical(call3("RxBothDef"), c(5, 1, 3, -2))
+    expect_identical(call4("RxBothDef", 0.7), c(6, 0, -1, 0.7))
+    # only the 3-argument form: the 4-argument call with a target_accept that
+    # keeps the block's target calls it; one in (0, 1] raises an error
+    expect_identical(call3("Rx3"), c(5, 1, 3, -9))
+    expect_identical(call4("Rx3", -1), c(6, 0, -1, -9))
+    expect_error(call4("Rx3", 0.7), "takes no target_accept")
+    # neither form
+    expect_error(call3("RxNone"), "takes neither")
+    expect_error(call4("RxNone", -1), "takes neither")
 })
 
 test_that("a redeclared mixin forwarder with another signature does not compile", {

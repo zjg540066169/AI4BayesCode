@@ -13,11 +13,13 @@ location of an AI4BayesCode checkout**. The only flag that differs from the R
 build is the module macro (``-DAI4BAYESCODE_PYBIND_MODULE`` instead of
 ``-DAI4BAYESCODE_RCPP_MODULE``).
 
-Both builds force-include ``AI4BayesCode/arma_aligned_alloc.hpp``, so
-Armadillo allocates its heap arrays on 256-byte boundaries. On an Apple M2 Max
-with macOS 27.0.1, the results of Accelerate routines that Armadillo calls
-(``ddot`` and ``dtrtrs`` among them) depend on the operand addresses modulo
-256 bytes; the header lists the routines and sizes measured.
+Both builds force-include ``AI4BayesCode/arma_aligned_alloc.hpp``. On macOS,
+Armadillo then allocates its heap arrays on 256-byte boundaries; on other
+systems the header leaves Armadillo's allocation unchanged, since the
+alignment was measured only on macOS. On an Apple M2 Max with macOS 27.0.1,
+the results of Accelerate routines that Armadillo calls (``ddot`` and
+``dtrtrs`` among them) depend on the operand addresses modulo 256 bytes; the
+header lists the routines and sizes measured.
 
 Standalone Armadillo: unlike R (which gets Armadillo via RcppArmadillo), the
 Python build needs a standalone Armadillo header tree. It is discovered from
@@ -405,9 +407,10 @@ def _compile_flags(include_root: Path, cxx: str | None = None) -> list[str]:
         # compile then opens with a macro-redefinition warning.
         "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_PYBIND_MODULE",   # the only macro that differs from R
-        # Armadillo allocates its heap arrays on 256-byte boundaries (see
-        # AI4BayesCode/arma_aligned_alloc.hpp for the Accelerate routines
-        # whose results depend on the operand addresses modulo 256 bytes).
+        # On macOS Armadillo allocates its heap arrays on 256-byte boundaries
+        # (see AI4BayesCode/arma_aligned_alloc.hpp for the Accelerate routines
+        # whose results depend on the operand addresses modulo 256 bytes);
+        # elsewhere the header leaves Armadillo's allocation unchanged.
         # With -include the preprocessor processes the header before the
         # first line of the source, so before <armadillo>. The header is
         # passed by absolute path: the compiler runs in the caller's working
@@ -431,8 +434,10 @@ def _compile_flags(include_root: Path, cxx: str | None = None) -> list[str]:
             "-Wa,-mbig-obj",
             # exp, log and pow from the Universal C Runtime, several times
             # faster than Rtools' own (see AI4BayesCode/win_ucrt_math.hpp).
-            # _link_flags adds the matching --wrap.
-            "-DAI4B_WIN_UCRT_MATH", "-include", "AI4BayesCode/win_ucrt_math.hpp",
+            # _link_flags adds the matching --wrap. By absolute path, as the
+            # alignment header above.
+            "-DAI4B_WIN_UCRT_MATH", "-include",
+            str((inc / "AI4BayesCode" / "win_ucrt_math.hpp").absolute()),
             # MSYS2's Armadillo turns on SuperLU and ARPACK, with an MSYS-style
             # include path the native compiler cannot resolve. Nothing here uses
             # them.

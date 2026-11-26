@@ -77,14 +77,16 @@ namespace detail {
  * to arma::vec: a number or 0-d array gives one element, a 1-D array or
  * sequence its elements, and a 2-D array or nested sequence its elements in
  * column-major order (element (i, j) of an n x p value at index i + j*n, the
- * order of as.vector() of an R matrix). *ncol is set to p for a 2-D value
- * and to 0 otherwise. Returns false, and converts nothing, for None, str,
- * bytes, a value numpy cannot convert to float64, and an array of more than
- * two dimensions.
+ * order of as.vector() of an R matrix). For a 2-D value *is_2d is set to
+ * true and *ncol to p (0 included); otherwise *is_2d is set to false and
+ * *ncol to 0. Returns false, and converts nothing, for None, str, bytes, a
+ * value numpy cannot convert to float64, and an array of more than two
+ * dimensions.
  */
 inline bool state_value_from_python(pybind11::handle src, arma::vec& out,
-                                    std::size_t* ncol) {
+                                    std::size_t* ncol, bool* is_2d = nullptr) {
     if (ncol) *ncol = 0;
+    if (is_2d) *is_2d = false;
     if (!src || src.is_none()) return false;
     PyObject* p = src.ptr();
     if (PyUnicode_Check(p) || PyBytes_Check(p) || PyByteArray_Check(p))
@@ -109,6 +111,7 @@ inline bool state_value_from_python(pybind11::handle src, arma::vec& out,
             for (pybind11::ssize_t i = 0; i < n_row; ++i)
                 out[static_cast<arma::uword>(i + j * n_row)] = r(i, j);
         if (ncol) *ncol = static_cast<std::size_t>(n_col);
+        if (is_2d) *is_2d = true;
     } else {
         return false;
     }
@@ -161,8 +164,11 @@ inline bool state_map_from_python(
         std::string key = pybind11::detail::cast_op<std::string&&>(std::move(key_conv));
         arma::vec value;
         std::size_t n_col = 0;
-        if (!state_value_from_python(v, value, &n_col)) return false;
-        if (ncol && n_col > 0) ncol->emplace(key, n_col);
+        bool is_2d = false;
+        if (!state_value_from_python(v, value, &n_col, &is_2d)) return false;
+        // A 2-D value with 0 columns is recorded as well, so predict_input
+        // rejects it as R does a matrix with 0 columns.
+        if (ncol && is_2d) ncol->emplace(key, n_col);
         values.emplace(std::move(key), std::move(value));
     }
     return true;
