@@ -89,7 +89,7 @@ if __name__ == "__main__":
         n_cores=4,
     )
 
-    # Predict at new data X_new from the draws of all chains. chains[i]["model"]
+    # Predict at new data X_new from the draws of all chains. chains.models[i]
     # is chain i's model; its method calls run in the worker process that holds it.
     pred = AI4BayesCode.predict(chains, {"X": X_new})
     AI4BayesCode.close_models(chains)   # stop the worker processes

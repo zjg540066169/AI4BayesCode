@@ -5,7 +5,7 @@ Mirror of the R-side ``ai4bayescode_source()``. After ``pip install AI4BayesCode
     import AI4BayesCode
     mod = AI4BayesCode.source("MyModel.cpp")   # file path ...
     mod = AI4BayesCode.source(cpp_source_string) # ... or a string
-    m = mod.MyModel(y, X, seed=1, keep_history=True)
+    m = mod.MyModel(y, X, rng_seed=1, keep_history=True)
 
 compiles a generated sampler against the header tree **vendored inside the
 installed package** (``_vendored_include/``) -- there is **no dependency on the

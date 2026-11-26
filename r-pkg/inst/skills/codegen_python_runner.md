@@ -206,7 +206,7 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
    print(AI4BayesCode.rhat_summary(chains))   # convergence across chains
    tbl, plot = AI4BayesCode.diagnose(chains[0]["hist"])
    pred = AI4BayesCode.predict(chains, {"<X>": X_test})   # pooled over the chains
-   chains[0]["model"].get_current()                       # chain 1's model after the run
+   chains.models[0].get_current()                        # chain 1's model after the run
    AI4BayesCode.close_models(chains)
    ```
 
@@ -264,10 +264,10 @@ if plot is not None:
 # Posterior predictions at the held-out inputs, using the draws of all chains.
 pred = AI4BayesCode.predict(chains, {"<X>": X_test})
 
-# chains[i]["model"] is the model of chain i after the run.
-print(chains[0]["model"].get_current())     # the last draw of chain 1
+# chains.models[i] is the model of chain i after the run.
+print(chains.models[0].get_current())      # the last draw of chain 1
 
-# Close the background processes that hold the models (chains[i]["model"])
+# Close the background processes that hold the models (chains.models)
 # when you no longer need them.
 AI4BayesCode.close_models(chains)
 
