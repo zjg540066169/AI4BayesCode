@@ -82,9 +82,9 @@ Jacobian). **AI4BayesCode ships `rjmcmc_block` as of 2026-04-19
 identity-coordinate proposals (the most common case, including
 Dirac spike-and-slab variable selection -- Jacobian = 1 by
 construction, so Sec.10.2's universal rule "users never write a
-Jacobian" holds). Library 1D transforms (linear / affine ported
-from librjmcmc) plus runtime autodiff on user-supplied
-bijections) will extend coverage; see Sec.10.2 for the Jacobian
+Jacobian" holds). Library 1D transforms (linear / affine)
+plus runtime autodiff on user-supplied
+bijections will extend coverage; see Sec.10.2 for the Jacobian
 ownership story at each tier.
 
 #### BNP mixture models: subclass with a Jacobian-free specialized path

@@ -13,7 +13,7 @@ description: |
 > the `AI4BAYESCODE_BIND_KERNEL_CONTROL` macro, the base class hooks in
 > `block_sampler.hpp`, the composite dispatch in `composite_block.hpp`,
 > and the `joint_nuts_block` slot-level override (Approach B per
-> `joint_nuts_block`) are all shipped. 42/42 examples migrated
+> `joint_nuts_block`) are all shipped. 42 of the 43 examples migrated
 > (ARDLasso remains hand-Gibbs; not yet mixin-enrolled). Layer-3 R2.f
 > (frozen-parameter exclusion) is active for any wrapper that freezes
 > at least one child.
@@ -1909,7 +1909,7 @@ IGNORE C++ default arguments. Note this is why the binding cannot live in
 `AI4BAYESCODE_BIND_KERNEL_CONTROL`: that macro is unconditional and every
 wrapper inherits freeze/unfreeze/get_frozen from `kernel_control_mixin`,
 whereas `readapt_NUTS` exists only on the models that have a NUTS kernel
-(22 of the 42 shipped examples) and needs the concrete class name in its
+(16 of the 43 shipped examples) and needs the concrete class name in its
 casts. Bind it in each model's RCPP_MODULE block.
 
 **Sub-checks** -- (a) and (b) are static (L2); (c) is runtime (R1). All

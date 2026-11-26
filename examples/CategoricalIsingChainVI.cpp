@@ -520,9 +520,9 @@ PYBIND11_MODULE(CategoricalIsingChainVI, m) {
 //  STANDALONE DEMO (int main)
 //  ---------------------------------------------------------------------------
 //  Compiled ONLY when neither binding module macro is defined. Drives the
-//  full-contract class directly: DGP + recovery check ported from the core
-//  standalone demo, but reads state via get_current() (key "phi", stored
-//  COLUMN-MAJOR: phi(i,k) == phi_flat[k*n + i]).
+//  full-contract class directly: DGP + recovery check, with the state taken
+//  from get_current() (key "phi", stored COLUMN-MAJOR: phi(i,k) ==
+//  phi_flat[k*n + i]).
 //
 //  Validation strategy (a prior-only VI sampler has NO likelihood, so we
 //  check the variational marginals against the KNOWN exact joint marginals

@@ -1,13 +1,12 @@
 /*
- *  bart_staging/src/bart_kernel_unity.h
+ *  bart_pure_cpp/src/bart_kernel_unity.h
  *
- *  Unity / amalgamation header for the unified BART tree kernel,
- *  ported from the legacy bart/bart_kernel_unity.h. Used by
+ *  Unity / amalgamation header for the unified BART tree kernel. Used by
  *  AI4BayesCode/bart_block.hpp so that any downstream sourceCpp of
- *  BartNoise.cpp (or similar BART-using wrapper outside bart_staging/)
+ *  BartNoise.cpp (or similar BART-using wrapper outside bart_pure_cpp/)
  *  pulls in the BART kernel .cpp files into the same translation unit.
  *
- *  When source-cpp'ing build_bart.cpp directly from bart_staging/,
+ *  When source-cpp'ing build_bart.cpp directly from bart_pure_cpp/,
  *  Rcpp's auto-discovery of sibling .cpp files handles linking and
  *  this header is unnecessary. It is required for the wrapper-from-
  *  examples-dir use case where Rcpp does NOT walk into src/BART/.

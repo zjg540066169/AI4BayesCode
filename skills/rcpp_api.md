@@ -46,12 +46,13 @@ arma::vec v(rcpp_vec.begin(), rcpp_vec.size(), /*copy=*/false);
 Use no-copy only for temporary computation within a single function.
 
 ### 4. Raising an error: use `ai4b::stop`
-Use `ai4b::stop()` (`backend_neutral.hpp`), NOT `ai4b::stop()` and not a bare
+Use `ai4b::stop()` (`backend_neutral.hpp`), NOT `Rcpp::stop()` and not a bare
 `throw`. The wrapper's class body is compiled by BOTH the `RCPP_MODULE` and the
 `PYBIND11_MODULE` translation units, so `Rcpp::stop` is undefined under
-`AI4BAYESCODE_PYBIND_MODULE`. `ai4b::stop` dispatches to `ai4b::stop` under the
+`AI4BAYESCODE_PYBIND_MODULE`. `ai4b::stop` dispatches to `Rcpp::stop` under the
 R backend (so it still unwinds through R's error handling) and to a C++
-exception otherwise. All 42 shipped examples use it; none uses `Rcpp::stop`.
+exception otherwise. 42 of the 43 shipped examples use it (LogisticRegression
+throws `std::runtime_error`); none uses `Rcpp::stop`.
 
 ### 5. Where Rcpp lives in the header tree
 All public `AI4BayesCode` headers under `include/AI4BayesCode/` depend on
@@ -183,10 +184,20 @@ A model object is an external pointer: `saveRDS()` and the transfer between
 processes in `parallel` deliver it as a NULL pointer. `ai4bayescode_run_chains()`
 therefore builds each chain's model in the worker process that runs the chain.
 With `keep_models = TRUE` (the default) the worker processes of a parallel run
-are not stopped at the end of the run, and `run$models[[i]]` is a handle:
+(at most `n_cores`; `mc.cores` is still accepted) are not stopped at the end of
+the run, and `run$models[[i]]` is a handle:
 `run$models[[i]]$get_current()` calls `get_current()` on chain i's model in its
 worker and returns the result. `predict(run, newdata)` (=
 `ai4bayescode_predict()`) calls `predict_at(newdata)` on every chain's model and
-stacks the chains; `ai4bayescode_close_models(run)` stops the workers. A
+stacks the chains; `ai4bayescode_close_models(run)` stops the workers. The
+option `ai4bayescode.max_workers` (or the environment variable
+`AI4BAYESCODE_MAX_WORKERS`) limits the number of worker processes of kept runs;
+when a new run would exceed it, those of the least recently used earlier runs
+are stopped first, and a call on one of their handles stops with an error. A
 sequential run returns the model objects themselves. Calls on a handle restored
-by `readRDS()` in another session stop with an error.
+by `readRDS()` in another session stop with an error. With
+`keep_models = FALSE` no models are kept, and the run is a plain list that
+starts with `histories`, `seeds` and `wall`, as in 1.1.2.
+`ai4bayescode_run_chains()` calls a model's `clear_history()` after the warmup
+only when the model has that method; for a model without it (compiled against
+1.1.2), `run$histories` and `predict()` leave out the warmup draws.

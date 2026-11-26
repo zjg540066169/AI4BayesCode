@@ -372,13 +372,21 @@ vector history -> `NumericMatrix` of (n_draws x dim)).
 - When `keep_history = true`, `predict_at` on a BART-family wrapper
   can return EITHER the current-state prediction OR the full
   (n_draws x n_test) matrix over history -- document which in the
-  wrapper's header.
+  wrapper's header. The full matrix at new X is computed from the
+  forest of each stored draw, which the block stores only with
+  `keep_tree = true`; the shipped BART-family examples (BartNoise,
+  SoftBartNoise, the four GBart* wrappers, VCBart) raise an error at
+  new X without it.
 - `clear_history()` (interface.md Sec.1) empties the history buffers
   of every block and the wrapper's own per-sweep members
   (`clear_extra_history_()`); the current state, the RNG streams and
   the tuning are unchanged, and the next `step()` records the first
-  draw of the new history. `ai4bayescode_run_chains()` /
-  `run_chains()` call it after the warmup sweeps.
+  draw of the new history (until then `get_history()` and
+  `predict_at()` return the current draw as one row).
+  `ai4bayescode_run_chains()` / `run_chains()` call it after the warmup
+  sweeps when the model has it; for a model compiled against 1.1.2 they
+  leave the warmup draws out of the returned histories and of
+  `predict()`.
 
 ---
 

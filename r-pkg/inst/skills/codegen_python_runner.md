@@ -211,7 +211,11 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
    ```
 
    Single-chain use is `seeds=[1]` (or the stateful API below); never
-   a bespoke wrapper.
+   a bespoke wrapper. For a model with a `bart_block` / `genbart_block` /
+   `softbart_block` child, the lambda also passes `keep_tree=True` (the
+   constructor argument of `examples/BartNoise.cpp`):
+   `AI4BayesCode.predict()` at `X_test` computes each kept draw from that
+   draw's forest, and the forests are stored only with `keep_tree=True`.
 7. **Stateful-API usage**, in order: `model.step()`,
    `model.get_history()`, `model.get_current()`,
    `model.predict_at({"<X>": X_test})`, then

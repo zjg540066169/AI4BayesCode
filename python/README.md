@@ -80,7 +80,7 @@ if __name__ == "__main__":
     AI4BayesCode.plot_dag(m, out_path="dag.png")
 
     # Run 4 parallel chains from different seeds (without n_cores, Windows
-    # runs the chains one after another):
+    # runs the chains one after another; n_jobs= is still accepted):
     chains = AI4BayesCode.run_chains(
         factory=build,
         seeds=[101, 202, 303, 404],
@@ -93,6 +93,15 @@ if __name__ == "__main__":
     # is chain i's model; its method calls run in the worker process that holds it.
     pred = AI4BayesCode.predict(chains, {"X": X_new})
     AI4BayesCode.close_models(chains)   # stop the worker processes
+
+    # chains[i] holds the 1.1.2 keys "seed", "wall" and "hist". The worker
+    # processes are stopped by close_models(chains), when chains is
+    # garbage-collected, or when Python exits. The environment variable
+    # AI4BAYESCODE_MAX_WORKERS limits their number over all runs; when a new
+    # run would exceed it, those of the least recently used runs are closed
+    # first. keep_models=False keeps no models (chains.models is None). A BART
+    # sampler predicts at new X from its draws only when built with
+    # keep_tree=True.
 ```
 
 ## Generate a sampler from natural language

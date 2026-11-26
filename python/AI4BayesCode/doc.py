@@ -127,7 +127,22 @@ def _parse_methods(src: str) -> list[str]:
     for m in re.finditer(r'\.(?:def|method)\(\s*"([^"]+)"', src):
         if m.group(1) not in out:
             out.append(m.group(1))
+    # A binding macro of kernel_control_mixin.hpp registers methods whose names
+    # do not appear as .def("...") in the source; comments are removed first.
+    code = re.sub(r"/\*.*?\*/", "", re.sub(r"//[^\n]*", "", src), flags=re.S)
+    for macro, names in _MACRO_METHODS.items():
+        if re.search(r"\b" + macro + r"\s*\(", code):
+            out.extend(nm for nm in names if nm not in out)
     return out
+
+
+# Methods registered by the binding macros (Rcpp and pybind11 forms).
+_MACRO_METHODS = {
+    "AI4BAYESCODE_PYBIND_KERNEL_CONTROL": ("freeze", "unfreeze", "get_frozen", "clear_history"),
+    "AI4BAYESCODE_BIND_KERNEL_CONTROL":   ("freeze", "unfreeze", "get_frozen", "clear_history"),
+    "AI4BAYESCODE_PYBIND_READAPT_NUTS":   ("readapt_NUTS",),
+    "AI4BAYESCODE_BIND_READAPT_NUTS":     ("readapt_NUTS",),
+}
 
 
 def _parse_header(src: str) -> list[str]:
@@ -176,8 +191,12 @@ _CANONICAL = {
     "set_current":  "set_current(params)      set the current draw (dict)",
     "predict_at":   "predict_at(new_data)     posterior prediction at new_data",
     "get_dag":      "get_dag()                model DAG (feed to plot_dag)",
-    "get_history":  "get_history()            every draw taken so far, warmup included (needs keep_history=True)",
+    "get_history":  "get_history()            draws since construction or the last clear_history() (needs keep_history=True)",
+    "clear_history": "clear_history()          discard the stored draws; the current state and tuning are kept",
     "readapt_NUTS": "readapt_NUTS(n, reset=False, max_tree_depth=-1)   re-run NUTS warm-up (online / sequential use)",
+    "freeze":       "freeze(names, quiet=False)   hold the named blocks at their current values",
+    "unfreeze":     "unfreeze(names=None)     sample the named blocks again; unfreeze() releases all",
+    "get_frozen":   "get_frozen()             names of the frozen blocks",
 }
 
 

@@ -125,7 +125,8 @@ documentation a first-time user reads):
 
    Everything AFTER the compile is identical in both branches: the checkout
    helpers ship `ai4bayescode_run_chains` / `ai4bayescode_rhat_summary` /
-   `ai4bayescode_diagnose` too, so the example's shape never changes -- only
+   `ai4bayescode_diagnose` / `predict` / `ai4bayescode_close_models` too, so
+   the example's shape never changes -- only
    these first one or two lines do.
    IMPORTANT -- where the class binds: `ai4bayescode_source()` /
    `ai4bayescode_source()` bind the compiled class into the CALLER'S frame
@@ -204,7 +205,11 @@ documentation a first-time user reads):
    ```
 
    Single-chain use is `n_chains = 1L` (or the stateful API below);
-   never a bespoke wrapper.
+   never a bespoke wrapper. For a model with a `bart_block` /
+   `genbart_block` / `softbart_block` child, the closure also passes
+   `keep_tree = TRUE` (the constructor argument of `examples/BartNoise.cpp`):
+   `predict()` at `<X>_test` computes each kept draw from that draw's forest,
+   and the forests are stored only with `keep_tree = TRUE`.
 7. **Stateful-API usage examples** -- commented, in this order:
    `new(<ClassName>, ..., keep_history = TRUE)`, `model$step()`,
    `model$get_history()`, `model$get_current()`, then

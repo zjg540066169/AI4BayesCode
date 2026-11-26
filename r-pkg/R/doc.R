@@ -200,8 +200,19 @@
     set_current  = "set_current(params)      set the current draw (named list)",
     predict_at   = "predict_at(new_data)     posterior prediction at new_data",
     get_dag      = "get_dag()                model DAG (feed to ai4bayescode_plot_dag)",
-    get_history  = "get_history()            every draw taken so far, warmup included (needs keep_history=TRUE)",
-    readapt_NUTS = "readapt_NUTS(n, reset, max_tree_depth)   re-run NUTS warm-up; pass all three (online / sequential use)"
+    get_history  = "get_history()            draws since construction or the last clear_history() (needs keep_history=TRUE)",
+    clear_history = "clear_history()          discard the stored draws; the current state and tuning are kept",
+    readapt_NUTS = "readapt_NUTS(n, reset, max_tree_depth)   re-run NUTS warm-up; pass all three (online / sequential use)",
+    freeze       = "freeze(names)            hold the named blocks at their current values",
+    unfreeze     = "unfreeze(names)          sample the named blocks again; unfreeze() releases all",
+    get_frozen   = "get_frozen()             names of the frozen blocks"
+)
+
+# Methods that a binding macro of kernel_control_mixin.hpp registers; their
+# names do not appear as .method("...") in a model's source.
+.ai4b_macro_methods <- list(
+    AI4BAYESCODE_BIND_KERNEL_CONTROL = c("freeze", "unfreeze", "get_frozen", "clear_history"),
+    AI4BAYESCODE_BIND_READAPT_NUTS   = "readapt_NUTS"
 )
 
 #' Print a usage card for an AI4BayesCode sampler
@@ -312,8 +323,16 @@ ai4bayescode_doc <- function(x) {
 
     cat("\nMethods:\n")
     shown <- character(0)
+    # Macros used in the code (comments removed) register their methods.
+    macro_methods <- if (is.null(src)) character(0) else {
+        code <- gsub("(?s)/\\*.*?\\*/", "", gsub("//[^\n]*", "", src), perl = TRUE)
+        unlist(.ai4b_macro_methods[vapply(names(.ai4b_macro_methods), function(mac)
+            grepl(sprintf("\\b%s\\s*\\(", mac), code, perl = TRUE), logical(1))],
+            use.names = FALSE)
+    }
     for (nm in names(.ai4b_canonical_methods)) {
-        registered <- is.null(src) || grepl(sprintf('\\.method\\(\\s*"%s"', nm), src)
+        registered <- is.null(src) || grepl(sprintf('\\.method\\(\\s*"%s"', nm), src) ||
+            nm %in% macro_methods
         if (!registered && !is.null(ctor)) next   # method not in this model
 
         doc <- mdoc[[nm]]
