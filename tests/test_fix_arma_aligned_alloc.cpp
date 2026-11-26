@@ -5,6 +5,9 @@
 //
 //  AI4BayesCode/arma_aligned_alloc.hpp, included before <armadillo> as the R
 //  and Python packages include it (-include). A = arma_heap_alignment.
+//  Sections 1 to 6 run on macOS, where the header sets the allocator
+//  (A = 256). On other systems the test checks only that the header defines
+//  neither allocator macro and that arma_heap_alignment is 0.
 //    1. ARMA_ALIEN_MEM_ALLOC_FUNCTION and ARMA_ALIEN_MEM_FREE_FUNCTION are
 //       defined, and arma::memory::acquire / release go through the two
 //       functions of the header.
@@ -71,6 +74,7 @@ void check(bool ok, const std::string& what) {
     if (!ok) ++g_fail;
 }
 
+#if defined(__APPLE__)
 const std::size_t A_BYTES = AI4BayesCode::arma_heap_alignment;
 const std::string A_STR = std::to_string(AI4BayesCode::arma_heap_alignment);
 
@@ -390,9 +394,12 @@ void routine_offset_classes() {
     }
 }
 
+#endif  // __APPLE__
+
 }  // namespace
 
 int main() {
+#if defined(__APPLE__)
     std::printf("=== test_fix_arma_aligned_alloc (arma_heap_alignment = %s) ===\n\n",
                 A_STR.c_str());
     allocator_macros();
@@ -403,6 +410,17 @@ int main() {
     gp_regression_repeats(120);
     elements_inside_the_object();
     routine_offset_classes();
+#else
+    std::printf("=== test_fix_arma_aligned_alloc (not macOS) ===\n\n");
+#  if defined(ARMA_ALIEN_MEM_ALLOC_FUNCTION) || defined(ARMA_ALIEN_MEM_FREE_FUNCTION)
+    check(false, "the header defines neither ARMA_ALIEN_MEM_ALLOC_FUNCTION nor "
+                 "ARMA_ALIEN_MEM_FREE_FUNCTION");
+#  else
+    check(true, "the header defines neither ARMA_ALIEN_MEM_ALLOC_FUNCTION nor "
+                "ARMA_ALIEN_MEM_FREE_FUNCTION");
+#  endif
+    check(AI4BayesCode::arma_heap_alignment == 0, "arma_heap_alignment is 0");
+#endif
     std::printf("\ntest_fix_arma_aligned_alloc: %d failed check(s)\n", g_fail);
     return g_fail == 0 ? 0 : 1;
 }

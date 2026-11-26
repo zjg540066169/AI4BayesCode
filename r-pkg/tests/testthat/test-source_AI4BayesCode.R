@@ -137,8 +137,8 @@ test_that("the staged copy of a read-only file stays writable and follows edits"
 # A module with three functions. `depends` is the list of packages in its
 # // [[Rcpp::depends(...)]] line.
 #   ai4b_arma_alignment()  AI4BayesCode::arma_heap_alignment if the build
-#                          force-included AI4BayesCode/arma_aligned_alloc.hpp,
-#                          0 otherwise
+#                          force-included AI4BayesCode/arma_aligned_alloc.hpp
+#                          (256 on macOS, 0 on other systems), -1 otherwise
 #   ai4b_arma_addresses()  addresses modulo 65536 of Armadillo heap arrays of
 #                          17 to 400 elements
 #   ai4b_offset_results()  results of ddot (n = 5000, 14400), dtrtrs (lower,
@@ -163,7 +163,7 @@ arma_probe_file <- function(depends = "RcppArmadillo") {
         "#ifdef AI4BAYESCODE_ARMA_ALIGNED_ALLOC_HPP",
         "    return static_cast<int>(AI4BayesCode::arma_heap_alignment);",
         "#else",
-        "    return 0;",
+        "    return -1;",
         "#endif",
         "}",
         "// [[Rcpp::export]]",
@@ -266,13 +266,22 @@ expect_one_result_per_class <- function(res, alignment) {
     }
 }
 
-test_that("the build fingerprint follows the flags and the force-included header", {
+# The header forces the 256-byte alignment on macOS only; elsewhere it leaves
+# Armadillo's allocation as it is and arma_heap_alignment is 0.
+on_macos <- identical(Sys.info()[["sysname"]], "Darwin")
+expected_alignment <- if (on_macos) 256L else 0L
+
+test_that("the build fingerprint follows the flags, the force-included header and the package version", {
     fp  <- AI4BayesCode:::.ai4b_build_fingerprint
     hdr <- tempfile(fileext = ".hpp")
     writeLines("// one", hdr)
     a <- fp(c("-Iinc", "-DX"), "-lm", hdr)
     expect_match(a, "^[0-9a-f]{12}$")
     expect_identical(fp(c("-Iinc", "-DX"), "-lm", hdr), a)
+    # the installed version is the default
+    expect_identical(fp(c("-Iinc", "-DX"), "-lm", hdr,
+                        version = as.character(utils::packageVersion("AI4BayesCode"))), a)
+    expect_false(identical(fp(c("-Iinc", "-DX"), "-lm", hdr, version = "1.1.2"), a))
     expect_false(identical(
         fp(c("-Iinc", "-DX", "-include AI4BayesCode/arma_aligned_alloc.hpp"), "-lm", hdr), a))
     expect_false(identical(fp(c("-Iinc", "-DX"), "-lblas", hdr), a))
@@ -298,7 +307,8 @@ test_that("Armadillo heap arrays of a compiled model lie on arma_heap_alignment-
     skip_if_not_installed("RcppArmadillo")
     e <- probe_env()
     alignment <- e$ai4b_arma_alignment()
-    expect_gt(alignment, 0L)
+    expect_identical(alignment, expected_alignment)
+    skip_if(!on_macos, "the header sets the allocator on macOS only")
     addr <- e$ai4b_arma_addresses()
     expect_length(addr, 3L * 384L)
     expect_true(all(addr %% alignment == 0L))
@@ -308,6 +318,7 @@ test_that("ddot, dtrtrs and dgetrs give one result per class of the operand offs
     skip_on_cran()
     skip_if_not_installed("Rcpp")
     skip_if_not_installed("RcppArmadillo")
+    skip_if(!on_macos, "the header sets the allocator on macOS only")
     e <- probe_env()
     expect_one_result_per_class(e$ai4b_offset_results(), e$ai4b_arma_alignment())
 })
@@ -322,12 +333,12 @@ test_that("a module built earlier in the same cacheDir with other flags is not r
     # Rcpp::sourceCpp on its own: no -include, Armadillo's own allocator.
     e0 <- new.env()
     Rcpp::sourceCpp(f, cacheDir = cache, env = e0)
-    expect_identical(e0$ai4b_arma_alignment(), 0L)
+    expect_identical(e0$ai4b_arma_alignment(), -1L)
     e <- new.env()
     ai4bayescode_source(f, env = e, quiet = TRUE, cacheDir = cache)
     alignment <- e$ai4b_arma_alignment()
-    expect_gt(alignment, 0L)
-    expect_true(all(e$ai4b_arma_addresses() %% alignment == 0L))
+    expect_identical(alignment, expected_alignment)
+    if (on_macos) expect_true(all(e$ai4b_arma_addresses() %% alignment == 0L))
     expect_length(list.files(cache, pattern = "^ai4b-[0-9a-f]{12}$"), 1L)
 })
 
@@ -365,7 +376,8 @@ test_that("a file compiled through the Rcpp plugin has aligned Armadillo heap ar
     e <- new.env()
     Rcpp::sourceCpp(f, env = e, cacheDir = tempfile("ai4b_plugin_cache_"))
     alignment <- e$ai4b_arma_alignment()
-    expect_gt(alignment, 0L)
+    expect_identical(alignment, expected_alignment)
+    skip_if(!on_macos, "the header sets the allocator on macOS only")
     addr <- e$ai4b_arma_addresses()
     expect_length(addr, 3L * 384L)
     expect_true(all(addr %% alignment == 0L))

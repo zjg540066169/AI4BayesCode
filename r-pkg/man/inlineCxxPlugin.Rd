@@ -22,7 +22,8 @@ automatically.
 
 The flags include `-include AI4BayesCode/arma_aligned_alloc.hpp`, so, as
 with [ai4bayescode_source()], Armadillo allocates its heap arrays on
-256-byte boundaries. Rcpp keys its build cache on the source file alone: a
+256-byte boundaries on macOS; on other systems the header leaves
+Armadillo's allocation unchanged. Rcpp keys its build cache on the source file alone: a
 module built through this plugin by an earlier version of AI4BayesCode and
 kept in a lasting `rcpp.cache.dir` folder is loaded again for an unchanged
 file unless `rebuild = TRUE` is passed to [Rcpp::sourceCpp()].

@@ -322,6 +322,142 @@ private:
     }
 };
 
+// ---- readapt_NUTS ----------------------------------------------------------
+
+/// W has a public member function void readapt_NUTS(int, bool, int).
+template <typename W, typename = void>
+struct readapt_exact3 : std::false_type {};
+template <typename W>
+struct readapt_exact3<W, typename void_type_<decltype(
+    static_cast<void (W::*)(int, bool, int)>(&W::readapt_NUTS))>::type>
+    : std::true_type {};
+
+/// W has a public member function void readapt_NUTS(int, bool, int, double).
+template <typename W, typename = void>
+struct readapt_exact4 : std::false_type {};
+template <typename W>
+struct readapt_exact4<W, typename void_type_<decltype(
+    static_cast<void (W::*)(int, bool, int, double)>(&W::readapt_NUTS))>::type>
+    : std::true_type {};
+
+/// w.readapt_NUTS(n, reset, depth) is a valid call outside W.
+template <typename W, typename = void>
+struct readapt_call3 : std::false_type {};
+template <typename W>
+struct readapt_call3<W, typename void_type_<decltype(
+    std::declval<W&>().readapt_NUTS(0, false, 0))>::type> : std::true_type {};
+
+/// w.readapt_NUTS(n, reset, depth, target_accept) is a valid call outside W.
+template <typename W, typename = void>
+struct readapt_call4 : std::false_type {};
+template <typename W>
+struct readapt_call4<W, typename void_type_<decltype(
+    std::declval<W&>().readapt_NUTS(0, false, 0, 0.0))>::type> : std::true_type {};
+
+/// &W::readapt_NUTS names one public member (W declares a single
+/// readapt_NUTS, of any parameter list).
+template <typename W, typename = void>
+struct readapt_single : std::false_type {};
+template <typename W>
+struct readapt_single<W, typename void_type_<decltype(&W::readapt_NUTS)>::type>
+    : std::true_type {};
+
+/**
+ * readapt_NUTS as bound by AI4BAYESCODE_BIND_READAPT_NUTS (call3 for the
+ * 3-argument R method, call4 for the 4-argument one) and by
+ * AI4BAYESCODE_PYBIND_READAPT_NUTS (call4), functions of W*.
+ *
+ * call3(n, reset, depth) calls, in this order of preference:
+ *   0. W's readapt_NUTS(int, bool, int);
+ *   1. W's readapt_NUTS called with (n, reset, depth, -1.0); target_accept
+ *      -1 keeps the block's target, as the 3-argument form does;
+ *   2. W's readapt_NUTS called with (n, reset, depth).
+ * call4(n, reset, depth, target_accept) calls, in this order:
+ *   0. W's readapt_NUTS(int, bool, int, double);
+ *   1. W's readapt_NUTS called with (n, reset, depth, target_accept);
+ *   2. when W's readapt_NUTS takes no target_accept: call3, if
+ *      target_accept is outside (0, 1] (the values with which nuts_block and
+ *      joint_nuts_block keep their target); a target_accept in (0, 1]
+ *      raises std::invalid_argument, since this readapt_NUTS cannot apply it.
+ * Every call names the function or uses a member pointer of exactly its
+ * type, so no function is called through a pointer of another type. A class
+ * with both overloads calls each as before; a class with only
+ * readapt_NUTS(int, bool, int, double = -1) or only the 3-argument form
+ * compiles, as it did with 1.1.2. A class whose single readapt_NUTS takes
+ * none of these argument lists compiles, and both methods raise
+ * std::logic_error; a class with no readapt_NUTS stops the build.
+ */
+template <typename W>
+struct readapt_binding {
+    static void call3(W* self, int n, bool reset, int max_tree_depth) {
+        check_();
+        three_(self, n, reset, max_tree_depth, std::integral_constant<int, how3_>{});
+    }
+    static void call4(W* self, int n, bool reset, int max_tree_depth,
+                      double target_accept) {
+        check_();
+        four_(self, n, reset, max_tree_depth, target_accept,
+              std::integral_constant<int, how4_>{});
+    }
+
+private:
+    static constexpr int how3_ =
+        readapt_exact3<W>::value ? 0 : readapt_call4<W>::value ? 1 :
+        readapt_call3<W>::value ? 2 : 3;
+    static constexpr int how4_ =
+        readapt_exact4<W>::value ? 0 : readapt_call4<W>::value ? 1 :
+        (readapt_exact3<W>::value || readapt_call3<W>::value) ? 2 : 3;
+
+    static void check_() {
+        static_assert(how3_ != 3 || how4_ != 3 || readapt_single<W>::value,
+                      "AI4BAYESCODE_BIND_READAPT_NUTS / "
+                      "AI4BAYESCODE_PYBIND_READAPT_NUTS: the class has no public "
+                      "readapt_NUTS(int n, bool reset, int max_tree_depth"
+                      "[, double target_accept])");
+    }
+    [[noreturn]] static void unusable_() {
+        throw std::logic_error(
+            "readapt_NUTS: this class's readapt_NUTS takes neither (n, reset, "
+            "max_tree_depth) nor (n, reset, max_tree_depth, target_accept)");
+    }
+
+    static void three_(W* s, int n, bool r, int d, std::integral_constant<int, 0>) {
+        (s->*static_cast<void (W::*)(int, bool, int)>(&W::readapt_NUTS))(n, r, d);
+    }
+    static void three_(W* s, int n, bool r, int d, std::integral_constant<int, 1>) {
+        static_cast<void>(s->readapt_NUTS(n, r, d, -1.0));
+    }
+    static void three_(W* s, int n, bool r, int d, std::integral_constant<int, 2>) {
+        static_cast<void>(s->readapt_NUTS(n, r, d));
+    }
+    static void three_(W*, int, bool, int, std::integral_constant<int, 3>) {
+        unusable_();
+    }
+
+    static void four_(W* s, int n, bool r, int d, double t,
+                      std::integral_constant<int, 0>) {
+        (s->*static_cast<void (W::*)(int, bool, int, double)>(&W::readapt_NUTS))(
+            n, r, d, t);
+    }
+    static void four_(W* s, int n, bool r, int d, double t,
+                      std::integral_constant<int, 1>) {
+        static_cast<void>(s->readapt_NUTS(n, r, d, t));
+    }
+    static void four_(W* s, int n, bool r, int d, double t,
+                      std::integral_constant<int, 2>) {
+        if (t > 0.0 && t <= 1.0) {
+            throw std::invalid_argument(
+                "readapt_NUTS: this class's readapt_NUTS takes no target_accept, "
+                "so target_accept = " + std::to_string(t) + " cannot be applied; "
+                "call readapt_NUTS(n, reset, max_tree_depth)");
+        }
+        three_(s, n, r, d, std::integral_constant<int, how3_>{});
+    }
+    static void four_(W*, int, bool, int, double, std::integral_constant<int, 3>) {
+        unusable_();
+    }
+};
+
 } // namespace kcm_detail
 
 } // namespace AI4BayesCode
@@ -458,19 +594,18 @@ private:
 //      AI4BAYESCODE_BIND_KERNEL_CONTROL(MyModel)
 // ----------------------------------------------------------------------------
 #ifdef AI4BAYESCODE_RCPP_MODULE
-//  Both entries select the overload with static_cast (see the comment above
-//  AI4BAYESCODE_BIND_KERNEL_CONTROL): a class without an overload of exactly
-//  that signature stops the build instead of binding another function.
+//  Both entries call the class's readapt_NUTS through
+//  kcm_detail::readapt_binding (see there): a class with both overloads calls
+//  each one, and a class with only one of them, as 1.1.2 compiled it, calls
+//  that one.
 #define AI4BAYESCODE_BIND_READAPT_NUTS(CLASSNAME)                          \
     .method("readapt_NUTS",                                                \
-            static_cast<void (CLASSNAME::*)(int, bool, int)>(              \
-                &CLASSNAME::readapt_NUTS),                                  \
+            &AI4BayesCode::kcm_detail::readapt_binding<CLASSNAME>::call3,   \
             "Re-tune NUTS dual-averaging: readapt_NUTS(n, reset, "          \
             "max_tree_depth). Pass all three -- Rcpp dispatches on arity "  \
             "and does not honour the C++ default arguments.")               \
     .method("readapt_NUTS",                                                \
-            static_cast<void (CLASSNAME::*)(int, bool, int, double)>(      \
-                &CLASSNAME::readapt_NUTS),                                  \
+            &AI4BayesCode::kcm_detail::readapt_binding<CLASSNAME>::call4,   \
             "Re-tune NUTS; 4th argument target_accept in (0, 1] overrides " \
             "the block's target (default 0.55) for this re-adaptation.")
 #endif // AI4BAYESCODE_RCPP_MODULE
@@ -478,8 +613,7 @@ private:
 #ifdef AI4BAYESCODE_PYBIND_MODULE
 #define AI4BAYESCODE_PYBIND_READAPT_NUTS(CLASSNAME)                        \
     .def("readapt_NUTS",                                                   \
-         static_cast<void (CLASSNAME::*)(int, bool, int, double)>(         \
-             &CLASSNAME::readapt_NUTS),                                     \
+         &AI4BayesCode::kcm_detail::readapt_binding<CLASSNAME>::call4,      \
          pybind11::arg("n"), pybind11::arg("reset") = false,               \
          pybind11::arg("max_tree_depth") = -1,                             \
          pybind11::arg("target_accept") = -1.0,                            \

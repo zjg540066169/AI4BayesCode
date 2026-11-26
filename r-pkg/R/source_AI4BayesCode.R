@@ -46,23 +46,25 @@
 #' to R's temporary folder.
 #'
 #' @section Memory alignment and the build cache:
-#' Every build force-includes `AI4BayesCode/arma_aligned_alloc.hpp`, so
-#' Armadillo allocates its heap arrays on 256-byte boundaries. On an Apple M2
-#' Max with macOS 27.0.1, the results of Accelerate routines that Armadillo
-#' calls, among them ddot (`dot()`, `accu(A % B)`) and dtrtrs
-#' (`solve(trimatl(L), b)`), depend on the addresses of the operands modulo
-#' 256 bytes, and with every operand at a multiple of 256 bytes each routine
-#' gave one result; the header lists the routines and sizes measured. On that
-#' machine `GPRegression` (N = 100, 110, 120), `GPClassification` (N = 100,
-#' 110) and `HSGPRegression` (N = 80, 110), each built six times with one seed
-#' in each of three R sessions, gave bit-identical draws within and across
-#' the sessions.
+#' Every build force-includes `AI4BayesCode/arma_aligned_alloc.hpp`. On
+#' macOS, Armadillo then allocates its heap arrays on 256-byte boundaries; on
+#' other systems the header leaves Armadillo's allocation unchanged, since the
+#' alignment was measured only on macOS. On an Apple M2 Max with macOS
+#' 27.0.1, the results of Accelerate routines that Armadillo calls, among them
+#' ddot (`dot()`, `accu(A % B)`) and dtrtrs (`solve(trimatl(L), b)`), depend
+#' on the addresses of the operands modulo 256 bytes, and with every operand
+#' at a multiple of 256 bytes each routine gave one result; the header lists
+#' the routines and sizes measured. On that machine `GPRegression` (N = 100,
+#' 110, 120), `GPClassification` (N = 100, 110) and `HSGPRegression` (N = 80,
+#' 110), each built six times with one seed in each of three R sessions, gave
+#' bit-identical draws within and across the sessions.
 #'
 #' Rcpp keys its build cache on the source file alone, so the build is kept
 #' in a subfolder of the cache folder (`cacheDir`, by default
 #' `getOption("rcpp.cache.dir", tempdir())`) named after a fingerprint of the
-#' compiler and linker flags and of that header: a module built with other
-#' flags is not loaded in its place.
+#' compiler and linker flags, of that header and of the installed
+#' AI4BayesCode version: a module built with other flags, or by another
+#' version of the package, is not loaded in its place.
 #'
 #' @param code Either a path to a `.cpp` file, or a length-1 character string
 #'   containing the `.cpp` source. A string that is not an existing path is
@@ -172,9 +174,10 @@ ai4bayescode_source <- function(code,
         # compile then opens with a macro-redefinition warning.
         "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_RCPP_MODULE",
-        # Armadillo allocates its heap arrays on 256-byte boundaries (see
-        # AI4BayesCode/arma_aligned_alloc.hpp for the Accelerate routines
-        # whose results depend on the operand addresses modulo 256 bytes).
+        # On macOS Armadillo allocates its heap arrays on 256-byte boundaries
+        # (see AI4BayesCode/arma_aligned_alloc.hpp for the Accelerate routines
+        # whose results depend on the operand addresses modulo 256 bytes);
+        # elsewhere the header leaves Armadillo's allocation unchanged.
         # With -include the preprocessor processes the header before the
         # first line of the source, so before <RcppArmadillo.h>. The relative
         # name needs no quoting: the compiler resolves a relative -include
@@ -251,11 +254,12 @@ ai4bayescode_source <- function(code,
     # Rcpp::sourceCpp keys its build cache (cache.rds under cacheDir, which
     # persists across sessions when the option rcpp.cache.dir names a lasting
     # folder) on the source file alone, so a module built earlier with other
-    # flags is loaded again for an unchanged file. The build therefore goes to
-    # a subfolder of cacheDir named after a fingerprint of the flags and of
-    # the force-included header. source_cpp() takes a `cacheDir` given in
-    # `...` as the folder that holds that subfolder and passes the other
-    # arguments in `...` to Rcpp::sourceCpp() unchanged. It calls
+    # flags, or against the headers of another AI4BayesCode version, is loaded
+    # again for an unchanged file. The build therefore goes to a subfolder of
+    # cacheDir named after a fingerprint of the flags, of the force-included
+    # header and of the installed AI4BayesCode version. source_cpp() takes a
+    # `cacheDir` given in `...` as the folder that holds that subfolder and
+    # passes the other arguments in `...` to Rcpp::sourceCpp() unchanged. It calls
     # Rcpp::sourceCpp() by name, so the error of a failed build reports the
     # call `Rcpp::sourceCpp(build_file, ...)`, not the deparsed function.
     fp_dir <- paste0("ai4b-", .ai4b_build_fingerprint(cppflags, libs, align_hdr))
@@ -296,16 +300,19 @@ ai4bayescode_source <- function(code,
 
 # ---------------------------------------------------------------------------
 # Internal: the first 12 hex digits of an MD5 over the compiler flags, the
-# linker flags and the MD5 of the force-included header. ai4bayescode_source()
-# names the Rcpp cache subfolder of a build after it, so a change in any of
-# them gives a new folder and a fresh build.
+# linker flags, the MD5 of the force-included header and the AI4BayesCode
+# version (by default the installed one). ai4bayescode_source() names the
+# Rcpp cache subfolder of a build after it, so a change in any of them, a
+# package upgrade included, gives a new folder and a fresh build.
 # ---------------------------------------------------------------------------
 #' @keywords internal
 #' @noRd
-.ai4b_build_fingerprint <- function(cppflags, libs, header) {
+.ai4b_build_fingerprint <- function(cppflags, libs, header,
+                                    version = as.character(utils::packageVersion("AI4BayesCode"))) {
     f <- tempfile("ai4b_fp_")
     on.exit(unlink(f), add = TRUE)
-    writeLines(c(cppflags, "\x1e", libs, "\x1e", unname(tools::md5sum(header))),
+    writeLines(c(cppflags, "\x1e", libs, "\x1e", unname(tools::md5sum(header)),
+                 "\x1e", version),
                f, useBytes = TRUE)
     substr(unname(tools::md5sum(f)), 1L, 12L)
 }

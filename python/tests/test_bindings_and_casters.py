@@ -117,6 +117,45 @@ public:
     void clear_history() { KcPlain::clear_history(); own_buf.clear(); ++own_calls; }
 };
 
+
+// readapt_NUTS of other shapes, bound by AI4BAYESCODE_BIND_READAPT_NUTS /
+// AI4BAYESCODE_PYBIND_READAPT_NUTS. last() is (n, reset, depth, target) of
+// the last call; target -9 marks a readapt_NUTS without target_accept and -2
+// the 3-argument overload of a class with both.
+#define RX_BODY                                                                 \
+public:                                                                         \
+    mutable std::vector<double> args;                                           \
+    std::vector<double> last() const { return args; }
+class Rx4d {     // 1.1.2 compiled this one; 1.1.3 with static_cast did not
+    RX_BODY
+    void readapt_NUTS(int n, bool r, int d, double t = -1.0) { args = {double(n), double(r), double(d), t}; }
+};
+class Rx4 {
+    RX_BODY
+    void readapt_NUTS(int n, bool r, int d, double t) { args = {double(n), double(r), double(d), t}; }
+};
+class Rx3 {
+    RX_BODY
+    void readapt_NUTS(int n, bool r = false, int d = -1) { args = {double(n), double(r), double(d), -9.0}; }
+};
+class RxBothDef {  // the 3-argument call would be ambiguous
+    RX_BODY
+    void readapt_NUTS(int n, bool r, int d, double t = -1.0) { args = {double(n), double(r), double(d), t}; }
+    void readapt_NUTS(int n, bool r = false, int d = -1) { args = {double(n), double(r), double(d), -2.0}; }
+};
+class RxConst {
+    RX_BODY
+    void readapt_NUTS(int n, bool r, int d, double t) const { args = {double(n), double(r), double(d), t}; }
+};
+class RxSizeT {
+    RX_BODY
+    void readapt_NUTS(std::size_t n, bool r, int d, double t) { args = {double(n), double(r), double(d), t}; }
+};
+class RxNone {   // takes neither argument list: compiles, every call raises
+    RX_BODY
+    void readapt_NUTS(int n) { args = {double(n)}; }
+};
+
 #define KC_BIND(CLS)                                                            \
     pybind11::class_<CLS>(m, #CLS)                                              \
         .def(pybind11::init<>())                                                \
@@ -133,6 +172,13 @@ PYBIND11_MODULE(KcToysPy, m) {
     KC_BIND(KcStringClear);
     KC_BIND(KcPrivateClear);
     KC_BIND(KcSub).def("own_rows", &KcSub::own_rows);
+#define RX_BIND(CLS)                                                            \
+    pybind11::class_<CLS>(m, #CLS)                                              \
+        .def(pybind11::init<>())                                                \
+        .def("last", &CLS::last)                                                \
+        AI4BAYESCODE_PYBIND_READAPT_NUTS(CLS)
+    RX_BIND(Rx4d); RX_BIND(Rx4); RX_BIND(Rx3); RX_BIND(RxBothDef);
+    RX_BIND(RxConst); RX_BIND(RxSizeT); RX_BIND(RxNone);
 }
 """
 
@@ -197,6 +243,24 @@ def test_readapt_binding_selects_the_overload(toys):
     assert m.last_readapt() == [5.0, 0.0, -1.0, -1.0]
     m.readapt_NUTS(6, True, 2, 0.7)
     assert m.last_readapt() == [6.0, 1.0, 2.0, 0.7]
+
+
+def test_readapt_binding_with_one_of_the_two_forms(toys):
+    def run(cls, *args, **kw):
+        m = getattr(toys, cls)()
+        m.readapt_NUTS(*args, **kw)
+        return m.last()
+    # only the 4-argument form, or both: target_accept = -1 by default
+    for cls in ("Rx4d", "Rx4", "RxConst", "RxSizeT", "RxBothDef"):
+        assert run(cls, 5) == [5.0, 0.0, -1.0, -1.0], cls
+        assert run(cls, 6, True, 2, 0.7) == [6.0, 1.0, 2.0, 0.7], cls
+    # only the 3-argument form: target_accept that keeps the target calls it
+    assert run("Rx3", 5) == [5.0, 0.0, -1.0, -9.0]
+    assert run("Rx3", 6, True, 2, -1.0) == [6.0, 1.0, 2.0, -9.0]
+    with pytest.raises(ValueError, match="takes no target_accept"):
+        run("Rx3", 5, target_accept=0.7)
+    with pytest.raises(RuntimeError, match="takes neither"):
+        run("RxNone", 5)
 
 
 # ---- freeze / unfreeze warnings (PyErr_WarnEx return value) ----------------

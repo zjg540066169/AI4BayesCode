@@ -1,6 +1,8 @@
 """source() compiles every sampler with -include and the absolute path of the
-vendored AI4BayesCode/arma_aligned_alloc.hpp, so Armadillo allocates its heap
-arrays on arma_heap_alignment-byte boundaries.
+vendored AI4BayesCode/arma_aligned_alloc.hpp. On macOS Armadillo then
+allocates its heap arrays on arma_heap_alignment = 256-byte boundaries; on
+other systems the header leaves Armadillo's allocation unchanged and
+arma_heap_alignment is 0, so (a) and (b) below run on macOS only.
 
 The flag is part of the build signature, so a module built without it is not
 loaded from the cache. The compile tests build a small module and check
@@ -18,6 +20,7 @@ loaded from the cache. The compile tests build a small module and check
 from __future__ import annotations
 
 import importlib
+import sys
 from pathlib import Path
 
 import pytest
@@ -25,6 +28,8 @@ import pytest
 src = importlib.import_module("AI4BayesCode.source")
 
 HEADER = "AI4BayesCode/arma_aligned_alloc.hpp"
+ON_MACOS = sys.platform == "darwin"
+EXPECTED_ALIGNMENT = 256 if ON_MACOS else 0
 
 
 def test_the_header_ships_in_the_vendored_tree():
@@ -82,12 +87,13 @@ PROBE = r"""
 namespace py = pybind11;
 
 // AI4BayesCode::arma_heap_alignment if the build force-included
-// AI4BayesCode/arma_aligned_alloc.hpp, 0 otherwise.
+// AI4BayesCode/arma_aligned_alloc.hpp (256 on macOS, 0 elsewhere), -1
+// otherwise.
 static int alignment() {
 #ifdef AI4BAYESCODE_ARMA_ALIGNED_ALLOC_HPP
     return static_cast<int>(AI4BayesCode::arma_heap_alignment);
 #else
-    return 0;
+    return -1;
 #endif
 }
 
@@ -206,7 +212,9 @@ def probe(tmp_path_factory):
 @pytest.mark.compile
 def test_armadillo_heap_arrays_lie_on_arma_heap_alignment_boundaries(probe):
     alignment = probe.alignment()
-    assert alignment > 0
+    assert alignment == EXPECTED_ALIGNMENT
+    if not ON_MACOS:
+        pytest.skip("the header sets the allocator on macOS only")
     addr = probe.addresses()
     assert len(addr) == 3 * 384
     assert all(a % alignment == 0 for a in addr)
@@ -214,8 +222,10 @@ def test_armadillo_heap_arrays_lie_on_arma_heap_alignment_boundaries(probe):
 
 @pytest.mark.compile
 def test_routines_give_one_result_per_class_of_the_offset(probe):
+    if not ON_MACOS:
+        pytest.skip("the header sets the allocator on macOS only")
     alignment = probe.alignment()
-    assert alignment > 0
+    assert alignment == EXPECTED_ALIGNMENT
     res = probe.offset_results()
     offsets = res["offsets"]
     assert len(offsets) == 256
@@ -241,7 +251,8 @@ def test_a_header_of_the_same_name_in_the_working_directory_is_not_read(
     code = PROBE.replace("ai4b_align_probe", "ai4b_align_probe_cwd")
     mod = src.source(code, cache_dir=tmp_path / "cache", quiet=True)
     alignment = mod.alignment()
-    assert alignment > 0
-    addr = mod.addresses()
-    assert len(addr) == 3 * 384
-    assert all(a % alignment == 0 for a in addr)
+    assert alignment == EXPECTED_ALIGNMENT       # the vendored header was read
+    if ON_MACOS:
+        addr = mod.addresses()
+        assert len(addr) == 3 * 384
+        assert all(a % alignment == 0 for a in addr)
