@@ -416,13 +416,35 @@ public:
     data_input_groups() const noexcept { return data_input_groups_; }
 
     /**
+     * Declare members of a co-indexed group as LABELS of its rows (e.g. a
+     * group index g_idx next to the design X). A call that supplies only
+     * label members of a group gives new labels to the TRAINING rows: the
+     * other members keep their training values and nothing is withheld (the
+     * wrapper checks that the labels have the training row count). A call
+     * that supplies any other member of the group withholds the members it
+     * leaves out, labels included, as for a group without labels.
+     */
+    void declare_data_input_labels(const std::vector<std::string>& keys) {
+        for (const auto& k : keys) {
+            data_input_keys_.insert(k);
+            data_input_labels_.insert(k);
+        }
+    }
+
+    /// Read-only access to the declared label inputs.
+    const std::unordered_set<std::string>&
+    data_input_labels() const noexcept { return data_input_labels_; }
+
+    /**
      * The keys that are NOT PREDICTABLE for a call that replaced `replaced`:
      * every co-indexed data input the caller left out, plus everything
      * downstream of one in the predict DAG.
      *
      * A group none of whose members were replaced contributes nothing -- the
      * whole group is at its training values and is mutually consistent, which
-     * is what predict_at with no replacements means.
+     * is what predict_at with no replacements means. Neither does a group of
+     * which only label members (declare_data_input_labels) were replaced:
+     * they label the training rows, with which the other members line up.
      */
     std::unordered_set<std::string> predict_withheld_cone(
             const std::unordered_set<std::string>& replaced) const {
@@ -430,7 +452,8 @@ public:
         std::vector<std::string> queue;
         for (const auto& grp : data_input_groups_) {
             bool any_replaced = false;
-            for (const auto& k : grp) if (replaced.count(k)) { any_replaced = true; break; }
+            for (const auto& k : grp)
+                if (replaced.count(k) && !data_input_labels_.count(k)) { any_replaced = true; break; }
             if (!any_replaced) continue;
             for (const auto& k : grp)
                 if (!replaced.count(k) && cone.insert(k).second) queue.push_back(k);
@@ -842,6 +865,36 @@ public:
             // always-available (e.g. a prior-draw terminal).
             if (all_avail) result.push_back(key);
         }
+        // A stochastic node whose predict-DAG parent is another sampled
+        // stochastic node (y_rep = f_star + sigma e) is sampled after it, so
+        // it reads the value drawn in this call. Stable: at each position
+        // the first remaining key whose sampled parents are placed is taken,
+        // so a list without such a dependency keeps its order.
+        if (result.size() > 1) {
+            std::vector<std::string> ordered;
+            std::vector<char> placed(result.size(), 0);
+            while (ordered.size() < result.size()) {
+                std::size_t pick = result.size();
+                for (std::size_t i = 0; i < result.size() && pick == result.size(); ++i) {
+                    if (placed[i]) continue;
+                    bool ready = true;
+                    auto pit = parents.find(result[i]);
+                    if (pit != parents.end())
+                        for (const auto& p : pit->second)
+                            for (std::size_t j = 0; j < result.size(); ++j)
+                                if (!placed[j] && j != i && result[j] == p) ready = false;
+                    if (ready) pick = i;
+                }
+                if (pick == result.size()) {   // a cycle: the rest keep their order
+                    for (std::size_t i = 0; i < result.size(); ++i)
+                        if (!placed[i]) ordered.push_back(result[i]);
+                    break;
+                }
+                placed[pick] = 1;
+                ordered.push_back(result[pick]);
+            }
+            result = std::move(ordered);
+        }
         return result;
     }
 
@@ -1069,6 +1122,8 @@ private:
     // Data inputs sharing one observation index; see
     // declare_data_input_group().
     std::vector<std::vector<std::string>> data_input_groups_;
+    // Group members that label the rows; see declare_data_input_labels().
+    std::unordered_set<std::string> data_input_labels_;
     std::unordered_map<std::string, std::vector<std::string>> predict_edges_;
     // VIZ-ONLY. Never read by predict_downstream_of /
     // predict_stochastic_sampleable. See declare_context_edges().

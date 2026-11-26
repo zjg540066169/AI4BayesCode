@@ -640,6 +640,10 @@ public:
                     " (pass vectorise(Phi_new), N_new*M col-major).");
             }
             has_phi = true;
+            // A key next to phi that is not a declared data input is ignored,
+            // with a warning that names it (1.1.2 ignored it).
+            ai4b::warn_ignored_predict_keys("HSGPRegression::predict_at", new_data,
+                                            impl_->data().valid_predict_inputs());
         } else {
             for (const auto& kv : new_data) {
                 throw std::runtime_error(

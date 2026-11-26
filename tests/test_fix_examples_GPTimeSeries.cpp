@@ -37,16 +37,17 @@
 //        1e-8 * amp_d);
 //    C8  predict_at({}, last_draw_only = true) gives the same at the
 //        current state in one row;
-//    C9  the y_rep stochastic refresher, run by composite_block::predict_at
-//        from an engine seeded as predict_rng_, equals the y_rep of the
-//        single-draw predict_at bit for bit, at the training t and at new
-//        times;
+//    C9  the f_star and y_rep stochastic refreshers, run by
+//        composite_block::predict_at from an engine seeded as predict_rng_,
+//        give the y_rep of the single-draw predict_at bit for bit, at the
+//        training t and at new times;
 //    C10 get_dag() declares the one data input "t", and predict_at with any
 //        other key throws an error that names the key;
 //    C11 get_dag() predict edges are amp -> a_real, tau -> c_real,
-//        sigma -> obs_diag and t, a_real, c_real, obs_diag, sigma -> y_rep
-//        (the keys passed to d.get in the refreshers), and the context edges
-//        are the three prior edges;
+//        sigma -> obs_diag, t, a_real, c_real, obs_diag -> f_mean, f_sd,
+//        f_mean, f_sd -> f_star and f_star, sigma -> y_rep (the nodes that
+//        predict_at returns), and the context edges are the three prior
+//        edges;
 //    C12 composite_block::predict_at with a replaced amp recomputes
 //        a_real = amp^2 and draws y_rep from it: y_rep equals, bit for bit,
 //        the single-draw predict_at of a twin model after set_current(amp);
@@ -395,7 +396,8 @@ int main() {
         std::printf("C9 refresher vs single-draw predict_at: training t %s, new t %s\n",
                     ok_tr ? "bit-identical" : "DIFFERS", ok_new ? "bit-identical" : "DIFFERS");
         check(ok_tr && ok_new,
-              "C9 the y_rep refresher equals the single-draw predict_at at the training and new t");
+              "C9 the f_star and y_rep refreshers give the y_rep of the single-draw predict_at "
+              "at the training and new t");
     }
 
     // C10: the declared data input and the unknown-key error.
@@ -416,16 +418,17 @@ int main() {
               "C10 data_inputs is {t}; predict_at with another key throws naming the key");
     }
 
-    // C11: the sources of the predict edges into each node are the keys
-    // passed to d.get in that node's refresher.
+    // C11: the predict edges, whose targets are the keys predict_at returns.
     {
         GPTimeSeries m11(t, y, 21, false);
         const auto dag = m11.get_dag();
         using edge_set = std::set<std::pair<std::string, std::string>>;
-        const edge_set want_pe = {{"amp", "a_real"},   {"tau", "c_real"},
-                                  {"sigma", "obs_diag"}, {"sigma", "y_rep"},
-                                  {"t", "y_rep"},        {"a_real", "y_rep"},
-                                  {"c_real", "y_rep"},   {"obs_diag", "y_rep"}};
+        edge_set want_pe = {{"amp", "a_real"},     {"tau", "c_real"},
+                            {"sigma", "obs_diag"},   {"sigma", "y_rep"},
+                            {"f_mean", "f_star"},    {"f_sd", "f_star"},
+                            {"f_star", "y_rep"}};
+        for (const char* parent : {"t", "a_real", "c_real", "obs_diag"})
+            for (const char* child : {"f_mean", "f_sd"}) want_pe.insert({parent, child});
         const edge_set want_ce = {{"amp_prior_sd", "amp"}, {"tau_prior_shape", "tau"},
                                   {"tau_prior_scale", "tau"}};
         edge_set pe, ce;
@@ -436,7 +439,8 @@ int main() {
         std::printf("C11 get_dag: %zu predict edges, %zu context edges\n", pe.size(), ce.size());
         check(pe == want_pe && ce == want_ce,
               "C11 predict edges amp->a_real, tau->c_real, sigma->obs_diag, "
-              "{t, a_real, c_real, obs_diag, sigma}->y_rep; context edges are the priors");
+              "{t, a_real, c_real, obs_diag}->{f_mean, f_sd}, {f_mean, f_sd}->f_star, "
+              "{f_star, sigma}->y_rep; context edges are the priors");
     }
 
     // C12: composite_block::predict_at with a replaced amp recomputes a_real

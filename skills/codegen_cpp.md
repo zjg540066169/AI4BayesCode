@@ -2558,7 +2558,9 @@ target of `declare_predict_edges`), in both branches. `predict_at(list())`
 means every data input at its training value: install the training
 value of a data input that `new_data` leaves out (unless it is withheld,
 i.e. an unsupplied member of a partially supplied
-`declare_data_input_group`), and return a node the walk does not reach
+`declare_data_input_group`; a group of which only members declared with
+`declare_data_input_labels` are supplied withholds nothing), and return a
+node the walk does not reach
 (parents all parameters, a forest fit at the training X) from the
 current state, or from each stored draw in history mode. See validator
 Check #6.

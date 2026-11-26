@@ -523,37 +523,35 @@ public:
 
         impl_->data().refresh_all();
 
-        // ---- Predict DAG + y_rep stochastic refresher -------------------
+        // ---- Predict DAG (for predict_at) ------------------------------
+        // The nodes predict_at returns, computed by it directly from each
+        // draw's amplitude, lengthscale and latent f at the training X:
+        // f_mean and f_sd, the mean and sd of the latent at the new (or the
+        // training) X given f; f_star, one joint draw of it (mean f_mean,
+        // marginal sds f_sd); prob = sigmoid(f_star); y_rep ~ Bernoulli(prob).
+        // At the training X, f_mean = f_star = f and f_sd = 0.
         impl_->data().declare_data_input("X");
-        impl_->data().declare_predict_edges("X",        {"K_matrix"});
-        impl_->data().declare_predict_edges("K_matrix", {"L_chol"});
-        impl_->data().declare_predict_edges("L_chol",   {"f"});
-        impl_->data().declare_predict_edges("f",        {"y_rep"});
+        for (const char* parent : {"X", "amplitude", "lengthscale"})
+            impl_->data().declare_predict_edges(parent, {"f_mean", "f_sd"});
+        impl_->data().declare_predict_edges("f",      {"f_mean"});
+        impl_->data().declare_predict_edges("f_mean", {"f_star"});
+        impl_->data().declare_predict_edges("f_sd",   {"f_star"});
+        impl_->data().declare_predict_edges("f_star", {"prob"});
+        impl_->data().declare_predict_edges("prob",   {"y_rep"});
 
         // ---- Generative-DAG context (VIZ-ONLY; predict_at BFS never
-        //      reads context_edges_). declare_predict_edges + context_edges
-        //      stay keyed by SUB-PARAM name (unchanged from original).
+        //      reads context_edges_): the priors, and the training-input
+        //      kernel K_matrix and its Cholesky factor L_chol, refreshed
+        //      after each sweep, which give f = L_chol z.
         impl_->data().declare_context_edges("amp_prior_sd",   {"amplitude"});
         impl_->data().declare_context_edges("ell_prior_shape",{"lengthscale"});
         impl_->data().declare_context_edges("ell_prior_scale",{"lengthscale"});
         impl_->data().declare_context_edges("amplitude",      {"K_matrix"});
         impl_->data().declare_context_edges("lengthscale",    {"K_matrix"});
+        impl_->data().declare_context_edges("X",              {"K_matrix"});
+        impl_->data().declare_context_edges("K_matrix",       {"L_chol"});
         impl_->data().declare_context_edges("L_chol",         {"f"});
         impl_->data().declare_context_edges("z",              {"f"});
-
-        impl_->data().set("y_rep", arma::vec(N, arma::fill::zeros));
-        impl_->data().register_stochastic_refresher("y_rep",
-            [](const AI4BayesCode::shared_data_t& d,
-               std::mt19937_64& rng) {
-                const arma::vec& f = d.get("f");
-                std::uniform_real_distribution<double> ud(0.0, 1.0);
-                arma::vec out(f.n_elem);
-                for (std::size_t i = 0; i < f.n_elem; ++i) {
-                    const double pi = stable_sigmoid(f[i]);
-                    out[i] = (ud(rng) < pi) ? 1.0 : 0.0;
-                }
-                return out;
-            });
 
         // ---- Child blocks in Gibbs order --------------------------------
         //   child(0) amp_ell_joint -- the ONLY block: one joint_nuts_block
@@ -706,9 +704,10 @@ public:
     }
 
     // predict_at: state_map{"X" = X_new} -> posterior p(f_star | X_new),
-    // samples f_star, returns prob_star = sigmoid(f_star) and y_rep ~
-    // Bernoulli(prob_star). Empty map -> posterior predictive at training X
-    // using current f.
+    // samples f_star, returns f_mean, f_sd, f_star, prob_star =
+    // sigmoid(f_star) and y_rep ~ Bernoulli(prob_star). Empty map ->
+    // posterior predictive at training X from the draw's f (f_mean = f_star
+    // = f, f_sd = 0).
     //
     // Backend-neutral I/O (frontend converts state_map <-> R list / Python
     // dict and history_map <-> R list-of-matrices / Python dict-of-arrays):
@@ -783,6 +782,10 @@ public:
                         yrep_mat(d, i)   = (ud(predict_rng_) < pi) ? 1.0 : 0.0;
                     }
                 }
+                // At the training X the latent of draw d is f_d itself:
+                // f_star = f_mean = f_d and f_sd = 0.
+                out.emplace("f_sd",   arma::mat(n_draws, N_local, arma::fill::zeros));
+                out.emplace("f_star", f_mean_mat);
                 out.emplace("f_mean", std::move(f_mean_mat));
                 out.emplace("prob",   std::move(prob_mat));
                 out.emplace("y_rep",  std::move(yrep_mat));
@@ -799,6 +802,8 @@ public:
                 prob_mat(0, i)   = pi;
                 yrep_mat(0, i)   = (ud(predict_rng_) < pi) ? 1.0 : 0.0;
             }
+            out.emplace("f_sd",   arma::mat(1, f.n_elem, arma::fill::zeros));
+            out.emplace("f_star", f_mean_mat);
             out.emplace("f_mean", std::move(f_mean_mat));
             out.emplace("prob",   std::move(prob_mat));
             out.emplace("y_rep",  std::move(yrep_mat));
@@ -827,6 +832,8 @@ public:
             auto* cf_mut = const_cast<libgp::CovSEiso*>(cf_.get());
 
             arma::mat f_mean_mat(n_draws, N_new);
+            arma::mat f_sd_mat  (n_draws, N_new);
+            arma::mat f_star_mat(n_draws, N_new);
             arma::mat prob_mat  (n_draws, N_new);
             arma::mat yrep_mat  (n_draws, N_new);
             std::normal_distribution<double> nd(0.0, 1.0);
@@ -873,6 +880,8 @@ public:
                 arma::vec mu_star = K_star_X * alpha;
                 arma::mat V = arma::solve(arma::trimatl(L_d), K_star_X.t());
                 arma::mat Sigma_star = K_star_star - V.t() * V;
+                for (std::size_t i = 0; i < N_new; ++i)
+                    f_sd_mat(d, i) = std::sqrt(std::max(Sigma_star(i, i), 0.0));
                 Sigma_star.diag() += 1e-8;
 
                 arma::mat L_star;
@@ -889,12 +898,15 @@ public:
                 }
                 for (std::size_t i = 0; i < N_new; ++i) {
                     f_mean_mat(d, i) = mu_star[i];
+                    f_star_mat(d, i) = f_star[i];
                     const double p_di = stable_sigmoid(f_star[i]);
                     prob_mat(d, i) = p_di;
                     yrep_mat(d, i) = (ud(predict_rng_) < p_di) ? 1.0 : 0.0;
                 }
             }
             out.emplace("f_mean", std::move(f_mean_mat));
+            out.emplace("f_sd",   std::move(f_sd_mat));
+            out.emplace("f_star", std::move(f_star_mat));
             out.emplace("prob",   std::move(prob_mat));
             out.emplace("y_rep",  std::move(yrep_mat));
             return out;

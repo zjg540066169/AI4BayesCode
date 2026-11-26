@@ -99,7 +99,8 @@ inline SEXP wrap(const AI4BayesCode::dag_info& d) {
         Rcpp::Named("predict_edges")     = predict_edges,
         Rcpp::Named("context_edges")     = context_edges,
         Rcpp::Named("data_inputs")       = Rcpp::wrap(d.data_inputs),
-        Rcpp::Named("data_input_groups") = data_input_groups
+        Rcpp::Named("data_input_groups") = data_input_groups,
+        Rcpp::Named("data_input_labels") = Rcpp::wrap(d.data_input_labels)
     );
 }
 

@@ -1016,6 +1016,9 @@ public:
         for (const auto& kv : ctxs)   out.context_edges[kv.first]     = kv.second;
         out.data_inputs.assign(inputs.begin(), inputs.end());
         out.data_input_groups = data_.data_input_groups();
+        out.data_input_labels.assign(data_.data_input_labels().begin(),
+                                     data_.data_input_labels().end());
+        std::sort(out.data_input_labels.begin(), out.data_input_labels.end());
         return out;
     }
 

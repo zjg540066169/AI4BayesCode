@@ -68,7 +68,8 @@
 //      returns history_map{"z_samples"}, a matrix of integer state indices
 //      with n columns. keep_history = TRUE and last_draw_only = FALSE: the
 //      stored q-draws, n_kept × n, and new_data must be empty. Otherwise it
-//      reads optional "n_draws" (length-1) and returns n_draws × n samples
+//      reads the optional control key "n_draws" (length 1, not a data
+//      input) and returns n_draws × n samples
 //      from the current q.
 // ============================================================================
 
@@ -390,7 +391,8 @@ public:
     /// empty.
     ///
     /// Single-draw path (last_draw_only = true, or keep_history = false):
-    /// n_draws rows (optional input "n_draws", length 1, default 100), each
+    /// n_draws rows (optional control key "n_draws", length 1, default 100;
+    /// not a data input of the predict DAG), each
     /// an independent sample from the current q (clique_phi at the current
     /// iterate) drawn with predict_rng_. These rows are q-samples at the
     /// current state, not stored draws.
@@ -429,6 +431,12 @@ public:
 
         // Single-draw path: n_draws samples from the current q (default 100).
         std::size_t n_draws = 100;
+        // n_draws is a CONTROL key (the number of samples), not a data input:
+        // accepted without a warning. Any other key is ignored, with a
+        // warning that names it (1.1.2 ignored it).
+        ai4b::warn_ignored_predict_keys("StructuredPottsVI::predict_at", new_data,
+                                        impl_->data().valid_predict_inputs(),
+                                        {"n_draws"});
         auto it = new_data.find("n_draws");
         if (it != new_data.end()) {
             if (it->second.n_elem < 1) ai4b::stop("n_draws must be a length-1 value");
@@ -510,7 +518,7 @@ RCPP_MODULE(StructuredPottsVI_module) {
                 "list(z_samples = integer matrix, n columns). keep_history = "
                 "TRUE: the stored q-draws, one row per kept sweep (new_data "
                 "must be empty). keep_history = FALSE: n_draws samples from "
-                "the current q (list(n_draws = N), default N = 100).")
+                "the current q (control key list(n_draws = N), default N = 100).")
         .method("predict_at",
                 (AI4BayesCode::history_map (StructuredPottsVI::*)(const AI4BayesCode::state_map&, bool) const)
                     &StructuredPottsVI::predict_at,

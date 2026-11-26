@@ -26,6 +26,8 @@
 #include "math_constants.hpp"   // M_PI etc. under MinGW -std=c++17
 #include <cstdio>
 #include <utility>
+#include <vector>
+#include <algorithm>
 
 namespace ai4b {
 
@@ -112,6 +114,39 @@ inline void warning(const char* fmt, Args... args) {
 }
 
 #endif
+
+// ----------------------------------------------------------------------------
+// warn_ignored_predict_keys(): for a predict_at that ignores the keys of
+// new_data which are not declared data inputs (1.1.2 ignored them without a
+// message): one warning naming each ignored key and the declared data inputs.
+// `control` lists keys that predict_at accepts and that are not data inputs
+// (e.g. "n_draws"); they are not warned about.
+// ----------------------------------------------------------------------------
+template <class Map, class Set>
+inline void warn_ignored_predict_keys(const std::string& where, const Map& new_data,
+                                      const Set& inputs,
+                                      const std::vector<std::string>& control = {}) {
+    std::vector<std::string> ignored;
+    for (const auto& kv : new_data)
+        if (!inputs.count(kv.first) &&
+            std::find(control.begin(), control.end(), kv.first) == control.end())
+            ignored.push_back(kv.first);
+    if (ignored.empty()) return;
+    std::sort(ignored.begin(), ignored.end());
+    std::vector<std::string> declared(inputs.begin(), inputs.end());
+    std::sort(declared.begin(), declared.end());
+    auto quoted = [](const std::vector<std::string>& v) {
+        if (v.empty()) return std::string("none");
+        std::string out;
+        for (std::size_t j = 0; j < v.size(); ++j) out += (j ? ", '" : "'") + v[j] + "'";
+        return out;
+    };
+    std::string msg = where + ": ignored key(s) " + quoted(ignored) +
+                      ", which are not declared data inputs. Declared data inputs: " +
+                      quoted(declared);
+    if (!control.empty()) msg += "; control key(s): " + quoted(control);
+    warning(msg + ".");
+}
 
 // ----------------------------------------------------------------------------
 // lgammafn(): log-gamma. R::lgammafn(x) == std::lgamma(x) for x > 0.

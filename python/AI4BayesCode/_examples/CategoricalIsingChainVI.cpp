@@ -352,7 +352,8 @@ public:
     /// not advanced. new_data must be empty.
     ///
     /// Single-draw path (last_draw_only = true, or keep_history = false):
-    /// n_draws rows (optional input "n_draws", length 1, default 100), each
+    /// n_draws rows (optional control key "n_draws", length 1, default 100;
+    /// not a data input of the predict DAG), each
     /// an independent sample from the current q (phi at the current
     /// iterate) drawn with predict_rng_. These rows are q-samples at the
     /// current state, not stored draws.
@@ -392,6 +393,12 @@ public:
         // Single-draw path: N samples from the current q (default N=100).
         // Optional input key "n_draws" (length-1 vector) overrides N.
         std::size_t n_draws = 100;
+        // n_draws is a CONTROL key (the number of samples), not a data input:
+        // accepted without a warning. Any other key is ignored, with a
+        // warning that names it (1.1.2 ignored it).
+        ai4b::warn_ignored_predict_keys("CategoricalIsingChainVI::predict_at", new_data,
+                                        impl_->data().valid_predict_inputs(),
+                                        {"n_draws"});
         auto it_nd = new_data.find("n_draws");
         if (it_nd != new_data.end()) {
             if (it_nd->second.n_elem != 1)
@@ -468,7 +475,7 @@ RCPP_MODULE(CategoricalIsingChainVI_module) {
                 "list(z_samples = integer matrix, n columns). keep_history = "
                 "TRUE: the stored q-draws, one row per kept sweep (new_data "
                 "must be empty). keep_history = FALSE: n_draws samples from "
-                "the current q (list(n_draws = N), default N = 100).")
+                "the current q (control key list(n_draws = N), default N = 100).")
         .method("predict_at",
                 (AI4BayesCode::history_map (CategoricalIsingChainVI::*)(const AI4BayesCode::state_map&, bool) const)
                     &CategoricalIsingChainVI::predict_at,

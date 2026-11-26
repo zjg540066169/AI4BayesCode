@@ -144,6 +144,50 @@
     sweep (it stopped with "not yet implemented").
   - `ARDLasso`: `predict_at(new_data, last_draw_only)`, and `m$predict_at()`
     in R.
+* `predict_at()` follows the declared predict DAG (`get_dag()`): it accepts
+  the declared data inputs and returns every computed node of the DAG, in
+  history mode and with `last_draw_only = TRUE`; `predict_at(list())` means
+  every data input at its training value. New keys:
+  - `ARDLasso` `y_hat`; `BartNoise` `f_bart` and `SoftBartNoise`
+    `f_softbart` also for `list()`; `LinearRegJointMixed` `mu`;
+    `SpikeSlabRJMCMC` `eta`; `BSplineRegression` `s`; `HSGPRegression`
+    `sqrt_spd`; `HierarchicalLM_MultivariateRE` `Z` and `u`.
+  - On the single-draw path with `list()`: `LogisticRegression` `eta`,
+    `prob`; `ProbitRegression` `mu_lin`, `prob`; `ODE_SIR` `I_traj`;
+    `HierarchicalLM_joint` `mu_fixed`; `BSplineRegression`,
+    `HSGPRegression` `f`, `mu`.
+  - GBart models, in every mode: `r` with `p` (GBartLogistic), `rate`,
+    `mean` and `mean_r`, or `probs`, `r_1`..`r_{C-1}` (GBartMultinomial);
+    `y_rep` also on the single-draw path at new X.
+  - `GPClassification` `f_sd` and `f_star` in every mode (at the training X,
+    `f_star = f_mean = f` and `f_sd = 0`); `GPTimeSeries` `a_real`, `c_real`
+    and `obs_diag`; `VCBart` `beta_0`..`beta_p` (and with `list(Z = Z_new)`
+    alone only these); `PehSurvival` `S` for `list()`, at the training times.
+* Declared inputs and edges: `PehSurvival` declares the data input `t`, and
+  `PehSharedFrailty` `t` and `g` (without `t`, `S` is at the training
+  times); `OrderMCMCBN` `order, order_party -> sampled_DAG`; the VI examples
+  `phi` / `clique_phi -> z_samples`; `GBartHeteroscedastic` `r -> mean`;
+  `GBartMultinomial` `r_j -> r`; `VCBart` the data-input group `{Z, X}`. The
+  GP examples declare the nodes `predict_at()` returns (X or t and the
+  hyperparameters -> `f_mean`, `f_sd` -> `f_star` -> `y_rep` or `prob`), with
+  `K_matrix` and `L_chol` as context edges. `GBartLogistic`: the DAG node
+  `prob` is renamed `p`, the name in `get_current()` and `predict_at()`.
+* `HierarchicalLM_joint`, `HierarchicalLM_MultivariateRE`: `g_idx` /
+  `group_idx` alone (one label per training row) gives `mu_fixed` and `y_rep`
+  at the training X on both paths (the single-draw path returned nothing).
+  `shared_data_t::declare_data_input_labels()` declares such a label member
+  of a data-input group; `get_dag()` reports it as `data_input_labels`.
+  `composite_block::predict_at()` samples a stochastic node after a
+  stochastic parent (GPTimeSeries `f_star -> y_rep`).
+* A key that is not a declared data input is ignored with a warning that
+  names it and the declared inputs (it was ignored silently): in
+  `LogisticRegression`, `ProbitRegression`, `LinearRegJointMixed`,
+  `PehSurvival`, `PehSharedFrailty`, in `BSplineRegression` and
+  `HSGPRegression` next to their data input, and on the single-draw path of
+  the VI examples, where `n_draws` is a control key.
+* Access the outputs of `predict_at()` by name: added keys can change the
+  order of the elements of the returned list (VCBart's starts with `mu`,
+  `y_rep`).
 * BART-family models predict at new X from every stored draw only when built
   with `keep_tree = TRUE`, so `predict(run, list(X = X_new))` needs it in
   `model_ctor`. Without it, and with more than one stored draw, BartNoise,

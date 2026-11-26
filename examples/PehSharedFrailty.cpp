@@ -297,6 +297,10 @@ public:
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
                                          bool last_draw_only) const {
         const bool use_history = keep_history_ && !last_draw_only;
+        // A key that is not a declared data input is ignored, with a warning
+        // that names it and the declared data inputs (1.1.2 ignored it).
+        ai4b::warn_ignored_predict_keys("PehSharedFrailty::predict_at", new_data,
+                                        impl_->data().valid_predict_inputs());
         AI4BayesCode::history_map out;
         auto it_tq = new_data.find("t"); auto it_g = new_data.find("g");
         if (it_g == new_data.end()) return out;

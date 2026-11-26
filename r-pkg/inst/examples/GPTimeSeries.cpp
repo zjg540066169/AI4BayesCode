@@ -595,29 +595,31 @@ public:
         impl_->data().declare_invalidates("tau",   {"c_real"});
         impl_->data().declare_invalidates("sigma", {"obs_diag"});
 
-        // ---- Predict DAG + y_rep stochastic refresher ------------------
-        // Edges into each node from its direct parents, i.e. the keys passed
-        // to d.get in that node's refresher:
+        // ---- Predict DAG + refreshers ----------------------------------
+        // The nodes predict_at returns (POSTERIOR PREDICTIVE in the file
+        // header), at the times "t":
         //   amp -> a_real, tau -> c_real, sigma -> obs_diag   (deterministic
         //       refreshers above);
-        //   t, a_real, c_real, obs_diag, sigma -> y_rep      (stochastic
-        //       refresher below).
-        // y_rep at the times "t" (POSTERIOR PREDICTIVE in the file header):
-        // y_rep = f + sigma * e, with f one joint draw of f at those times
-        // from its distribution given the training t and y under the kernel
-        // coefficients a_real, c_real and the noise variance obs_diag. The
-        // training t and y are fixed inputs of this conditional and are
-        // captured by the refresher, so y is not a node of the predict DAG.
+        //   t, a_real, c_real, obs_diag -> f_mean, f_sd       (the marginal
+        //       mean and sd of f given the training t and y; deterministic);
+        //   f_mean, f_sd -> f_star                            (one joint draw
+        //       of f from N(m, C); stochastic);
+        //   f_star, sigma -> y_rep                            (y_rep = f_star
+        //       + sigma * e; stochastic, sampled after f_star).
+        // The training t and y are fixed inputs of the conditional and are
+        // captured by the refreshers, so y is not a node of the predict DAG.
         // "t" is the one declared data input: predict_at accepts new times
-        // under that key.
+        // under that key. predict_at computes the same values directly
+        // (ou_predict); the refreshers serve composite_block::predict_at.
         impl_->data().declare_data_input("t");
         impl_->data().declare_predict_edges("amp",      {"a_real"});
         impl_->data().declare_predict_edges("tau",      {"c_real"});
         impl_->data().declare_predict_edges("sigma",    {"obs_diag", "y_rep"});
-        impl_->data().declare_predict_edges("t",        {"y_rep"});
-        impl_->data().declare_predict_edges("a_real",   {"y_rep"});
-        impl_->data().declare_predict_edges("c_real",   {"y_rep"});
-        impl_->data().declare_predict_edges("obs_diag", {"y_rep"});
+        for (const char* parent : {"t", "a_real", "c_real", "obs_diag"})
+            impl_->data().declare_predict_edges(parent, {"f_mean", "f_sd"});
+        impl_->data().declare_predict_edges("f_mean",   {"f_star"});
+        impl_->data().declare_predict_edges("f_sd",     {"f_star"});
+        impl_->data().declare_predict_edges("f_star",   {"y_rep"});
 
         // ---- Generative-DAG context (VIZ-ONLY; predict_at BFS never
         //      reads context_edges_). amp ~ half-Normal(0,
@@ -627,26 +629,58 @@ public:
         impl_->data().declare_context_edges("amp_prior_sd",   {"amp"});
         impl_->data().declare_context_edges("tau_prior_shape",{"tau"});
         impl_->data().declare_context_edges("tau_prior_scale",{"tau"});
-        impl_->data().set("y_rep", arma::vec(N, arma::fill::zeros));
-        impl_->data().register_stochastic_refresher("y_rep",
-            [t_train = t_arma, y_train = y_arma](
+        for (const char* key : {"f_mean", "f_sd", "f_star", "y_rep"})
+            impl_->data().set(key, arma::vec(N, arma::fill::zeros));
+        // f_mean and f_sd at the times d.get("t") (the training t, or new
+        // times that composite_block::predict_at installs under "t").
+        for (const bool want_sd : {false, true}) {
+            impl_->data().register_refresher(want_sd ? "f_sd" : "f_mean",
+                [t_train = t_arma, y_train = y_arma, want_sd](
+                        const AI4BayesCode::shared_data_t& d) {
+                    const ou_nodes g = make_ou_nodes(t_train, d.get("t"));
+                    ou_work w;
+                    ou_smooth(g, y_train, scalar_of(d.get("a_real"), "a_real"),
+                              scalar_of(d.get("c_real"), "c_real"),
+                              noise_var_(scalar_of(d.get("obs_diag"), "obs_diag")), w);
+                    arma::vec v(g.node_of.size());
+                    for (std::size_t i = 0; i < v.n_elem; ++i) {
+                        const std::size_t k = g.node_of[i];
+                        v[i] = want_sd ? std::sqrt(w.Ps[k]) : w.ms[k];
+                    }
+                    return v;
+                });
+        }
+        // f_star and y_rep draw from one normal_distribution, reset at the
+        // start of each f_star draw: the f_star draw and then e_1, ..., e_n,
+        // the order of ou_predict, so from the same engine state the two
+        // refreshers give the f_star and y_rep of the single-draw
+        // predict_at. composite_block::predict_at samples f_star before
+        // y_rep (y_rep reads f_star).
+        auto nd_pair = std::make_shared<std::normal_distribution<double>>(0.0, 1.0);
+        impl_->data().register_stochastic_refresher("f_star",
+            [t_train = t_arma, y_train = y_arma, nd_pair](
                     const AI4BayesCode::shared_data_t& d,
                     std::mt19937_64& rng) {
-                // One draw at the times d.get("t") (the training t, or new
-                // times that composite_block::predict_at installs under "t"),
-                // computed by the function of predict_at's single-draw path
-                // (ou_predict) with the training t and y captured here and
-                // a_real, c_real, obs_diag and sigma read from d; the same
-                // engine state gives the same y_rep.
+                nd_pair->reset();
                 const ou_nodes g = make_ou_nodes(t_train, d.get("t"));
                 ou_work w;
-                std::normal_distribution<double> nd(0.0, 1.0);
-                arma::vec f_mean, f_sd, f_star, y_rep;
-                ou_predict(g, y_train, scalar_of(d.get("a_real"), "a_real"),
-                           scalar_of(d.get("c_real"), "c_real"),
-                           noise_var_(scalar_of(d.get("obs_diag"), "obs_diag")),
-                           scalar_of(d.get("sigma"), "sigma"), w, nd, rng,
-                           f_mean, f_sd, f_star, y_rep);
+                ou_smooth(g, y_train, scalar_of(d.get("a_real"), "a_real"),
+                          scalar_of(d.get("c_real"), "c_real"),
+                          noise_var_(scalar_of(d.get("obs_diag"), "obs_diag")), w);
+                arma::vec f(g.node_of.size());
+                if (f.n_elem == 0) return f;
+                ou_sample(g, w, *nd_pair, rng);
+                for (std::size_t i = 0; i < f.n_elem; ++i) f[i] = w.x[g.node_of[i]];
+                return f;
+            });
+        impl_->data().register_stochastic_refresher("y_rep",
+            [nd_pair](const AI4BayesCode::shared_data_t& d,
+                      std::mt19937_64& rng) {
+                const arma::vec& f = d.get("f_star");
+                const double sig = scalar_of(d.get("sigma"), "sigma");
+                arma::vec y_rep(f.n_elem);
+                for (std::size_t i = 0; i < f.n_elem; ++i)
+                    y_rep[i] = f[i] + sig * (*nd_pair)(rng);
                 return y_rep;
             });
 

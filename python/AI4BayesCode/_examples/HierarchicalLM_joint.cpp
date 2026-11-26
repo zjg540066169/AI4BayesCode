@@ -392,8 +392,12 @@ public:
         // Predict DAG (edges keyed by sub-param name or derived node name).
         // X and g_idx index the SAME observations: y_rep needs the group
         // each row belongs to. Supplying only X therefore leaves y_rep not
-        // predictable, while mu_fixed = alpha + X*beta still is.
+        // predictable, while mu_fixed = alpha + X*beta still is. g_idx is a
+        // LABEL of the rows: supplied alone (one label per training row) it
+        // relabels the training rows, so mu_fixed and y_rep are computed at
+        // the training X.
         impl_->data().declare_data_input_group({"X", "g_idx"});
+        impl_->data().declare_data_input_labels({"g_idx"});
         N_ = N;
         p_ = p;
         G_ = static_cast<std::size_t>(G);
@@ -615,7 +619,8 @@ public:
         // absent; an entry >= G is a group with no training rows. Either may
         // be supplied on its own -- with only X, the predict DAG computes
         // mu_fixed and leaves y_rep out, because the group of each NEW row is
-        // unknown.
+        // unknown; with only g_idx (a label of the rows), mu_fixed and y_rep
+        // at the training X.
         block_context replaced;
         for (const auto& kv : new_data) {
             if (kv.first != "X" && kv.first != "g_idx")
@@ -656,13 +661,13 @@ public:
         AI4BayesCode::history_map out;
 
         if (!use_history) {
-            // With neither X nor g_idx given, both are installed at their
-            // training values (the whole co-indexed group), so the predict
-            // DAG recomputes mu_fixed and returns it with y_rep.
-            if (new_data.empty()) {
-                replaced["X"]     = impl_->data().get("X");
+            // Without X, the training X is installed (g_idx alone labels the
+            // training rows), and without either, the training g_idx too, so
+            // the predict DAG recomputes mu_fixed and returns it with y_rep.
+            if (it_X == new_data.end())
+                replaced["X"] = impl_->data().get("X");
+            if (new_data.empty())
                 replaced["g_idx"] = impl_->data().get("g_idx");
-            }
             block_context result = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : result) {
                 arma::mat m(1, kv.second.n_elem);

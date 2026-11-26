@@ -43,11 +43,13 @@
 //        row of y_rep from the current sigma;
 //    C11 predict_at calls between sweeps leave every get_history() and
 //        get_current() entry of the chain bit-identical.
-//    C12 the iteration order of the keys of every predict_at output of C9
-//        and C10, and of the one-argument predict_at (single draw and history
-//        mode), is mu, y_rep: the R list and the Python dict are built in the
-//        iteration order, so mu is the first element, as in 1.1.2, where it
-//        was the only key.
+//    C12 every predict_at output of C9 and C10, and of the one-argument
+//        predict_at (single draw and history mode), has the keys mu, y_rep and
+//        beta_0..beta_p; the R list and the Python dict are built in the
+//        order of output_order_(), which is mu, y_rep, beta_0..beta_p, so mu
+//        is the first element, as in 1.1.2, where it was the only key;
+//        predict_at({Z}) returns beta_0..beta_p only, and predict_at({X})
+//        throws an error that names Z.
 // ============================================================================
 #include <armadillo>
 #include <algorithm>
@@ -75,6 +77,12 @@ struct impl_tag {
     friend type member_of(impl_tag);
 };
 template struct expose_member<impl_tag, &VCBart::impl_>;
+// ... and to the order of the R list / Python dict of predict_at.
+struct order_tag {
+    using type = std::vector<std::string> (VCBart::*)() const;
+    friend type member_of(order_tag);
+};
+template struct expose_member<order_tag, &VCBart::output_order_>;
 // ... and to the stream of the y_rep noise.
 struct prng_tag {
     using type = std::mt19937_64 VCBart::*;
@@ -410,11 +418,35 @@ int main() {
                 c9a.keys.c_str(), c9b.keys.c_str(), c9c.keys.c_str(), c9d.keys.c_str(),
                 c9e.keys.c_str(), c9f.keys.c_str(), c10a.keys.c_str(), c10b.keys.c_str(),
                 k12a.c_str(), k12b.c_str());
-    bool order12 = k12a == "mu,y_rep" && k12b == "mu,y_rep";
+    // The keys, sorted, and the order of the R list / Python dict.
+    auto sorted_keys = [](const std::string& csv) {
+        std::vector<std::string> v; std::string cur;
+        for (char ch : csv + ",") { if (ch == ',') { v.push_back(cur); cur.clear(); } else cur += ch; }
+        std::sort(v.begin(), v.end());
+        return v;
+    };
+    // The models of C9 and C10 have p = 2 columns of X: beta_0, beta_1, beta_2.
+    const std::vector<std::string> want_keys{"beta_0", "beta_1", "beta_2", "mu", "y_rep"};
+    bool keys12 = sorted_keys(k12a) == want_keys && sorted_keys(k12b) == want_keys;
     for (const yrep_check* c : {&c9a, &c9b, &c9c, &c9d, &c9e, &c9f, &c10a, &c10b})
-        order12 = order12 && c->keys == "mu,y_rep";
-    check(order12, "C12 mu is the first key of predict_at in every mode (the first element of "
-                   "the R list and the Python dict, as in 1.1.2)");
+        keys12 = keys12 && sorted_keys(c->keys) == want_keys;
+    const std::vector<std::string> order = (m5.*member_of(order_tag{}))();
+    const bool order12 =
+        order == std::vector<std::string>{"mu", "y_rep", "beta_0", "beta_1", "beta_2"};
+    AI4BayesCode::state_map z_only, x_only;
+    z_only["Z"] = nd_new.at("Z");
+    x_only["X"] = nd_new.at("X");
+    const auto pz = mh.predict_at(z_only);
+    const bool z12 = sorted_keys(key_list(pz)) ==
+                         std::vector<std::string>{"beta_0", "beta_1", "beta_2"} &&
+                     pz.at("beta_0").n_cols == nd_new.at("Z").n_elem;
+    std::string ex;
+    try { mh.predict_at(x_only); } catch (const std::exception& e) { ex = e.what(); }
+    check(keys12, "C12 every predict_at output has the keys mu, y_rep, beta_0..beta_2");
+    check(order12, "C12 the R list and the Python dict are built in the order mu, y_rep, "
+                   "beta_0..beta_p (mu first, as in 1.1.2)");
+    check(z12 && ex.find("supply Z") != std::string::npos,
+          "C12 predict_at({Z}) gives beta_0..beta_p only; predict_at({X}) throws naming Z");
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail,
                 g_fail == 1 ? "" : "s");

@@ -548,8 +548,12 @@ public:
         // X, Z and group_idx index the SAME observations: y_rep combines
         // the fixed-effect row of X with the random-effect row of Z for that
         // row's group. Supplying only X therefore leaves y_rep not
-        // predictable, while mu_fixed = X*beta still is.
+        // predictable, while mu_fixed = X*beta still is. group_idx is a
+        // LABEL of the rows: supplied alone (one label per training row) it
+        // relabels the training rows, so Z, mu_fixed and y_rep are computed
+        // at the training X.
         impl_->data().declare_data_input_group({"X", "group_idx"});
+        impl_->data().declare_data_input_labels({"group_idx"});
         impl_->data().declare_predict_edges("X", {"Z"});
         impl_->data().declare_predict_edges("X",         {"mu_fixed"});
         impl_->data().declare_predict_edges("beta",      {"mu_fixed"});
@@ -830,7 +834,9 @@ public:
         // per training row when X is absent; a label > J is a group with no
         // training rows. Either may be supplied on its own -- with only X,
         // the predict DAG computes mu_fixed and leaves y_rep out, because the
-        // group and random-effect row of each NEW observation are unknown.
+        // group and random-effect row of each NEW observation are unknown;
+        // with only group_idx (a label of the rows), Z, mu_fixed and y_rep at
+        // the training X.
         block_context replaced;
         for (const auto& kv : new_data) {
             if (kv.first == "Z")
@@ -876,13 +882,14 @@ public:
         AI4BayesCode::history_map out;
 
         if (!use_history) {
-            // With neither X nor group_idx given, both are installed at their
-            // training values (the whole co-indexed group), so the predict
-            // DAG recomputes Z and mu_fixed and returns them with y_rep.
-            if (new_data.empty()) {
-                replaced["X"]         = impl_->data().get("X");
+            // Without X, the training X is installed (group_idx alone labels
+            // the training rows), and without either, the training group_idx
+            // too, so the predict DAG recomputes Z and mu_fixed and returns
+            // them with y_rep.
+            if (it_X == new_data.end())
+                replaced["X"] = impl_->data().get("X");
+            if (new_data.empty())
                 replaced["group_idx"] = impl_->data().get("group_idx");
-            }
             block_context result = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : result) {
                 arma::mat m(1, kv.second.n_elem);
@@ -963,10 +970,9 @@ public:
             u_out.row(d) = arma::vectorise(u_mat).t();
         }
         out.emplace("u", std::move(u_out));
-        // Z (the first D columns of X, a node of the predict DAG) wherever X
-        // is predictable: X supplied, or the training data.
-        if (it_X != new_data.end() || new_data.empty())
-            out.emplace("Z", arma::mat(arma::repmat(Z_flat.t(), n_draws, 1)));
+        // Z (the first D columns of X, a node of the predict DAG): at the new
+        // X, or at the training X.
+        out.emplace("Z", arma::mat(arma::repmat(Z_flat.t(), n_draws, 1)));
         if (!predict_y_rep) return out;    // y_rep needs the new Z and groups
 
         arma::mat yrep_mat(n_draws, N);

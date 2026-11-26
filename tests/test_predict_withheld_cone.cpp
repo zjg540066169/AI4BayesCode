@@ -21,7 +21,11 @@
 //      far as the graph allows and stops;
 //    * a model that declares no group is completely unaffected;
 //    * replacing NO member of a group is unaffected (the whole group is at its
-//      training values and is mutually consistent).
+//      training values and is mutually consistent);
+//    * replacing only LABEL members of a group (declare_data_input_labels)
+//      withholds nothing, and get_dag() reports the labels;
+//    * a stochastic node whose parent is another sampled stochastic node is
+//      sampled after it.
 // ============================================================================
 
 #ifndef MCMC_ENABLE_ARMA_WRAPPERS
@@ -291,6 +295,58 @@ int main() {
         AI4BayesCode::composite_block c0;
         c0.data().set("X", arma::vec{1.0});
         check(c0.get_dag().data_input_groups.empty(), "no group declared -> empty, not absent");
+    }
+
+    // ------------------------------------------------------------------
+    // Case 9: a label member of a group (a group index G next to the design
+    // X). G alone labels the training rows, so nothing is withheld; X alone
+    // withholds G and y_rep, as without labels.
+    {
+        std::printf("\nCase 9: label members of a group\n");
+        AI4BayesCode::composite_block c;
+        auto& d = c.data();
+        for (const char* k : {"X", "G", "beta"}) d.set(k, arma::vec{1.0});
+        derived(d, "mu", "X");
+        d.set("y_rep", arma::vec{0.0});
+        d.register_stochastic_refresher(
+            "y_rep", [](const AI4BayesCode::shared_data_t& s, std::mt19937_64&) {
+                return s.get("mu");
+            });
+        d.declare_predict_edges("X", {"mu"});
+        d.declare_predict_edges("beta", {"mu"});
+        d.declare_predict_edges("mu", {"y_rep"});
+        d.declare_predict_edges("G", {"y_rep"});
+        d.declare_data_input_group({"X", "G"});
+        d.declare_data_input_labels({"G"});
+        check(d.predict_withheld_cone({"G"}).empty(), "G alone withholds nothing");
+        const auto cone_x = d.predict_withheld_cone({"X"});
+        check(has(cone_x, "G") && has(cone_x, "y_rep") && !has(cone_x, "mu"),
+              "X alone withholds G and y_rep, not mu");
+        check(d.predict_withheld_cone({"X", "G"}).empty(), "X and G together withhold nothing");
+        const AI4BayesCode::dag_info dag = c.get_dag();
+        check(dag.data_input_labels.size() == 1 && dag.data_input_labels[0] == "G",
+              "get_dag() reports the label G");
+        check(dag.data_inputs.size() == 2, "a label is a data input");
+    }
+
+    // ------------------------------------------------------------------
+    // Case 10: pass 2 samples h before y_rep, because y_rep reads h.
+    {
+        std::printf("\nCase 10: a stochastic node is sampled after its stochastic parent\n");
+        auto d = bkmr_shape(true);
+        std::unordered_set<std::string> replaced{"X", "Z"};
+        const auto cone = d.predict_withheld_cone(replaced);
+        const auto det = d.predict_downstream_of(replaced, cone);
+        std::unordered_set<std::string> after(replaced);
+        for (const auto& k : det) after.insert(k);
+        const auto stoch = d.predict_stochastic_sampleable(after, cone);
+        std::printf("        pass 2 = %s\n", join(stoch).c_str());
+        std::size_t ih = stoch.size(), iy = stoch.size();
+        for (std::size_t i = 0; i < stoch.size(); ++i) {
+            if (stoch[i] == "h") ih = i;
+            if (stoch[i] == "y_rep") iy = i;
+        }
+        check(ih < stoch.size() && iy < stoch.size() && ih < iy, "h comes before y_rep");
     }
 
     std::printf("\n=== SUMMARY: %d passed, %d failed ===\n", g_pass, g_fail);

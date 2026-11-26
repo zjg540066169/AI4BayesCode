@@ -494,18 +494,23 @@ public:
         impl_->data().refresh_all();
 
         // ---- Predict DAG (for predict_at) -----------------------------
+        // The nodes predict_at returns, computed by it directly at the new
+        // (or the training) X from each draw's hyperparameters (R&W Eq.
+        // 2.23-2.24): f_mean and f_sd, the mean and sd of f given y, from X,
+        // amplitude, lengthscale and sigma; f_star, one joint draw of f
+        // (mean f_mean, marginal sds f_sd); y_rep = f_star + sigma * e.
         impl_->data().declare_data_input("X");
-        impl_->data().declare_predict_edges("X",        {"K_matrix"});
-        impl_->data().declare_predict_edges("K_matrix", {"L_chol"});
-        impl_->data().declare_predict_edges("L_chol",   {"f_mean"});
-        impl_->data().declare_predict_edges("f_mean",   {"y_rep"});
-        impl_->data().declare_predict_edges("sigma",    {"y_rep"});
+        for (const char* parent : {"X", "amplitude", "lengthscale", "sigma"})
+            impl_->data().declare_predict_edges(parent, {"f_mean", "f_sd"});
+        impl_->data().declare_predict_edges("f_mean", {"f_star"});
+        impl_->data().declare_predict_edges("f_sd",   {"f_star"});
+        impl_->data().declare_predict_edges("f_star", {"y_rep"});
+        impl_->data().declare_predict_edges("sigma",  {"y_rep"});
 
         // ---- Generative-DAG context (VIZ-ONLY; predict_at BFS never
-        //      reads context_edges_). The GP kernel K is built from the
-        //      sampled hyperparameters (amplitude, lengthscale) -- they
-        //      are generative parents of K_matrix, analogous to the BART
-        //      forest -> f_bart edge. Their priors: amplitude ~
+        //      reads context_edges_). The training-input kernel K_matrix
+        //      and its Cholesky factor L_chol, refreshed after each sweep,
+        //      give f_mean at the training X; amplitude ~
         //      half-Normal(0, amp_prior_sd); lengthscale ~
         //      InverseGamma(ell_prior_shape, ell_prior_scale); sigma ~
         //      Jeffreys (no slot). Drawn faded by ai4bayescode_plot_dag.
@@ -514,36 +519,10 @@ public:
         impl_->data().declare_context_edges("ell_prior_scale",{"lengthscale"});
         impl_->data().declare_context_edges("amplitude",      {"K_matrix"});
         impl_->data().declare_context_edges("lengthscale",    {"K_matrix"});
-        impl_->data().declare_context_edges("K_matrix",       {"f_mean"});
-
-        impl_->data().set("y_rep", arma::vec(N, arma::fill::zeros));
-        // y_rep at the training inputs: draw the latent f from its Gaussian
-        // posterior N(f_mean, K - K Ky^-1 K), then add observation noise.
-        // Using f_mean alone would understate the predictive spread.
-        impl_->data().register_stochastic_refresher("y_rep",
-            [N](const AI4BayesCode::shared_data_t& d,
-                std::mt19937_64& rng) {
-                const arma::vec& mu     = d.get("f_mean");
-                const arma::vec& K_flat = d.get("K_matrix");
-                const arma::vec& L_flat = d.get("L_chol");
-                const double sig = d.get("sigma")[0];
-                arma::mat K(const_cast<double*>(K_flat.memptr()), N, N,
-                             false, true);
-                arma::mat L(const_cast<double*>(L_flat.memptr()), N, N,
-                             false, true);
-                const arma::mat V = arma::solve(arma::trimatl(L), K);
-                arma::mat Sigma = K - V.t() * V;
-                Sigma.diag() += sig * sig + GP_JITTER;
-                std::normal_distribution<double> nd(0.0, 1.0);
-                arma::vec z(N);
-                for (std::size_t i = 0; i < N; ++i) z[i] = nd(rng);
-                arma::mat Ls;
-                if (arma::chol(Ls, Sigma, "lower")) return arma::vec(mu + Ls * z);
-                arma::vec out(N);
-                for (std::size_t i = 0; i < N; ++i)
-                    out[i] = mu[i] + std::sqrt(std::max(Sigma(i, i), 0.0)) * z[i];
-                return out;
-            });
+        impl_->data().declare_context_edges("X",              {"K_matrix"});
+        impl_->data().declare_context_edges("K_matrix",       {"L_chol", "f_mean"});
+        impl_->data().declare_context_edges("sigma",          {"L_chol"});
+        impl_->data().declare_context_edges("L_chol",         {"f_mean"});
 
         // ---- ONE joint_nuts_block over (amplitude, lengthscale, sigma) ----
         {

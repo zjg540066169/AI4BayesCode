@@ -2640,7 +2640,9 @@ own, and for every strict subset of each co-indexed group, work out which
 outputs the DECLARED graph makes reachable by the rule below, then
 call `predict_at` with that subset and compare. The rule: first form the
 WITHHELD set -- every member of any group that has at least one replaced
-member and is not itself supplied -- and close it transitively over
+member and is not itself supplied; a group of which only label members
+(`$data_input_labels`, `declare_data_input_labels`) are supplied withholds
+nothing -- and close it transitively over
 `predict_edges` (everything downstream of a withheld key is withheld).
 Every computed node of the declared graph (every target of
 `predict_edges`) outside the withheld set is returned, deterministic and
@@ -2797,6 +2799,7 @@ predict_dag_smoke <- function(model, sample_newdata = list()) {
     edges  <- dag$predict_edges                 # list: src -> chr vec of dst
     di     <- as.character(dag$data_inputs)     # data_input names
     groups <- dag$data_input_groups             # list of chr vecs (co-indexed)
+    labels <- as.character(dag$data_input_labels)   # group members that label the rows
     targets <- setdiff(unique(unlist(edges, use.names = FALSE)), di)  # computed nodes
     declared <- unique(c(names(edges), unlist(edges, use.names = FALSE), di))
     descendants <- function(keys) {               # transitive closure over predict_edges
@@ -2828,7 +2831,8 @@ predict_dag_smoke <- function(model, sample_newdata = list()) {
         # the withheld cone: unsupplied members of any group that has a
         # replaced member, and everything downstream of them
         withheld <- character(0)
-        for (g in groups) if (any(g %in% nd_keys)) withheld <- c(withheld, setdiff(g, nd_keys))
+        for (g in groups) if (any(setdiff(g, labels) %in% nd_keys))
+            withheld <- c(withheld, setdiff(g, nd_keys))
         cone <- unique(c(withheld, descendants(withheld)))
         expected <- setdiff(targets, c(cone, nd_keys))   # supplied inputs are never returned
         for (path in names(paths)) {
