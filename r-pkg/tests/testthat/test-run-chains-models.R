@@ -76,7 +76,7 @@ test_that("parallel keep_models run: handles, histories, predict_at", {
     withr::defer(ai4bayescode_close_models(run))
     expect_s3_class(run, "ai4bayescode_run")
     expect_type(run, "list")
-    expect_named(run, c("histories", "models", "seeds", "wall", "n_burn",
+    expect_named(run, c("histories", "seeds", "wall", "models", "n_burn",
                         "n_keep", "history_cleared"))
     expect_identical(run$history_cleared, c(TRUE, TRUE))
     expect_length(run$models, 2L)
@@ -100,6 +100,9 @@ test_that("parallel keep_models run: handles, histories, predict_at", {
                                      n_keep = 100, parallel = FALSE,
                                      verbose = FALSE)
     expect_null(run_f$models)
+    expect_false(is.object(run_f))
+    expect_named(run_f, c("histories", "seeds", "wall", "n_burn", "n_keep",
+                          "history_cleared"))
     expect_identical(run_f$histories, run$histories)
     expect_identical(run_s$histories, run$histories)
     expect_identical(run_s$seeds, run$seeds)
@@ -149,7 +152,7 @@ test_that("predict pools the chains and equals the per-chain predict_at", {
     run_n <- ai4bayescode_run_chains(fake_ctor(clear = TRUE), n_chains = 2,
                                      n_burn = 1, n_keep = 2, n_cores = 2,
                                      keep_models = FALSE, verbose = FALSE)
-    expect_error(predict(run_n), "keep_models = TRUE")
+    expect_error(ai4bayescode_predict(run_n), "keep_models = TRUE")
 })
 
 test_that("calls through a handle change the model in its worker", {
@@ -346,32 +349,59 @@ test_that("a handle of another session errors without using a connection", {
     expect_identical(run$models[[2]]$get_history(), run$histories[[2]])
 })
 
-test_that("an error in the constructor stops the run as before", {
+test_that("an R error in a chain stops the run at once, naming the chain", {
     skip_on_os("windows")
-    bad <- function(seed) stop("boom in the constructor")
+    parent <- Sys.getpid()
+    log <- tempfile()
+    # The constructor records the pid of every process it runs in, as the
+    # name of a file in `log`.
+    bad <- function(seed) {
+        file.create(file.path(log, Sys.getpid()))
+        stop("boom in the constructor")
+    }
     conn  <- n_conn()
     pools <- ls(AI4BayesCode:::.ai4b_rc_registry())
-    expect_warning(
-        expect_error(ai4bayescode_run_chains(bad, n_chains = 2, n_burn = 1,
-                                             n_keep = 1, n_cores = 2,
-                                             verbose = FALSE),
-                     "boom in the constructor"),
-        "a parallel chain failed")
-    expect_identical(n_conn(), conn)
-    expect_identical(ls(AI4BayesCode:::.ai4b_rc_registry()), pools)
+    for (keep in c(TRUE, FALSE)) {
+        unlink(log, recursive = TRUE)
+        dir.create(log)
+        expect_no_warning(
+            expect_error(ai4bayescode_run_chains(bad, n_chains = 2, n_burn = 1,
+                                                 n_keep = 1, n_cores = 2,
+                                                 keep_models = keep,
+                                                 verbose = FALSE),
+                         "chain 1 (seed 101): boom in the constructor",
+                         fixed = TRUE))
+        # No sequential re-run in this session.
+        ran_in <- as.integer(list.files(log))
+        expect_length(ran_in, 2L)
+        expect_false(parent %in% ran_in)
+        expect_identical(n_conn(), conn)
+        expect_identical(ls(AI4BayesCode:::.ai4b_rc_registry()), pools)
+    }
     expect_error(ai4bayescode_run_chains(bad, n_chains = 2, n_burn = 1,
                                          n_keep = 1, parallel = FALSE,
                                          verbose = FALSE),
-                 "boom in the constructor")
-    # A chain that fails in one worker only.
-    half <- function(seed) if (seed == 202) stop("chain two fails") else
-        fake_ctor(clear = TRUE)(seed)
-    expect_warning(
-        expect_error(ai4bayescode_run_chains(half, n_chains = 2, n_burn = 1,
-                                             n_keep = 1, n_cores = 2,
-                                             verbose = FALSE),
-                     "chain two fails"),
-        "chain 2: chain two fails")
+                 "chain 1 (seed 101): boom in the constructor", fixed = TRUE)
+    # A chain that fails in one worker only, in a method of the model.
+    half <- function(seed) {
+        m <- fake_ctor(clear = TRUE)(seed)
+        if (seed == 202) m$step <- function(n = 1L) stop("chain two fails")
+        m
+    }
+    for (keep in c(TRUE, FALSE))
+        expect_no_warning(
+            expect_error(ai4bayescode_run_chains(half, n_chains = 3, n_burn = 1,
+                                                 n_keep = 1, n_cores = 2,
+                                                 keep_models = keep,
+                                                 verbose = FALSE),
+                         "chain 2 (seed 202): chain two fails", fixed = TRUE))
+    err <- tryCatch(ai4bayescode_run_chains(half, n_chains = 3, n_burn = 1,
+                                            n_keep = 1, parallel = FALSE,
+                                            verbose = FALSE),
+                    error = identity)
+    expect_s3_class(err, "simpleError")
+    expect_identical(conditionMessage(err),
+                     "ai4bayescode_run_chains: chain 2 (seed 202): chain two fails")
 })
 
 test_that("print(run) is compact", {
@@ -388,11 +418,12 @@ test_that("print(run) is compact", {
     expect_false(vis$visible)
     expect_identical(vis$value, run)
     ai4bayescode_close_models(run)
+    # keep_models = FALSE gives the plain list of earlier versions.
     run_f <- ai4bayescode_run_chains(fake_ctor(clear = TRUE), n_chains = 2,
                                      n_burn = 5, n_keep = 400,
                                      keep_models = FALSE, parallel = FALSE,
                                      verbose = FALSE)
-    expect_output(print(run_f), "not kept (keep_models = FALSE)", fixed = TRUE)
+    expect_false(inherits(run_f, "ai4bayescode_run"))
 })
 
 test_that("an interrupted call does not shift the results of later calls", {
@@ -416,4 +447,290 @@ test_that("an interrupted call does not shift the results of later calls", {
     expect_identical(run$models[[1]]$get_history(), run$histories[[1]])
     expect_identical(run$models[[1]]$slow(0), "slow-result")
     expect_identical(predict(run)$det[, 1], c(101 + 3 + 1:4, 202 + 3 + 1:4))
+})
+
+test_that("keep_models = FALSE returns the 1.1.2 list, with positional arguments", {
+    skip_on_os("windows")
+    ctor <- fake_ctor()           # no clear_history(), as with 1.1.2 headers
+    # 1.1.2 call: model_ctor, n_chains, n_burn, n_keep, seeds, parallel,
+    # mc.cores, verbose.
+    expect_silent(run <- ai4bayescode_run_chains(ctor, 2, 3, 4, NULL, TRUE, 2,
+                                                 FALSE, keep_models = FALSE))
+    expect_false(is.object(run))
+    expect_named(run, c("histories", "seeds", "wall", "n_burn", "n_keep",
+                        "history_cleared"))
+    expect_identical(run[[1]], run$histories)
+    expect_identical(run[[2]], c(101L, 202L))
+    expect_identical(run[[3]], run$wall)
+    expect_identical(run$histories[[2]]$theta, 202 + 3 + 1:4)
+    expect_null(run$models)
+    skip_if_not_installed("jsonlite")
+    js <- jsonlite::toJSON(run)
+    expect_s3_class(js, "json")
+    expect_identical(jsonlite::fromJSON(js)$seeds, c(101L, 202L))
+})
+
+# A model whose predict_at() returns the shape named in newdata$mode, with
+# n_keep draws per chain; `chain_value` is seed / 101.
+shape_ctor <- function(seed) {
+    m <- fake_ctor(clear = TRUE)(seed)
+    m$predict_at <- function(newdata) {
+        d <- m$draws
+        n <- length(d)
+        odd <- (seed / 101) %% 2 == 1
+        switch(newdata$mode,
+            vec    = list(v = d),
+            scalar = list(s = d[1L]),
+            arr1   = list(a = array(d)),
+            mat    = list(m = cbind(d, -d)),
+            arr3   = list(a = array(seq_len(n * 6) + seed, c(n, 2, 3))),
+            mixed  = list(x = if (odd) d else matrix(d, ncol = 1L)),
+            cols   = list(x = matrix(d, n, if (odd) 2L else 3L)),
+            nullkey = list(a = d, b = NULL),
+            listkey = list(a = list(1, 2)),
+            unnamed = list(d),
+            dup    = list(a = d, a = -d),
+            bare   = cbind(d, d),
+            empty  = list())
+    }
+    m
+}
+
+test_that("predict(): newdata NULL is list(); other non-lists raise an error", {
+    skip_on_os("windows")
+    for (par in c(FALSE, TRUE)) {
+        run <- ai4bayescode_run_chains(fake_ctor(clear = TRUE), n_chains = 2,
+                                       n_burn = 1, n_keep = 3, parallel = par,
+                                       n_cores = 2, verbose = FALSE)
+        expect_identical(predict(run, NULL), predict(run))
+        expect_identical(ai4bayescode_predict(run, NULL), predict(run, list()))
+        X <- matrix(1, 2, 2)
+        expect_error(predict(run, X), "predict(run, list(X = X_new))",
+                     fixed = TRUE)
+        expect_error(predict(run, X), "got a matrix", fixed = TRUE)
+        expect_error(predict(run, data.frame(a = 1:2)), "got a data.frame",
+                     fixed = TRUE)
+        expect_error(predict(run, list(1, 2)), "unnamed element", fixed = TRUE)
+        expect_error(predict(run, 1:3), "got an integer", fixed = TRUE)
+        ai4bayescode_close_models(run)
+    }
+})
+
+test_that("predict(): pooled entries keep their number of dimensions", {
+    skip_on_os("windows")
+    for (par in c(FALSE, TRUE)) {
+        run <- ai4bayescode_run_chains(shape_ctor, n_chains = 3, n_burn = 2,
+                                       n_keep = 4, parallel = par, n_cores = 2,
+                                       verbose = FALSE)
+        d <- lapply(c(101, 202, 303), function(s) s + 2 + 1:4)
+        p <- function(mode, ...) predict(run, list(mode = mode), ...)
+        expect_identical(p("vec")$v, unlist(d))
+        expect_identical(p("scalar")$s, vapply(d, `[`, numeric(1), 1L))
+        expect_identical(p("arr1")$a, unlist(d))
+        expect_identical(p("mat")$m, do.call(rbind, lapply(d, function(d) cbind(d, -d))))
+        a3 <- p("arr3")$a
+        expect_identical(dim(a3), c(12L, 2L, 3L))
+        by_chain <- ai4bayescode_predict(run, list(mode = "arr3"), pool = FALSE)
+        for (i in 1:3)
+            expect_identical(a3[(i - 1) * 4 + 1:4, , , drop = FALSE],
+                             by_chain[[i]]$a)
+        expect_identical(p("empty"), list())
+        expect_error(p("mixed"), "'x' has 1 dimension in chain 1 and 2 in chain 2",
+                     fixed = TRUE)
+        expect_error(p("cols"), "'x' has 2 columns in chain 1 and 3 in chain 2",
+                     fixed = TRUE)
+        expect_error(p("nullkey"), "'b' of chain 1 is NULL", fixed = TRUE)
+        expect_error(p("listkey"), "'a' of chain 1 is a list", fixed = TRUE)
+        # The value of predict_at() must be a list with unique non-empty
+        # names, also with pool = FALSE.
+        for (pl in c(TRUE, FALSE)) {
+            expect_error(p("unnamed", pool = pl),
+                         "predict_at() of chain 1 returned a list without unique non-empty names",
+                         fixed = TRUE)
+            expect_error(p("dup", pool = pl), "of chain 1 returned a list without",
+                         fixed = TRUE)
+            expect_error(p("bare", pool = pl),
+                         "predict_at() of chain 1 returned a matrix", fixed = TRUE)
+        }
+        ai4bayescode_close_models(run)
+    }
+})
+
+test_that("predict(run, ...) raises an error for an unused argument", {
+    skip_on_os("windows")
+    run <- ai4bayescode_run_chains(fake_ctor(clear = TRUE), n_chains = 2,
+                                   n_burn = 1, n_keep = 2, parallel = FALSE,
+                                   verbose = FALSE)
+    expect_error(predict(run, nwdata = list(x = 1)), "unused argument 'nwdata'",
+                 fixed = TRUE)
+    expect_error(predict(run, list(), pooled = FALSE),
+                 "unused argument 'pooled'", fixed = TRUE)
+    expect_error(predict(run, list(), TRUE, 3, z = 1),
+                 "unused arguments '(unnamed)', 'z'", fixed = TRUE)
+    # Positional, exact and partial names are accepted.
+    expect_identical(predict(run, list(), FALSE), predict(run, pool = FALSE))
+    expect_identical(predict(run, newdat = list()), predict(run))
+})
+
+test_that("a lost worker process ends only the models of its own chains", {
+    skip_on_cran(); skip_on_os("windows")
+    run <- ai4bayescode_run_chains(fake_ctor(clear = TRUE), n_chains = 4,
+                                   n_burn = 1, n_keep = 2, n_cores = 2,
+                                   verbose = FALSE)
+    pids <- pids_of(run)
+    tools::pskill(pids[1L], tools::SIGKILL)       # holds chains 1 and 3
+    expect_true(all_exited(pids[1L]))
+    lost <- sprintf("the worker process %d holding chains 1, 3 exited unexpectedly",
+                    pids[1L])
+    expect_error(run$models[[1]]$get_history(), paste("chain 1:", lost),
+                 fixed = TRUE)
+    expect_error(run$models[[3]]$get_history(), "the models of these chains are lost",
+                 fixed = TRUE)
+    expect_error(predict(run), lost, fixed = TRUE)
+    # The other worker process keeps its models.
+    expect_identical(run$models[[2]]$get_history(), run$histories[[2]])
+    expect_identical(run$models[[4]]$get_history(), run$histories[[4]])
+    expect_true(alive(pids[2L]))
+    expect_output(print(run$models[[3]]), sub("^the", "The", lost), fixed = TRUE)
+    expect_output(print(run$models[[2]]), "is in worker process", fixed = TRUE)
+    out <- capture.output(print(run))
+    expect_true(any(grepl(sprintf("in 1 worker process of this R session (pid %d)",
+                                  pids[2L]), out, fixed = TRUE)))
+    expect_true(any(grepl(lost, out, fixed = TRUE)))
+    ai4bayescode_close_models(run)
+    expect_true(all_exited(pids[2L]))
+})
+
+test_that("a worker process that exits during the run: sequential re-run", {
+    skip_on_cran(); skip_on_os("windows")
+    parent <- Sys.getpid()
+    # The constructor ends its own process (SIGKILL) when it runs in a
+    # forked worker process.
+    dies <- function(seed) {
+        if (Sys.getpid() != parent) tools::pskill(Sys.getpid(), tools::SIGKILL)
+        fake_ctor(clear = TRUE)(seed)
+    }
+    for (keep in c(TRUE, FALSE)) {
+        # keep_models = FALSE: parallel::mclapply() warns as well.
+        w <- character(0)
+        run <- withCallingHandlers(
+            ai4bayescode_run_chains(dies, n_chains = 2, n_burn = 1, n_keep = 2,
+                                    n_cores = 2, keep_models = keep,
+                                    verbose = FALSE),
+            warning = function(x) {
+                w <<- c(w, conditionMessage(x))
+                invokeRestart("muffleWarning")
+            })
+        expect_true(any(grepl("fork-unsafe multithreaded BLAS", w, fixed = TRUE)))
+        expect_identical(run$histories[[2]]$theta, 202 + 1 + 1:2)
+        if (keep) expect_false(inherits(run$models[[1]], "ai4bayescode_chain_model"))
+    }
+})
+
+test_that("a pid that no longer designates a worker is not signalled", {
+    skip_on_cran(); skip_on_os("windows")
+    run <- ai4bayescode_run_chains(fake_ctor(clear = TRUE), n_chains = 2,
+                                   n_burn = 1, n_keep = 2, n_cores = 2,
+                                   verbose = FALSE)
+    pids  <- pids_of(run)
+    entry <- get(pool_of(run)$token, envir = AI4BayesCode:::.ai4b_rc_registry())
+    # A stand-in process started later than the worker takes the pid of
+    # worker 2 in the registry, as a pid reused by the system would.
+    Sys.sleep(1.2)
+    standin <- parallel::mcparallel(Sys.sleep(60), mc.set.seed = FALSE)
+    on.exit({
+        tools::pskill(standin$pid, tools::SIGKILL)
+        suppressWarnings(parallel::mccollect(standin))
+    }, add = TRUE)
+    tools::pskill(pids[2L], tools::SIGKILL)
+    expect_true(all_exited(pids[2L]))
+    entry$pids[2L] <- standin$pid
+    expect_error(run$models[[2]]$get_history(), "exited unexpectedly")
+    ai4bayescode_close_models(run)
+    expect_true(all_exited(pids[1L]))
+    Sys.sleep(0.3)
+    expect_true(alive(standin$pid))
+
+    # A busy worker (an interrupted call) is sent SIGTERM at close, also only
+    # while its pid designates it.
+    run <- ai4bayescode_run_chains(fake_ctor(clear = TRUE), n_chains = 2,
+                                   n_burn = 1, n_keep = 2, n_cores = 2,
+                                   verbose = FALSE)
+    pids  <- pids_of(run)
+    entry <- get(pool_of(run)$token, envir = AI4BayesCode:::.ai4b_rc_registry())
+    parent <- Sys.getpid()
+    job <- parallel::mcparallel({ Sys.sleep(0.3); tools::pskill(parent, tools::SIGINT) })
+    done <- FALSE
+    tryCatch({ run$models[[2]]$slow(30); done <- TRUE; Sys.sleep(30) },
+             interrupt = function(e) NULL)
+    suppressWarnings(parallel::mccollect(job))
+    expect_false(done)
+    expect_true(entry$sent[2L] > entry$recv[2L])
+    Sys.sleep(1.2)
+    standin2 <- parallel::mcparallel(Sys.sleep(60), mc.set.seed = FALSE)
+    on.exit({
+        tools::pskill(standin2$pid, tools::SIGKILL)
+        suppressWarnings(parallel::mccollect(standin2))
+    }, add = TRUE)
+    tools::pskill(pids[2L], tools::SIGKILL)
+    expect_true(all_exited(pids[2L]))
+    entry$pids[2L] <- standin2$pid
+    ai4bayescode_close_models(run)
+    expect_true(all_exited(pids[1L]))
+    Sys.sleep(0.3)
+    expect_true(alive(standin2$pid))
+})
+
+test_that("the reason a pool was closed is shown by every copy of the run", {
+    skip_on_cran(); skip_on_os("windows")
+    run <- ai4bayescode_run_chains(fake_ctor(clear = TRUE), n_chains = 2,
+                                   n_burn = 1, n_keep = 2, n_cores = 2,
+                                   verbose = FALSE)
+    pids <- pids_of(run)
+    copy <- unserialize(serialize(run, NULL))
+    expect_identical(copy$models[[2]]$get_history(), run$histories[[2]])
+    rm(run); invisible(gc())
+    expect_true(all_exited(pids))
+    expect_error(copy$models[[1]]$get_history(), "were closed when the run and its handles were garbage-collected",
+                 fixed = TRUE)
+    expect_output(print(copy), "closed (the run that started them was garbage-collected)",
+                  fixed = TRUE)
+    expect_output(print(copy$models[[2]]), "garbage-collected")
+    expect_false(any(grepl("ai4bayescode_close_models)", capture.output(print(copy)),
+                           fixed = TRUE)))
+})
+
+test_that("a handle called in model_ctor or a forked child: a specific error", {
+    skip_on_cran(); skip_on_os("windows")
+    pilot <- ai4bayescode_run_chains(fake_ctor(clear = TRUE), n_chains = 2,
+                                     n_burn = 1, n_keep = 2, n_cores = 2,
+                                     verbose = FALSE)
+    on.exit(ai4bayescode_close_models(pilot), add = TRUE)
+    warm <- function(seed) {
+        m <- fake_ctor(clear = TRUE)(seed)
+        m$state <- tail(pilot$models[[match(seed, pilot$seeds)]]$get_history()$theta, 1)
+        m
+    }
+    expect_no_warning(expect_error(
+        ai4bayescode_run_chains(warm, n_chains = 2, n_burn = 1, n_keep = 2,
+                                n_cores = 2, verbose = FALSE),
+        "chain 1 (seed 101): an ai4bayescode_chain_model handle can be called only in the R process",
+        fixed = TRUE))
+    res <- parallel::mclapply(pilot$models, function(h)
+        tryCatch(h$get_history(), error = conditionMessage), mc.cores = 2)
+    expect_match(res[[1]], "not in a forked child process", fixed = TRUE)
+    # Reading the values first runs in parallel.
+    last <- lapply(pilot$models, function(h) tail(h$get_history()$theta, 1))
+    warm2 <- function(seed) {
+        m <- fake_ctor(clear = TRUE)(seed)
+        m$state <- last[[match(seed, pilot$seeds)]]
+        m
+    }
+    run <- ai4bayescode_run_chains(warm2, n_chains = 2, n_burn = 1, n_keep = 2,
+                                   n_cores = 2, verbose = FALSE)
+    expect_s3_class(run$models[[1]], "ai4bayescode_chain_model")
+    expect_identical(run$histories[[2]]$theta, 205 + 1 + 1:2)
+    ai4bayescode_close_models(run)
+    # The pilot's handles still work here.
+    expect_identical(pilot$models[[1]]$get_history(), pilot$histories[[1]])
 })

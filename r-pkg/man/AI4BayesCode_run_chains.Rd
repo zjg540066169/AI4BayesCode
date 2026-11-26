@@ -36,9 +36,8 @@ draws of a model that uses R's generator (`bart_block`, `genbart_block`
 and `softbart_block` under Rcpp) are therefore determined by `seeds`, and
 chains with different seeds use different streams. The caller's
 `.Random.seed` (or its absence) is saved before the run and restored
-after a sequential run and after the `parallel::mclapply` call, which
-evaluates the chains in this session when `as.integer(n_cores) < 2`, so
-the caller's random-number stream is unchanged by the run.}
+after it in every path, so the caller's random-number stream is
+unchanged by the run.}
 
 \item{parallel}{Logical; run the chains in forked worker processes on
 POSIX. Defaults to `TRUE` (sequential on Windows).}
@@ -48,57 +47,88 @@ and differ.}
 
 \item{verbose}{Logical; print a progress message. Defaults to `TRUE`.}
 
-\item{n_cores}{Number of worker processes; defaults to
+\item{n_cores}{Maximum number of worker processes (a run uses
+`min(n_cores, n_chains)`); defaults to
 `min(n_chains, max(1, parallel::detectCores() - 1))` for a parallel run.}
 
 \item{keep_models}{Logical; return the models in `run$models`. Defaults to
 `TRUE`.}
 }
 \value{
-An object of class `"ai4bayescode_run"` (a list) with `histories`
-  (list of per-chain histories, keep-only: each entry -- vector, matrix, or
-  higher-dimensional array -- holds the `n_keep` post-warmup draws along
-  its first axis; an entry with a single stored draw, i.e.
-  `keep_history = FALSE`, is returned unchanged), `models` (list of the
-  `n_chains` models -- handles after a parallel run, model objects after a
-  sequential one -- or `NULL` when `keep_models = FALSE`), `seeds`, `wall`
-  (per-chain seconds), `n_burn`, `n_keep`, and `history_cleared` (logical,
-  one per chain: `TRUE` when `clear_history()` was called after the
-  warmup). See `ai4bayescode_predict()` for prediction from all chains and
+With `keep_models = TRUE`, an object of class `"ai4bayescode_run"`
+  (a list) with `histories` (list of per-chain histories, keep-only: each
+  entry -- vector, matrix, or higher-dimensional array -- holds the
+  `n_keep` post-warmup draws along its first axis; an entry with a single
+  stored draw, i.e. `keep_history = FALSE`, is returned unchanged),
+  `seeds`, `wall` (per-chain seconds), `models` (list of the `n_chains`
+  models: handles after a parallel run, model objects after a sequential
+  one), `n_burn`, `n_keep`, and `history_cleared` (logical, one per chain:
+  `TRUE` when `clear_history()` was called after the warmup). With
+  `keep_models = FALSE`, a plain list with `histories`, `seeds`, `wall`,
+  `n_burn`, `n_keep` and `history_cleared`. In both, the first three
+  elements are `histories`, `seeds` and `wall`, as in earlier versions. See
+  `ai4bayescode_predict()` for prediction from all chains and
   `ai4bayescode_close_models()` to terminate the worker processes.
 }
 \description{
 Runs `n_chains` chains from a deterministic constructor
-  closure and returns the per-chain histories, the models, the seeds used,
-  and the per-chain wall time. Each chain builds a fresh model with
+  closure and returns the per-chain histories, the seeds used, the
+  per-chain wall time and the models. Each chain builds a fresh model with
   `model_ctor(seed)`, runs `n_burn` warmup sweeps, discards the stored draws
-  with the model's `clear_history()`, and runs `n_keep` sweeps, so the
-  model's own `get_history()` and `predict_at()` cover the `n_keep`
-  post-warmup draws only. The histories in `run$histories` are KEEP-ONLY,
-  so downstream `ai4bayescode_rhat_summary()` / `ai4bayescode_diagnose()`
-  need no `drop_burn` / `n_burn` bookkeeping.
+  with the model's `clear_history()` when the model has that method, and
+  runs `n_keep` sweeps, so the model's own `get_history()` and
+  `predict_at()` cover the `n_keep` post-warmup draws only. The histories in
+  `run$histories` are KEEP-ONLY, so downstream
+  `ai4bayescode_rhat_summary()` / `ai4bayescode_diagnose()` need no
+  `drop_burn` / `n_burn` bookkeeping.
 
   The chains run in forked worker processes on POSIX when
   `parallel = TRUE`, `n_cores > 1` and `n_chains > 1`, and sequentially in
   this session otherwise. With `keep_models = TRUE` (default) a parallel
-  run uses persistent worker processes (`parallel::makeForkCluster`):
-  chain `i` runs in worker `((i - 1) %% n_workers) + 1`, and its model is
-  kept in that process.
-  `run$models[[i]]` is then a handle of class `"ai4bayescode_chain_model"`:
-  `run$models[[i]]$predict_at(newdata)`, or any other method call, is
-  evaluated on chain `i`'s model in its worker process and returns the
-  result (an error there is raised here with the worker's message). The
-  worker processes are terminated by `ai4bayescode_close_models(run)`,
-  when the run and every handle taken from it are garbage-collected, or
-  when R exits. A handle restored with `readRDS()` in another R session
-  raises an error. A sequential run returns the model objects themselves in
-  `run$models`. With `keep_models = FALSE` a parallel run uses
+  run starts `n_workers = min(n_cores, n_chains)` persistent worker
+  processes: chain `i` runs in worker `((i - 1) \%\% n_workers) + 1`, and
+  its model is kept in that process. `run$models[[i]]` is then a handle of
+  class `"ai4bayescode_chain_model"`: `run$models[[i]]$predict_at(newdata)`,
+  or any other method call, is evaluated on chain `i`'s model in its worker
+  process and returns the result (an error there is raised here with the
+  worker's message). A handle can be called only in the R process that ran
+  `ai4bayescode_run_chains()`: not in a forked child process of it (in
+  `parallel::mclapply()`, or in `model_ctor` of another parallel run), and
+  not after `readRDS()` in another R session. To start the chains of a run
+  from the states of an earlier parallel run, read them first, e.g.
+  `inits <- lapply(pilot$models, function(h) h$get_current())`, and use
+  `inits[[i]]` in `model_ctor`. A sequential run returns the model objects
+  themselves in `run$models`. With `keep_models = FALSE` a parallel run uses
   `parallel::mclapply`, which evaluates the chains in this session when
-  `as.integer(n_cores) < 2`, and `run$models` is `NULL`.
+  `as.integer(n_cores) < 2`, and keeps no models.
+
+  Each worker process of a kept run holds one R connection (R has 128 by
+  default) and its memory until it is terminated: by
+  `ai4bayescode_close_models(run)`, when the run and every handle taken
+  from it are garbage-collected, when R exits, or to start the worker
+  processes of a later run. At most `max_workers` worker processes of kept
+  runs are alive at a time: `getOption("ai4bayescode.max_workers")`, else
+  the environment variable `AI4BAYESCODE_MAX_WORKERS`, else
+  `max(8, 4 * parallel::detectCores())`. Before the worker processes of a
+  run are started, those of earlier runs are terminated, least recently
+  used (created or called) first, until the new ones fit under
+  `max_workers` and `n_workers + 2` connections are free; one warning says
+  how many, and a call on a handle of such a run raises an error that names
+  the reason. When even that is not enough, the chains run in this session,
+  with a warning. A worker process that exits ends the models of its own
+  chains only: a call on one of them raises an error that names the
+  process, and calls on the chains of the other worker processes work as
+  before.
+
+  An R error in a chain (in `model_ctor` or in a method of the model) stops
+  the run with the error "chain i (seed s): <message>". When a worker
+  process exits during a parallel run (a fork-unsafe multithreaded BLAS
+  can make a forked chain crash), every chain is re-run sequentially in
+  this session, with a warning.
 
   A model without `clear_history()` (compiled against AI4BayesCode older
   than 1.1.3, or a custom object) gives the same `run$histories`, with the
   first `n_burn` draws dropped here, but its own `get_history()` and
-  `predict_at()` include the warmup draws; a message says so, and
-  `ai4bayescode_predict()` drops them.
+  `predict_at()` include the warmup draws; with `keep_models = TRUE` a
+  message says so, and `ai4bayescode_predict()` drops them.
 }

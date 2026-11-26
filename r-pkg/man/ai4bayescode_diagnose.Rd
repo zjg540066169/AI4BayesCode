@@ -7,13 +7,17 @@
 ai4bayescode_diagnose(hist, n_burn = 0, plot = TRUE, order_components = FALSE)
 }
 \arguments{
-\item{hist}{Named list of posterior draws: scalars as numeric vectors,
-vector parameters as matrices (draws in rows).}
+\item{hist}{Named list of posterior draws (scalars as numeric vectors,
+vector parameters as matrices, draws in rows), or a model object with a
+`get_history()` method, whose history is then used.}
 
 \item{n_burn}{Integer; number of leading draws to drop from EVERY key before
-summarising. `get_history()` includes burn-in, so pass the burn-in length
-here; use `0` (default) when `hist` is already burn-in-stripped (no change
-for existing callers). Errors if `n_burn` leaves no post-burn-in draws.}
+summarising. Pass the warmup length when `hist` contains the warmup
+draws, as `get_history()` of a model stepped through warmup and sampling
+does. Use `0` (default) when `hist` holds post-warmup draws only:
+`run$histories[[i]]`, `run$models[[i]]` when `run$history_cleared[i]` is
+`TRUE`, or a model on which `clear_history()` was called after the
+warmup. Errors if `n_burn` leaves no post-burn-in draws.}
 
 \item{plot}{Logical; build the diagnostic plot. Defaults to `TRUE`.}
 
@@ -31,7 +35,7 @@ A list with `summary` (a `posterior::summarise_draws` table), `plot`
 }
 \description{
 Computes per-parameter convergence diagnostics (split-R-hat,
-  bulk/tail ESS, MCSE, mean/sd/median/90% CI via the \pkg{posterior} package)
+  bulk/tail ESS, MCSE, mean/sd/median/90\% CI via the \pkg{posterior} package)
   from a named list of posterior draws, and returns a combined
   trace + autocorrelation + density plot (via \pkg{bayesplot}, with a base-R
   fallback when bayesplot is absent). Shipped so generated
@@ -44,5 +48,9 @@ Computes per-parameter convergence diagnostics (split-R-hat,
 hist <- list(mu = rnorm(2000), sigma = abs(rnorm(2000)))
 ai4bayescode_diagnose(hist)                 # all draws
 ai4bayescode_diagnose(hist, n_burn = 1000)  # drop the first 1000 draws first
+# a model from ai4bayescode_run_chains() holds the kept draws only:
+# ai4bayescode_diagnose(run$models[[1]])
+# a model stepped by hand (m$step(1000); m$step(2000)) includes the warmup:
+# ai4bayescode_diagnose(m, n_burn = 1000)
 }
 }

@@ -15,11 +15,14 @@ Invisibly `NULL`.
 \description{
 After a parallel `ai4bayescode_run_chains()` with
   `keep_models = TRUE`, the model of each chain is held in a worker
-  process, and the worker processes are terminated only by this function,
-  by garbage collection of the run and of every handle taken from it, or
-  when R exits. A method call through a handle of the run afterwards raises
-  the error "the worker processes holding the models of this run were
-  closed (ai4bayescode_close_models)". A second call does nothing, and so
-  does a call on a run whose models are objects in this session or that was
-  made with `keep_models = FALSE`.
+  process. The worker processes are terminated by this function, by
+  garbage collection of the run and of every handle taken from it, when R
+  exits, or to start the worker processes of a later run (see
+  `max_workers` in [ai4bayescode_run_chains()]); a worker process that
+  exits ends the models of its own chains only. A method call through a
+  handle of the run afterwards raises an error that names the reason, here
+  "the worker processes holding the models of this run were closed
+  (ai4bayescode_close_models)". A second call does nothing, and so does a
+  call on a run whose models are objects in this session or that was made
+  with `keep_models = FALSE`.
 }

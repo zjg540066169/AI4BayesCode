@@ -1,9 +1,9 @@
 # ----------------------------------------------------------------------------
 # Pin the native BLAS to one thread, as early as possible.
 #
-# ai4bayescode_run_chains() parallelises with fork(): worker processes of
-# parallel::makeForkCluster(), or parallel::mclapply() when keep_models =
-# FALSE. A multithreaded BLAS -- macOS Accelerate/vecLib above all, but also
+# ai4bayescode_run_chains() parallelises with fork(): worker processes
+# forked with parallel::mcparallel(), or parallel::mclapply() when
+# keep_models = FALSE. A multithreaded BLAS -- macOS Accelerate/vecLib above all, but also
 # OpenBLAS with pthreads and MKL -- keeps a worker-thread pool; fork() copies
 # only the calling thread, so the child inherits a pool whose threads do not
 # exist and the first heavy BLAS call there dies. On macOS the crash is inside
@@ -11,15 +11,15 @@
 # reported as "crashed on child side of fork pre-exec"), and it aborts the
 # whole R session -- it cannot be caught and retried.
 #
-# The cap has to be in place BEFORE the first BLAS call, because that is when
-# Accelerate decides whether to use its dispatch queues. Setting it later --
+# The cap has to be in place BEFORE the first BLAS call, because that call
+# sets whether Accelerate uses its dispatch queues. Setting it later --
 # inside ai4bayescode_run_chains(), say -- has no effect whatsoever. Hence:
 # here, at load.
 #
 # Only variables the caller has not already set are touched.
 #
 # The cap costs nothing in practice: the chains are separate processes
-# already, so mc.cores workers x k BLAS threads each would only oversubscribe
+# already, so n_cores workers x k BLAS threads each would only oversubscribe
 # the machine. Measured on the GP examples, per-chain wall time is the same or
 # slightly better at one thread, and the parallel speedup is a clean 4.2x on
 # four cores.
