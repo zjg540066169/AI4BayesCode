@@ -21,9 +21,11 @@
 //  exact_state_cap), gradients are EXACT; otherwise Monte Carlo with
 //  configurable S.
 //
-//  This is a PURE-VI demo: no observation model. predict_at(list(n_draws=N))
-//  returns N fresh q-samples (matrix of integer indices); empty input is
-//  also valid (no-op stochastic refresher).
+//  This is a PURE-VI demo: no observation model. predict_at() returns
+//  "z_samples" (matrix of integer indices). With keep_history = TRUE its
+//  rows are the stored per-sweep q-draws, one per kept sweep;
+//  predict_at(list(n_draws=N), last_draw_only = TRUE), or predict_at with
+//  keep_history = FALSE, returns N new samples from the current q.
 //
 //  Validation
 //  ----------
@@ -52,7 +54,9 @@
 //  length-(n*K) column-major vector or -- under the R backend only, via a
 //  named-list helper -- an n×K matrix; under the backend-neutral path it is the
 //  flat column-major vector. predict_at() returns a history_map with key
-//  "z_samples" = an (n_draws × n) integer-valued matrix.
+//  "z_samples", an integer-valued matrix with n columns: (n_kept × n), the
+//  stored q-draws, when keep_history = TRUE and last_draw_only = FALSE;
+//  (n_draws × n) samples from the current q otherwise.
 //
 // @example:R
 //   library(AI4BayesCode)
@@ -109,6 +113,7 @@
 #include <cstdint>
 #include <memory>
 #include <random>
+#include <string>
 #include <vector>
 
 using AI4BayesCode::block_context;
@@ -212,8 +217,9 @@ public:
         impl_->data().declare_context_edges("beta", {"z"});
         impl_->data().declare_context_edges("h",    {"z"});
 
-        // No predict DAG / stochastic refresher: predict_at draws fresh
-        // q-samples directly via current_sample (no graph traversal).
+        // No predict DAG / stochastic refresher: predict_at copies the
+        // stored q-draws (history path) or samples the current q via
+        // current_sample (single-draw path); no graph traversal.
 
         impl_->add_child(std::make_unique<mean_field_categorical_vi_block>(
             std::move(cfg)));
@@ -326,9 +332,62 @@ public:
         }
     }
 
-    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
-        // Returns N fresh q-samples (default N=100). The VI block is a
-        // deterministic q at the current eta; sampling from it is cheap.
+    /// predict_at(new_data) is predict_at(new_data, /*last_draw_only=*/false).
+    AI4BayesCode::history_map predict_at(
+            const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// Returns history_map{"z_samples"}: integer state indices 0..K-1, one
+    /// column per node.
+    ///
+    /// History path (keep_history = true, last_draw_only = false): row t is
+    /// the q-draw of kept sweep t, the value current_sample() returned in
+    /// that sweep and the composite wrote to the shared value "z"
+    /// (vi_block::q_draw_history(); get_history()["z"] has the same rows
+    /// while at least one sweep is stored). One row per kept sweep, zero
+    /// rows when no sweep is stored. Nothing is sampled and predict_rng_ is
+    /// not advanced. new_data must be empty.
+    ///
+    /// Single-draw path (last_draw_only = true, or keep_history = false):
+    /// n_draws rows (optional input "n_draws", length 1, default 100), each
+    /// an independent sample from the current q (phi at the current
+    /// iterate) drawn with predict_rng_. These rows are q-samples at the
+    /// current state, not stored draws.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
+        if (use_history) {
+            if (!new_data.empty()) {
+                std::vector<std::string> keys;
+                for (const auto& kv : new_data) keys.push_back(kv.first);
+                std::sort(keys.begin(), keys.end());
+                std::string msg = "predict_at: with keep_history on, z_samples "
+                                  "holds the stored q-draws (one row per kept "
+                                  "sweep) and new_data must be empty; got key(s)";
+                for (std::size_t j = 0; j < keys.size(); ++j)
+                    msg += (j == 0 ? " '" : ", '") + keys[j] + "'";
+                msg += ". n_draws sets the number of samples from the current q "
+                       "on the single-draw path: predict_at(new_data, "
+                       "last_draw_only = true).";
+                ai4b::stop(msg);
+            }
+            const auto* vi = dynamic_cast<const mean_field_categorical_vi_block*>(
+                &impl_->child(0));
+            if (!vi) ai4b::stop("internal: child 0 is not mean_field_categorical_vi_block");
+            const std::vector<arma::vec>& qd = vi->q_draw_history();
+            arma::mat z_samples(qd.size(), n_);   // (n_kept × n) integer-valued
+            for (std::size_t t = 0; t < qd.size(); ++t) {
+                if (qd[t].n_elem != n_)
+                    ai4b::stop("internal: a stored q-draw does not have length n");
+                for (std::size_t i = 0; i < n_; ++i) z_samples(t, i) = qd[t][i];
+            }
+            AI4BayesCode::history_map out;
+            out.emplace("z_samples", std::move(z_samples));
+            return out;
+        }
+
+        // Single-draw path: N samples from the current q (default N=100).
         // Optional input key "n_draws" (length-1 vector) overrides N.
         std::size_t n_draws = 100;
         auto it_nd = new_data.find("n_draws");
@@ -400,10 +459,20 @@ RCPP_MODULE(CategoricalIsingChainVI_module) {
                 "(length n). beta/h updates are informational only; "
                 "log_density was captured at construction. Reconstruct "
                 "to re-tune VI under a new beta or h.")
-        .method("predict_at",  &CategoricalIsingChainVI::predict_at,
-                "Draw N fresh q-samples. Pass list(n_draws=100) (default "
-                "N=100). Returns list(z_samples = n_draws × n integer "
-                "matrix).")
+        .method("predict_at",
+                (AI4BayesCode::history_map (CategoricalIsingChainVI::*)(const AI4BayesCode::state_map&) const)
+                    &CategoricalIsingChainVI::predict_at,
+                "predict_at(new_data) = predict_at(new_data, FALSE). Returns "
+                "list(z_samples = integer matrix, n columns). keep_history = "
+                "TRUE: the stored q-draws, one row per kept sweep (new_data "
+                "must be empty). keep_history = FALSE: n_draws samples from "
+                "the current q (list(n_draws = N), default N = 100).")
+        .method("predict_at",
+                (AI4BayesCode::history_map (CategoricalIsingChainVI::*)(const AI4BayesCode::state_map&, bool) const)
+                    &CategoricalIsingChainVI::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history: n_draws "
+                "samples from the current q (default 100), not stored draws.")
         .method("get_dag",     &CategoricalIsingChainVI::get_dag)
         .method("get_history", &CategoricalIsingChainVI::get_history)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(CategoricalIsingChainVI);
@@ -431,7 +500,16 @@ PYBIND11_MODULE(CategoricalIsingChainVI, m) {
         .def("step", (void (CategoricalIsingChainVI::*)(int)) &CategoricalIsingChainVI::step, pybind11::arg("n_steps"))
         .def("get_current", &CategoricalIsingChainVI::get_current)
         .def("set_current", &CategoricalIsingChainVI::set_current, pybind11::arg("params"))
-        .def("predict_at",  &CategoricalIsingChainVI::predict_at,  pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (CategoricalIsingChainVI::*)(const AI4BayesCode::state_map&, bool) const)
+                 &CategoricalIsingChainVI::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false,
+             "Returns {'z_samples': integer matrix, n columns}. keep_history="
+             "True and last_draw_only=False: the stored q-draws, one row per "
+             "kept sweep (new_data must be empty). Otherwise n_draws samples "
+             "from the current q ({'n_draws': N}, default N = 100), not "
+             "stored draws.")
         .def("get_dag",     &CategoricalIsingChainVI::get_dag)
         .def("get_history", &CategoricalIsingChainVI::get_history)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(CategoricalIsingChainVI);

@@ -21,8 +21,11 @@
 //  the analytical clique-sum-over-state gradient (Saul-Jordan 1996
 //  Sec.2.2 style).
 //
-//  This is a PURE-VI demo. predict_at(list(n_draws=N)) returns N fresh
-//  q-samples (matrix of integer indices, n_draws × n).
+//  This is a PURE-VI demo. predict_at() returns "z_samples" (matrix of
+//  integer indices, n columns). With keep_history = TRUE its rows are the
+//  stored per-sweep q-draws, one per kept sweep;
+//  predict_at(list(n_draws=N), last_draw_only = TRUE), or predict_at with
+//  keep_history = FALSE, returns N new samples from the current q.
 //
 //  Validation
 //  ----------
@@ -61,9 +64,12 @@
 //      converged / epoch are length-1 vectors.
 //    - set_current(const state_map&) reads "clique_phi" (flat, length
 //      total_S) and/or "z" (length n) via .find().
-//    - predict_at(const state_map& new_data) reads optional "n_draws"
-//      (length-1) and returns history_map{"z_samples"} as an
-//      n_draws × n matrix of integer state indices.
+//    - predict_at(const state_map& new_data, bool last_draw_only = false)
+//      returns history_map{"z_samples"}, a matrix of integer state indices
+//      with n columns. keep_history = TRUE and last_draw_only = FALSE: the
+//      stored q-draws, n_kept × n, and new_data must be empty. Otherwise it
+//      reads optional "n_draws" (length-1) and returns n_draws × n samples
+//      from the current q.
 // ============================================================================
 
 // @example:R
@@ -118,6 +124,7 @@
 #include "AI4BayesCode/structured_categorical_vi_block.hpp"
 #include "AI4BayesCode/kernel_control_mixin.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <memory>
@@ -255,6 +262,10 @@ public:
         impl_->data().declare_dependencies("z", {"h"});
         impl_->data().declare_context_edges("h", {"z"});
 
+        // No predict DAG / stochastic refresher: predict_at copies the
+        // stored q-draws (history path) or samples the current q via
+        // current_sample (single-draw path); no graph traversal.
+
         impl_->add_child(std::make_unique<structured_categorical_vi_block>(
             std::move(cfg)));
 
@@ -358,11 +369,63 @@ public:
         if (it_z != params.end()) impl_->data().set("z", it_z->second);
     }
 
-    // predict_at(): draw n_draws fresh q-samples. Reads optional "n_draws"
-    // (length-1) from new_data. Returns history_map{"z_samples"} as an
-    // n_draws × n matrix of integer state indices.
+    /// predict_at(new_data) is predict_at(new_data, /*last_draw_only=*/false).
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// Returns history_map{"z_samples"}: integer state indices 0..K-1, one
+    /// column per node.
+    ///
+    /// History path (keep_history = true, last_draw_only = false): row t is
+    /// the q-draw of kept sweep t, the value current_sample() returned in
+    /// that sweep (one joint state per clique, decoded to the nodes) and the
+    /// composite wrote to the shared value "z" (vi_block::q_draw_history();
+    /// get_history()["z"] has the same rows while at least one sweep is
+    /// stored). One row per kept sweep, zero rows when no sweep is stored.
+    /// Nothing is sampled and predict_rng_ is not advanced. new_data must be
+    /// empty.
+    ///
+    /// Single-draw path (last_draw_only = true, or keep_history = false):
+    /// n_draws rows (optional input "n_draws", length 1, default 100), each
+    /// an independent sample from the current q (clique_phi at the current
+    /// iterate) drawn with predict_rng_. These rows are q-samples at the
+    /// current state, not stored draws.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
+        if (use_history) {
+            if (!new_data.empty()) {
+                std::vector<std::string> keys;
+                for (const auto& kv : new_data) keys.push_back(kv.first);
+                std::sort(keys.begin(), keys.end());
+                std::string msg = "predict_at: with keep_history on, z_samples "
+                                  "holds the stored q-draws (one row per kept "
+                                  "sweep) and new_data must be empty; got key(s)";
+                for (std::size_t j = 0; j < keys.size(); ++j)
+                    msg += (j == 0 ? " '" : ", '") + keys[j] + "'";
+                msg += ". n_draws sets the number of samples from the current q "
+                       "on the single-draw path: predict_at(new_data, "
+                       "last_draw_only = true).";
+                ai4b::stop(msg);
+            }
+            const auto* vi = dynamic_cast<const structured_categorical_vi_block*>(
+                &impl_->child(0));
+            if (!vi) ai4b::stop("internal: child 0 not structured_categorical_vi_block");
+            const std::vector<arma::vec>& qd = vi->q_draw_history();
+            arma::mat z_samples(qd.size(), n_);   // (n_kept × n) integer-valued
+            for (std::size_t t = 0; t < qd.size(); ++t) {
+                if (qd[t].n_elem != n_)
+                    ai4b::stop("internal: a stored q-draw does not have length n");
+                for (std::size_t i = 0; i < n_; ++i) z_samples(t, i) = qd[t][i];
+            }
+            AI4BayesCode::history_map out;
+            out.emplace("z_samples", std::move(z_samples));
+            return out;
+        }
+
+        // Single-draw path: n_draws samples from the current q (default 100).
         std::size_t n_draws = 100;
         auto it = new_data.find("n_draws");
         if (it != new_data.end()) {
@@ -438,9 +501,20 @@ RCPP_MODULE(StructuredPottsVI_module) {
         .method("set_current", &StructuredPottsVI::set_current,
                 "Overwrite clique_phi (flat vector of length total_S) "
                 "and/or z (length n).")
-        .method("predict_at",  &StructuredPottsVI::predict_at,
-                "Draw n_draws fresh q-samples. Pass list(n_draws=N). "
-                "Returns list(z_samples = n_draws × n integer matrix).")
+        .method("predict_at",
+                (AI4BayesCode::history_map (StructuredPottsVI::*)(const AI4BayesCode::state_map&) const)
+                    &StructuredPottsVI::predict_at,
+                "predict_at(new_data) = predict_at(new_data, FALSE). Returns "
+                "list(z_samples = integer matrix, n columns). keep_history = "
+                "TRUE: the stored q-draws, one row per kept sweep (new_data "
+                "must be empty). keep_history = FALSE: n_draws samples from "
+                "the current q (list(n_draws = N), default N = 100).")
+        .method("predict_at",
+                (AI4BayesCode::history_map (StructuredPottsVI::*)(const AI4BayesCode::state_map&, bool) const)
+                    &StructuredPottsVI::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history: n_draws "
+                "samples from the current q (default 100), not stored draws.")
         .method("get_dag",     &StructuredPottsVI::get_dag)
         .method("get_history", &StructuredPottsVI::get_history)
         AI4BAYESCODE_BIND_KERNEL_CONTROL(StructuredPottsVI);
@@ -470,7 +544,16 @@ PYBIND11_MODULE(StructuredPottsVI, m) {
         .def("step", (void (StructuredPottsVI::*)(int)) &StructuredPottsVI::step, pybind11::arg("n_steps"))
         .def("get_current",  &StructuredPottsVI::get_current)
         .def("set_current",  &StructuredPottsVI::set_current, pybind11::arg("params"))
-        .def("predict_at",   &StructuredPottsVI::predict_at,  pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (StructuredPottsVI::*)(const AI4BayesCode::state_map&, bool) const)
+                 &StructuredPottsVI::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false,
+             "Returns {'z_samples': integer matrix, n columns}. keep_history="
+             "True and last_draw_only=False: the stored q-draws, one row per "
+             "kept sweep (new_data must be empty). Otherwise n_draws samples "
+             "from the current q ({'n_draws': N}, default N = 100), not "
+             "stored draws.")
         .def("get_dag",      &StructuredPottsVI::get_dag)
         .def("get_history",  &StructuredPottsVI::get_history)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(StructuredPottsVI);
