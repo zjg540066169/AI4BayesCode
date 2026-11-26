@@ -313,8 +313,11 @@ public:
         //   mu  = Intercept + f                    (fitted mean)
         //   y_rep ~ N(mu, exp(log_sigma)^2)        (stochastic)
         // s/f/mu kept current during sampling via declare_invalidates
-        // (order: s -> f -> mu) so stateful predict_at(list()) (empty
-        // changed-set, no Pass-1 recompute) reads fresh values.
+        // (order: s -> f -> mu) so single-draw predict_at(list()) (empty
+        // changed-set, no Pass-1 recompute) draws y_rep around the mu of the
+        // current state. History-mode predict_at replaces Intercept,
+        // log_sds, log_sigma, z and Bsp per stored draw, and Pass 1
+        // recomputes s, f and mu from them.
         impl_->data().set("s",     arma::vec(K_s, arma::fill::zeros));
         impl_->data().set("f",     arma::vec(N,   arma::fill::zeros));
         impl_->data().set("mu",    arma::vec(N,   arma::fill::zeros));
@@ -438,19 +441,39 @@ public:
         impl_->sync_child(0);
     }
 
-    // Real posterior predictive via the framework predict DAG (replaces
-    // the old stub that echoed the training y). Single current-draw
-    // sample, consistent with the state_map (vector) return contract.
-    //   predict_at(list())              -> s,f,mu,y_rep at training x
-    //   predict_at(list(Bsp=...))  -> at a NEW precomputed basis
-    //       (Bsp = vectorise(Bsp_new), N_new*K_s column-major;
-    //        Q3=A: the spline basis is evaluated R-side at new x).
-    // Returns history_map (matrices) per the core-six contract in
-    // interface.md: predict_at's outputs share get_history()'s shape,
-    // so a scalar draw is an n x 1 column.
+    // Posterior predictive through the predict DAG declared in the
+    // constructor. new_data is empty or holds "Bsp", the basis evaluated at
+    // new x as N_new*K_s values: the column-major vectorisation of the
+    // N_new x K_s basis (R also accepts the matrix itself). Every output key
+    // is a matrix with one row per draw.
+    //
+    //   History mode (keep_history TRUE, last_draw_only FALSE): for each
+    //   stored draw d, the values of Intercept, log_sds, log_sigma and z in
+    //   row d of get_history(), and Bsp (new_data's, else the training Bsp),
+    //   are passed to impl_->predict_at, which computes
+    //       s = exp(log_sds_d) z_d,  f = Bsp s,  mu = Intercept_d + f,
+    //       y_rep ~ N(mu, exp(log_sigma_d)^2)   (one draw from predict_rng_).
+    //   Returns f, mu and y_rep, each n_draws x N.
+    //
+    //   Single-draw path (last_draw_only TRUE, or keep_history FALSE): one
+    //   impl_->predict_at call at the current state, each key 1 x N.
+    //     predict_at(list())          -> y_rep at the training Bsp; f and mu
+    //                                    of the current state are not
+    //                                    recomputed and not returned
+    //     predict_at(list(Bsp = ...)) -> f, mu and y_rep at the new Bsp
+    /// predict_at(new_data) = predict_at(new_data, last_draw_only = false).
     AI4BayesCode::history_map predict_at(
-        const AI4BayesCode::state_map& new_data) const {
-        block_context replaced;
+            const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the single-draw path (the path taken when
+    /// keep_history is false) and leaves the stored draws in place.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
+            bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
+
+        bool has_Bsp = false;
         auto it = new_data.find("Bsp");
         if (it != new_data.end()) {
             const arma::vec& bf = it->second;
@@ -464,7 +487,7 @@ public:
                     std::to_string(K) +
                     " (pass vectorise(Bsp_new), N_new*K_s col-major).");
             }
-            replaced["Bsp"] = bf;
+            has_Bsp = true;
         } else {
             for (const auto& kv : new_data) {
                 throw std::runtime_error(
@@ -472,9 +495,55 @@ public:
                     kv.first + "'. Valid: 'Bsp' (or empty).");
             }
         }
-        block_context r = impl_->predict_at(replaced, predict_rng_);
+
         AI4BayesCode::history_map out;
-        for (const auto& kv : r) out[kv.first] = arma::mat(kv.second);
+
+        if (!use_history) {
+            block_context replaced;
+            if (has_Bsp) replaced["Bsp"] = it->second;
+            block_context r = impl_->predict_at(replaced, predict_rng_);
+            for (const auto& kv : r) out.emplace(kv.first, arma::mat(kv.second.t()));
+            return out;
+        }
+
+        // History mode. Intercept, log_sds, log_sigma and z are sub-parameters
+        // of the joint block and declared sources of the predict DAG, so
+        // impl_->predict_at accepts them as replaced values. Bsp is passed for
+        // every draw: f is recomputed only when each of its parents is
+        // available, and a data input is available only when it is in the
+        // replaced set. Without Bsp, f would equal its value at the current
+        // state and mu would be computed from that f.
+        const AI4BayesCode::history_map hist = impl_->get_history();
+        const arma::mat& Intercept_h = hist.at("Intercept");   // n_draws x 1
+        const arma::mat& log_sds_h   = hist.at("log_sds");     // n_draws x 1
+        const arma::mat& log_sigma_h = hist.at("log_sigma");   // n_draws x 1
+        const arma::mat& z_h         = hist.at("z");           // n_draws x K_s
+        const std::size_t n_draws = Intercept_h.n_rows;
+        if (log_sds_h.n_rows != n_draws || log_sigma_h.n_rows != n_draws ||
+            z_h.n_rows != n_draws) {
+            throw std::runtime_error(
+                "BSplineRegression::predict_at: the stored draws of Intercept, "
+                "log_sds, log_sigma and z differ in number.");
+        }
+
+        block_context replaced;
+        replaced["Bsp"] = has_Bsp ? it->second : impl_->data().get("Bsp");
+        const std::size_t N_pred = replaced["Bsp"].n_elem / z_h.n_cols;
+        arma::mat f_out(n_draws, N_pred), mu_out(n_draws, N_pred),
+                  yrep_out(n_draws, N_pred);
+        for (std::size_t d = 0; d < n_draws; ++d) {
+            replaced["Intercept"] = Intercept_h.row(d).t();
+            replaced["log_sds"]   = log_sds_h.row(d).t();
+            replaced["log_sigma"] = log_sigma_h.row(d).t();
+            replaced["z"]         = z_h.row(d).t();
+            const block_context r = impl_->predict_at(replaced, predict_rng_);
+            f_out.row(d)    = r.at("f").t();
+            mu_out.row(d)   = r.at("mu").t();
+            yrep_out.row(d) = r.at("y_rep").t();
+        }
+        out.emplace("f",     std::move(f_out));
+        out.emplace("mu",    std::move(mu_out));
+        out.emplace("y_rep", std::move(yrep_out));
         return out;
     }
 
@@ -539,7 +608,18 @@ RCPP_MODULE(BSplineRegression_module) {
         .method("step", (void (BSplineRegression::*)(int)) &BSplineRegression::step, "Run n sweeps.")
         .method("get_current", &BSplineRegression::get_current)
         .method("set_current", &BSplineRegression::set_current)
-        .method("predict_at",  &BSplineRegression::predict_at)
+        .method("predict_at",
+                (AI4BayesCode::history_map (BSplineRegression::*)(const AI4BayesCode::state_map&) const)
+                    &BSplineRegression::predict_at,
+                "predict_at(new_data), new_data = list() or list(Bsp = <N_new x K_s basis>): "
+                "f, mu and y_rep with one row per stored draw (keep_history = TRUE; "
+                "predict_at(list()) at the training Bsp), or one row from the current "
+                "state (keep_history = FALSE; predict_at(list()) returns y_rep only).")
+        .method("predict_at",
+                (AI4BayesCode::history_map (BSplineRegression::*)(const AI4BayesCode::state_map&, bool) const)
+                    &BSplineRegression::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",     &BSplineRegression::get_dag)
         .method("get_history", &BSplineRegression::get_history)
         AI4BAYESCODE_BIND_READAPT_NUTS(BSplineRegression)
@@ -564,8 +644,16 @@ PYBIND11_MODULE(BSplineRegression, m) {
         .def("get_current", &BSplineRegression::get_current)
         .def("set_current", &BSplineRegression::set_current,
              pybind11::arg("params"))
-        .def("predict_at",  &BSplineRegression::predict_at,
-             pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (BSplineRegression::*)(const AI4BayesCode::state_map&, bool) const)
+                 &BSplineRegression::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false,
+             "predict_at(new_data, last_draw_only=False), new_data = {} or "
+             "{'Bsp': vectorise(Bsp_new)} (N_new*K_s values, column-major): f, mu and "
+             "y_rep with one row per stored draw (keep_history=True and "
+             "last_draw_only=False; {} at the training Bsp), else one row from the "
+             "current state ({} returns y_rep only).")
         .def("get_dag",     &BSplineRegression::get_dag)
         .def("get_history", &BSplineRegression::get_history)
         .def("readapt_NUTS", (void (BSplineRegression::*)(int, bool, int, double)) &BSplineRegression::readapt_NUTS,

@@ -18,6 +18,26 @@
  *  HSGPRegression in history mode, where the per-draw replaced keys are the
  *  sampled parameters rather than the data inputs).
  *
+ *  Cases 6-9 pin the ORDER. A parent that is itself recomputed counts as
+ *  available from the start (it holds a value in shared_data), so the walk
+ *  can resolve a child before that parent; the returned list is reordered so
+ *  that each node follows its parents in the list.
+ *    Case 6: A -> Q -> P -> C with X -> C, replaced {A, X}: the walk resolves C
+ *            in the first round and P in the second, so before the reorder C
+ *            preceded P for every iteration order of the replaced set. Also
+ *            run through composite_block::predict_at, where C must be computed
+ *            from the recomputed P.
+ *    Cases 7, 8: the BSplineRegression and HSGPRegression topologies with the
+ *            full per-draw replaced set of their history-mode predict_at
+ *            (every sampled source plus the basis), through
+ *            composite_block::predict_at with the examples' formulas.
+ *    Case 9: X -> Q -> P -> C with X -> C, ONE replaced key {X}: the walk
+ *            resolves Q and C in the first round and P in the second, so
+ *            before the reorder C preceded P with no iteration order
+ *            involved. Also run through composite_block::predict_at.
+ *  Case 5 also checks that a list already in parent-first order is returned
+ *  as the walk produced it.
+ *
  *  Copyright (C) 2026 AI4BayesCode
  *  SPDX-License-Identifier: GPL-3.0-or-later
  *================================================================================*/
@@ -29,10 +49,13 @@
 #endif
 
 #include "AI4BayesCode/block_sampler.hpp"
+#include "AI4BayesCode/composite_block.hpp"
 #include "AI4BayesCode/shared_data.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <random>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -262,6 +285,254 @@ int main() {
         check_order(order, "t1", "t2");
         check_order(order, "t2", "t3");
         check_order(order, "t3", "t4");
+        // The walk resolves w1, w2, w3 (children of X, in declaration order),
+        // then t1..t4 one per round: already parent-first, so the reorder
+        // leaves it as it is.
+        check(order == std::vector<std::string>{"w1", "w2", "w3", "t1", "t2",
+                                                "t3", "t4"},
+              "a parent-first walk order is returned unchanged");
+    }
+
+    // ---- Case 6: a recomputed parent resolved one round after its child -----
+    //   A -> Q -> P -> C,  X -> C ;  replaced {A, X}
+    // Round 1 resolves Q (parent A) and C (parents P: holds a value, X:
+    // replaced); P follows in round 2. C must still be refreshed after P.
+    {
+        std::printf("\nCase 6: A -> Q -> P -> C and X -> C, replaced {A, X}\n");
+        auto build = [](AI4BayesCode::shared_data_t& d) {
+            d.declare_data_input("X");
+            d.set("A", arma::vec{0.0});
+            d.set("X", arma::vec{0.0});
+            d.set("Q", arma::vec{1.0});
+            d.set("P", arma::vec{2.0});
+            d.set("C", arma::vec{2.0});
+            d.register_refresher("Q", [](const AI4BayesCode::shared_data_t& s) {
+                return arma::vec{s.get("A")(0) + 1.0}; });
+            d.register_refresher("P", [](const AI4BayesCode::shared_data_t& s) {
+                return arma::vec{2.0 * s.get("Q")(0)}; });
+            d.register_refresher("C", [](const AI4BayesCode::shared_data_t& s) {
+                return arma::vec{s.get("P")(0) + s.get("X")(0)}; });
+            d.declare_predict_edges("A", {"Q"});
+            d.declare_predict_edges("Q", {"P"});
+            d.declare_predict_edges("P", {"C"});
+            d.declare_predict_edges("X", {"C"});
+        };
+        AI4BayesCode::shared_data_t d;
+        build(d);
+        std::unordered_set<std::string> changed{"A", "X"};
+        const auto order = d.predict_downstream_of(changed);
+        std::printf("        order = %s\n", join(order).c_str());
+        check(order.size() == 3 && contains(order, "Q") && contains(order, "P") &&
+              contains(order, "C"), "Q, P and C recomputed (and nothing else)");
+        check_order(order, "Q", "P");
+        check_order(order, "P", "C");
+
+        AI4BayesCode::composite_block c("case6");
+        build(c.data());
+        AI4BayesCode::block_context rep;
+        rep["A"] = arma::vec{5.0};
+        rep["X"] = arma::vec{100.0};
+        std::mt19937_64 rng(1);
+        const auto r = c.predict_at(rep, rng);
+        const double C = r.count("C") ? r.at("C")(0) : NAN;
+        std::printf("        predict_at(A = 5, X = 100): C = %g (expected (5 + 1) * 2 + 100 = 112)\n", C);
+        check(C == 112.0, "predict_at computes C from the recomputed P");
+    }
+
+    // ---- Case 7: BSplineRegression, full per-draw replaced set ---------------
+    //   s = exp(log_sds) z ; f = Bsp s ; mu = Intercept + f ; y_rep ~ N(mu, .)
+    // History-mode predict_at replaces {Intercept, log_sds, log_sigma, z, Bsp}.
+    {
+        std::printf("\nCase 7: BSplineRegression topology, replaced {Intercept, "
+                    "log_sds, log_sigma, z, Bsp}\n");
+        const std::size_t N = 4, K = 3;
+        AI4BayesCode::composite_block c("case7");
+        AI4BayesCode::shared_data_t& d = c.data();
+        d.set("Bsp", arma::vec(N * K, arma::fill::ones));
+        d.set("Intercept", arma::vec{0.0});
+        d.set("log_sds", arma::vec{0.0});
+        d.set("log_sigma", arma::vec{0.0});
+        d.set("z", arma::vec(K, arma::fill::zeros));
+        d.set("s", arma::vec(K, arma::fill::zeros));
+        d.set("f", arma::vec(N, arma::fill::zeros));
+        d.set("mu", arma::vec(N, arma::fill::zeros));
+        d.set("y_rep", arma::vec(N, arma::fill::zeros));
+        d.register_refresher("s", [](const AI4BayesCode::shared_data_t& t) {
+            return arma::vec(std::exp(t.get("log_sds")(0)) * t.get("z")); });
+        d.register_refresher("f", [](const AI4BayesCode::shared_data_t& t) {
+            const arma::vec& s = t.get("s");
+            const arma::vec& B = t.get("Bsp");
+            const arma::mat Bm(B.memptr(), B.n_elem / s.n_elem, s.n_elem);
+            return arma::vec(Bm * s); });
+        d.register_refresher("mu", [](const AI4BayesCode::shared_data_t& t) {
+            return arma::vec(t.get("Intercept")(0) + t.get("f")); });
+        d.register_stochastic_refresher("y_rep",
+            [](const AI4BayesCode::shared_data_t& t, std::mt19937_64&) {
+                return arma::vec(t.get("mu")); });
+        d.declare_data_input("Bsp");
+        d.declare_predict_edges("log_sds", {"s"});
+        d.declare_predict_edges("z", {"s"});
+        d.declare_predict_edges("s", {"f"});
+        d.declare_predict_edges("Bsp", {"f"});
+        d.declare_predict_edges("f", {"mu"});
+        d.declare_predict_edges("Intercept", {"mu"});
+        d.declare_predict_edges("mu", {"y_rep"});
+        d.declare_predict_edges("log_sigma", {"y_rep"});
+
+        std::unordered_set<std::string> changed{"Intercept", "log_sds", "log_sigma",
+                                                "z", "Bsp"};
+        const auto order = d.predict_downstream_of(changed);
+        std::printf("        order = %s\n", join(order).c_str());
+        check_order(order, "s", "f");
+        check_order(order, "f", "mu");
+
+        arma::mat Bm(N, K);
+        for (std::size_t i = 0; i < N * K; ++i) Bm(i) = 0.1 * static_cast<double>(i + 1);
+        AI4BayesCode::block_context rep;
+        rep["Bsp"] = arma::vectorise(Bm);
+        rep["Intercept"] = arma::vec{2.0};
+        rep["log_sds"] = arma::vec{std::log(3.0)};
+        rep["log_sigma"] = arma::vec{0.0};
+        rep["z"] = arma::vec{1.0, -1.0, 0.5};
+        std::mt19937_64 rng(1);
+        const auto r = c.predict_at(rep, rng);
+        const arma::vec f_ref = Bm * (3.0 * rep["z"]);
+        const arma::vec mu_ref = 2.0 + f_ref;
+        const double ef = r.count("f") ? arma::max(arma::abs(r.at("f") - f_ref)) : INFINITY;
+        const double em = r.count("mu") ? arma::max(arma::abs(r.at("mu") - mu_ref)) : INFINITY;
+        std::printf("        max|f - Bsp exp(log_sds) z| = %.3g, max|mu - (Intercept + f)| = %.3g\n",
+                    ef, em);
+        check(ef < 1e-12 && em < 1e-12,
+              "predict_at: f and mu from the replaced draw (not from the s before the call)");
+    }
+
+    // ---- Case 8: HSGPRegression, full per-draw replaced set ------------------
+    //   sqrt_spd(log_amp, log_ell, lambda) ; f = phi (sqrt_spd % z) ;
+    //   mu = Intercept + f. History mode replaces {Intercept, log_amp, log_ell,
+    //   log_sigma, z, phi}.
+    {
+        std::printf("\nCase 8: HSGPRegression topology, replaced {Intercept, "
+                    "log_amp, log_ell, log_sigma, z, phi}\n");
+        const std::size_t N = 5, M = 3;
+        AI4BayesCode::composite_block c("case8");
+        AI4BayesCode::shared_data_t& d = c.data();
+        d.set("phi", arma::vec(N * M, arma::fill::ones));
+        d.set("lambda", arma::vec{0.5, 2.0, 4.5});
+        for (const char* k : {"Intercept", "log_amp", "log_ell", "log_sigma"})
+            d.set(k, arma::vec{0.0});
+        d.set("z", arma::vec(M, arma::fill::zeros));
+        d.set("sqrt_spd", arma::vec(M, arma::fill::zeros));
+        d.set("f", arma::vec(N, arma::fill::zeros));
+        d.set("mu", arma::vec(N, arma::fill::zeros));
+        d.set("y_rep", arma::vec(N, arma::fill::zeros));
+        auto spd = [](double amp, double ell, const arma::vec& lam) {
+            arma::vec ss(lam.n_elem);
+            for (std::size_t m = 0; m < lam.n_elem; ++m)
+                ss[m] = std::sqrt(amp * amp * std::sqrt(2.0 * M_PI) * ell *
+                                  std::exp(-0.5 * ell * ell * lam[m]));
+            return ss;
+        };
+        d.register_refresher("sqrt_spd", [spd](const AI4BayesCode::shared_data_t& t) {
+            return spd(std::exp(t.get("log_amp")(0)), std::exp(t.get("log_ell")(0)),
+                       t.get("lambda")); });
+        d.register_refresher("f", [](const AI4BayesCode::shared_data_t& t) {
+            const arma::vec c_m = t.get("sqrt_spd") % t.get("z");
+            const arma::vec& P = t.get("phi");
+            const arma::mat Pm(P.memptr(), P.n_elem / c_m.n_elem, c_m.n_elem);
+            return arma::vec(Pm * c_m); });
+        d.register_refresher("mu", [](const AI4BayesCode::shared_data_t& t) {
+            return arma::vec(t.get("Intercept")(0) + t.get("f")); });
+        d.register_stochastic_refresher("y_rep",
+            [](const AI4BayesCode::shared_data_t& t, std::mt19937_64&) {
+                return arma::vec(t.get("mu")); });
+        d.declare_data_input("phi");
+        d.declare_predict_edges("log_amp", {"sqrt_spd"});
+        d.declare_predict_edges("log_ell", {"sqrt_spd"});
+        d.declare_predict_edges("lambda", {"sqrt_spd"});
+        d.declare_predict_edges("sqrt_spd", {"f"});
+        d.declare_predict_edges("z", {"f"});
+        d.declare_predict_edges("phi", {"f"});
+        d.declare_predict_edges("f", {"mu"});
+        d.declare_predict_edges("Intercept", {"mu"});
+        d.declare_predict_edges("mu", {"y_rep"});
+        d.declare_predict_edges("log_sigma", {"y_rep"});
+
+        std::unordered_set<std::string> changed{"Intercept", "log_amp", "log_ell",
+                                                "log_sigma", "z", "phi"};
+        const auto order = d.predict_downstream_of(changed);
+        std::printf("        order = %s\n", join(order).c_str());
+        check_order(order, "sqrt_spd", "f");
+        check_order(order, "f", "mu");
+
+        arma::mat Pm(N, M);
+        for (std::size_t i = 0; i < N * M; ++i) Pm(i) = std::sin(0.3 * static_cast<double>(i + 1));
+        AI4BayesCode::block_context rep;
+        rep["phi"] = arma::vectorise(Pm);
+        rep["Intercept"] = arma::vec{-1.0};
+        rep["log_amp"] = arma::vec{std::log(1.5)};
+        rep["log_ell"] = arma::vec{std::log(0.7)};
+        rep["log_sigma"] = arma::vec{0.0};
+        rep["z"] = arma::vec{0.3, -1.2, 2.0};
+        std::mt19937_64 rng(1);
+        const auto r = c.predict_at(rep, rng);
+        const arma::vec f_ref = Pm * (spd(1.5, 0.7, arma::vec{0.5, 2.0, 4.5}) % rep["z"]);
+        const arma::vec mu_ref = -1.0 + f_ref;
+        const double ef = r.count("f") ? arma::max(arma::abs(r.at("f") - f_ref)) : INFINITY;
+        const double em = r.count("mu") ? arma::max(arma::abs(r.at("mu") - mu_ref)) : INFINITY;
+        std::printf("        max|f - phi (sqrt_spd %% z)| = %.3g, max|mu - (Intercept + f)| = %.3g\n",
+                    ef, em);
+        check(ef < 1e-12 && em < 1e-12,
+              "predict_at: f and mu from the replaced draw (not from the sqrt_spd before the call)");
+    }
+
+    // ---- Case 9: one replaced key, parent resolved one round after its child -
+    //   X -> Q -> P -> C,  X -> C ;  replaced {X}
+    // Round 1 resolves Q (parent X) and C (parents P: holds a value, X:
+    // replaced); P follows in round 2. With one replaced key the iteration
+    // order of `changed` has no effect on the walk, so the declaration order
+    // of X's children is varied instead.
+    {
+        std::printf("\nCase 9: X -> Q -> P -> C and X -> C, ONE replaced key {X}\n");
+        for (const bool q_first : {true, false}) {
+            auto build = [q_first](AI4BayesCode::shared_data_t& d) {
+                d.declare_data_input("X");
+                d.set("X", arma::vec{0.0});
+                d.set("Q", arma::vec{1.0});
+                d.set("P", arma::vec{2.0});
+                d.set("C", arma::vec{2.0});
+                d.register_refresher("Q", [](const AI4BayesCode::shared_data_t& s) {
+                    return arma::vec{s.get("X")(0) + 1.0}; });
+                d.register_refresher("P", [](const AI4BayesCode::shared_data_t& s) {
+                    return arma::vec{2.0 * s.get("Q")(0)}; });
+                d.register_refresher("C", [](const AI4BayesCode::shared_data_t& s) {
+                    return arma::vec{s.get("P")(0) + s.get("X")(0)}; });
+                if (q_first) d.declare_predict_edges("X", {"Q", "C"});
+                else         d.declare_predict_edges("X", {"C", "Q"});
+                d.declare_predict_edges("Q", {"P"});
+                d.declare_predict_edges("P", {"C"});
+            };
+            const std::string tag = q_first ? "X -> {Q, C}" : "X -> {C, Q}";
+            AI4BayesCode::shared_data_t d;
+            build(d);
+            const auto order = d.predict_downstream_of({"X"});
+            std::printf("        %s: order = %s\n", tag.c_str(), join(order).c_str());
+            check(order.size() == 3 && contains(order, "Q") && contains(order, "P") &&
+                  contains(order, "C"),
+                  tag + ": Q, P and C recomputed (and nothing else)");
+            check_order(order, "Q", "P");
+            check_order(order, "P", "C");
+
+            AI4BayesCode::composite_block c("case9");
+            build(c.data());
+            AI4BayesCode::block_context rep;
+            rep["X"] = arma::vec{10.0};
+            std::mt19937_64 rng(1);
+            const auto r = c.predict_at(rep, rng);
+            const double C = r.count("C") ? r.at("C")(0) : NAN;
+            std::printf("        %s: predict_at(X = 10): C = %g (expected (10 + 1) * 2 + 10 = 32)\n",
+                        tag.c_str(), C);
+            check(C == 32.0, tag + ": predict_at computes C from the recomputed P");
+        }
     }
 
     std::printf("\n=== SUMMARY: %d passed, %d failed ===\n", g_pass, g_fail);

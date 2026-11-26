@@ -596,6 +596,13 @@ public:
      *   y's other parent v2 is a data_input and was not supplied, hence
      *   unavailable.
      *
+     * Order of the returned list: every node comes after each of its
+     * parents that is also in the list, so refreshing the list in order
+     * computes a node from the recomputed values of its parents. The rule
+     * above admits a node whose parent is itself in the list but resolved
+     * later (that parent holds a value in values_), so the walk alone does
+     * not give this order; it is restored at the end of the function.
+     *
      * @param changed  The set of nodes whose values were replaced.
      * @return  Ordered list of deterministic downstream nodes to refresh.
      */
@@ -699,6 +706,67 @@ public:
 
             queue = std::move(next_queue);
             if (!progress) break;
+        }
+
+        // Refresh order. A parent that is in `result` counts as available
+        // from the start (it holds a value in values_), so the walk can list
+        // a child before that parent, with one replaced key as with several:
+        //   - the parent resolves in a later round. With X -> Q -> P -> C,
+        //     X -> C and the single replaced key X, round 1 resolves Q and C
+        //     (parents P and X) and round 2 resolves P;
+        //   - the parent resolves in the same round after the child, depending
+        //     on the iteration order of `changed`. For the per-draw replaced
+        //     set {Intercept, log_sds, log_sigma, z, Bsp} of
+        //     examples/BSplineRegression.cpp, round 1 can list f (parents s,
+        //     Bsp) before s (parents log_sds, z).
+        // composite_block::predict_at refreshes `result` in order, so the
+        // child was computed from the parent's value at the current state (C
+        // from the P of the current state; f from the s of the current state
+        // instead of the replaced log_sds and z). The loop below reorders
+        // `result` so that every node follows each of its parents in `result`.
+        // At each position it places the earliest node of `result` whose
+        // parents in `result` are already placed, so a list that satisfies
+        // the condition is returned unchanged. The set of nodes does not
+        // change.
+        if (result.size() > 1) {
+            const std::size_t n = result.size();
+            std::unordered_map<std::string, std::size_t> index;
+            for (std::size_t i = 0; i < n; ++i) index.emplace(result[i], i);
+            // parent_idx[i]: positions in `result` of the parents of result[i].
+            std::vector<std::vector<std::size_t>> parent_idx(n);
+            for (std::size_t i = 0; i < n; ++i) {
+                auto pit = parents.find(result[i]);
+                if (pit == parents.end()) continue;
+                for (const auto& p : pit->second) {
+                    auto it = index.find(p);
+                    if (it != index.end() && it->second != i)
+                        parent_idx[i].push_back(it->second);
+                }
+            }
+            std::vector<char> placed(n, 0);
+            std::vector<std::string> ordered;
+            ordered.reserve(n);
+            while (ordered.size() < n) {
+                std::size_t pick = n;
+                for (std::size_t i = 0; i < n && pick == n; ++i) {
+                    if (placed[i]) continue;
+                    bool ready = true;
+                    for (std::size_t j : parent_idx[i]) {
+                        if (!placed[j]) { ready = false; break; }
+                    }
+                    if (ready) pick = i;
+                }
+                if (pick == n) {
+                    // Only a cycle among the predict edges leaves no node
+                    // placeable; the remaining nodes keep their order.
+                    for (std::size_t i = 0; i < n; ++i)
+                        if (!placed[i]) ordered.push_back(result[i]);
+                    break;
+                }
+                placed[pick] = 1;
+                ordered.push_back(result[pick]);
+            }
+            result = std::move(ordered);
         }
 
         return result;
