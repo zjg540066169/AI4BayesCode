@@ -48,6 +48,15 @@
 //      alpha, beta, u (= tau * z_u), tau, sigma.
 //  z_u is also exposed so cross-val can inspect the reparameterized space.
 //
+//  Prediction (predict_at)
+//  -----------------------
+//      y_rep_n = alpha + X_n' beta + u_{g[n]} + sigma * e_n,   e_n ~ N(0, 1),
+//  per stored draw (history mode) or at the current state. g[n] is the
+//  0-based g_idx: an integer >= 0, one per row of X (per training row when X
+//  is absent). A group g >= G has no training rows; its u_g = tau * z,
+//  z ~ N(0, 1) from predict_rng_, is drawn at the first row of that group and
+//  used for every row of that group in the same draw (with that draw's tau).
+//
 //  Cross-validation against HierarchicalLM_joint.cpp
 //  ---------------------------------------------------
 //  Class name: HierarchicalLM_joint
@@ -120,6 +129,7 @@
 #include <limits>
 #include <memory>
 #include <random>
+#include <unordered_map>
 
 using AI4BayesCode::block_context;
 using AI4BayesCode::composite_block;
@@ -390,6 +400,7 @@ public:
         // each row belongs to. Supplying only X therefore leaves y_rep not
         // predictable, while mu_fixed = alpha + X*beta still is.
         impl_->data().declare_data_input_group({"X", "g_idx"});
+        N_ = N;
         p_ = p;
         G_ = static_cast<std::size_t>(G);
         impl_->data().declare_predict_edges("X",        {"mu_fixed"});
@@ -424,10 +435,22 @@ public:
                                "observations and must be replaced together",
                                static_cast<std::size_t>(gix.n_elem), N);
                 std::normal_distribution<double> norm(0.0, 1.0);
+                // A group g >= G has no training rows: u_g = tau * z,
+                // z ~ N(0, 1), is drawn at the first row of g and used for
+                // every row of g in this call.
+                std::unordered_map<std::size_t, double> u_unseen;
                 arma::vec y_rep(N);
                 for (std::size_t i = 0; i < N; ++i) {
                     const std::size_t g = static_cast<std::size_t>(gix[i]);
-                    const double re = (g < G) ? u[g] : tau * norm(rng);
+                    double re;
+                    if (g < G) {
+                        re = u[g];
+                    } else {
+                        auto it = u_unseen.find(g);
+                        if (it == u_unseen.end())
+                            it = u_unseen.emplace(g, tau * norm(rng)).first;
+                        re = it->second;
+                    }
                     y_rep[i] = mf[i] + re + s * norm(rng);
                 }
                 return y_rep;
@@ -574,11 +597,12 @@ public:
     AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
 
     // Backend-neutral predict_at: takes a state_map of replaced data inputs
-    // (empty here) and returns a history_map (map<string,arma::mat>). The
-    // rcpp_wrap.hpp / pybind glue converts each matrix to an R matrix /
-    // Python 2D array. Cf. GaussianLocationScale::predict_at.
-    /// Unchanged one-argument form: predict_at(new_data) means exactly what
-    /// it always did. The overload below adds the trailing switch.
+    // (X and/or g_idx; empty for the training data) and returns a
+    // history_map (map<string,arma::mat>). The rcpp_wrap.hpp / pybind glue
+    // converts each matrix to an R matrix / Python 2D array. Formula and the
+    // rule for groups >= G: "Prediction" in the file header.
+    /// One-argument form: predict_at(new_data) equals
+    /// predict_at(new_data, false). The overload below adds the switch.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
         return predict_at(new_data, /*last_draw_only=*/false);
@@ -592,10 +616,12 @@ public:
             bool last_draw_only) const {
         const bool use_history = keep_history_ && !last_draw_only;
 
-        // X arrives vectorised column-major (N_new * p); g_idx is 0-based and
-        // length N_new. Either may be supplied on its own -- with only X, the
-        // predict DAG computes mu_fixed and leaves y_rep out, because the
-        // group of each NEW row is unknown.
+        // X arrives vectorised column-major (N_new * p). g_idx is 0-based:
+        // one integer >= 0 per row of X, or per training row when X is
+        // absent; an entry >= G is a group with no training rows. Either may
+        // be supplied on its own -- with only X, the predict DAG computes
+        // mu_fixed and leaves y_rep out, because the group of each NEW row is
+        // unknown.
         block_context replaced;
         for (const auto& kv : new_data) {
             if (kv.first != "X" && kv.first != "g_idx")
@@ -615,16 +641,21 @@ public:
         }
         if (it_g != new_data.end()) {
             const arma::vec& g = it_g->second;
-            if (N_new != 0 && g.n_elem != N_new)
+            const bool has_X = it_X != new_data.end();
+            const std::size_t N_rows = has_X ? N_new : N_;
+            if (g.n_elem != N_rows)
                 ai4b::stop("HierarchicalLM_joint::predict_at: g_idx has %zu "
-                           "entries but X has %zu rows",
-                           static_cast<std::size_t>(g.n_elem), N_new);
-            for (std::size_t i = 0; i < g.n_elem; ++i) {
-                const long gi = static_cast<long>(std::llround(g[i]));
-                if (gi < 0 || static_cast<std::size_t>(gi) >= G_)
+                           "entries but %s has %zu rows",
+                           static_cast<std::size_t>(g.n_elem),
+                           has_X ? "X" : "the training data", N_rows);
+            // An integer-valued double in [0, 2^53]: every such value is
+            // exact, and its conversion to std::size_t below is defined.
+            for (std::size_t i = 0; i < g.n_elem; ++i)
+                if (!(g[i] >= 0.0 && g[i] <= 9007199254740992.0 &&
+                      g[i] == std::floor(g[i])))
                     ai4b::stop("HierarchicalLM_joint::predict_at: g_idx[%zu] "
-                               "= %g is outside {0, ..., G-1}", i, g[i]);
-            }
+                               "= %g is not an integer in [0, 2^53] (g_idx is "
+                               "0-based)", i, g[i]);
             replaced["g_idx"] = g;
         }
 
@@ -683,15 +714,29 @@ public:
 
         arma::mat yrep_mat(n_draws, N);
         std::normal_distribution<double> norm01(0.0, 1.0);
+        // Groups >= G (no training rows) in draw d: u_dg = tau_d * z,
+        // z ~ N(0, 1), drawn at the first row of g and used for every row of
+        // g in draw d -- the rule of the y_rep refresher, with draw d's tau.
+        std::unordered_map<std::size_t, double> u_unseen;
         for (std::size_t d = 0; d < n_draws; ++d) {
             const double alpha_d = alpha_hist(d, 0);
             const double sigma_d = sigma_hist(d, 0);
+            u_unseen.clear();
             for (std::size_t i = 0; i < N; ++i) {
                 double xb = 0.0;
                 for (std::size_t j = 0; j < p_dim; ++j)
                     xb += X_flat[i + j * N] * beta_hist(d, j);
                 const std::size_t gi = static_cast<std::size_t>(g_idx[i]);
-                const double u_dg = tau_hist(d, 0) * z_u_hist(d, gi);
+                double u_dg;
+                if (gi < G_) {
+                    u_dg = tau_hist(d, 0) * z_u_hist(d, gi);
+                } else {
+                    auto it = u_unseen.find(gi);
+                    if (it == u_unseen.end())
+                        it = u_unseen.emplace(
+                                 gi, tau_hist(d, 0) * norm01(predict_rng_)).first;
+                    u_dg = it->second;
+                }
                 const double mu = alpha_d + xb + u_dg;
                 yrep_mat(d, i) = mu + sigma_d * norm01(predict_rng_);
             }
@@ -726,7 +771,10 @@ private:
     mutable std::mt19937_64          readapt_rng_;
     std::unique_ptr<composite_block> impl_;
     bool                             keep_history_ = false;
-    // predict_at validates a replaced X / g_idx against these.
+    // predict_at validates a replaced X / g_idx against these. N_: training
+    // rows, the length of a g_idx supplied without X. G_: an index >= G_ is
+    // a group with no training rows.
+    std::size_t                      N_ = 0;
     std::size_t                      p_ = 0;
     std::size_t                      G_ = 0;
 };
@@ -754,7 +802,12 @@ RCPP_MODULE(HierarchicalLM_joint_module) {
         .method("predict_at",
                 (AI4BayesCode::history_map (HierarchicalLM_joint::*)(const AI4BayesCode::state_map&) const)
                     &HierarchicalLM_joint::predict_at,
-                "Predict at new_data. Unchanged.")
+                "predict_at(new_data): new_data = list(X = <N_new x p>, "
+                "g_idx = <0-based group of each row>), either one alone, or "
+                "list() for the training data. g_idx: integers >= 0, one per "
+                "row of X (per training row without X); for an entry >= G "
+                "the group's random effect is drawn from N(0, tau^2), once "
+                "per group and draw.")
         .method("predict_at",
                 (AI4BayesCode::history_map (HierarchicalLM_joint::*)(const AI4BayesCode::state_map&, bool) const)
                     &HierarchicalLM_joint::predict_at,
@@ -792,7 +845,13 @@ PYBIND11_MODULE(HierarchicalLM_joint, m) {
              (AI4BayesCode::history_map (HierarchicalLM_joint::*)(const AI4BayesCode::state_map&, bool) const)
                  &HierarchicalLM_joint::predict_at,
              pybind11::arg("new_data"),
-             pybind11::arg("last_draw_only") = false)
+             pybind11::arg("last_draw_only") = false,
+             "predict_at(new_data, last_draw_only=False): new_data = "
+             "{'X': <N_new x p, flattened column-major>, 'g_idx': <0-based "
+             "group of each row>}, either one alone, or {} for the training "
+             "data. g_idx: integers >= 0, one per row of X (per training row "
+             "without X); for an entry >= G the group's random effect is "
+             "drawn from N(0, tau^2), once per group and draw.")
         .def("get_dag",      &HierarchicalLM_joint::get_dag)
         .def("readapt_NUTS", (void (HierarchicalLM_joint::*)(int, bool, int, double)) &HierarchicalLM_joint::readapt_NUTS,
              pybind11::arg("n"), pybind11::arg("reset") = false,

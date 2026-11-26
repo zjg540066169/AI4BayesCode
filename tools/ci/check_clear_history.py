@@ -54,9 +54,6 @@ import numpy as np
 # constructor argument names. Each entry maps the constructor arguments
 # (v(name) returns the value passed for that C++ parameter) to new data.
 NEWDATA = {
-    # predict_at takes new times "t"; the declared inputs t_new_flag and y are
-    # not prediction covariates.
-    "GPTimeSeries": lambda v: {"t": v("t")},
     # Declared inputs y0 = (S0, I0, R0) and t_obs.
     "ODE_SIR": lambda v: {"y0": [v("S0"), v("I0"), v("R0")], "t_obs": v("t_obs")},
     # predict_at takes a 0-based g_idx; the constructor takes g_idx_1based.

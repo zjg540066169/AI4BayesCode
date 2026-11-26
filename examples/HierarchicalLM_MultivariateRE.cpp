@@ -101,6 +101,17 @@
 //                        + (tau_k/sigma^2) * sum_i r_i Z_{i,k} z_{l,g(i)}
 //                        (entries above the diagonal are ignored by the
 //                         block's chain rule)
+//
+//  PREDICTION (predict_at)
+//  -----------------------
+//    y_rep_i = X_i' beta + Z_i' u_{g(i)} + sigma * e_i,   e_i ~ N(0, 1),
+//  per stored draw (history mode) or at the current state. group_idx is
+//  1-BASED: an integer >= 1 per row of X (per training row when X is
+//  absent). A label > J is a group with no training rows; its
+//  u_g = diag(tau) L z_g, z_g ~ N(0, I_d) from predict_rng_, i.e.
+//  u_g ~ N(0, diag(tau) L L' diag(tau)), is drawn at the first row of that
+//  group and used for every row of that group in the same draw (with that
+//  draw's tau and L).
 // ============================================================================
 
 // @example:R
@@ -796,8 +807,9 @@ public:
         }
     }
 
-    /// Unchanged one-argument form: predict_at(new_data) means exactly what
-    /// it always did. The overload below adds the trailing switch.
+    /// One-argument form: predict_at(new_data) equals
+    /// predict_at(new_data, false). The overload below adds the switch.
+    /// Formula and the rule for labels > J: PREDICTION in the file header.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
         return predict_at(new_data, /*last_draw_only=*/false);
@@ -811,11 +823,12 @@ public:
             bool last_draw_only) const {
         const bool use_history = keep_history_ && !last_draw_only;
 
-        // X and Z arrive vectorised column-major (N_new*p and N_new*D);
-        // group_idx is 1-BASED and length N_new. Any subset may be supplied
-        // -- with only X, the predict DAG computes mu_fixed and leaves y_rep
-        // out, because the group and random-effect row of each NEW
-        // observation are unknown.
+        // X arrives vectorised column-major (N_new*p); Z is its first D
+        // columns. group_idx is 1-BASED: one integer >= 1 per row of X, or
+        // per training row when X is absent; a label > J is a group with no
+        // training rows. Either may be supplied on its own -- with only X,
+        // the predict DAG computes mu_fixed and leaves y_rep out, because the
+        // group and random-effect row of each NEW observation are unknown.
         block_context replaced;
         for (const auto& kv : new_data) {
             if (kv.first == "Z")
@@ -840,14 +853,21 @@ public:
         }
         if (it_g != new_data.end()) {
             const arma::vec& g = it_g->second;
-            if (N_new != 0 && g.n_elem != N_new)
+            const bool has_X = it_X != new_data.end();
+            const std::size_t N_rows = has_X ? N_new : N_;
+            if (g.n_elem != N_rows)
                 ai4b::stop("HierarchicalLM_MultivariateRE::predict_at: "
-                           "group_idx has %zu entries but the design has %zu "
-                           "rows", static_cast<std::size_t>(g.n_elem), N_new);
+                           "group_idx has %zu entries but %s has %zu rows",
+                           static_cast<std::size_t>(g.n_elem),
+                           has_X ? "X" : "the training data", N_rows);
+            // An integer-valued double in [1, 2^53]: every such value is
+            // exact, and its 0-based index converts to std::size_t.
             for (std::size_t i = 0; i < g.n_elem; ++i)
-                if (static_cast<long>(std::llround(g[i])) < 1)
+                if (!(g[i] >= 1.0 && g[i] <= 9007199254740992.0 &&
+                      g[i] == std::floor(g[i])))
                     ai4b::stop("HierarchicalLM_MultivariateRE::predict_at: "
-                               "group_idx is 1-BASED; entry %zu is %g", i, g[i]);
+                               "group_idx[%zu] = %g is not an integer in "
+                               "[1, 2^53] (group_idx is 1-BASED)", i, g[i]);
             replaced["group_idx"] = g;
         }
 
@@ -921,6 +941,11 @@ public:
 
         arma::mat yrep_mat(n_draws, N);
         std::normal_distribution<double> norm01(0.0, 1.0);
+        // Groups with no training rows (0-based index >= J) in draw d:
+        // u_g = diag(tau_d) L_d z_g, z_g ~ N(0, I_D), drawn at the first row
+        // of g and used for every row of g in draw d -- the rule of the
+        // y_rep refresher, with draw d's tau and L.
+        std::unordered_map<std::size_t, std::array<double, D>> unseen;
         for (std::size_t d = 0; d < n_draws; ++d) {
             arma::vec beta_d   = beta_hist.row(d).t();
             arma::vec z_d      = z_flat_hist.row(d).t();
@@ -934,6 +959,7 @@ public:
             arma::mat z_mat(z_d.memptr(), D_local, J, false, true);
             arma::mat u_mat = L_d * z_mat;
             for (std::size_t k = 0; k < D_local; ++k) u_mat.row(k) *= tau_d[k];
+            unseen.clear();
 
             for (std::size_t i = 0; i < N; ++i) {
                 double mu_i = 0.0;
@@ -941,8 +967,24 @@ public:
                     mu_i += X_mat(i, k) * beta_d[k];
                 const std::size_t g_i = static_cast<std::size_t>(
                     std::llround(group[i])) - 1u;
-                for (std::size_t k = 0; k < D_local; ++k)
-                    mu_i += Z_mat(i, k) * u_mat(k, g_i);
+                if (g_i < J) {
+                    for (std::size_t k = 0; k < D_local; ++k)
+                        mu_i += Z_mat(i, k) * u_mat(k, g_i);
+                } else {
+                    auto it = unseen.find(g_i);
+                    if (it == unseen.end()) {
+                        arma::vec zg(D_local);
+                        for (std::size_t k = 0; k < D_local; ++k)
+                            zg[k] = norm01(predict_rng_);
+                        arma::vec ug = L_d * zg;            // D
+                        std::array<double, D> ua;
+                        for (std::size_t k = 0; k < D_local; ++k)
+                            ua[k] = tau_d[k] * ug[k];
+                        it = unseen.emplace(g_i, ua).first;
+                    }
+                    for (std::size_t k = 0; k < D_local; ++k)
+                        mu_i += Z_mat(i, k) * it->second[k];
+                }
                 yrep_mat(d, i) = mu_i + sigma_d * norm01(predict_rng_);
             }
         }
@@ -1008,7 +1050,12 @@ RCPP_MODULE(HierarchicalLM_MultivariateRE_module) {
         .method("predict_at",
                 (AI4BayesCode::history_map (HierarchicalLM_MultivariateRE::*)(const AI4BayesCode::state_map&) const)
                     &HierarchicalLM_MultivariateRE::predict_at,
-                "Predict at new_data. Unchanged.")
+                "predict_at(new_data): new_data = list(X = <N_new x p>, "
+                "group_idx = <1-based group of each row>), either one alone, "
+                "or list() for the training data. group_idx: integers >= 1, "
+                "one per row of X (per training row without X); for a label "
+                "> J the group's random effect is drawn from N(0, diag(tau) "
+                "L L' diag(tau)), once per group and draw.")
         .method("predict_at",
                 (AI4BayesCode::history_map (HierarchicalLM_MultivariateRE::*)(const AI4BayesCode::state_map&, bool) const)
                     &HierarchicalLM_MultivariateRE::predict_at,
@@ -1043,7 +1090,14 @@ PYBIND11_MODULE(HierarchicalLM_MultivariateRE, m) {
              (AI4BayesCode::history_map (HierarchicalLM_MultivariateRE::*)(const AI4BayesCode::state_map&, bool) const)
                  &HierarchicalLM_MultivariateRE::predict_at,
              pybind11::arg("new_data"),
-             pybind11::arg("last_draw_only") = false)
+             pybind11::arg("last_draw_only") = false,
+             "predict_at(new_data, last_draw_only=False): new_data = "
+             "{'X': <N_new x p, flattened column-major>, 'group_idx': "
+             "<1-based group of each row>}, either one alone, or {} for the "
+             "training data. group_idx: integers >= 1, one per row of X (per "
+             "training row without X); for a label > J the group's random "
+             "effect is drawn from N(0, diag(tau) L L' diag(tau)), once per "
+             "group and draw.")
         .def("get_dag",      &HierarchicalLM_MultivariateRE::get_dag)
         .def("get_history",  &HierarchicalLM_MultivariateRE::get_history)
         .def("readapt_NUTS", (void (HierarchicalLM_MultivariateRE::*)(int, bool, int, double)) &HierarchicalLM_MultivariateRE::readapt_NUTS,

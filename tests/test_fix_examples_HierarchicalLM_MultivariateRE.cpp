@@ -25,15 +25,28 @@
 //        unchanged (bit for bit);
 //    C6  set_current(get_current()) leaves get_current() unchanged up to
 //        rounding (1e-12).
+//  predict_at(new_data) with group_idx (1-based):
+//    C7  an entry < 1, a non-integer or NaN entry, a length other than the
+//        rows of X, or (without X) other than N throws; group_idx of length
+//        N without X, and labels > J with X, are accepted;
+//    C8  history mode with labels > J: y_rep of draw d equals
+//        X beta_d + Z u + sigma_d * e bit for bit, where u = u_d[:, g] for a
+//        training group and, for a label > J, u = diag(tau_d) L_d z with
+//        z ~ N(0, I_2) drawn at the first row of that label in draw d and
+//        reused for its later rows; z and e come from an engine seeded as
+//        predict_rng_, in row order.
 // ============================================================================
 #include <armadillo>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <map>
 #include <memory>
 #include <random>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "AI4BayesCode/composite_block.hpp"
@@ -219,6 +232,101 @@ int main() {
     for (const auto& kv : c6) e6 = std::max(e6, rel_err(a6.at(kv.first), kv.second));
     std::printf("C6 set_current(get_current()): max rel change %.3g\n", e6);
     check(e6 <= 1e-12, "C6 set_current(get_current()) leaves get_current() unchanged up to rounding");
+
+    const std::uint64_t pred_xor = 0x9E3779B97F4A7C15ULL;   // predict_rng_ seed
+    const arma::mat X5 = X.rows(0, 4);
+    const double Jd = static_cast<double>(J);
+    const arma::vec g5{1.0, Jd + 1.0, Jd + 2.0, Jd + 1.0, 2.0};
+    AI4BayesCode::state_map nd5;
+    nd5["X"] = arma::vectorise(X5);
+    nd5["group_idx"] = g5;
+
+    // C7
+    {
+        HierarchicalLM_MultivariateRE mv(y, X, group, 31, false);
+        auto throws = [&](const AI4BayesCode::state_map& nd) {
+            try { (void)mv.predict_at(nd); } catch (const std::exception& e) {
+                std::printf("    error: %s\n", e.what());
+                return true;
+            }
+            return false;
+        };
+        auto with_X = [&](const arma::vec& g) {
+            AI4BayesCode::state_map nd;
+            nd["X"] = arma::vectorise(X.rows(0, 2));
+            nd["group_idx"] = g;
+            return nd;
+        };
+        AI4BayesCode::state_map short_no_X, full_no_X;
+        short_no_X["group_idx"] = arma::vec{1.0, 2.0, 3.0};
+        full_no_X["group_idx"] = group;
+        const bool rejects = throws(with_X(arma::vec{1.0, 0.0, 2.0})) &&
+                             throws(with_X(arma::vec{1.0, -1.0, 2.0})) &&
+                             throws(with_X(arma::vec{1.0, 1.5, 2.0})) &&
+                             throws(with_X(arma::vec{1.0, NAN, 2.0})) &&
+                             throws(with_X(arma::vec{1.0, 2.0})) && throws(short_no_X);
+        const bool accepts = !throws(full_no_X) && !throws(nd5);
+        check(rejects && accepts,
+              "C7 group_idx: < 1, non-integer, NaN and wrong lengths throw; N entries "
+              "without X and labels > J are accepted");
+    }
+
+    // C8: history mode, labels > J.
+    {
+        HierarchicalLM_MultivariateRE mh(y, X, group, 33, true);
+        mh.step(6);
+        const auto H = mh.get_history();
+        const auto P = mh.predict_at(nd5);
+        const arma::mat& B = H.at("beta");
+        const arma::mat& Zf = H.at("z_flat");
+        const arma::mat& LT = H.at("log_tau");
+        const arma::mat& LS = H.at("log_sigma");
+        const arma::mat& RC = H.at("R_chol");
+        const arma::mat& YR = P.at("y_rep");
+        bool bits = YR.n_rows == B.n_rows && YR.n_cols == 5 && B.n_rows == 6;
+        std::mt19937_64 r(static_cast<std::uint64_t>(33) ^ pred_xor);
+        std::normal_distribution<double> z01(0.0, 1.0);
+        std::unordered_map<std::size_t, std::array<double, D>> u_new;
+        for (std::size_t d = 0; bits && d < B.n_rows; ++d) {
+            arma::vec tau_d(D);
+            for (std::size_t k = 0; k < D; ++k) tau_d[k] = std::exp(LT(d, k));
+            const double sigma_d = std::exp(LS(d, 0));
+            arma::vec L_flat = RC.row(d).t();
+            arma::vec z_d = Zf.row(d).t();
+            arma::mat L_d(L_flat.memptr(), D, D, false, true);
+            arma::mat z_mat(z_d.memptr(), D, J, false, true);
+            arma::mat u_mat = L_d * z_mat;
+            for (std::size_t k = 0; k < D; ++k) u_mat.row(k) *= tau_d[k];
+            u_new.clear();
+            for (std::size_t i = 0; i < 5; ++i) {
+                double mu = 0.0;
+                for (std::size_t k = 0; k < p; ++k) mu += X5(i, k) * B(d, k);
+                const std::size_t g = static_cast<std::size_t>(g5[i]) - 1u;
+                if (g < J) {
+                    for (std::size_t k = 0; k < D; ++k) mu += X5(i, k) * u_mat(k, g);
+                } else {
+                    auto it = u_new.find(g);
+                    if (it == u_new.end()) {
+                        arma::vec zg(D);
+                        for (std::size_t k = 0; k < D; ++k) zg[k] = z01(r);
+                        arma::vec ug = L_d * zg;
+                        std::array<double, D> ua;
+                        for (std::size_t k = 0; k < D; ++k) ua[k] = tau_d[k] * ug[k];
+                        it = u_new.emplace(g, ua).first;
+                    }
+                    for (std::size_t k = 0; k < D; ++k) mu += X5(i, k) * it->second[k];
+                }
+                const double yr = mu + sigma_d * z01(r);
+                const double out = YR(d, i);
+                bits = bits && std::memcmp(&yr, &out, sizeof(double)) == 0;
+            }
+        }
+        std::printf("C8 history predict_at with group_idx = {1, J+1, J+2, J+1, 2}: %u x %u, "
+                    "replay %s\n", static_cast<unsigned>(YR.n_rows),
+                    static_cast<unsigned>(YR.n_cols), bits ? "bit-identical" : "DIFFERS");
+        check(bits, "C8 history mode draws u ~ N(0, diag(tau_d) L_d L_d' diag(tau_d)) once per "
+                    "new group and draw");
+    }
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail,
                 g_fail == 1 ? "" : "s");
