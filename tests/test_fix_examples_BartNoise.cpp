@@ -27,8 +27,10 @@
 //        the forest's fit, and predict_at({}) returns 6 rows of y_rep;
 //    C7  set_current with an empty sigma throws and leaves get_current()
 //        unchanged;
-//    C8  with keep_history on and keep_tree off, predict_at at new X throws
-//        with a message that names keep_tree = TRUE, and last_draw_only gives
+//    C8  with keep_history on and keep_tree off, predict_at at new X returns
+//        one row (f_bart from the current forest) after 0 and after 1 sweep,
+//        as in 1.1.2; after 5 sweeps it throws with a message that names
+//        keep_tree = TRUE and the 5 stored draws, and last_draw_only gives
 //        one row; with keep_tree on as well it gives one row per stored draw.
 // ============================================================================
 #include <armadillo>
@@ -202,20 +204,43 @@ int main() {
         AI4BayesCode::state_map at_x;
         at_x["X"] = arma::vec(arma::vectorise(arma::mat(X2.rows(0, 9))));
         BartNoise mh(X, y, 30, 2.0, 2.0, 0.95, 3.0, 100, false, false, 19, false, true);
-        mh.step(5);
+        bool ok01 = true;
+        for (int sweeps = 0; sweeps <= 1; ++sweeps) {
+            if (sweeps == 1) mh.step(1);
+            AI4BayesCode::history_map r;
+            try {
+                r = mh.predict_at(at_x);
+            } catch (const std::exception& e) {
+                std::printf("C8 keep_tree off, %d sweep(s): threw \"%s\"\n", sweeps, e.what());
+                ok01 = false;
+                continue;
+            }
+            const arma::mat F1 = r.at("f_bart"), Y1 = r.at("y_rep");
+            const arma::mat Fl = mh.predict_at(at_x, true).at("f_bart");
+            std::printf("C8 keep_tree off, %d sweep(s): f_bart %u x %u, y_rep %u x %u\n",
+                        sweeps, (unsigned)F1.n_rows, (unsigned)F1.n_cols,
+                        (unsigned)Y1.n_rows, (unsigned)Y1.n_cols);
+            ok01 = ok01 && F1.n_rows == 1 && F1.n_cols == 10 && Y1.n_rows == 1 &&
+                   Y1.n_cols == 10 &&
+                   same_bits(arma::vec(F1.row(0).t()), arma::vec(Fl.row(0).t()));
+        }
+        check(ok01, "C8 without keep_tree, 0 and 1 stored draws give one row at new X "
+                    "(f_bart from the current forest)");
+        mh.step(4);
         std::string msg;
         try { mh.predict_at(at_x); } catch (const std::exception& e) { msg = e.what(); }
         const arma::uword rows_last = mh.predict_at(at_x, true).at("f_bart").n_rows;
         BartNoise mt(X, y, 30, 2.0, 2.0, 0.95, 3.0, 100, false, false, 19, true, true);
         mt.step(5);
         const arma::mat Ft = mt.predict_at(at_x).at("f_bart");
-        std::printf("C8 keep_tree off: \"%s\"; last_draw_only rows %u; keep_tree on: "
-                    "f_bart %u x %u\n", msg.c_str(), (unsigned)rows_last,
+        std::printf("C8 keep_tree off, 5 sweeps: \"%s\"; last_draw_only rows %u; "
+                    "keep_tree on: f_bart %u x %u\n", msg.c_str(), (unsigned)rows_last,
                     (unsigned)Ft.n_rows, (unsigned)Ft.n_cols);
-        check(msg.find("keep_tree = TRUE") != std::string::npos && rows_last == 1 &&
+        check(msg.find("keep_tree = TRUE") != std::string::npos &&
+              msg.find("5 stored draws") != std::string::npos && rows_last == 1 &&
               Ft.n_rows == 5 && Ft.n_cols == 10,
-              "C8 without keep_tree the history-mode prediction at new X raises an "
-              "error that names keep_tree = TRUE");
+              "C8 without keep_tree, 5 stored draws raise an error that names "
+              "keep_tree = TRUE");
     }
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail,

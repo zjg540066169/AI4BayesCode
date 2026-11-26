@@ -204,9 +204,10 @@ public:
         impl_->data().declare_context_edges("log_lik", {"z"});
 
         // ---- posterior predictive y_rep_i ~ N(μ_{z_i}, σ²) ------------------
-        // μ and σ are fixed; no block reads "mu" or "sigma", so the sweeps are
-        // unchanged. predict_at() samples y_rep from the z of its scratch copy
-        // of the shared data: the current labels, or a stored draw's labels.
+        // μ and σ are fixed; no block depends on "mu" or "sigma", so the
+        // sweeps are unchanged. predict_at() draws y_rep given the z of its
+        // scratch copy of the shared data: the current labels, or a stored
+        // draw's labels.
         impl_->data().set("mu",    arma::vec{mu0, mu1});
         impl_->data().set("sigma", arma::vec{sigma});
         impl_->data().set("y_rep", arma::vec(N_, arma::fill::zeros));

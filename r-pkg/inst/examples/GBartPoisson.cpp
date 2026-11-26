@@ -410,9 +410,11 @@ public:
     //       r/rate/y_rep: n_draws x N_new, one row per stored draw d.
     //       r_d = the forest stored at sweep d evaluated at X_new
     //       (genbart_block::predict_history; no offset), rate_d = exp(r_d),
-    //       y_rep_d ~ Poisson(rate_d) per point. Requires keep_tree = TRUE
-    //       (the forests of the stored draws are stored only then); without
-    //       it the call raises an error.
+    //       y_rep_d ~ Poisson(rate_d) per point. With more than one stored
+    //       draw this requires keep_tree = TRUE (the forests of the stored
+    //       draws are stored only then); without it the call raises an
+    //       error. With keep_tree = FALSE and at most one stored draw, the
+    //       one row comes from the current forest.
     //
     // Uses predict_rng_ (const-preserving, persistent, seeded at
     // construction) so posterior-predictive draws are reproducible given
@@ -424,9 +426,8 @@ public:
         return predict_at(new_data, /*last_draw_only=*/false);
     }
 
-    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
-    /// function already takes when keep_history is false -- without giving up
-    /// the retained history.
+    /// last_draw_only = true returns the single-draw output (the
+    /// keep_history = false output) and leaves the stored draws unchanged.
     AI4BayesCode::history_map
     predict_at(const AI4BayesCode::state_map& new_data,
             bool last_draw_only) const {
@@ -501,17 +502,21 @@ public:
         if (use_history) {
             // History mode: one row per stored draw d, computed from the
             // forest stored at sweep d (no offset in this model).
-            if (!keep_tree_) {
-                ai4b::stop("GBartPoisson::predict_at: prediction at new X "
-                           "with keep_history = TRUE requires keep_tree = TRUE "
-                           "at construction (the forests of the stored draws "
-                           "are stored only then). Construct with keep_tree = "
-                           "TRUE, or pass last_draw_only = TRUE to predict "
-                           "from the current forest.");
-            }
             arma::mat r_hist = blk.predict_history(X_new);  // n_draws x N_new
             const std::size_t n_draws = r_hist.n_rows;
             if (n_draws != blk.history_size()) {
+                // The forests are stored only with keep_tree = TRUE; without
+                // them predict_history returns one row (the current forest),
+                // which differs from the number of stored draws once more
+                // than one draw is stored.
+                if (!keep_tree_)
+                    ai4b::stop("GBartPoisson::predict_at: prediction at new X "
+                               "with keep_history = TRUE and %d stored draws "
+                               "requires keep_tree = TRUE at construction (the "
+                               "forests of the stored draws are stored only "
+                               "then). Construct with keep_tree = TRUE, or pass "
+                               "last_draw_only = TRUE to predict from the "
+                               "current forest.", (int)blk.history_size());
                 ai4b::stop("GBartPoisson::predict_at: inconsistent history "
                            "sizes (forests=%d, r=%d)",
                            (int)n_draws, (int)blk.history_size());
@@ -590,8 +595,8 @@ RCPP_MODULE(GBartPoisson_module) {
         .constructor<arma::mat, arma::vec, int, int, bool>(
             "Ctor with keep_tree only. X, y, ntrees, seed, keep_tree "
             "(forest snapshots per step; EXPENSIVE, required only by "
-            "predict_at at new X with keep_history = TRUE); keep_history "
-            "defaults FALSE.")
+            "predict_at at new X with keep_history = TRUE and more than one "
+            "stored draw); keep_history defaults FALSE.")
         // Full constructor: keep_tree + keep_history.
         .constructor<arma::mat, arma::vec, int, int, bool, bool>(
             "Full ctor: X (N x p), y (non-negative counts), ntrees, "
@@ -600,7 +605,8 @@ RCPP_MODULE(GBartPoisson_module) {
             "for reproducible MCMC, call set.seed() in R before step()), "
             "keep_tree (forest snapshots per step; EXPENSIVE; default "
             "FALSE; required by predict_at at new X with keep_history = "
-            "TRUE), keep_history (numeric per-step buffers; cheap; "
+            "TRUE and more than one stored draw), keep_history (numeric "
+            "per-step buffers; cheap; "
             "default FALSE).")
         .method("step", (void (GBartPoisson::*)())    &GBartPoisson::step, "Run one sweep.")
         .method("step", (void (GBartPoisson::*)(int)) &GBartPoisson::step,
@@ -627,7 +633,8 @@ RCPP_MODULE(GBartPoisson_module) {
                 "test-set prediction, or an empty list for posterior-"
                 "predictive y_rep at training X. keep_history = TRUE: one "
                 "row per stored draw (at new X r, rate and y_rep, which "
-                "requires keep_tree = TRUE). Const, no state mutation.")
+                "requires keep_tree = TRUE when more than one draw is "
+                "stored). Const, no state mutation.")
         .method("predict_at",
                 (AI4BayesCode::history_map (GBartPoisson::*)(Rcpp::List, bool) const)
                     &GBartPoisson::predict_at_r,

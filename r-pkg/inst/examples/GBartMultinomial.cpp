@@ -655,8 +655,10 @@ public:
     //       probs : n_draws x (N_new*C); softmax(0, r_{1,d}, ..., r_{C-1,d})
     //               per point (reference class 0), same layout as above
     //       y_rep : n_draws x N_new; y_rep_{d,i} ~ Categorical(probs_d[i, ])
-    //       Requires keep_tree = TRUE (the forests of the stored draws are
-    //       stored only then); without it the call raises an error.
+    //       With more than one stored draw this requires keep_tree = TRUE
+    //       (the forests of the stored draws are stored only then); without
+    //       it the call raises an error. With keep_tree = FALSE and at most
+    //       one stored draw, the one row comes from the current forests.
     //
     // Uses predict_rng_ (const-preserving, persistent, seeded at
     // construction). Does NOT modify MCMC state in any mode.
@@ -667,9 +669,8 @@ public:
         return predict_at(new_data, /*last_draw_only=*/false);
     }
 
-    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
-    /// function already takes when keep_history is false -- without giving up
-    /// the retained history.
+    /// last_draw_only = true returns the single-draw output (the
+    /// keep_history = false output) and leaves the stored draws unchanged.
     AI4BayesCode::history_map
     predict_at(const AI4BayesCode::state_map& new_data,
             bool last_draw_only) const {
@@ -767,14 +768,6 @@ public:
         if (use_history) {
             // History mode: one row per stored draw d, computed from the C-1
             // class forests stored at sweep d.
-            if (!keep_tree_) {
-                ai4b::stop("GBartMultinomial::predict_at: prediction at new X "
-                           "with keep_history = TRUE requires keep_tree = TRUE "
-                           "at construction (the forests of the stored draws "
-                           "are stored only then). Construct with keep_tree = "
-                           "TRUE, or pass last_draw_only = TRUE to predict "
-                           "from the current forests.");
-            }
             // r_hist[j](d, i): forest of class j + 1 stored at sweep d, at
             // row i of X_new.
             std::vector<arma::mat> r_hist(C_ - 1);
@@ -786,6 +779,19 @@ public:
             for (std::size_t j = 0; j < C_ - 1; ++j) {
                 auto& g = dynamic_cast<genbart_block&>(impl_->child(1 + j));
                 if (r_hist[j].n_rows != n_draws || g.history_size() != n_draws) {
+                    // The forests are stored only with keep_tree = TRUE;
+                    // without them predict_history returns one row (the
+                    // current forest), which differs from the number of
+                    // stored draws once more than one draw is stored.
+                    if (!keep_tree_)
+                        ai4b::stop("GBartMultinomial::predict_at: prediction "
+                                   "at new X with keep_history = TRUE and %d "
+                                   "stored draws requires keep_tree = TRUE at "
+                                   "construction (the forests of the stored "
+                                   "draws are stored only then). Construct "
+                                   "with keep_tree = TRUE, or pass "
+                                   "last_draw_only = TRUE to predict from the "
+                                   "current forests.", (int)g.history_size());
                     ai4b::stop("GBartMultinomial::predict_at: inconsistent "
                                "history sizes (forests of r_1=%d, forests of "
                                "r_%d=%d, r_%d=%d)",
@@ -901,12 +907,13 @@ RCPP_MODULE(GBartMultinomial_module) {
             "keep_tree and keep_history default FALSE.")
         .constructor<arma::mat, arma::vec, int, int, int, bool>(
             "Ctor with keep_tree only (EXPENSIVE; required by predict_at at "
-            "new X with keep_history = TRUE).")
+            "new X with keep_history = TRUE and more than one stored draw).")
         .constructor<arma::mat, arma::vec, int, int, int, bool, bool>(
             "Full ctor: X (N x p), y in {0..n_classes-1}, n_classes (>= 2), ntrees, "
             "seed, keep_tree (forest snapshots; EXPENSIVE; default "
             "FALSE; required by predict_at at new X with keep_history = "
-            "TRUE), keep_history (numeric buffers; cheap; default "
+            "TRUE and more than one stored draw), keep_history (numeric "
+            "buffers; cheap; default "
             "FALSE).")
         .method("step", (void (GBartMultinomial::*)())    &GBartMultinomial::step, "Run one sweep.")
         .method("step", (void (GBartMultinomial::*)(int)) &GBartMultinomial::step,
@@ -932,7 +939,8 @@ RCPP_MODULE(GBartMultinomial_module) {
                 "(flattened column-major) or an empty list for posterior "
                 "predictive at training X. keep_history = TRUE: one row per "
                 "stored draw (at new X r, probs and y_rep, which requires "
-                "keep_tree = TRUE). Const, no state mutation.")
+                "keep_tree = TRUE when more than one draw is stored). Const, "
+                "no state mutation.")
         .method("predict_at",
                 (AI4BayesCode::history_map (GBartMultinomial::*)(Rcpp::List, bool) const)
                     &GBartMultinomial::predict_at_r,

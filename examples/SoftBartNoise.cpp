@@ -476,9 +476,12 @@ public:
     //       y_rep:      posterior-predictive at X_new from CURRENT draw.
     //   * keep_history = FALSE, empty map:
     //       y_rep:      posterior-predictive at TRAINING X from current draw.
-    //   * keep_history = TRUE,  X supplied (needs keep_tree = TRUE, which
-    //     stores the forest of every draw; without it this mode stops with
-    //     an error that names keep_tree = TRUE and last_draw_only = TRUE):
+    //   * keep_history = TRUE,  X supplied (with more than one stored draw
+    //     this requires keep_tree = TRUE, which stores the forest of every
+    //     draw; without it this mode stops with an error that names
+    //     keep_tree = TRUE and last_draw_only = TRUE; with keep_tree = FALSE
+    //     and at most one stored draw, the one row comes from the current
+    //     forest):
     //       f_softbart: n_draws x N_new; row d = m_d + y_scale * (stored
     //                   forest d at X_new), m_d = mean(y) of sweep d.
     //       y_rep:      n_draws x N_new; row d = f_softbart row d +
@@ -500,9 +503,8 @@ public:
         return predict_at(new_data, /*last_draw_only=*/false);
     }
 
-    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
-    /// function already takes when keep_history is false -- without giving up
-    /// the retained history.
+    /// last_draw_only = true returns the single-draw output (the
+    /// keep_history = false output) and leaves the stored draws unchanged.
     AI4BayesCode::history_map
     predict_at(const AI4BayesCode::state_map& new_data,
             bool last_draw_only) const {
@@ -562,23 +564,6 @@ public:
         }
 
         // ---- History mode ---------------------------------------------
-        // At new X, row d evaluates the forest stored with draw d; the
-        // forests are stored only with keep_tree = TRUE.
-        if (has_X && !keep_tree_) {
-#ifdef AI4BAYESCODE_PYBIND_MODULE
-            const std::string yes = "True";
-#else
-            const std::string yes = "TRUE";
-#endif
-            ai4b::stop(
-                "SoftBartNoise::predict_at: prediction at new X from the "
-                "stored draws evaluates the forest of every stored draw, and "
-                "the forests are stored only when the model is built with "
-                "keep_tree = " + yes + " (one forest per stored draw, extra "
-                "time and memory). Build the model with keep_tree = " + yes +
-                ", or call predict_at(new_data, last_draw_only = " + yes +
-                ") for the current draw only.");
-        }
         auto& sigma_child = dynamic_cast<univariate_slice_sampling_block&>(impl_->child(1));
         AI4BayesCode::history_map sigma_list = sigma_child.get_history();
         const arma::mat& sigma_hist = sigma_list.at("sigma");
@@ -596,6 +581,26 @@ public:
         }
 
         if (n_draws != F_pred.n_rows) {
+            // At new X, row d evaluates the forest stored with draw d. The
+            // forests are stored only with keep_tree = TRUE; without them
+            // predict_history returns one row (the current forest), which
+            // differs from n_draws once more than one draw is stored.
+            if (has_X && !keep_tree_) {
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+                const std::string yes = "True";
+#else
+                const std::string yes = "TRUE";
+#endif
+                ai4b::stop(
+                    "SoftBartNoise::predict_at: prediction at new X from the "
+                    + std::to_string(n_draws) + " stored draws evaluates the "
+                    "forest of every stored draw, and the forests are stored "
+                    "only when the model is built with keep_tree = " + yes +
+                    " (one forest per stored draw, extra time and memory). "
+                    "Build the model with keep_tree = " + yes + ", or call "
+                    "predict_at(new_data, last_draw_only = " + yes + ") for "
+                    "the current draw only.");
+            }
             ai4b::stop("SoftBartNoise::predict_at: inconsistent history "
                        "sizes (softbart=%d, sigma=%d)",
                        (int)F_pred.n_rows, (int)n_draws);
@@ -727,8 +732,9 @@ RCPP_MODULE(SoftBartNoise_module) {
                      int, double, double, bool, int, double, bool, bool>(
             "Construct (full): X, y, ntrees, k, tau_rate, dart, seed, "
             "nu (sigma prior df, default 3), keep_tree (record forest "
-            "snapshots per step for predict_history; EXPENSIVE; default "
-            "FALSE), keep_history (record numeric per-step buffers; "
+            "snapshots per step, required by predict_at at new X with "
+            "keep_history = TRUE and more than one stored draw; EXPENSIVE; "
+            "default FALSE), keep_history (record numeric per-step buffers; "
             "cheap; default FALSE).")
         .method("step", (void (SoftBartNoise::*)())    &SoftBartNoise::step, "Run one sweep.")
         .method("step", (void (SoftBartNoise::*)(int)) &SoftBartNoise::step, "Run n Gibbs sweeps.")

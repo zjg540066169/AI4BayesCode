@@ -64,8 +64,9 @@
 //    * keep_history = TRUE, new (X, Z), one row per stored draw d: beta_{j,d}
 //        is the forest of ensemble j stored at sweep d, evaluated at Z_new,
 //        plus the fmean of that sweep (bart_block::predict_history). The
-//        forests are stored only with keep_tree = TRUE; without it the call
-//        raises an error.
+//        forests are stored only with keep_tree = TRUE; without it the one
+//        row comes from the current forests, as in 1.1.2, with a warning when
+//        more than one draw is stored.
 //    In both history modes y_rep_{d,i} = mu_{d,i} + sigma_d * eps_{d,i}, with
 //    sigma_d the sigma of sweep d (row d of get_history()$sigma). With no
 //    sweep stored since construction or clear_history(), history mode gives
@@ -446,7 +447,8 @@ public:
     //   * keep_history = TRUE, Z and X given: n_draws x N_new; row d of mu is
     //       computed from the forests stored at sweep d
     //       (bart_block::predict_history: stored forest d at Z_new plus the
-    //       fmean of sweep d). Requires keep_tree = TRUE.
+    //       fmean of sweep d). Without keep_tree = TRUE one row from the
+    //       current forests, with a warning when more than one draw is stored.
     //   In both history modes y_rep_{d,i} = mu_{d,i} + sigma_d * eps_{d,i},
     //   with sigma_d = row d of the stored sigma (get_history()["sigma"]); with
     //   no sweep stored, the one row is computed with the current sigma.
@@ -462,12 +464,11 @@ public:
         return predict_at(new_data, /*last_draw_only=*/false);
     }
 
-    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
-    /// function already takes when keep_history is false -- without giving up
-    /// the retained history.
+    /// last_draw_only = true returns the single-draw output (the
+    /// keep_history = false output) and leaves the stored draws unchanged.
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
                                          bool last_draw_only) const {
-        const bool use_history = keep_history_ && !last_draw_only;
+        bool use_history = keep_history_ && !last_draw_only;
         for (const auto& kv : new_data)
             if (kv.first != "Z" && kv.first != "X")
                 ai4b::stop("VCBart::predict_at: unknown key '%s'", kv.first.c_str());
@@ -477,6 +478,17 @@ public:
             ai4b::stop("VCBart::predict_at: supply BOTH 'Z' and 'X', or neither "
                        "(neither = predict at the training data).");
         const bool has_new = it_z != new_data.end();
+        // Without keep_tree only the current forests exist. At new (X, Z) with
+        // more than one stored draw the prediction then uses the current
+        // forests (one row), as in 1.1.2, and a warning names keep_tree = TRUE.
+        if (use_history && has_new && !keep_tree_ && sigma_hist_.size() > 1) {
+            ai4b::warning("VCBart::predict_at: keep_tree = FALSE, so the forests "
+                          "of the %d stored draws are not stored; the prediction "
+                          "at new (X, Z) uses the current forests (one row). "
+                          "Construct with keep_tree = TRUE for one row per "
+                          "stored draw.", (int)sigma_hist_.size());
+            use_history = false;
+        }
         const std::size_t J = static_cast<std::size_t>(p_) + 1;   // ensembles
 
         arma::mat Z_new, X_new;
@@ -540,13 +552,6 @@ public:
             const AI4BayesCode::history_map h = impl_->get_history();
             for (std::size_t j = 0; j < J; ++j) B[j] = h.at(beta_key(static_cast<int>(j)));
         } else {
-            if (!keep_tree_)
-                ai4b::stop("VCBart::predict_at: prediction at new (X, Z) with "
-                           "keep_history = TRUE requires keep_tree = TRUE at "
-                           "construction (the forests of the stored draws are "
-                           "stored only then). Construct with keep_tree = TRUE, "
-                           "or pass last_draw_only = TRUE to predict from the "
-                           "current forests.");
             for (std::size_t j = 0; j < J; ++j) {
                 auto& bj = dynamic_cast<bart_block&>(impl_->child(j));
                 B[j] = bj.predict_history(Z_new);   // forest d at Z_new + fmean of sweep d
@@ -563,9 +568,10 @@ public:
         // sweep stored, B holds one row from the current forests, and the
         // y_rep of that row is computed with the current sigma.
         const bool none_stored = sigma_hist_.empty();
-        if (none_stored ? n_draws != 1 : sigma_hist_.size() != n_draws)
+        if (none_stored ? n_draws != 1 : sigma_hist_.size() != n_draws) {
             ai4b::stop("VCBart::predict_at: %d stored draws of the betas and "
                        "%d of sigma", (int)n_draws, (int)sigma_hist_.size());
+        }
         // mu_{d,i} = sum_{j=0..p} x_ij beta_{j,d}(Z_i), summed over j in the
         // order of the "mu" refresher.
         arma::mat mu(n_draws, n_new, arma::fill::zeros);
@@ -646,7 +652,8 @@ RCPP_MODULE(VCBart_module) {
                      int, double, double, double, double, int, int, bool, bool>(
             "As the 11-argument constructor, plus keep_tree (store the forest "
             "of every sweep, required by predict_at at new (X, Z) with "
-            "keep_history = TRUE; EXPENSIVE; default FALSE).")
+            "keep_history = TRUE and more than one stored draw; EXPENSIVE; "
+            "default FALSE).")
         .method("step", (void (VCBart::*)())    &VCBart::step, "Run one Gibbs backfitting sweep.")
         .method("step", (void (VCBart::*)(int)) &VCBart::step, "Run n Gibbs backfitting sweeps.")
         .method("get_current",  &VCBart::get_current,
@@ -662,8 +669,9 @@ RCPP_MODULE(VCBart_module) {
                 "Pass list(Z = Z_new, X = X_new) (matrices, or their "
                 "column-major vectors), or list() for the training data. "
                 "keep_history = TRUE: one row per stored draw, y_rep with "
-                "the sigma of that draw (new (X, Z) requires keep_tree = "
-                "TRUE); else one row from the current forests and sigma.")
+                "the sigma of that draw (at new (X, Z) this needs keep_tree = "
+                "TRUE; without it one row from the current forests, with a "
+                "warning); else one row from the current forests and sigma.")
         .method("predict_at",
                 (AI4BayesCode::history_map (VCBart::*)(const AI4BayesCode::state_map&, bool) const)
                     &VCBart::predict_at,
@@ -710,7 +718,8 @@ PYBIND11_MODULE(VCBart, m) {
              "new_data: {'Z': Z_new, 'X': X_new} (each flattened "
              "column-major), or {} for the training data. keep_history=True: "
              "one row per stored draw, y_rep with the sigma of that draw "
-             "(new (X, Z) requires keep_tree=True); last_draw_only=True or "
+             "(new (X, Z) with more than one stored draw requires "
+             "keep_tree=True); last_draw_only=True or "
              "keep_history=False: one row from the current forests and sigma.")
         .def("get_dag",      &VCBart::get_dag)
         .def("get_history",  &VCBart::get_history)

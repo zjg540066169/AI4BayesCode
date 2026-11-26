@@ -401,9 +401,11 @@ public:
     //   * X supplied, keep_history = TRUE: n_draws x N_new, one row per
     //       stored draw d. r_d = the forest stored at sweep d evaluated at
     //       X_new (genbart_block::predict_history; no offset), p_d =
-    //       sigmoid(r_d), y_rep_d ~ Bernoulli(p_d) per point. Requires
-    //       keep_tree = TRUE (the forests of the stored draws are stored only
-    //       then); without it the call raises an error.
+    //       sigmoid(r_d), y_rep_d ~ Bernoulli(p_d) per point. With more
+    //       than one stored draw this requires keep_tree = TRUE (the forests
+    //       of the stored draws are stored only then); without it the call
+    //       raises an error. With keep_tree = FALSE and at most one stored
+    //       draw, the one row comes from the current forest.
     //
     // X is passed as a FLATTENED column-major vector under key "X"
     // (length N_new * p); reshaped here back into an N_new x p matrix.
@@ -416,9 +418,8 @@ public:
         return predict_at(new_data, /*last_draw_only=*/false);
     }
 
-    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
-    /// function already takes when keep_history is false -- without giving up
-    /// the retained history.
+    /// last_draw_only = true returns the single-draw output (the
+    /// keep_history = false output) and leaves the stored draws unchanged.
     AI4BayesCode::history_map
     predict_at(const AI4BayesCode::state_map& new_data,
             bool last_draw_only) const {
@@ -486,17 +487,21 @@ public:
         if (use_history) {
             // History mode: one row per stored draw d, computed from the
             // forest stored at sweep d (no offset in this model).
-            if (!keep_tree_) {
-                ai4b::stop("GBartLogistic::predict_at: prediction at new X "
-                           "with keep_history = TRUE requires keep_tree = TRUE "
-                           "at construction (the forests of the stored draws "
-                           "are stored only then). Construct with keep_tree = "
-                           "TRUE, or pass last_draw_only = TRUE to predict "
-                           "from the current forest.");
-            }
             arma::mat r_hist = blk.predict_history(X_new);  // n_draws x N_new
             const std::size_t n_draws = r_hist.n_rows;
             if (n_draws != blk.history_size()) {
+                // The forests are stored only with keep_tree = TRUE; without
+                // them predict_history returns one row (the current forest),
+                // which differs from the number of stored draws once more
+                // than one draw is stored.
+                if (!keep_tree_)
+                    ai4b::stop("GBartLogistic::predict_at: prediction at new X "
+                               "with keep_history = TRUE and %d stored draws "
+                               "requires keep_tree = TRUE at construction (the "
+                               "forests of the stored draws are stored only "
+                               "then). Construct with keep_tree = TRUE, or pass "
+                               "last_draw_only = TRUE to predict from the "
+                               "current forest.", (int)blk.history_size());
                 ai4b::stop("GBartLogistic::predict_at: inconsistent history "
                            "sizes (forests=%d, r=%d)",
                            (int)n_draws, (int)blk.history_size());
@@ -573,11 +578,12 @@ RCPP_MODULE(GBartLogistic_module) {
         .constructor<arma::mat, arma::vec, int, int, bool>(
             "Ctor with keep_tree only: X, y, ntrees, seed, keep_tree "
             "(EXPENSIVE; required by predict_at at new X with "
-            "keep_history = TRUE).")
+            "keep_history = TRUE and more than one stored draw).")
         .constructor<arma::mat, arma::vec, int, int, bool, bool>(
             "Full ctor: X (N x p), y (0/1), ntrees, seed, keep_tree "
             "(forest snapshots per step; EXPENSIVE; default FALSE; "
-            "required by predict_at at new X with keep_history = TRUE), "
+            "required by predict_at at new X with keep_history = TRUE and "
+            "more than one stored draw), "
             "keep_history (numeric per-step buffers; cheap; default FALSE).")
         .method("step", (void (GBartLogistic::*)())    &GBartLogistic::step, "Run one sweep.")
         .method("step", (void (GBartLogistic::*)(int)) &GBartLogistic::step,
@@ -603,7 +609,8 @@ RCPP_MODULE(GBartLogistic_module) {
                 "(flattened column-major) for r/p at X_new, or list() for "
                 "posterior-predictive y_rep at training X. keep_history = "
                 "TRUE: one row per stored draw (at new X r, p and y_rep, "
-                "which requires keep_tree = TRUE). Const, no state "
+                "which requires keep_tree = TRUE when more than one draw is "
+                "stored). Const, no state "
                 "mutation.")
         .method("predict_at",
                 (AI4BayesCode::history_map (GBartLogistic::*)(Rcpp::List, bool) const)

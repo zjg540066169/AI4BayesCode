@@ -59,10 +59,16 @@
 //  i.e. y_rep[d, i] ~ LogNormal(log I_traj[d, i], sigma_d^2), the likelihood
 //  above. I(t; beta, gamma, y0) is the infected compartment at time t of the
 //  SIR solution with state y0 at time 0, computed by ode::rk45 with
-//  rtol = atol = 1e-6 (the training path's solver): when t_1 > 0, time 0 is
-//  added to the solver's output times and its row is dropped. The absolute
-//  accuracy of I_traj is the solver's atol: where the exact I(t) is below
-//  about 1e-6 (long after the epidemic), I_traj can be of order 1e-6.
+//  rtol = atol = 1e-6 (the training path's solver) and its step size capped
+//  at the largest spacing of the training t_obs: when t_1 > 0, time 0 is
+//  added to the solver's output times and its row is dropped. At the
+//  training t_obs the cap changes no step, so I_traj there equals the I of
+//  the training solve bit for bit; at other times every step is at most the
+//  largest training spacing, for any set of requested times and any scale of
+//  y0 (tests/test_fix_examples_ODE_SIR.cpp, C12: at t = 30, 60, 90, 120,
+//  relative error below 3e-6 against an RK4 solve with step 1/64, for y0 in
+//  counts and in fractions). A value of I_traj below 0 (rounding error where
+//  I(t) is near 0) is set to 0.
 //  z_{d,i} comes from predict_rng_, in the order i = 1..n within
 //  d = 1..n_draws. Output: I_traj and y_rep, n_draws x n (history mode, one
 //  row per stored draw), or 1 x n from the current (beta, gamma, sigma)
@@ -150,6 +156,7 @@
 #include "AI4BayesCode/ode_rk45.hpp"
 #include "AI4BayesCode/kernel_control_mixin.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -211,22 +218,41 @@ inline arma::vec solve_sir_I(double beta, double gamma,
 }
 
 // I(t_i) of the SIR solution with state y0 at time 0, at the times t
-// (strictly increasing, t[0] >= 0). ode::rk45 uses its first output time as
-// the initial time, so when t[0] > 0, time 0 is put in front of t and the row
-// of time 0 is dropped from the result. With t[0] == 0 (every training t_obs)
-// this is the call ode::rk45(sir_rhs, y0, t, theta, 1e-6, 1e-6).col(1).
+// (strictly increasing, t[0] >= 0), from ode::rk45 with rtol = atol = 1e-6
+// and the step size capped at h_cap, the largest spacing of the training
+// t_obs. ode::rk45 uses its first output time as the initial time, so when
+// t[0] > 0, time 0 is put in front of t and the row of time 0 is dropped from
+// the result. An ode::rk45 step never passes the next output time, so on a
+// grid whose spacings are all <= h_cap (every training t_obs among them) the
+// cap changes no step and the result equals
+// ode::rk45(sir_rhs, y0, t, theta, 1e-6, 1e-6).col(1) bit for bit. On a
+// coarser grid every step is at most h_cap, as on the training grid. The
+// exact I(t) is >= 0, so a value below 0 (rounding error where I(t) is near
+// 0) is set to 0.
 inline arma::vec sir_I_at(const arma::vec& y0, const arma::vec& t,
-                          const arma::vec& theta) {
-    if (t.n_elem > 0 && t[0] > 0.0) {
-        arma::vec ts(t.n_elem + 1);
+                          const arma::vec& theta, double h_cap) {
+    if (t.n_elem == 0) return arma::vec();
+    const bool from_zero = t[0] > 0.0;
+    arma::vec ts = t;
+    if (from_zero) {
+        ts.set_size(t.n_elem + 1);
         ts[0] = 0.0;
         ts.subvec(1, t.n_elem) = t;
-        const arma::mat y_traj = ode::rk45(sir_rhs, y0, ts, theta, 1e-6, 1e-6);
-        return y_traj(arma::span(1, t.n_elem), 1);   // rows of t[0], ..., t[n-1]
     }
-    const arma::mat y_traj = ode::rk45(sir_rhs, y0, t, theta,
-                                       1e-6, 1e-6);  // Stan rk45 default (was 1e-8: needlessly tight, ~tens x slower)
-    return y_traj.col(1);
+    // At least (ts[last] - ts[0]) / h_cap steps, plus one per output time;
+    // max_iter allows 20 times that, and never less than the default 100000.
+    const double n_steps =
+        (ts[ts.n_elem - 1] - ts[0]) / h_cap + static_cast<double>(ts.n_elem);
+    const std::size_t max_iter = static_cast<std::size_t>(
+        std::min(1e15, std::max(1e5, 20.0 * n_steps)));
+    const arma::mat y_traj = ode::rk45(sir_rhs, y0, ts, theta, 1e-6, 1e-6,
+                                       /*max_h=*/h_cap * (1.0 + 1e-9),
+                                       /*min_h=*/1e-14, max_iter);
+    arma::vec I = from_zero ? arma::vec(y_traj(arma::span(1, t.n_elem), 1))
+                            : arma::vec(y_traj.col(1));
+    for (arma::uword i = 0; i < I.n_elem; ++i)
+        if (I[i] < 0.0) I[i] = 0.0;
+    return I;
 }
 
 // ----------------------------------------------------------------------------
@@ -417,13 +443,15 @@ public:
         impl_->data().declare_predict_edges("sigma",  {"y_rep"});
 
         // I_traj refresher: I at t_obs of the solution from y0 at time 0 with
-        // the rates theta. At the training t_obs (t_obs[0] == 0) sir_I_at is
-        // the plain rk45 solve; a t_obs that predict_at installs may start
-        // after time 0.
+        // the rates theta; h_cap, the largest spacing of the training t_obs,
+        // caps the solver step. At the training t_obs (t_obs[0] == 0)
+        // sir_I_at equals the plain rk45 solve; a t_obs that predict_at
+        // installs may start after time 0.
+        const double h_cap = arma::max(arma::diff(t_obs));
         impl_->data().register_refresher(
             "I_traj",
-            [](const AI4BayesCode::shared_data_t& d) -> arma::vec {
-                return sir_I_at(d.get("y0"), d.get("t_obs"), d.get("theta"));
+            [h_cap](const AI4BayesCode::shared_data_t& d) -> arma::vec {
+                return sir_I_at(d.get("y0"), d.get("t_obs"), d.get("theta"), h_cap);
             });
         // Keyed under the JOINT BLOCK NAME (the joint block updates theta+sigma
         // together; composite_block calls refresh_derived_for(block_name)).
@@ -554,17 +582,17 @@ public:
     /// compartments at time 0); a key left out is set to its training value.
     /// Output: I_traj and y_rep at those times (formulas: "Posterior
     /// predictive" in the file header), one row per stored draw in history
-    /// mode. last_draw_only = true takes the SINGLE-DRAW path -- the one this
-    /// function takes when keep_history is false -- without giving up the
-    /// retained history: one row from the current (beta, gamma, sigma); with
-    /// an empty new_data, y_rep only.
+    /// mode. last_draw_only = true returns the single-draw output (the
+    /// keep_history = false output) and leaves the stored draws unchanged:
+    /// one row from the current (beta, gamma, sigma); with an empty new_data,
+    /// y_rep only.
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
             bool last_draw_only) const {
         const bool use_history = keep_history_ && !last_draw_only;
 
         // The declared data inputs (get_dag()$data_inputs: y0, t_obs) are
-        // the only keys accepted. The training values fill the keys that
-        // new_data leaves out.
+        // the only keys accepted. A key absent from new_data is set to its
+        // training value.
         arma::vec y0_new    = impl_->data().get("y0");
         arma::vec t_obs_new = impl_->data().get("t_obs");
         for (const auto& kv : new_data) {
