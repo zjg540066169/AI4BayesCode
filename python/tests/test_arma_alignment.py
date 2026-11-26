@@ -43,6 +43,26 @@ def test_compile_flags_force_include_the_header():
     assert path == (src.vendored_include_path() / HEADER).absolute()
 
 
+def test_windows_flags_force_include_both_headers_by_absolute_path(monkeypatch):
+    # The Windows branch of _compile_flags, run on this system: the compiler
+    # resolves a relative -include name against its working directory first,
+    # so both force-included headers are passed by absolute path.
+    try:
+        cxx = src._compiler()
+    except RuntimeError as exc:                          # no C++ compiler
+        pytest.skip(str(exc))
+    monkeypatch.setattr(src, "_is_windows", lambda: True)
+    try:
+        flags = src._compile_flags(src.vendored_include_path(), cxx)
+    except FileNotFoundError as exc:                     # no Armadillo
+        pytest.skip(str(exc))
+    paths = [Path(flags[i + 1]) for i, f in enumerate(flags) if f == "-include"]
+    assert [p.name for p in paths] == ["arma_aligned_alloc.hpp", "win_ucrt_math.hpp"]
+    for p in paths:
+        assert p.is_absolute() and p.is_file()
+        assert p.parent == (src.vendored_include_path() / "AI4BayesCode").absolute()
+
+
 def test_the_flag_moves_the_signature():
     flags = ["-Iinc", "-DAI4BAYESCODE_PYBIND_MODULE"]
     without = src._signature("// code\n", flags, [], "c++|1")

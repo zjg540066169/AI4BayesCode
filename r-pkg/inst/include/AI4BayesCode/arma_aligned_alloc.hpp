@@ -50,8 +50,11 @@
 //
 //  Memory from _aligned_malloc must be released by _aligned_free. On Windows
 //  every translation unit that creates or destroys the Armadillo objects of
-//  one module must therefore be compiled with this header; the packages
-//  compile each sampler as one translation unit.
+//  one module must therefore be compiled with this header. The three R paths
+//  above pass the flag to every translation unit that Rcpp::sourceCpp
+//  compiles for a sampler: the file, and the .cpp file of the same name as a
+//  header that the file includes from its own folder. AI4BayesCode.source()
+//  compiles the file as one translation unit.
 //
 //  Not covered: a Mat with at most 16 elements (arma_config::mat_prealloc)
 //  and a Cube with at most 64 elements (Cube_prealloc::mem_n_elem) store

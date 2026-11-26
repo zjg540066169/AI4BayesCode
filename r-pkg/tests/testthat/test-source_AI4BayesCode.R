@@ -338,6 +338,22 @@ test_that("the Rcpp plugin force-includes the alignment header", {
                                         package = "AI4BayesCode")))
 })
 
+test_that("the Rcpp plugin writes an include root with a space in double quotes", {
+    # Unquoted, the compiler receives the parts of such a path as separate
+    # arguments ("no such file or directory: 'with'" for a library folder
+    # "lib with space" on macOS). A path without a space is written as before.
+    f <- AI4BayesCode:::.ai4b_plugin_path
+    expect_identical(f("/lib/AI4BayesCode/include", windows = FALSE),
+                     "/lib/AI4BayesCode/include")
+    expect_identical(f("/lib with space/AI4BayesCode/include", windows = FALSE),
+                     "\"/lib with space/AI4BayesCode/include\"")
+    expect_identical(f("C:\\R\\library\\AI4BayesCode\\include", windows = FALSE),
+                     "C:/R/library/AI4BayesCode/include")
+    flags <- inlineCxxPlugin()$env$PKG_CPPFLAGS
+    inc <- system.file("include", package = "AI4BayesCode")
+    expect_true(grepl(paste0("-I", f(inc)), flags, fixed = TRUE))
+})
+
 test_that("a file compiled through the Rcpp plugin has aligned Armadillo heap arrays and one routine result per offset class", {
     skip_on_cran()
     skip_if_not_installed("Rcpp")

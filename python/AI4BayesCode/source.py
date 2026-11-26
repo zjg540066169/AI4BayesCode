@@ -431,8 +431,10 @@ def _compile_flags(include_root: Path, cxx: str | None = None) -> list[str]:
             "-Wa,-mbig-obj",
             # exp, log and pow from the Universal C Runtime, several times
             # faster than Rtools' own (see AI4BayesCode/win_ucrt_math.hpp).
-            # _link_flags adds the matching --wrap.
-            "-DAI4B_WIN_UCRT_MATH", "-include", "AI4BayesCode/win_ucrt_math.hpp",
+            # _link_flags adds the matching --wrap. By absolute path, as the
+            # alignment header above.
+            "-DAI4B_WIN_UCRT_MATH", "-include",
+            str((inc / "AI4BayesCode" / "win_ucrt_math.hpp").absolute()),
             # MSYS2's Armadillo turns on SuperLU and ARPACK, with an MSYS-style
             # include path the native compiler cannot resolve. Nothing here uses
             # them.

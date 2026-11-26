@@ -292,6 +292,11 @@ def test_predict_input_guard(probe):
     np.testing.assert_array_equal(probe.guard({"X": X[:, :2]}, 0)["X"], X[:, :2].ravel(order="F"))
     with pytest.raises(RuntimeError, match="'X' has 2 columns but the model was fitted with p = 3"):
         probe.guard({"X": X[:, :2]}, 3)
+    # a 2-D value with 0 columns: recorded, and rejected as R rejects a
+    # matrix with 0 columns
+    assert probe.ncol({"X": np.zeros((4, 0)), "y": []}) == {"X": 0}
+    with pytest.raises(RuntimeError, match="'X' has 0 columns but the model was fitted with p = 3"):
+        probe.guard({"X": np.zeros((4, 0))}, 3)
 
 
 # ---- shipped examples ------------------------------------------------------
