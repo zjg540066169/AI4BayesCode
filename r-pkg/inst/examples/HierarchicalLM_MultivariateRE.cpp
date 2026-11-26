@@ -105,7 +105,9 @@
 //  PREDICTION (predict_at)
 //  -----------------------
 //    y_rep_i = X_i' beta + Z_i' u_{g(i)} + sigma * e_i,   e_i ~ N(0, 1),
-//  per stored draw (history mode) or at the current state. group_idx is
+//  per stored draw (history mode) or at the current state, returned with
+//  the predict-DAG nodes mu_fixed = X beta, Z (the first D columns of X) and
+//  u (D x J, column-major, u_g = diag(tau) L z_g). group_idx is
 //  1-BASED: an integer >= 1 per row of X (per training row when X is
 //  absent). A label > J is a group with no training rows; its
 //  u_g = diag(tau) L z_g, z_g ~ N(0, I_d) from predict_rng_, i.e.
@@ -874,16 +876,26 @@ public:
         AI4BayesCode::history_map out;
 
         if (!use_history) {
+            // With neither X nor group_idx given, both are installed at their
+            // training values (the whole co-indexed group), so the predict
+            // DAG recomputes Z and mu_fixed and returns them with y_rep.
+            if (new_data.empty()) {
+                replaced["X"]         = impl_->data().get("X");
+                replaced["group_idx"] = impl_->data().get("group_idx");
+            }
             block_context result = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : result) {
-                // Z is an internal restatement of X's first D columns, not a
-                // prediction; the history path does not report it either.
-                if (kv.first == "Z") continue;
                 arma::mat m(1, kv.second.n_elem);
                 for (std::size_t j = 0; j < kv.second.n_elem; ++j)
                     m(0, j) = kv.second[j];
                 out.emplace(kv.first, std::move(m));
             }
+            // u depends on z_flat, tau and R_chol only (none of them replaced
+            // here), so the walk above does not reach it; it is a node of the
+            // predict DAG and is returned at the current state (kept current
+            // by declare_invalidates).
+            if (!out.count("u"))
+                out.emplace("u", arma::mat(impl_->data().get("u").t()));
             return out;
         }
 
@@ -937,6 +949,24 @@ public:
                 }
         }
         out.emplace("mu_fixed", mu_mat);
+        // u_d = diag(tau_d) L_d z_d (D x J, column-major), a node of the
+        // predict DAG that depends on no data input: row d from draw d.
+        arma::mat u_out(n_draws, D_local * J);
+        for (std::size_t d = 0; d < n_draws; ++d) {
+            arma::vec z_d = z_flat_hist.row(d).t();
+            arma::vec L_d_flat = R_chol_hist.row(d).t();
+            arma::mat L_d(L_d_flat.memptr(), D_local, D_local, false, true);
+            arma::mat z_mat(z_d.memptr(), D_local, J, false, true);
+            arma::mat u_mat = L_d * z_mat;
+            for (std::size_t k = 0; k < D_local; ++k)
+                u_mat.row(k) *= std::exp(log_tau_hist(d, k));
+            u_out.row(d) = arma::vectorise(u_mat).t();
+        }
+        out.emplace("u", std::move(u_out));
+        // Z (the first D columns of X, a node of the predict DAG) wherever X
+        // is predictable: X supplied, or the training data.
+        if (it_X != new_data.end() || new_data.empty())
+            out.emplace("Z", arma::mat(arma::repmat(Z_flat.t(), n_draws, 1)));
         if (!predict_y_rep) return out;    // y_rep needs the new Z and groups
 
         arma::mat yrep_mat(n_draws, N);

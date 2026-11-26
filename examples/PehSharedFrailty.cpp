@@ -181,6 +181,19 @@ public:
         impl_->data().declare_dependencies("lambda", {"t", "delta", "expanded_w"});
         impl_->data().declare_invalidates("w", {"expanded_w"});
 
+        // ---- Predict DAG ---------------------------------------------------
+        // S(t | g) = exp(-w_g H_0(t)), H_0 from lambda and the interval edges.
+        // Data inputs of predict_at: "t" (the query times, the training times
+        // when not supplied) and "g" (one group index; no training value, so
+        // S is not computed without it).
+        impl_->data().declare_data_input("t");
+        impl_->data().declare_data_input("g");
+        impl_->data().declare_predict_edges("t",      {"S"});
+        impl_->data().declare_predict_edges("g",      {"S"});
+        impl_->data().declare_predict_edges("lambda", {"S"});
+        impl_->data().declare_predict_edges("w",      {"S"});
+        impl_->data().declare_predict_edges("edges",  {"S"});
+
         // ---- Frailty block: samples w[G] each sweep ----------------------
         {
             frailty_gamma_gibbs_block_config cfg;
@@ -272,7 +285,8 @@ public:
     ///     stored draw d (row d of get_history()), n_draws x n_q;
     ///   last_draw_only TRUE, or keep_history FALSE: one row from the current
     ///     lambda and w, 1 x n_q.
-    /// Without "t" or "g" (e.g. predict_at(list())) the result is empty.
+    /// Without "g" (e.g. predict_at(list())) the result is empty; without "t"
+    /// the query times are the training times t.
     /// predict_at(new_data) = predict_at(new_data, last_draw_only = false).
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
         return predict_at(new_data, /*last_draw_only=*/false);
@@ -303,8 +317,8 @@ public:
                        g_val, static_cast<int>(G));
         const std::size_t g = static_cast<std::size_t>(g_val);
 
-        if (it_tq == new_data.end()) return out;
-        const arma::vec& t_q = it_tq->second;
+        const arma::vec& t_q = (it_tq != new_data.end()) ? it_tq->second
+                                                         : impl_->data().get("t");
 
         const arma::vec& edges_local = impl_->data().get("edges");
         const std::size_t K = edges_local.n_elem - 1;
@@ -369,8 +383,8 @@ RCPP_MODULE(PehSharedFrailty_module) {
                     &PehSharedFrailty::predict_at,
                 "predict_at(list(t = <query times>, g = <group, 0 <= g < G>)): S(t | g) "
                 "with one row per stored (lambda, w) draw (keep_history = TRUE), or one "
-                "row from the current draw (keep_history = FALSE). Without t or g the "
-                "result is empty.")
+                "row from the current draw (keep_history = FALSE). Without g the "
+                "result is empty; without t, S at the training times.")
         .method("predict_at",
                 (AI4BayesCode::history_map (PehSharedFrailty::*)(const AI4BayesCode::state_map&, bool) const)
                     &PehSharedFrailty::predict_at,
@@ -407,7 +421,8 @@ PYBIND11_MODULE(PehSharedFrailty, m) {
              "predict_at({'t': query_times, 'g': group}, last_draw_only=False), "
              "0 <= g < G: S(t | g) with one row per stored (lambda, w) draw "
              "(keep_history=True and last_draw_only=False), else one row from the "
-             "current draw. Without 't' or 'g' the result is empty.")
+             "current draw. Without 'g' the result is empty; without 't', S at "
+             "the training times.")
         .def("get_dag",     &PehSharedFrailty::get_dag)
         .def("get_history", &PehSharedFrailty::get_history)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(PehSharedFrailty);

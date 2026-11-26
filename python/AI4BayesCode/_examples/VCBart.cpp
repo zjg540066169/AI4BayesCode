@@ -359,17 +359,17 @@ public:
         // Inv-Chi^2 -- there is NO separate sigma block (see the ensemble loop).
 
         // ---- predict DAG (generative direction) ------------------------------
-        // NOT declare_data_input_group: this wrapper's predict_at never
-        // routes through composite_block::predict_at, because the varying
-        // coefficients beta_j(Z) are BART forests that have to be RE-EVALUATED
-        // at the new Z (the current forests, or the forest stored at each
-        // sweep in history mode) rather than refreshed from shared_data. The
-        // co-indexing of X and Z is therefore enforced by predict_at's own check, which is
-        // also the more useful answer here: mu combines beta_j(Z_i) with X_ij,
-        // so with only one of the two supplied NOTHING is predictable, and an
-        // explicit message beats an empty result.
-        impl_->data().declare_data_input("X");
-        impl_->data().declare_data_input("Z");
+        // X and Z index the same observations: declared as one data-input
+        // group, so get_dag()$data_input_groups states it. This wrapper's
+        // predict_at never routes through composite_block::predict_at,
+        // because the varying coefficients beta_j(Z) are BART forests that
+        // have to be RE-EVALUATED at the new Z (the current forests, or the
+        // forest stored at each sweep in history mode) rather than refreshed
+        // from shared_data; the co-indexing is enforced by predict_at's own
+        // check: mu combines beta_j(Z_i) with X_ij, so with only one of the
+        // two supplied mu and y_rep are not predictable, and the call raises
+        // an error that names the missing input.
+        impl_->data().declare_data_input_group({"Z", "X"});
         for (int j = 0; j < J; ++j) {
             impl_->data().declare_predict_edges("Z", {beta_key(j)});
             impl_->data().declare_predict_edges(beta_key(j), {"mu"});

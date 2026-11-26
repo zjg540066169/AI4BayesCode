@@ -20,13 +20,15 @@
 //    C5  set_current(get_current()) returns the same get_current() values,
 //        with sqrt_spd, f and mu exact.
 //    C6  keep_history = true: predict_at({}) and predict_at({phi: basis at
-//        new x}) return f, mu and y_rep with one row per stored draw; row d
-//        of f and mu is computed from Intercept, log_amp, log_ell and z of
-//        stored draw d, and row d of y_rep is centred on row d of mu with sd
+//        new x}) return sqrt_spd, f, mu and y_rep (the computed nodes of the
+//        predict DAG) with one row per stored draw; row d of sqrt_spd, f and
+//        mu is computed from Intercept, log_amp, log_ell and z of stored draw
+//        d, and row d of y_rep is centred on row d of mu with sd
 //        exp(log_sigma_d); predict_at(new_data, true) returns one row, equal
 //        for f and mu to the last row of the history-mode output;
-//    C7  keep_history = false: predict_at returns one row (1 x N) from the
-//        current state: y_rep for {}, and f, mu, y_rep for a new phi;
+//    C7  keep_history = false: predict_at returns one row from the current
+//        state: sqrt_spd, f, mu and y_rep, for {} at the training phi and for
+//        a new phi;
 //    C8  clear_history() with the predict_at outputs as per-draw buffers
 //        (clear_history_contract.hpp): after k1 sweeps, clear_history() and
 //        k2 sweeps, f and mu of predict_at({}) and predict_at({phi}) have k2
@@ -166,6 +168,21 @@ arma::mat basis_at(const HSGPRegression& m, const arma::vec& xs) {
 
 // f and mu at the basis Pm (N_new x M), one row per row of the history h:
 // row d from Intercept, log_amp, log_ell and z of row d.
+// sqrt_spd_k = sqrt(amp^2 sqrt(2 pi) ell exp(-ell^2 lambda_k / 2)), one row
+// per row of the history.
+arma::mat spd_ref(const AI4BayesCode::history_map& h, const arma::vec& lam) {
+    const arma::mat& la = h.at("log_amp");
+    const arma::mat& le = h.at("log_ell");
+    arma::mat ss(la.n_rows, lam.n_elem);
+    for (std::size_t d = 0; d < la.n_rows; ++d) {
+        const double amp = std::exp(la(d, 0)), ell = std::exp(le(d, 0));
+        for (std::size_t k = 0; k < lam.n_elem; ++k)
+            ss(d, k) = std::sqrt(amp * amp * std::sqrt(2.0 * M_PI) * ell *
+                                 std::exp(-0.5 * ell * ell * lam[k]));
+    }
+    return ss;
+}
+
 void f_mu_ref(const AI4BayesCode::history_map& h, const arma::vec& lam,
               const arma::mat& Pm, arma::mat& f, arma::mat& mu) {
     const arma::mat& I  = h.at("Intercept");
@@ -331,21 +348,24 @@ int main() {
         const auto hist = h6.get_history();
         const auto p_tr = h6.predict_at(AI4BayesCode::state_map{});
         const auto p_nw = h6.predict_at(nd_new);
-        bool keys = p_tr.size() == 3 && p_nw.size() == 3;
-        for (const char* k : {"f", "mu", "y_rep"})
+        bool keys = p_tr.size() == 4 && p_nw.size() == 4;
+        for (const char* k : {"sqrt_spd", "f", "mu", "y_rep"})
             keys = keys && p_tr.count(k) && p_nw.count(k);
-        check(keys, "C6 history mode: predict_at returns f, mu and y_rep");
+        check(keys, "C6 history mode: predict_at returns sqrt_spd, f, mu and y_rep");
         if (keys) {
-            bool rows = true;
+            bool rows = p_tr.at("sqrt_spd").n_rows == D && p_tr.at("sqrt_spd").n_cols == K &&
+                        p_nw.at("sqrt_spd").n_rows == D && p_nw.at("sqrt_spd").n_cols == K;
             for (const char* k : {"f", "mu", "y_rep"})
                 rows = rows && p_tr.at(k).n_rows == D && p_tr.at(k).n_cols == N &&
                        p_nw.at(k).n_rows == D && p_nw.at(k).n_cols == N_new;
             arma::mat f_tr, mu_tr, f_nw, mu_nw;
             f_mu_ref(hist, lam, P_tr, f_tr, mu_tr);
             f_mu_ref(hist, lam, Pn, f_nw, mu_nw);
-            const double e = std::max(
+            const arma::mat ss = spd_ref(hist, lam);
+            const double e = std::max(std::max(
                 std::max(max_rel(p_tr.at("f"), f_tr), max_rel(p_tr.at("mu"), mu_tr)),
-                std::max(max_rel(p_nw.at("f"), f_nw), max_rel(p_nw.at("mu"), mu_nw)));
+                std::max(max_rel(p_nw.at("f"), f_nw), max_rel(p_nw.at("mu"), mu_nw))),
+                std::max(max_rel(p_tr.at("sqrt_spd"), ss), max_rel(p_nw.at("sqrt_spd"), ss)));
             const double z_tr = yrep_z_rows(p_tr.at("y_rep"), p_tr.at("mu"), hist.at("log_sigma"));
             const double z_nw = yrep_z_rows(p_nw.at("y_rep"), p_nw.at("mu"), hist.at("log_sigma"));
             std::printf("C6 history mode: y_rep %s ({}) and %s ({phi}); max rel error of "
@@ -353,13 +373,13 @@ int main() {
                         shape(p_tr.at("y_rep")).c_str(), shape(p_nw.at("y_rep")).c_str(),
                         e, z_tr, z_nw);
             check(rows, "C6 one row per stored draw: D x N for {}, D x N_new for {phi}");
-            check(e <= 1e-12, "C6 row d of f and mu from Intercept, log_amp, log_ell and z "
-                              "of stored draw d");
+            check(e <= 1e-12, "C6 row d of sqrt_spd, f and mu from Intercept, log_amp, "
+                              "log_ell and z of stored draw d");
             check(std::abs(z_tr) < 5.0 && std::abs(z_nw) < 5.0,
                   "C6 row d of y_rep centred on row d of mu, sd exp(log_sigma_d)");
             const auto p_last = h6.predict_at(nd_new, true);
             const bool last_ok =
-                p_last.size() == 3 && p_last.at("y_rep").n_rows == 1 &&
+                p_last.size() == 4 && p_last.at("y_rep").n_rows == 1 &&
                 p_last.at("y_rep").n_cols == N_new &&
                 same_mat(p_last.at("f"), arma::mat(p_nw.at("f").row(D - 1))) &&
                 same_mat(p_last.at("mu"), arma::mat(p_nw.at("mu").row(D - 1)));
@@ -372,14 +392,20 @@ int main() {
     {
         const auto p0 = m.predict_at(AI4BayesCode::state_map{});
         const auto p1 = m.predict_at(nd_new);
-        arma::mat f_ref, mu_ref1;
+        arma::mat f_ref, mu_ref1, f_ref0, mu_ref0;
         f_mu_ref(m.get_history(), lam, Pn, f_ref, mu_ref1);   // 1-row history = current state
-        const bool ok = p0.size() == 1 && p0.count("y_rep") &&
+        f_mu_ref(m.get_history(), lam, P_tr, f_ref0, mu_ref0);
+        const arma::mat ss_cur = spd_ref(m.get_history(), lam);
+        const bool ok = p0.size() == 4 && p0.count("y_rep") &&
                         p0.at("y_rep").n_rows == 1 && p0.at("y_rep").n_cols == N &&
-                        p1.size() == 3 && p1.at("y_rep").n_rows == 1 &&
+                        max_rel(p0.at("f"), f_ref0) <= 1e-12 &&
+                        max_rel(p0.at("mu"), mu_ref0) <= 1e-12 &&
+                        max_rel(p0.at("sqrt_spd"), ss_cur) <= 1e-12 &&
+                        p1.size() == 4 && p1.at("y_rep").n_rows == 1 &&
                         p1.at("y_rep").n_cols == N_new &&
                         max_rel(p1.at("f"), f_ref) <= 1e-12 &&
-                        max_rel(p1.at("mu"), mu_ref1) <= 1e-12;
+                        max_rel(p1.at("mu"), mu_ref1) <= 1e-12 &&
+                        max_rel(p1.at("sqrt_spd"), ss_cur) <= 1e-12;
         std::printf("C7 keep_history = false: {} -> y_rep %s; {phi} -> f %s, mu %s, y_rep %s\n",
                     shape(p0.at("y_rep")).c_str(), shape(p1.at("f")).c_str(),
                     shape(p1.at("mu")).c_str(), shape(p1.at("y_rep")).c_str());

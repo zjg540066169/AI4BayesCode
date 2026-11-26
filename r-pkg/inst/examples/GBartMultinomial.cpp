@@ -334,6 +334,29 @@ public:
             impl_->data().declare_predict_edges(r_key(j + 1), {"probs"});
         }
         impl_->data().declare_predict_edges("probs", { "y_rep" });
+        // r = (r_1, ..., r_{C-1}) flattened column-major (N x (C-1)), the
+        // name get_current() and predict_at use for the class predictors
+        // together. A predict-DAG node of its own, computed at predict time
+        // only (no invalidation).
+        impl_->data().set("r", arma::vec(N * (C_ - 1), arma::fill::zeros));
+        {
+            const std::size_t C_r = C_;
+            impl_->data().register_refresher(
+                "r",
+                [C_r](const AI4BayesCode::shared_data_t& d) -> arma::vec {
+                    const std::size_t N_here = d.get(r_key(1)).n_elem;
+                    arma::vec r_flat(N_here * (C_r - 1));
+                    for (std::size_t j = 0; j < C_r - 1; ++j) {
+                        const arma::vec& rj = d.get(r_key(j + 1));
+                        for (std::size_t i = 0; i < N_here; ++i)
+                            r_flat[j * N_here + i] = rj[i];
+                    }
+                    return r_flat;
+                });
+        }
+        for (std::size_t j = 0; j < C_ - 1; ++j) {
+            impl_->data().declare_predict_edges(r_key(j + 1), {"r"});
+        }
 
         // ---- Generative-DAG context (VIZ-ONLY; predict_at BFS never
         //      reads context_edges_). Each r_j ~ independent
@@ -638,16 +661,21 @@ public:
     // Predict at new data. Takes a state_map with optional key "X"
     // (flattened column-major N_new x p matrix). Returns a history_map.
     //
+    // Every call returns r_1, ..., r_{C-1} (one class predictor each), r,
+    // probs and y_rep:
     //   * keep_history = FALSE (or last_draw_only = TRUE), X supplied:
+    //       r_j   : 1 x N_new, r_j(X_new) from the current forest of class j
     //       r     : 1 x (N_new*(C-1)) flattened column-major r_j(X_new)
     //       probs : 1 x (N_new*C)     flattened-per-observation probs
+    //       y_rep : 1 x N_new; y_rep_i ~ Categorical(probs[i, ])
     //   * keep_history = FALSE, empty map:
-    //       probs : 1 x (N_train*C) at training X from the current draw
+    //       r_j, r, probs : the current values at training X
     //       y_rep : 1 x N_train posterior-predictive draw
-    //   * keep_history = TRUE, empty map:
-    //       y_rep : n_draws x N_train posterior-predictive samples, drawn
-    //               from each stored draw's softmaxed r history.
+    //   * keep_history = TRUE, empty map: one row per stored draw d, from
+    //       the stored r_{j,d}: r_j, r, probs = softmax(0, r_{1,d}, ...,
+    //       r_{C-1,d}) and y_rep ~ Categorical(probs_d[i, ]).
     //   * keep_history = TRUE, X supplied: one row per stored draw d.
+    //       r_j   : n_draws x N_new; r_{j,d}(X_new)
     //       r     : n_draws x (N_new*(C-1)); r_{j,d} = the forest of class j
     //               stored at sweep d evaluated at X_new
     //               (genbart_block::predict_history; the augmentation offset
@@ -710,6 +738,10 @@ public:
                 const std::size_t N_local = r_class_hist[0].n_cols;
                 std::uniform_real_distribution<double> unif(0.0, 1.0);
                 arma::mat yrep_mat(n_draws, N_local);
+                arma::mat r_mat(n_draws, N_local * (C_ - 1));
+                arma::mat probs_mat(n_draws, N_local * C_);
+                for (std::size_t j = 0; j + 1 < C_; ++j)
+                    r_mat.cols(j * N_local, (j + 1) * N_local - 1) = r_class_hist[j];
                 for (std::size_t d = 0; d < n_draws; ++d) {
                     for (std::size_t i = 0; i < N_local; ++i) {
                         // Softmax over (ref f^(0)=1, r_1..r_{C-1}), class
@@ -727,6 +759,8 @@ public:
                                 std::exp(r_class_hist[c](d, i) - max_r);
                             denom += probs_i[c + 1];
                         }
+                        for (std::size_t c = 0; c < C_; ++c)
+                            probs_mat(d, i * C_ + c) = probs_i[c] / denom;
                         const double u = unif(predict_rng_);
                         double acc = 0.0;
                         std::size_t chosen = C_ - 1;
@@ -738,14 +772,31 @@ public:
                     }
                 }
                 AI4BayesCode::history_map out;
+                for (std::size_t j = 0; j + 1 < C_; ++j)
+                    out.emplace(r_key(j + 1), r_class_hist[j]);
+                out.emplace("r",     std::move(r_mat));
+                out.emplace("probs", std::move(probs_mat));
                 out.emplace("y_rep", std::move(yrep_mat));
                 return out;
             }
 
-            // Stateful mode: refresh probs + y_rep from the current draw.
+            // Stateful mode: y_rep from the current draw, with the current
+            // r_j, r and probs (probs kept current by declare_invalidates).
             const block_context empty;
             block_context result = impl_->predict_at(empty, predict_rng_);
             AI4BayesCode::history_map out;
+            {
+                const std::size_t N_local = impl_->data().get(r_key(1)).n_elem;
+                arma::mat r_mat(1, N_local * (C_ - 1));
+                for (std::size_t j = 0; j + 1 < C_; ++j) {
+                    const arma::vec& rj = impl_->data().get(r_key(j + 1));
+                    for (std::size_t i = 0; i < N_local; ++i)
+                        r_mat(0, j * N_local + i) = rj[i];
+                    out.emplace(r_key(j + 1), arma::mat(rj.t()));
+                }
+                out.emplace("r", std::move(r_mat));
+                out.emplace("probs", arma::mat(impl_->data().get("probs").t()));
+            }
             for (const auto& kv : result) {
                 arma::mat m(1, kv.second.n_elem);
                 for (std::size_t i = 0; i < kv.second.n_elem; ++i)
@@ -831,6 +882,8 @@ public:
                 }
             }
             AI4BayesCode::history_map out;
+            for (std::size_t j = 0; j < C_ - 1; ++j)
+                out.emplace(r_key(j + 1), std::move(r_hist[j]));
             out.emplace("r",     std::move(r_mat));
             out.emplace("probs", std::move(probs_mat));
             out.emplace("y_rep", std::move(yrep_mat));
@@ -857,10 +910,27 @@ public:
         arma::mat probs_mat(1, probs.n_elem);
         for (std::size_t i = 0; i < probs.n_elem; ++i)
             probs_mat(0, i) = probs[i];
+        // y_rep_i ~ Categorical(probs[i, ]): the draw of the "y_rep"
+        // refresher.
+        arma::mat yrep_mat(1, N_new);
+        std::uniform_real_distribution<double> unif(0.0, 1.0);
+        for (std::size_t i = 0; i < N_new; ++i) {
+            const double u = unif(predict_rng_);
+            double acc = 0.0;
+            std::size_t chosen = C_ - 1;
+            for (std::size_t c = 0; c < C_; ++c) {
+                acc += probs[i * C_ + c];
+                if (u < acc) { chosen = c; break; }
+            }
+            yrep_mat(0, i) = static_cast<double>(chosen);
+        }
 
         AI4BayesCode::history_map out;
+        for (std::size_t j = 0; j < C_ - 1; ++j)
+            out.emplace(r_key(j + 1), arma::mat(r_new[j].t()));
         out.emplace("r", std::move(r_mat));
         out.emplace("probs", std::move(probs_mat));
+        out.emplace("y_rep", std::move(yrep_mat));
         return out;
     }
 

@@ -374,8 +374,11 @@ public:
 
         if (!use_history) {
             // ---- Stateful mode: single predict at current draw ------------
+            // X is installed also when not supplied (the training X), so the
+            // predict DAG recomputes eta = X beta and prob and returns them
+            // with y_rep.
             block_context replaced;
-            if (has_X) replaced["X"] = x_flat;
+            replaced["X"] = has_X ? x_flat : impl_->data().get("X");
             block_context result = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : result) {
                 arma::mat m(1, kv.second.n_elem);

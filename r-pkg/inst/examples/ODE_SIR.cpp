@@ -72,9 +72,8 @@
 //  z_{d,i} comes from predict_rng_, in the order i = 1..n within
 //  d = 1..n_draws. Output: I_traj and y_rep, n_draws x n (history mode, one
 //  row per stored draw), or 1 x n from the current (beta, gamma, sigma)
-//  (keep_history = false or last_draw_only = true). The single-draw path
-//  with an EMPTY new_data returns y_rep only, drawn around the I_traj of the
-//  current state, as in 1.1.2.
+//  (keep_history = false or last_draw_only = true); an EMPTY new_data uses
+//  the training t_obs and y0 in both paths.
 // ============================================================================
 
 // @example:R
@@ -426,8 +425,8 @@ public:
             "theta_sigma_joint", {"y0", "t_obs", "I_obs"});
 
         // Data inputs of predict_at (get_dag()$data_inputs): the keys of
-        // new_data. A key left out of a non-empty new_data is set to its
-        // training value; predict_at passes both to the BFS.
+        // new_data. A key left out of new_data is set to its training value;
+        // predict_at passes both to the BFS.
         impl_->data().declare_data_input("y0");
         impl_->data().declare_data_input("t_obs");
 
@@ -584,8 +583,7 @@ public:
     /// predictive" in the file header), one row per stored draw in history
     /// mode. last_draw_only = true returns the single-draw output (the
     /// keep_history = false output) and leaves the stored draws unchanged:
-    /// one row from the current (beta, gamma, sigma); with an empty new_data,
-    /// y_rep only.
+    /// one row from the current (beta, gamma, sigma).
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
             bool last_draw_only) const {
         const bool use_history = keep_history_ && !last_draw_only;
@@ -613,15 +611,12 @@ public:
         AI4BayesCode::history_map out;
 
         if (!use_history) {
-            // With an empty new_data nothing is installed: y_rep is drawn
-            // around the I_traj of the current state (the 1.1.2 output).
-            // Otherwise both inputs are installed, so the BFS recomputes
-            // I_traj from them and the current theta before y_rep is drawn.
+            // Both inputs are installed (a key left out at its training
+            // value), so the BFS recomputes I_traj from them and the current
+            // theta and returns it with the y_rep drawn around it.
             block_context replaced;
-            if (!new_data.empty()) {
-                replaced["y0"]    = y0_new;
-                replaced["t_obs"] = t_obs_new;
-            }
+            replaced["y0"]    = y0_new;
+            replaced["t_obs"] = t_obs_new;
             block_context result = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : result) {
                 arma::mat m(1, kv.second.n_elem);
@@ -769,7 +764,7 @@ RCPP_MODULE(ODE_SIR_module) {
                 "the SIR solution from y0 at time 0) and y_rep (LogNormal("
                 "log I_traj, sigma^2)), one row per stored draw of (beta, "
                 "gamma, sigma) with keep_history = TRUE, else one row from the "
-                "current draw (y_rep only for list()).")
+                "current draw.")
         .method("predict_at",
                 (AI4BayesCode::history_map (ODE_SIR::*)(const AI4BayesCode::state_map&, bool) const)
                     &ODE_SIR::predict_at,
@@ -815,7 +810,7 @@ PYBIND11_MODULE(ODE_SIR, m) {
              "I_traj (I(t) of the SIR solution from y0 at time 0) and y_rep "
              "(LogNormal(log I_traj, sigma^2)), one row per stored draw of "
              "(beta, gamma, sigma) with keep_history=True, else one row from "
-             "the current draw (y_rep only for {}). last_draw_only=True takes "
+             "the current draw. last_draw_only=True takes "
              "the single-draw path without discarding the history.")
         .def("get_dag",      &ODE_SIR::get_dag)
         .def("get_history",  &ODE_SIR::get_history)

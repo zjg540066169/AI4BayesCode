@@ -256,14 +256,28 @@ public:
                 return arma::vec{lik_ptr->phi()};
             });
         impl_->data().declare_invalidates("r", {"mean_r", "phi"});
+        // "mean" = exp(r) as well: the name get_current() and predict_at use
+        // for the conditional mean. A predict-DAG node of its own, computed
+        // at predict time only (not in the invalidation list above).
+        impl_->data().set("mean", arma::vec(N, arma::fill::ones));
+        impl_->data().register_refresher(
+            "mean",
+            [](const AI4BayesCode::shared_data_t& d) -> arma::vec {
+                const arma::vec& r = d.get("r");
+                arma::vec m(r.n_elem);
+                for (std::size_t i = 0; i < r.n_elem; ++i)
+                    m[i] = std::exp(r[i]);
+                return m;
+            });
 
         // ---- Declare predict DAG (generative direction) -----------------
         //   X      -> r       (genBART tree traversal)
         //   r      -> mean_r  (exp link)
+        //   r      -> mean    (exp link; the same values as mean_r)
         //   mean_r -> y_rep   (observation layer)
         //   phi    -> y_rep   (dispersion enters the observation layer)
         impl_->data().declare_predict_edges("X",      {"r"});
-        impl_->data().declare_predict_edges("r",      {"mean_r"});
+        impl_->data().declare_predict_edges("r",      {"mean_r", "mean"});
         impl_->data().declare_predict_edges("mean_r", {"y_rep"});
         impl_->data().declare_predict_edges("phi",    {"y_rep"});
 
@@ -438,11 +452,13 @@ public:
     // Predict at new data. Takes a state_map with optional key "X".
     //
     //   * empty map, keep_history = FALSE:
+    //       r, mean, mean_r: the current r and exp(r) at the TRAINING X.
     //       y_rep: posterior-predictive at TRAINING X from current draw.
     //   * empty map, keep_history = TRUE:
-    //       y_rep: n_draws x N posterior-predictive at training X, one
-    //              row per stored draw (documented shadow loop -- tree
-    //              forests cannot pass predict_at replaced-validation).
+    //       r, mean, mean_r, y_rep: n_draws x N at training X, one row per
+    //              stored draw (documented shadow loop -- tree forests
+    //              cannot pass predict_at replaced-validation): r_d = the
+    //              stored r of draw d, mean_d = mean_r_d = exp(r_d).
     //   * X supplied, keep_history = FALSE (or last_draw_only = TRUE):
     //       r, mean: from current trees at X_new.
     //       mean_r, y_rep: routed through the predict DAG (real
@@ -504,7 +520,7 @@ public:
                 }
                 auto* lik_ptr = static_cast<genbart::lik::heteroscedastic_lik*>(
                     likelihood_.get());
-                arma::mat yrep_mat(n_draws, N_local);
+                arma::mat mean_mat(n_draws, N_local), yrep_mat(n_draws, N_local);
                 std::normal_distribution<double> norm(0.0, 1.0);
                 for (std::size_t d = 0; d < n_draws; ++d) {
                     const double phi =
@@ -512,19 +528,36 @@ public:
                     for (std::size_t i = 0; i < N_local; ++i) {
                         const double m  = std::exp(r_hist(d, i));
                         const double sd = std::sqrt(phi * m);
+                        mean_mat(d, i)  = m;
                         yrep_mat(d, i)  = m + sd * norm(predict_rng_);
                     }
                 }
                 AI4BayesCode::history_map out;
-                out.emplace("y_rep", std::move(yrep_mat));
+                out.emplace("r",      r_hist);
+                out.emplace("mean",   mean_mat);
+                out.emplace("mean_r", std::move(mean_mat));
+                out.emplace("y_rep",  std::move(yrep_mat));
                 return out;
             }
 
             // Stateful mode: route through the framework predict DAG so the
-            // training-X path returns a posterior-predictive y_rep.
+            // training-X path returns a posterior-predictive y_rep. r, mean
+            // = exp(r) and mean_r (kept current by declare_invalidates) are
+            // nodes of the predict DAG and are returned with it.
             const block_context empty;
             block_context result = impl_->predict_at(empty, predict_rng_);
             AI4BayesCode::history_map out;
+            {
+                const arma::vec& r = impl_->data().get("r");
+                arma::mat rm(1, r.n_elem), mm(1, r.n_elem);
+                for (std::size_t i = 0; i < r.n_elem; ++i) {
+                    rm(0, i) = r[i];
+                    mm(0, i) = std::exp(r[i]);
+                }
+                out.emplace("r",      std::move(rm));
+                out.emplace("mean",   std::move(mm));
+                out.emplace("mean_r", arma::mat(impl_->data().get("mean_r").t()));
+            }
             for (const auto& kv : result) {
                 arma::mat m(1, kv.second.n_elem);
                 for (std::size_t i = 0; i < kv.second.n_elem; ++i)

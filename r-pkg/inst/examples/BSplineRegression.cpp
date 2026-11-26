@@ -453,14 +453,12 @@ public:
     //   are passed to impl_->predict_at, which computes
     //       s = exp(log_sds_d) z_d,  f = Bsp s,  mu = Intercept_d + f,
     //       y_rep ~ N(mu, exp(log_sigma_d)^2)   (one draw from predict_rng_).
-    //   Returns f, mu and y_rep, each n_draws x N.
+    //   Returns s (n_draws x K_s) and f, mu and y_rep, each n_draws x N.
     //
     //   Single-draw path (last_draw_only TRUE, or keep_history FALSE): one
-    //   impl_->predict_at call at the current state, each key 1 x N.
-    //     predict_at(list())          -> y_rep at the training Bsp; f and mu
-    //                                    of the current state are not
-    //                                    recomputed and not returned
-    //     predict_at(list(Bsp = ...)) -> f, mu and y_rep at the new Bsp
+    //   impl_->predict_at call at the current state with Bsp (new_data's,
+    //   else the training Bsp), each key one row: f, mu and y_rep at that
+    //   Bsp, and s of the current state.
     /// predict_at(new_data) = predict_at(new_data, last_draw_only = false).
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
@@ -500,9 +498,14 @@ public:
 
         if (!use_history) {
             block_context replaced;
-            if (has_Bsp) replaced["Bsp"] = it->second;
+            replaced["Bsp"] = has_Bsp ? it->second : impl_->data().get("Bsp");
             block_context r = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : r) out.emplace(kv.first, arma::mat(kv.second.t()));
+            // s = exp(log_sds) z does not depend on Bsp, so the walk above
+            // does not reach it; it is a node of the predict DAG and is
+            // returned at the current state.
+            if (!out.count("s"))
+                out.emplace("s", arma::mat(impl_->data().get("s").t()));
             return out;
         }
 
@@ -530,17 +533,19 @@ public:
         replaced["Bsp"] = has_Bsp ? it->second : impl_->data().get("Bsp");
         const std::size_t N_pred = replaced["Bsp"].n_elem / z_h.n_cols;
         arma::mat f_out(n_draws, N_pred), mu_out(n_draws, N_pred),
-                  yrep_out(n_draws, N_pred);
+                  yrep_out(n_draws, N_pred), s_out(n_draws, z_h.n_cols);
         for (std::size_t d = 0; d < n_draws; ++d) {
             replaced["Intercept"] = Intercept_h.row(d).t();
             replaced["log_sds"]   = log_sds_h.row(d).t();
             replaced["log_sigma"] = log_sigma_h.row(d).t();
             replaced["z"]         = z_h.row(d).t();
             const block_context r = impl_->predict_at(replaced, predict_rng_);
+            s_out.row(d)    = r.at("s").t();
             f_out.row(d)    = r.at("f").t();
             mu_out.row(d)   = r.at("mu").t();
             yrep_out.row(d) = r.at("y_rep").t();
         }
+        out.emplace("s",     std::move(s_out));
         out.emplace("f",     std::move(f_out));
         out.emplace("mu",    std::move(mu_out));
         out.emplace("y_rep", std::move(yrep_out));

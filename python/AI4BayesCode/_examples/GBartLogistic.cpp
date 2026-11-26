@@ -212,19 +212,20 @@ public:
         x_ncol_ = static_cast<std::size_t>(X.n_cols);
 
         // ---- Full predict-DAG reconstruction (no inlined sigmoid). ----
-        //   prob = sigmoid(r)        (deterministic intermediate)
-        //   y_rep ~ Bernoulli(prob)  (stochastic; reads ONLY prob)
-        // prob kept current during sampling via
-        // declare_invalidates("r", {"prob"}) so stateful
-        // predict_at(empty) reads a fresh prob. Behaviour-preserving:
+        //   p = sigmoid(r)           (deterministic intermediate; the name
+        //                             get_current() and predict_at use)
+        //   y_rep ~ Bernoulli(p)     (stochastic; reads ONLY p)
+        // p kept current during sampling via
+        // declare_invalidates("r", {"p"}) so stateful
+        // predict_at(empty) reads a fresh p. Behaviour-preserving:
         // same sigmoid(r), same per-i Bernoulli draw order => bit-identical
         // y_rep under a fixed predict RNG. (genBART history mode stays a
         // documented shadow loop per Ruling A -- tree forests cannot be
         // injected through predict_at's replaced-key validation.)
-        impl_->data().set("prob",  arma::vec(N, arma::fill::value(0.5)));
+        impl_->data().set("p",     arma::vec(N, arma::fill::value(0.5)));
         impl_->data().set("y_rep", arma::vec(N, arma::fill::zeros));
         impl_->data().register_refresher(
-            "prob",
+            "p",
             [](const AI4BayesCode::shared_data_t& d) -> arma::vec {
                 const arma::vec& r = d.get("r");
                 arma::vec p(r.n_elem);
@@ -232,11 +233,11 @@ public:
                     p[i] = safe_sigmoid(r[i]);
                 return p;
             });
-        impl_->data().declare_invalidates("r", {"prob"});
+        impl_->data().declare_invalidates("r", {"p"});
 
-        impl_->data().declare_predict_edges("X",    {"r"});
-        impl_->data().declare_predict_edges("r",    {"prob"});
-        impl_->data().declare_predict_edges("prob", {"y_rep"});
+        impl_->data().declare_predict_edges("X", {"r"});
+        impl_->data().declare_predict_edges("r", {"p"});
+        impl_->data().declare_predict_edges("p", {"y_rep"});
 
         // ---- Generative-DAG context (VIZ-ONLY; predict_at BFS never
         //      reads context_edges_). r ~ generalized-BART prior.
@@ -246,7 +247,7 @@ public:
             "y_rep",
             [](const AI4BayesCode::shared_data_t& d,
                std::mt19937_64& rng) {
-                const arma::vec& prob = d.get("prob");
+                const arma::vec& prob = d.get("p");
                 arma::vec y_rep(prob.n_elem);
                 for (std::size_t i = 0; i < prob.n_elem; ++i) {
                     std::bernoulli_distribution bern(prob[i]);
@@ -342,7 +343,7 @@ public:
             blk->set_Y(y_new);
             impl_->data().set("y", y_new);
         }
-        // The forest's r at the training X, and "prob" derived from it, in
+        // The forest's r at the training X, and "p" derived from it, in
         // the shared data (get_current and predict_at({}) use them).
         if (has_X || has_y) impl_->sync_child(0);
         // r is read-only output; silently ignored on input so that round-trip
@@ -353,7 +354,7 @@ public:
     // Restore the full genBART forest from a serialized snapshot previously
     // obtained from get_tree(). Separate from set_current because a tree is a
     // std::string, not a numeric state vector. Sets shared_data r and
-    // "prob" from the restored forest.
+    // "p" from the restored forest.
     void set_tree(const std::string& tree_s) {
         auto* blk = dynamic_cast<genbart_block*>(&impl_->child(0));
         blk->set_tree(tree_s);
@@ -389,15 +390,17 @@ public:
     // Predict at new data. Takes a state_map with optional key "X".
     //
     //   * empty map, keep_history = FALSE:
-    //       y_rep: posterior-predictive at TRAINING X from the current draw.
+    //       r, p, y_rep: the current r and p at the TRAINING X and the
+    //              posterior-predictive y_rep ~ Bernoulli(p) (1 x N_train).
     //   * empty map, keep_history = TRUE:
-    //       y_rep: n_draws x N_train posterior-predictive from each stored
-    //              draw's r history (documented genBART shadow loop -- forests
-    //              cannot be injected through predict_at's replaced-key
-    //              validation, so this iterates the stored r directly).
+    //       r, p, y_rep: n_draws x N_train, row d from the stored r of draw d
+    //              (documented genBART shadow loop -- forests cannot be
+    //              injected through predict_at's replaced-key validation, so
+    //              this iterates the stored r directly), p_d = sigmoid(r_d),
+    //              y_rep_d ~ Bernoulli(p_d).
     //   * X supplied, keep_history = FALSE (or last_draw_only = TRUE):
-    //       r, p:  linear predictor + fitted probability at X_new from the
-    //              CURRENT forest (1 x N_new).
+    //       r, p, y_rep: linear predictor + fitted probability at X_new from
+    //              the CURRENT forest and y_rep ~ Bernoulli(p) (1 x N_new).
     //   * X supplied, keep_history = TRUE: n_draws x N_new, one row per
     //       stored draw d. r_d = the forest stored at sweep d evaluated at
     //       X_new (genbart_block::predict_history; no offset), p_d =
@@ -446,23 +449,32 @@ public:
                 const arma::mat& r_hist = hist.at("r");
                 const std::size_t n_draws = r_hist.n_rows;
                 const std::size_t N_local = r_hist.n_cols;
-                arma::mat yrep(n_draws, N_local);
+                arma::mat p_mat(n_draws, N_local), yrep(n_draws, N_local);
                 for (std::size_t d = 0; d < n_draws; ++d) {
                     for (std::size_t i = 0; i < N_local; ++i) {
                         const double p = safe_sigmoid(r_hist(d, i));
+                        p_mat(d, i) = p;
                         std::bernoulli_distribution bern(p);
                         yrep(d, i) = bern(predict_rng_) ? 1.0 : 0.0;
                     }
                 }
                 AI4BayesCode::history_map out;
+                out.emplace("r",     r_hist);
+                out.emplace("p",     std::move(p_mat));
                 out.emplace("y_rep", std::move(yrep));
                 return out;
             }
 
-            // Stateful mode: walk the DAG once from the current draw.
+            // Stateful mode: walk the DAG once from the current draw. r and p
+            // (kept current by declare_invalidates("r", {"p"})) are nodes of
+            // the predict DAG and are returned with the y_rep drawn from p.
             const block_context empty;
             block_context result = impl_->predict_at(empty, predict_rng_);
             AI4BayesCode::history_map out;
+            for (const char* key : {"r", "p"}) {
+                const arma::vec& v = impl_->data().get(key);
+                out.emplace(key, arma::mat(v.t()));
+            }
             for (const auto& kv : result) {
                 arma::mat m(1, kv.second.n_elem);
                 for (std::size_t i = 0; i < kv.second.n_elem; ++i)
@@ -524,14 +536,17 @@ public:
 
         arma::vec r = blk.predict_r(X_new);
 
-        arma::mat r_mat(1, r.n_elem), p_mat(1, r.n_elem);
+        arma::mat r_mat(1, r.n_elem), p_mat(1, r.n_elem), yrep_mat(1, r.n_elem);
         for (std::size_t i = 0; i < r.n_elem; ++i) {
             r_mat(0, i) = r[i];
             p_mat(0, i) = safe_sigmoid(r[i]);
+            std::bernoulli_distribution bern(p_mat(0, i));
+            yrep_mat(0, i) = bern(predict_rng_) ? 1.0 : 0.0;
         }
         AI4BayesCode::history_map out;
-        out.emplace("r", std::move(r_mat));
-        out.emplace("p", std::move(p_mat));
+        out.emplace("r",     std::move(r_mat));
+        out.emplace("p",     std::move(p_mat));
+        out.emplace("y_rep", std::move(yrep_mat));
         return out;
     }
 

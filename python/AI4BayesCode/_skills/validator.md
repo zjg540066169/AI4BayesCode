@@ -432,6 +432,29 @@ register it as a `declare_data_input` (if it's user-replaceable
 data) or add a `declare_predict_edges` arrow from it to the
 refresher's output (if it's a sampled / derived upstream node).
 
+**Sibling check -- predict_at takes and returns exactly what the
+declared predict DAG says.** `get_dag()` is the contract of
+`predict_at`; each of these failing is a FAIL:
+- (a) every key in `$data_inputs` is accepted, in history mode and
+  with `last_draw_only = TRUE`;
+- (b) a key that is not in `$data_inputs` raises an error that names
+  it; it is not ignored;
+- (c) with every data input at its training value -- `predict_at(list())`
+  means exactly this -- the returned keys are exactly the computed nodes
+  of `$predict_edges` (every target of an edge), in both paths: a
+  declared node missing from the output, or a returned key the graph
+  does not declare, fails. A node whose parents are all parameters
+  (`s = sds * z`) and a forest / kernel node (`f_bart`) are computed
+  nodes and are returned.
+
+A strict subset of the data inputs returns the computed nodes outside
+its withheld cone (R1 partial-newdata checks).
+
+**Fix:** complete the declaration: declare the data input or the
+predict edge the code already uses, or return the declared node
+(per stored draw, from that draw's values). Do not narrow the
+output to what the framework's passes happened to recompute.
+
 **Sibling check -- silent default-substitution inside refresher
 bodies is forbidden.** A stochastic / deterministic refresher's
 lambda body MUST assume the framework has guaranteed that every
@@ -459,11 +482,13 @@ arma::vec sigma_per_obs(N_cur, arma::fill::value(0.1));   // hardcoded
 
 These patterns make `predict_at(newdata)` return downstream keys
 (`y_rep`, etc.) that the user did not authorise the framework to
-compute -- the framework's correctness contract is that **a missing
-data_input means "skip the downstream refresher"**, not "improvise
-a default and continue". This bug is silent: compile passes,
-R-hat / ESS / LOO pass, but the posterior predictive at new
-covariates is computed with WRONG variances / WRONG covariates.
+compute -- the framework's correctness contract is that **a withheld
+data_input (an unsupplied member of a partially supplied co-indexed
+group, `declare_data_input_group`) means "skip the downstream
+refresher"**, not "improvise a default and continue". This bug is
+silent: compile passes, R-hat / ESS / LOO pass, but the posterior
+predictive at new covariates is computed with WRONG variances / WRONG
+covariates.
 
 **Concrete failure example.** Model:
 
@@ -473,7 +498,8 @@ theta_i ~ N(f(X_i, Z_i), tau^2),    f(X, Z) = BART(X) + spline(Z)
 ```
 
 User-verified predict DAG: `X -> f_bart -> theta; Z -> f_spline ->
-theta; tau -> theta; theta -> y_rep; v2 -> y_rep`. User calls
+theta; tau -> theta; theta -> y_rep; v2 -> y_rep`, with X, Z and v2
+declared as one co-indexed group. User calls
 `predict_at(list(X = X_new, Z = Z_new))`. Correct behaviour:
 `theta` recomputed at the new (X, Z); `y_rep` ABSENT from the
 result because `v2_new` was not supplied. Incorrect (silent-
@@ -806,10 +832,9 @@ grep -nE 'predict_at[^{]*\{[^}]*keep_history_[^}]*for[^}]*draws' examples/*.cpp
 `predict_at(<subset>)` for every smoke-fixture newdata combination
 and (i) requires the call to NOT throw on legitimate partial
 inputs, (ii) compares the actual output keys, two-sided, against the
-library's own two-pass rule (deterministic refreshers: an unsupplied
-data input is unavailable and something upstream must have changed;
-stochastic refreshers: blocked only by the withheld cone of a partially
-replaced co-indexed group; see the partial-newdata checks). A wrapper
+declared graph (every computed node outside the withheld cone of a
+partially replaced co-indexed group; see the partial-newdata checks),
+on both paths. A wrapper
 that hard-rejects, returns a key the rule excludes, or omits one the
 rule includes, fails R1.
 
@@ -2612,24 +2637,21 @@ failing is an R1 FAIL.** Read the declared predict edges out of
 and the co-indexed groups out of `$data_input_groups` (a list of character
 vectors; `dag.data_input_groups` in Python). For EVERY data input on its
 own, and for every strict subset of each co-indexed group, work out which
-outputs the DECLARED graph makes reachable by the library's own rule, then
+outputs the DECLARED graph makes reachable by the rule below, then
 call `predict_at` with that subset and compare. The rule: first form the
 WITHHELD set -- every member of any group that has at least one replaced
 member and is not itself supplied -- and close it transitively over
-`predict_edges` (everything downstream of a withheld key is withheld). A
-remaining node is returned according to the pass its refresher runs in. A
-DETERMINISTIC node (`register_refresher`) is recomputed and returned iff
-at least one of its direct parents in `predict_edges` was supplied or
-recomputed in this call AND every direct parent is supplied, recomputed,
-or a non-data-input key -- a data input NOT supplied in this call is
-unavailable even when it belongs to no group, and a node whose parents
-are all parameters is never returned because nothing upstream changed. A
-STOCHASTIC node (`register_stochastic_refresher`) is sampled and returned
-iff neither it nor any direct parent is withheld: every declared parent
-holds a value, so an unsupplied ungrouped data input does not block it.
-Supplied inputs are never part of the result. `predict_dag_smoke` below
-encodes exactly this rule. Do not skip a subset because it "obviously"
-needs the others -- that assumption is the bug this check exists to catch.
+`predict_edges` (everything downstream of a withheld key is withheld).
+Every computed node of the declared graph (every target of
+`predict_edges`) outside the withheld set is returned, deterministic and
+stochastic alike: a data input left out of the call and not withheld is
+at its training value, and a node whose parents are all parameters is
+returned in every call (Check #6, "predict_at takes and returns exactly
+what the declared predict DAG says"). Supplied inputs are never part of
+the result. `predict_dag_smoke` below encodes exactly this rule, on the
+single-draw path and, when the wrapper has one, the history path. Do not
+skip a subset because it "obviously" needs the others -- that assumption
+is the bug this check exists to catch.
 
 **(1) Reachable means returned.** If the graph makes at least one output
 reachable, the call MUST NOT throw and MUST return every reachable key.
@@ -2762,34 +2784,21 @@ if (length(miss)) stop("[R1] predict_at does not return predictable variable(s):
 # --- Predict-DAG consistency smoke (Semantic #6) -----------------------
 # Cycle through every reasonable subset of the declared data_input keys
 # and check that the output set of predict_at(<subset>) is exactly what
-# the library's own rule gives for the DECLARED graph (see the partial-
-# newdata checks): a withheld cone from the co-indexed groups, then a
-# deterministic pass (something upstream changed AND every parent
-# available; an unsupplied data input is unavailable) and a stochastic
-# pass (blocked only by the cone). A key returned although the rule says
-# it cannot be signals SILENT DEFAULT-SUBSTITUTION inside the refresher
-# or the wrapper (e.g. `if (!has(v2)) v2 = mean(v2_train)`); a key missing
-# although the rule says it is returned signals a wrapper that rejects or
-# truncates a legitimate partial newdata. Both are forbidden by Semantic #6.
-#
-# Which refreshers are STOCHASTIC is not in get_dag(); read it from the
-# generated source, one key per register_stochastic_refresher call:
-src <- paste(readLines("<file>"), collapse = "\n")          # the key may sit on the next line
-STOCHASTIC_KEYS <- unique(sub('register_stochastic_refresher\\(\\s*"([^"]+)"', "\\1",
-    regmatches(src, gregexpr('register_stochastic_refresher\\(\\s*"[^"]+"', src, perl = TRUE))[[1]]))
-predict_dag_smoke <- function(model, sample_newdata = list(), stochastic_keys = character(0)) {
+# the declared graph gives (see the partial-newdata checks): a withheld
+# cone from the co-indexed groups, and every computed node (every target
+# of predict_edges) outside it. A key returned although it is withheld
+# signals SILENT DEFAULT-SUBSTITUTION inside the refresher or the wrapper
+# (e.g. `if (!has(v2)) v2 = mean(v2_train)`); a computed node missing
+# signals a wrapper that rejects, truncates or narrows a legitimate
+# newdata; a key the graph does not declare is an undeclared output. All
+# are forbidden by Semantic #6, on both paths.
+predict_dag_smoke <- function(model, sample_newdata = list()) {
     dag    <- model$get_dag()
     edges  <- dag$predict_edges                 # list: src -> chr vec of dst
     di     <- as.character(dag$data_inputs)     # data_input names
     groups <- dag$data_input_groups             # list of chr vecs (co-indexed)
-    parents <- list()
-    for (src in names(edges)) {
-        for (dst in edges[[src]]) {
-            parents[[dst]] <- c(parents[[dst]], src)
-        }
-    }
-    refresher_keys <- intersect(names(parents),
-                                unique(unlist(edges, use.names = FALSE)))
+    targets <- setdiff(unique(unlist(edges, use.names = FALSE)), di)  # computed nodes
+    declared <- unique(c(names(edges), unlist(edges, use.names = FALSE), di))
     descendants <- function(keys) {               # transitive closure over predict_edges
         seen <- character(0); frontier <- keys
         while (length(frontier)) {
@@ -2799,82 +2808,53 @@ predict_dag_smoke <- function(model, sample_newdata = list(), stochastic_keys = 
         }
         seen
     }
+    # (b) a key that is not a declared data input is an error, on both paths
+    for (last in c(FALSE, TRUE)) {
+        res <- tryCatch(if (last) model$predict_at(list(no_such_key_xyz = 1), TRUE)
+                        else model$predict_at(list(no_such_key_xyz = 1)),
+                        error = identity)
+        if (!inherits(res, "error"))
+            stop("[R1] predict_at accepted the undeclared key 'no_such_key_xyz'")
+    }
+    # The single-draw path (last_draw_only = TRUE) and the one-argument call,
+    # which is the history path with keep_history = TRUE. A wrapper with no
+    # history path has no second arity (the mixin's stub answers "takes ONE
+    # list argument"); there the one-argument call IS the single-draw path.
+    single_draw <- function(nd) tryCatch(model$predict_at(nd, TRUE), error = function(e)
+        if (grepl("takes ONE list argument", conditionMessage(e))) model$predict_at(nd) else stop(e))
+    paths <- list(single_draw = single_draw, history = function(nd) model$predict_at(nd))
     for (nd in sample_newdata) {
         nd_keys <- if (length(nd) == 0L) character(0) else names(nd)
-        # 1. the withheld cone: unsupplied members of any group that has a
-        #    replaced member, and everything downstream of them
+        # the withheld cone: unsupplied members of any group that has a
+        # replaced member, and everything downstream of them
         withheld <- character(0)
         for (g in groups) if (any(g %in% nd_keys)) withheld <- c(withheld, setdiff(g, nd_keys))
         cone <- unique(c(withheld, descendants(withheld)))
-        # 2. deterministic pass, to a fixed point: recomputed iff >= 1 direct
-        #    parent supplied or recomputed AND every direct parent supplied,
-        #    recomputed, or a non-data-input key
-        det_keys <- setdiff(refresher_keys, stochastic_keys)
-        recomputed <- character(0)
-        repeat {
-            added <- FALSE
-            for (k in setdiff(det_keys, c(recomputed, cone))) {
-                ps <- parents[[k]]
-                changed <- ps %in% c(nd_keys, recomputed)
-                avail   <- changed | !(ps %in% di)
-                if (any(changed) && all(avail)) { recomputed <- c(recomputed, k); added <- TRUE }
+        expected <- setdiff(targets, c(cone, nd_keys))   # supplied inputs are never returned
+        for (path in names(paths)) {
+            pp <- tryCatch(paths[[path]](nd), error = function(e) e)
+            if (inherits(pp, "error")) {
+                # (3) only a call with nothing reachable may throw, naming the input
+                if (length(expected) == 0L && length(withheld) &&
+                    any(vapply(withheld, grepl, logical(1), x = conditionMessage(pp), fixed = TRUE)))
+                    next
+                stop(sprintf("[R1] predict_at(%s) [%s] threw an error: %s",
+                             paste(nd_keys, collapse = ","), path, conditionMessage(pp)))
             }
-            if (!added) break
-        }
-        # 3. stochastic pass: sampled iff neither the node nor any direct
-        #    parent is in the cone (a stored value is enough, including an
-        #    unsupplied ungrouped data input at its training value)
-        sampled <- Filter(function(k) !(k %in% cone) && !any(parents[[k]] %in% cone),
-                          intersect(refresher_keys, stochastic_keys))
-        expected <- refresher_keys %in% c(recomputed, sampled)   # supplied inputs are never returned
-        names(expected) <- refresher_keys
-
-        # Run predict_at on the SINGLE-DRAW path (last_draw_only = TRUE): that
-        # path runs the composite's two passes, which is what the rule above
-        # describes. The history path is the wrapper's own per-draw replay and
-        # is covered by the last_draw_only checks, not here. A wrapper with no
-        # history path has no second arity (the mixin's stub answers "takes ONE
-        # list argument"); there the one-argument call IS the single-draw path.
-        # It must NOT throw on legitimate partial newdata.
-        single_draw <- function(nd) tryCatch(model$predict_at(nd, TRUE), error = function(e)
-            if (grepl("takes ONE list argument", conditionMessage(e))) model$predict_at(nd) else stop(e))
-        pp <- tryCatch(single_draw(nd),
-                       error = function(e) {
-                           stop(sprintf(paste0(
-                               "[R1] predict_at(%s) threw an error: %s\n",
-                               "Wrappers must forward partial newdata to ",
-                               "impl_->predict_at() and let the framework's ",
-                               "BFS rule decide which downstream keys to ",
-                               "skip -- hard-rejecting a legitimate subset ",
-                               "of data_inputs violates Semantic #6."),
-                               paste(nd_keys, collapse = ","),
-                               conditionMessage(e)))
-                       })
-        actual <- intersect(refresher_keys, names(pp))
-
-        # 1) Every expected key must be in the output
-        missing_expected <- setdiff(refresher_keys[expected], actual)
-        if (length(missing_expected) > 0L) {
-            stop(sprintf("[R1] predict_at(%s) missing expected key(s): %s",
-                         paste(nd_keys, collapse = ","),
-                         paste(missing_expected, collapse = ",")))
-        }
-        # 2) Every key in the output must have had all parents available
-        # (silent default-substitution signal).
-        extra <- setdiff(actual, refresher_keys[expected])
-        if (length(extra) > 0L) {
-            stop(sprintf(paste0(
-                "[R1] predict_at(%s) returned key(s) [%s] that the ",
-                "declared graph cannot produce for this newdata (a ",
-                "withheld or unavailable parent, or nothing upstream ",
-                "changed) -- this is the silent-default-substitution ",
-                "pattern (Semantic #6). The refresher body must not ",
-                "synthesise defaults for missing predict-DAG parents, the ",
-                "wrapper must not auto-pad sibling data_inputs from ",
-                "training, and it must not compute outputs the framework's ",
-                "own passes would skip."),
-                paste(nd_keys, collapse = ","),
-                paste(extra, collapse = ",")))
+            missing_expected <- setdiff(expected, names(pp))
+            extra            <- setdiff(intersect(names(pp), declared), expected)
+            undeclared       <- setdiff(names(pp), declared)
+            if (length(missing_expected) || length(extra) || length(undeclared))
+                stop(sprintf(paste0(
+                    "[R1] predict_at(%s) [%s]: computed node(s) missing [%s]; ",
+                    "withheld or non-computed key(s) returned [%s]; key(s) the ",
+                    "predict DAG does not declare [%s]. predict_at must return ",
+                    "exactly the computed nodes of the declared graph outside the ",
+                    "withheld cone (Semantic #6): complete the declaration or the ",
+                    "output, never fill a withheld input from training."),
+                    paste(nd_keys, collapse = ","), path,
+                    paste(missing_expected, collapse = ","), paste(extra, collapse = ","),
+                    paste(undeclared, collapse = ",")))
         }
     }
 }
@@ -2882,14 +2862,14 @@ predict_dag_smoke <- function(model, sample_newdata = list(), stochastic_keys = 
 # the R1 script builds a smoke-data fixture for. The wrapper's smoke-data
 # fixture should supply at least ONE non-empty newdata combination per
 # distinct data_input, sized to differ from training N where applicable.
-predict_dag_smoke(model, sample_newdata = SMOKE_NEWDATA, stochastic_keys = STOCHASTIC_KEYS)
+predict_dag_smoke(model, sample_newdata = SMOKE_NEWDATA)
 ```
 
 The wrapper-specific `SMOKE_NEWDATA` is a list of newdata candidates that
 the validator builds in its R1 script from the `.cpp`'s DGP. Minimum coverage:
 
-1. `list()` -- empty newdata; every refresher whose declared parents are
-   either non-data-input or supplied-by-default must fire.
+1. `list()` -- empty newdata, i.e. every data input at its training
+   value; every computed node of the declared graph must be returned.
 2. One entry per declared `data_input`, where the omitted inputs cause
    exactly the downstream stochastic refreshers that read those inputs
    to be absent from the output. Example for the

@@ -140,6 +140,14 @@ public:
         // Gibbs DAG: lambda depends on (t, delta) each sweep.
         impl_->data().declare_dependencies("lambda", {"t", "delta"});
 
+        // Predict DAG: S(t) = exp(-H_0(t)), H_0 from lambda and the interval
+        // edges. "t" is the data input of predict_at: the query times, the
+        // training times when it is not supplied.
+        impl_->data().declare_data_input("t");
+        impl_->data().declare_predict_edges("t",      {"S"});
+        impl_->data().declare_predict_edges("lambda", {"S"});
+        impl_->data().declare_predict_edges("edges",  {"S"});
+
         // ---- PEH-Gibbs block: samples lambda[K] each sweep -----------------
         piecewise_exponential_gibbs_block_config peh_cfg;
         peh_cfg.name           = "lambda";
@@ -194,7 +202,8 @@ public:
     ///     stored draw d (row d of get_history()), n_draws x n_q;
     ///   last_draw_only TRUE, or keep_history FALSE: one row from the current
     ///     lambda, 1 x n_q.
-    /// Without "t" (e.g. predict_at(list())) the result is empty.
+    /// Without "t" (e.g. predict_at(list())) the query times are the training
+    /// times t.
     /// predict_at(new_data) = predict_at(new_data, last_draw_only = false).
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
         return predict_at(new_data, /*last_draw_only=*/false);
@@ -207,8 +216,8 @@ public:
         const bool use_history = keep_history_ && !last_draw_only;
         AI4BayesCode::history_map out;
         auto it_tq = new_data.find("t");
-        if (it_tq == new_data.end()) return out;
-        const arma::vec& t_q = it_tq->second;
+        const arma::vec& t_q = (it_tq != new_data.end()) ? it_tq->second
+                                                         : impl_->data().get("t");
         const arma::vec& edges_local = impl_->data().get("edges");
         const std::size_t K = edges_local.n_elem - 1;
 
@@ -261,7 +270,7 @@ RCPP_MODULE(PehSurvival_module) {
                     &PehSurvival::predict_at,
                 "predict_at(list(t = <query times>)): S(t) with one row per stored "
                 "lambda draw (keep_history = TRUE), or one row from the current lambda "
-                "(keep_history = FALSE). Without t the result is empty.")
+                "(keep_history = FALSE). Without t, S at the training times.")
         .method("predict_at",
                 (AI4BayesCode::history_map (PehSurvival::*)(const AI4BayesCode::state_map&, bool) const)
                     &PehSurvival::predict_at,
@@ -296,7 +305,7 @@ PYBIND11_MODULE(PehSurvival, m) {
              pybind11::arg("last_draw_only") = false,
              "predict_at({'t': query_times}, last_draw_only=False): S(t) with one row "
              "per stored lambda draw (keep_history=True and last_draw_only=False), else "
-             "one row from the current lambda. Without 't' the result is empty.")
+             "one row from the current lambda. Without 't', S at the training times.")
         .def("get_dag",     &PehSurvival::get_dag)
         .def("get_history", &PehSurvival::get_history)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(PehSurvival);

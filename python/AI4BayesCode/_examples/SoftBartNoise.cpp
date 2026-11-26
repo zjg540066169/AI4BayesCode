@@ -475,6 +475,7 @@ public:
     //       f_softbart: length N_new, from current trees.
     //       y_rep:      posterior-predictive at X_new from CURRENT draw.
     //   * keep_history = FALSE, empty map:
+    //       f_softbart: length N_train, the current fit at the training X.
     //       y_rep:      posterior-predictive at TRAINING X from current draw.
     //   * keep_history = TRUE,  X supplied (with more than one stored draw
     //     this requires keep_tree = TRUE, which stores the forest of every
@@ -488,6 +489,7 @@ public:
     //                   sigma_d * N(0, 1), sigma_d = row d of the sigma
     //                   history.
     //   * keep_history = TRUE,  empty map:
+    //       f_softbart: n_draws x N_train, row d of the f_softbart history.
     //       y_rep:      n_draws x N_train posterior-predictive at training X
     //                   (row d = f_softbart row d of the history + sigma_d *
     //                   N(0, 1)).
@@ -540,7 +542,10 @@ public:
         if (!use_history) {
             // ---- Stateful mode -----------------------------------------
             block_context replaced;
-            arma::vec f_pred;           // only set if has_X
+            // f_softbart at the new X from the current trees, or the current
+            // fit at the training X: a node of the predict DAG
+            // (X -> f_softbart), returned in both cases.
+            arma::vec f_pred = impl_->data().get("f_softbart");
             if (has_X) {
                 f_pred = sb_child.predict(X_new);
                 replaced["X"]          = arma::vec(arma::vectorise(X_new));
@@ -549,7 +554,7 @@ public:
             block_context result = impl_->predict_at(replaced, predict_rng_);
 
             AI4BayesCode::history_map out;
-            if (has_X) {
+            {
                 arma::mat fm(1, f_pred.n_elem);
                 for (std::size_t i = 0; i < f_pred.n_elem; ++i) fm(0, i) = f_pred[i];
                 out.emplace("f_softbart", std::move(fm));
@@ -571,7 +576,9 @@ public:
 
         arma::mat F_pred;
         arma::vec x_flat;
-        bool echo_f = has_X;
+        // f_softbart (row d from draw d) is returned in both cases: it is a
+        // node of the predict DAG (X -> f_softbart).
+        const bool echo_f = true;
         if (has_X) {
             F_pred = sb_child.predict_history(X_new);
             x_flat = arma::vec(arma::vectorise(X_new));

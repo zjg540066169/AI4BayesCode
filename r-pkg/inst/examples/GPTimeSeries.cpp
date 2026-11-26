@@ -692,8 +692,11 @@ public:
     // key "t" (a flat arma::vec of finite time points, any order, repeats
     // allowed); any other key is an error. OUTPUT is a history_map with
     // f_mean, f_sd, f_star and y_rep at the new times, or at the training t
-    // when new_data is empty or its "t" has no elements; every key is an
-    // arma::mat (1-row in stateful mode, n_draws-row in history mode). Row d
+    // when new_data is empty or its "t" has no elements, and the kernel
+    // coefficients a_real = amp^2, c_real = 1 / tau and the noise variance
+    // obs_diag = sigma^2 (nodes of the predict DAG, one column each); every
+    // key is an arma::mat (1-row in stateful mode, n_draws-row in history
+    // mode). Row d
     // holds the marginal means and sds of f given y, one joint draw of f
     // from its distribution given y, and y_rep = f_star + sigma * e, all
     // under the hyperparameters of draw d. Formulas and the order of the
@@ -737,6 +740,7 @@ public:
         std::normal_distribution<double> nd(0.0, 1.0);
         arma::vec f_mean, f_sd, f_star, y_rep;
         arma::mat mu_mat, sd_mat, fs_mat, yr_mat;
+        arma::mat a_mat, c_mat, od_mat;             // n_rows x 1 each
         auto store_row = [&](std::size_t d) {
             mu_mat.row(d) = f_mean.t();
             sd_mat.row(d) = f_sd.t();
@@ -755,10 +759,15 @@ public:
             const std::size_t n_draws   = amp_hist.n_rows;
             for (auto* m : {&mu_mat, &sd_mat, &fs_mat, &yr_mat})
                 m->set_size(n_draws, N_new);
+            for (auto* m : {&a_mat, &c_mat, &od_mat})
+                m->set_size(n_draws, 1);
             for (std::size_t d = 0; d < n_draws; ++d) {
                 const double amp_d   = amp_hist(d, 0);
                 const double tau_d   = tau_hist(d, 0);
                 const double sigma_d = sigma_hist(d, 0);
+                a_mat(d, 0)  = amp_d * amp_d;
+                c_mat(d, 0)  = 1.0 / std::max(tau_d, 1e-10);
+                od_mat(d, 0) = sigma_d * sigma_d;
                 ou_predict(g, y_tr, amp_d * amp_d, 1.0 / std::max(tau_d, 1e-10),
                            noise_var_(sigma_d * sigma_d), sigma_d, w, nd,
                            predict_rng_, f_mean, f_sd, f_star, y_rep);
@@ -769,6 +778,9 @@ public:
             // y_rep refresher.
             for (auto* m : {&mu_mat, &sd_mat, &fs_mat, &yr_mat})
                 m->set_size(1, N_new);
+            a_mat  = arma::mat(1, 1, arma::fill::value(scalar_of(dat.get("a_real"), "a_real")));
+            c_mat  = arma::mat(1, 1, arma::fill::value(scalar_of(dat.get("c_real"), "c_real")));
+            od_mat = arma::mat(1, 1, arma::fill::value(scalar_of(dat.get("obs_diag"), "obs_diag")));
             ou_predict(g, y_tr, scalar_of(dat.get("a_real"), "a_real"),
                        scalar_of(dat.get("c_real"), "c_real"),
                        noise_var_(scalar_of(dat.get("obs_diag"), "obs_diag")),
@@ -782,6 +794,9 @@ public:
         out.emplace("f_sd",   std::move(sd_mat));
         out.emplace("f_star", std::move(fs_mat));
         out.emplace("y_rep",  std::move(yr_mat));
+        out.emplace("a_real",   std::move(a_mat));
+        out.emplace("c_real",   std::move(c_mat));
+        out.emplace("obs_diag", std::move(od_mat));
         return out;
     }
 

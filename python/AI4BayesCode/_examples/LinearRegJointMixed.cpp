@@ -448,8 +448,11 @@ public:
         AI4BayesCode::history_map out;
 
         if (!use_history) {
+            // X is installed also when not supplied (the training X), so the
+            // predict DAG recomputes mu = alpha + X beta and returns it with
+            // y_rep.
             block_context replaced;
-            if (has_X) replaced["X"] = x_flat;
+            replaced["X"] = has_X ? x_flat : impl_->data().get("X");
             block_context result = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : result) {
                 arma::mat m(1, kv.second.n_elem);
@@ -472,7 +475,9 @@ public:
         const arma::vec& X_use = has_X ? x_flat : impl_->data().get("X");
         const std::size_t N_pred = X_use.n_elem / p_;
 
-        arma::mat yrep_mat(n_draws, N_pred);
+        // mu = alpha + X beta (a node of the predict DAG) and y_rep, row d
+        // from draw d.
+        arma::mat mu_mat(n_draws, N_pred), yrep_mat(n_draws, N_pred);
         std::normal_distribution<double> norm01(0.0, 1.0);
         for (std::size_t d = 0; d < n_draws; ++d) {
             const double alpha_d = alpha_hist(d, 0);
@@ -481,9 +486,11 @@ public:
                 double xb = 0.0;
                 for (std::size_t j = 0; j < p_; ++j)
                     xb += X_use[i + j * N_pred] * beta_hist(d, j);
+                mu_mat(d, i)   = alpha_d + xb;
                 yrep_mat(d, i) = alpha_d + xb + sigma_d * norm01(predict_rng_);
             }
         }
+        out.emplace("mu",    std::move(mu_mat));
         out.emplace("y_rep", std::move(yrep_mat));
         return out;
     }

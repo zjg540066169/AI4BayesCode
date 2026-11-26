@@ -2550,6 +2550,19 @@ under `keep_history_ = TRUE` is the silent-wrong-posterior-predictive
 bug: the user expects the full posterior predictive distribution and
 gets a single point estimate at the last MCMC iteration instead.
 
+**WARNING Critical #3 (output = the declared predict DAG):**
+`predict_at` accepts exactly the declared data inputs (any other key
+raises an error that names it -- the membership test in the template
+below) and returns exactly the computed nodes of the predict DAG (every
+target of `declare_predict_edges`), in both branches. `predict_at(list())`
+means every data input at its training value: install the training
+value of a data input that `new_data` leaves out (unless it is withheld,
+i.e. an unsupplied member of a partially supplied
+`declare_data_input_group`), and return a node the walk does not reach
+(parents all parameters, a forest fit at the training X) from the
+current state, or from each stored draw in history mode. See validator
+Check #6.
+
 **Refresher should use dynamic N**, not a captured constructor-time
 `N`. Use `X_flat.n_elem / p` (or equivalent) so the refresher works
 correctly when `predict_at(list(X = X_new))` provides a different
@@ -2669,7 +2682,7 @@ AI4BayesCode::history_map predict_at(
     if (!keep_history_) {
         // ---- Stateful mode: single predict at current draw --------
         block_context replaced;
-        if (has_X) replaced["X"] = x_flat;
+        replaced["X"] = has_X ? x_flat : impl_->data().get("X");   // list(): training X
         block_context result = impl_->predict_at(replaced, predict_rng_);
         for (const auto& kv : result) {
             arma::mat m(1, kv.second.n_elem);

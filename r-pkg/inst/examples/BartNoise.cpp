@@ -412,6 +412,7 @@ public:
     //       f_bart: length N_new, from current trees.
     //       y_rep:  posterior-predictive at X_new from CURRENT draw.
     //   * keep_history = FALSE, empty map:
+    //       f_bart: length N_train, the current fit at the training X.
     //       y_rep:  posterior-predictive at TRAINING X from current draw.
     //   * keep_history = TRUE,  X supplied:
     //       f_bart: n_draws x N_new from each stored draw's trees.
@@ -421,6 +422,8 @@ public:
     //       it the call raises an error. With keep_tree = FALSE and at most
     //       one stored draw, the one row comes from the current forest.
     //   * keep_history = TRUE,  empty map:
+    //       f_bart: n_draws x N_train, the stored fit of each draw at the
+    //               training X.
     //       y_rep:  n_draws x N_train posterior-predictive at training X.
     //
     // X is passed as a FLATTENED column-major vector under key "X"
@@ -472,7 +475,9 @@ public:
         if (!use_history) {
             // ---- Stateful mode ------------------------------------------
             block_context replaced;
-            arma::vec f_pred;           // only set if has_X
+            // f_bart at the new X from the current trees, or the current fit
+            // at the training X.
+            arma::vec f_pred = impl_->data().get("f_bart");
             if (has_X) {
                 f_pred = bart_child.predict(X_new);
                 replaced["X"]      = arma::vec(arma::vectorise(X_new));
@@ -481,9 +486,10 @@ public:
             block_context result = impl_->predict_at(replaced, predict_rng_);
 
             AI4BayesCode::history_map out;
-            if (has_X) {
-                // Echo f_bart prediction (it was in `replaced`, so
-                // composite_block::predict_at strips it from `result`).
+            {
+                // f_bart is a node of the predict DAG (X -> f_bart). At new X
+                // it was in `replaced`, so composite_block::predict_at strips
+                // it from `result`; at the training X it is not recomputed.
                 arma::mat fm(1, f_pred.n_elem);
                 for (std::size_t i = 0; i < f_pred.n_elem; ++i) fm(0, i) = f_pred[i];
                 out.emplace("f_bart", std::move(fm));
@@ -508,7 +514,9 @@ public:
         // f_bart from each draw's get_history.
         arma::mat F_pred;
         arma::vec x_flat;
-        bool echo_f_bart = has_X;  // echo f_bart in output only when X given
+        // f_bart (row d from draw d) is returned in both cases: it is a node
+        // of the predict DAG (X -> f_bart).
+        const bool echo_f_bart = true;
         if (has_X) {
             F_pred = bart_child.predict_history(X_new);
             x_flat = arma::vec(arma::vectorise(X_new));

@@ -195,9 +195,11 @@ bool check_rows(const AI4BayesCode::history_map& p, const arma::vec& tq, const a
                 const arma::vec& y, const arma::mat& A, const arma::mat& T, const arma::mat& S,
                 std::uint64_t seed, const char* label) {
     const std::size_t nr = A.n_rows, n = tq.n_elem;
-    bool shape = p.size() == 4;
+    bool shape = p.size() == 7;
     for (const char* k : {"f_mean", "f_sd", "f_star", "y_rep"})
         shape = shape && p.count(k) && p.at(k).n_rows == nr && p.at(k).n_cols == n;
+    for (const char* k : {"a_real", "c_real", "obs_diag"})
+        shape = shape && p.count(k) && p.at(k).n_rows == nr && p.at(k).n_cols == 1;
     if (!shape) {
         std::printf("%s: wrong keys or shapes\n", label);
         return false;

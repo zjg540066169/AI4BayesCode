@@ -607,14 +607,13 @@ public:
     //       f = phi (sqrt_spd % z_d),  mu = Intercept_d + f,
     //       y_rep ~ N(mu, exp(log_sigma_d)^2)   (one draw from predict_rng_),
     //   with amp_d = exp(log_amp_d), ell_d = exp(log_ell_d).
-    //   Returns f, mu and y_rep, each n_draws x N.
+    //   Returns sqrt_spd (n_draws x M) and f, mu and y_rep, each
+    //   n_draws x N.
     //
     //   Single-draw path (last_draw_only TRUE, or keep_history FALSE): one
-    //   impl_->predict_at call at the current state, each key 1 x N.
-    //     predict_at(list())          -> y_rep at the training phi; f and mu
-    //                                    of the current state are not
-    //                                    recomputed and not returned
-    //     predict_at(list(phi = ...)) -> f, mu and y_rep at the new phi
+    //   impl_->predict_at call at the current state with phi (new_data's,
+    //   else the training phi), each key one row: f, mu and y_rep at that
+    //   phi, and sqrt_spd of the current state.
     /// predict_at(new_data) = predict_at(new_data, last_draw_only = false).
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
@@ -653,9 +652,14 @@ public:
 
         if (!use_history) {
             block_context replaced;
-            if (has_phi) replaced["phi"] = it->second;
+            replaced["phi"] = has_phi ? it->second : impl_->data().get("phi");
             block_context r = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : r) out.emplace(kv.first, arma::mat(kv.second.t()));
+            // sqrt_spd depends on log_amp, log_ell and lambda only, so the
+            // walk above does not reach it; it is a node of the predict DAG
+            // and is returned at the current state.
+            if (!out.count("sqrt_spd"))
+                out.emplace("sqrt_spd", arma::mat(impl_->data().get("sqrt_spd").t()));
             return out;
         }
 
@@ -684,7 +688,7 @@ public:
         replaced["phi"] = has_phi ? it->second : impl_->data().get("phi");
         const std::size_t N_pred = replaced["phi"].n_elem / z_h.n_cols;
         arma::mat f_out(n_draws, N_pred), mu_out(n_draws, N_pred),
-                  yrep_out(n_draws, N_pred);
+                  yrep_out(n_draws, N_pred), spd_out(n_draws, z_h.n_cols);
         for (std::size_t d = 0; d < n_draws; ++d) {
             replaced["Intercept"] = Intercept_h.row(d).t();
             replaced["log_amp"]   = log_amp_h.row(d).t();
@@ -692,10 +696,12 @@ public:
             replaced["log_sigma"] = log_sigma_h.row(d).t();
             replaced["z"]         = z_h.row(d).t();
             const block_context r = impl_->predict_at(replaced, predict_rng_);
+            spd_out.row(d)  = r.at("sqrt_spd").t();
             f_out.row(d)    = r.at("f").t();
             mu_out.row(d)   = r.at("mu").t();
             yrep_out.row(d) = r.at("y_rep").t();
         }
+        out.emplace("sqrt_spd", std::move(spd_out));
         out.emplace("f",     std::move(f_out));
         out.emplace("mu",    std::move(mu_out));
         out.emplace("y_rep", std::move(yrep_out));

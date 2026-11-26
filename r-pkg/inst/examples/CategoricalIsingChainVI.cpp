@@ -217,9 +217,11 @@ public:
         impl_->data().declare_context_edges("beta", {"z"});
         impl_->data().declare_context_edges("h",    {"z"});
 
-        // No predict DAG / stochastic refresher: predict_at copies the
+        // Predict DAG: phi -> z_samples (the draws from q, which phi
+        // parameterises). No stochastic refresher: predict_at copies the
         // stored q-draws (history path) or samples the current q via
         // current_sample (single-draw path); no graph traversal.
+        impl_->data().declare_predict_edges("phi", {"z_samples"});
 
         impl_->add_child(std::make_unique<mean_field_categorical_vi_block>(
             std::move(cfg)));

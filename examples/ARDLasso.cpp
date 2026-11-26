@@ -300,7 +300,7 @@ public:
     //          last_draw_only = TRUE, returns 1-row matrices (single predict
     //          at the current draw); keep_history = TRUE returns n_draws-row
     //          matrices, row d from stored draw d (beta_d, alpha_d, sigma2_d).
-    //            $y_hat (only when X is supplied) = X_use * beta + alpha
+    //            $y_hat                           = X_use * beta + alpha
     //            $y_rep                           = y_hat + sigma * Normal(0,1)
     //
     // Uses predict_rng_ for reproducible posterior-predictive sampling.
@@ -357,7 +357,7 @@ public:
                     Y_rep(i, j) = yh[j] + sig_d * norm01(predict_rng_);
                 }
             }
-            if (has_X) out.emplace("y_hat", std::move(Y_hat));  // mean only meaningful at X_new
+            out.emplace("y_hat", std::move(Y_hat));
             out.emplace("y_rep", std::move(Y_rep));
             return out;
         }
@@ -372,7 +372,7 @@ public:
             y_hat_out(0, i) = y_hat[i];
             y_rep_out(0, i) = y_hat[i] + sig_cur * norm01(predict_rng_);
         }
-        if (has_X) out.emplace("y_hat", std::move(y_hat_out));
+        out.emplace("y_hat", std::move(y_hat_out));
         out.emplace("y_rep", std::move(y_rep_out));
         return out;
     }

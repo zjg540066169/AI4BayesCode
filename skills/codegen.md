@@ -1503,6 +1503,12 @@ run, and produce reasonable samples out of the box.
   mixture, heteroscedastic Normal, AFT Logistic). Every other example,
   including the joint-NUTS examples (`IRT1PL_joint`,
   `HierarchicalLM_joint`, `LinearRegJointMixed`), registers y_rep.
+- **`predict_at` follows the declared predict DAG.** It accepts exactly
+  the declared data inputs (any other key raises an error) and, with every
+  data input at its training value (`predict_at(list())`), returns exactly
+  the computed nodes of the predict DAG, in history mode and with
+  `last_draw_only = TRUE` (`codegen_cpp.md` "predict_at method",
+  Critical #3; validator Check #6).
 - **Always emit a `mutable std::mt19937_64 predict_rng_` in the
   wrapper**, seeded once in the constructor with
   `rng_seed ^ 0x9E3779B97F4A7C15ULL`, and pass it to every

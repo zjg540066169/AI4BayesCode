@@ -25,7 +25,8 @@
 //    C6  g that is not an integer in [0, G) (negative, G, 1.5, NaN, two
 //        values, no value) throws an error naming g and G, on both paths,
 //        with and without t (g = -1 and g = G); g = 0 and g = G - 1 are
-//        accepted; a valid g without t returns no keys;
+//        accepted; a valid g without t returns S at the training times t
+//        (t is a data input of the predict DAG, t -> S);
 //    C7  clear_history() with S as a per-draw buffer
 //        (clear_history_contract.hpp): after k1 sweeps, clear_history() and
 //        k2 sweeps, S has k2 rows and equals the last k2 rows of a run
@@ -283,9 +284,16 @@ int main() {
         AI4BayesCode::state_map ok_no_t;
         ok_no_t["g"] = arma::vec{0.0};
         check(no_t_named, "C6 without t, g = -1 and g = G throw an error naming g and G");
-        check(predict_error(h5, ok_no_t, false).empty() && h5.predict_at(ok_no_t).empty() &&
-              h5.predict_at(ok_no_t, true).empty(),
-              "C6 without t, a valid g returns no keys");
+        const auto hist6 = h5.get_history();
+        const auto p_no_t = h5.predict_at(ok_no_t);
+        const auto p_no_t_last = h5.predict_at(ok_no_t, true);
+        const bool no_t_ok =
+            predict_error(h5, ok_no_t, false).empty() &&
+            p_no_t.size() == 1 && p_no_t.count("S") && p_no_t.at("S").n_cols == t.n_elem &&
+            max_rel(p_no_t.at("S"), S_ref(hist6.at("lambda"), hist6.at("w"), 0, t, edges)) <= 1e-14 &&
+            p_no_t_last.size() == 1 && p_no_t_last.count("S") &&
+            same_mat(p_no_t_last.at("S"), arma::mat(p_no_t.at("S").row(p_no_t.at("S").n_rows - 1)));
+        check(no_t_ok, "C6 without t, a valid g returns S at the training times");
     }
 
     // C7

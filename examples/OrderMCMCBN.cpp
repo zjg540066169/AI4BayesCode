@@ -35,8 +35,9 @@
 //
 //  NAMING CLASH WARNING
 //  --------------------
-//  get_dag() returns AI4BayesCode's INTERNAL Gibbs/Predict DAG (one node,
-//  "order_mcmc"), NOT the learned Bayesian network DAG. The learned BN
+//  get_dag() returns AI4BayesCode's INTERNAL Gibbs/Predict DAG (predict
+//  edges order, order_party -> sampled_DAG), NOT the learned Bayesian
+//  network DAG. The learned BN
 //  DAG is in `get_current()$sampled_DAG`, and with keep_history one per
 //  stored sweep in `predict_at(list())$sampled_DAG` (get_history() has the
 //  keys of 1.1.2, order and order_log_score).
@@ -333,6 +334,12 @@ public:
         // ---- shared_data setup -----------------------------------------
         // No upstream data dependencies for the block.
         impl_->add_child(std::make_unique<order_mcmc_block>(std::move(cfg)));
+
+        // Predict DAG: the DAG of a sweep is drawn given the partition
+        // (order, order_party) of that sweep; predict_at returns it as
+        // "sampled_DAG".
+        impl_->data().declare_predict_edges("order",       {"sampled_DAG"});
+        impl_->data().declare_predict_edges("order_party", {"sampled_DAG"});
 
         if (keep_history_) impl_->set_keep_history(true);
 

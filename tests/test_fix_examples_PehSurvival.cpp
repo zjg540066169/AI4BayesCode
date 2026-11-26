@@ -17,7 +17,8 @@
 //        for lambda_d of stored draw d (relative tolerance 1e-14);
 //        predict_at(new_data, true), and a keep_history = false model,
 //        return one row (1 x n_q) from the current lambda; predict_at({})
-//        returns no keys;
+//        returns S at the training times t (t is the data input of the
+//        predict DAG, t -> S);
 //    C6  clear_history() with S as a per-draw buffer
 //        (clear_history_contract.hpp): after k1 sweeps, clear_history() and
 //        k2 sweeps, S has k2 rows and equals the last k2 rows of a run
@@ -190,7 +191,11 @@ int main() {
         check(shape_ok && e <= 1e-14, "C5 one row per stored draw, row d from lambda_d");
         check(p_last.count("S") && same_mat(p_last.at("S"), arma::mat(p.at("S").row(19))),
               "C5 last_draw_only = true: one row = the last row of the history-mode output");
-        check(h5.predict_at(AI4BayesCode::state_map{}).empty(), "C5 predict_at({}) returns no keys");
+        const auto p_tr = h5.predict_at(AI4BayesCode::state_map{});
+        check(p_tr.size() == 1 && p_tr.count("S") && p_tr.at("S").n_rows == 20 &&
+              p_tr.at("S").n_cols == t.n_elem &&
+              max_rel(p_tr.at("S"), S_ref(L, t, edges)) <= 1e-14,
+              "C5 predict_at({}) returns S at the training times");
         const auto p0 = m.predict_at(nd);   // keep_history = false
         const arma::mat cur = m.get_current().at("lambda").t();
         check(p0.count("S") && p0.at("S").n_rows == 1 &&

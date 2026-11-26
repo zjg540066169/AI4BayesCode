@@ -19,13 +19,15 @@
 //    C5  set_current(get_current()) returns the same get_current() values,
 //        with s, f and mu exact.
 //    C6  keep_history = true: predict_at({}) and predict_at({Bsp: new basis})
-//        return f, mu and y_rep with one row per stored draw; row d of f and
-//        mu is computed from Intercept, log_sds and z of stored draw d, and
-//        row d of y_rep is centred on row d of mu with sd exp(log_sigma_d);
+//        return s, f, mu and y_rep (the computed nodes of the predict DAG)
+//        with one row per stored draw; row d of s, f and mu is computed from
+//        Intercept, log_sds and z of stored draw d, and row d of y_rep is
+//        centred on row d of mu with sd exp(log_sigma_d);
 //        predict_at(new_data, true) returns one row, equal for f and mu to
 //        the last row of the history-mode output;
-//    C7  keep_history = false: predict_at returns one row (1 x N) from the
-//        current state: y_rep for {}, and f, mu, y_rep for a new Bsp;
+//    C7  keep_history = false: predict_at returns one row from the current
+//        state: s, f, mu and y_rep, for {} at the training Bsp and for a new
+//        Bsp;
 //    C8  clear_history() with the predict_at outputs as per-draw buffers
 //        (clear_history_contract.hpp): after k1 sweeps, clear_history() and
 //        k2 sweeps, f and mu of predict_at({}) and predict_at({Bsp}) have k2
@@ -140,6 +142,13 @@ std::string shape(const arma::mat& a) {
 
 // f and mu at the basis Bm (N_new x K_s), one row per row of the history h:
 // row d from Intercept, log_sds and z of row d.
+// s = exp(log_sds) z, one row per row of the history.
+arma::mat s_ref(const AI4BayesCode::history_map& h) {
+    arma::mat s = h.at("z");
+    for (std::size_t d = 0; d < s.n_rows; ++d) s.row(d) *= std::exp(h.at("log_sds")(d, 0));
+    return s;
+}
+
 void f_mu_ref(const AI4BayesCode::history_map& h, const arma::mat& Bm,
               arma::mat& f, arma::mat& mu) {
     const arma::mat& I  = h.at("Intercept");
@@ -298,21 +307,23 @@ int main() {
         const auto hist = h6.get_history();
         const auto p_tr = h6.predict_at(AI4BayesCode::state_map{});
         const auto p_nw = h6.predict_at(nd_new);
-        bool keys = p_tr.size() == 3 && p_nw.size() == 3;
-        for (const char* k : {"f", "mu", "y_rep"})
+        bool keys = p_tr.size() == 4 && p_nw.size() == 4;
+        for (const char* k : {"s", "f", "mu", "y_rep"})
             keys = keys && p_tr.count(k) && p_nw.count(k);
-        check(keys, "C6 history mode: predict_at returns f, mu and y_rep");
+        check(keys, "C6 history mode: predict_at returns s, f, mu and y_rep");
         if (keys) {
-            bool rows = true;
+            bool rows = p_tr.at("s").n_rows == D && p_tr.at("s").n_cols == K &&
+                        p_nw.at("s").n_rows == D && p_nw.at("s").n_cols == K;
             for (const char* k : {"f", "mu", "y_rep"})
                 rows = rows && p_tr.at(k).n_rows == D && p_tr.at(k).n_cols == N &&
                        p_nw.at(k).n_rows == D && p_nw.at(k).n_cols == N_new;
             arma::mat f_tr, mu_tr, f_nw, mu_nw;
             f_mu_ref(hist, B, f_tr, mu_tr);
             f_mu_ref(hist, Bn, f_nw, mu_nw);
-            const double e = std::max(
+            const double e = std::max(std::max(
                 std::max(max_rel(p_tr.at("f"), f_tr), max_rel(p_tr.at("mu"), mu_tr)),
-                std::max(max_rel(p_nw.at("f"), f_nw), max_rel(p_nw.at("mu"), mu_nw)));
+                std::max(max_rel(p_nw.at("f"), f_nw), max_rel(p_nw.at("mu"), mu_nw))),
+                std::max(max_rel(p_tr.at("s"), s_ref(hist)), max_rel(p_nw.at("s"), s_ref(hist))));
             const double z_tr = yrep_z_rows(p_tr.at("y_rep"), p_tr.at("mu"), hist.at("log_sigma"));
             const double z_nw = yrep_z_rows(p_nw.at("y_rep"), p_nw.at("mu"), hist.at("log_sigma"));
             std::printf("C6 history mode: y_rep %s ({}) and %s ({Bsp}); max rel error of "
@@ -320,12 +331,12 @@ int main() {
                         shape(p_tr.at("y_rep")).c_str(), shape(p_nw.at("y_rep")).c_str(),
                         e, z_tr, z_nw);
             check(rows, "C6 one row per stored draw: D x N for {}, D x N_new for {Bsp}");
-            check(e <= 1e-12, "C6 row d of f and mu from Intercept, log_sds and z of stored draw d");
+            check(e <= 1e-12, "C6 row d of s, f and mu from Intercept, log_sds and z of stored draw d");
             check(std::abs(z_tr) < 5.0 && std::abs(z_nw) < 5.0,
                   "C6 row d of y_rep centred on row d of mu, sd exp(log_sigma_d)");
             const auto p_last = h6.predict_at(nd_new, true);
             const bool last_ok =
-                p_last.size() == 3 && p_last.at("y_rep").n_rows == 1 &&
+                p_last.size() == 4 && p_last.at("y_rep").n_rows == 1 &&
                 p_last.at("y_rep").n_cols == N_new &&
                 same_mat(p_last.at("f"), arma::mat(p_nw.at("f").row(D - 1))) &&
                 same_mat(p_last.at("mu"), arma::mat(p_nw.at("mu").row(D - 1)));
@@ -338,14 +349,20 @@ int main() {
     {
         const auto p0 = m.predict_at(AI4BayesCode::state_map{});
         const auto p1 = m.predict_at(nd_new);
-        arma::mat f_ref, mu_ref1;
+        arma::mat f_ref, mu_ref1, f_ref0, mu_ref0;
         f_mu_ref(m.get_history(), Bn, f_ref, mu_ref1);   // 1-row history = current state
-        const bool ok = p0.size() == 1 && p0.count("y_rep") &&
+        f_mu_ref(m.get_history(), B, f_ref0, mu_ref0);
+        const arma::mat s_cur = s_ref(m.get_history());
+        const bool ok = p0.size() == 4 && p0.count("y_rep") &&
                         p0.at("y_rep").n_rows == 1 && p0.at("y_rep").n_cols == N &&
-                        p1.size() == 3 && p1.at("y_rep").n_rows == 1 &&
+                        max_rel(p0.at("f"), f_ref0) <= 1e-12 &&
+                        max_rel(p0.at("mu"), mu_ref0) <= 1e-12 &&
+                        max_rel(p0.at("s"), s_cur) <= 1e-12 &&
+                        p1.size() == 4 && p1.at("y_rep").n_rows == 1 &&
                         p1.at("y_rep").n_cols == N_new &&
                         max_rel(p1.at("f"), f_ref) <= 1e-12 &&
-                        max_rel(p1.at("mu"), mu_ref1) <= 1e-12;
+                        max_rel(p1.at("mu"), mu_ref1) <= 1e-12 &&
+                        max_rel(p1.at("s"), s_cur) <= 1e-12;
         std::printf("C7 keep_history = false: {} -> y_rep %s; {Bsp} -> f %s, mu %s, y_rep %s\n",
                     shape(p0.at("y_rep")).c_str(), shape(p1.at("f")).c_str(),
                     shape(p1.at("mu")).c_str(), shape(p1.at("y_rep")).c_str());

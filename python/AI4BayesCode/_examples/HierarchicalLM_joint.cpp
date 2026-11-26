@@ -656,6 +656,13 @@ public:
         AI4BayesCode::history_map out;
 
         if (!use_history) {
+            // With neither X nor g_idx given, both are installed at their
+            // training values (the whole co-indexed group), so the predict
+            // DAG recomputes mu_fixed and returns it with y_rep.
+            if (new_data.empty()) {
+                replaced["X"]     = impl_->data().get("X");
+                replaced["g_idx"] = impl_->data().get("g_idx");
+            }
             block_context result = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : result) {
                 arma::mat m(1, kv.second.n_elem);

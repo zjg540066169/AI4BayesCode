@@ -1024,8 +1024,10 @@ public:
 
         if (!use_history) {
             // ---- Stateful mode: single predict at current draw ------------
+            // X is installed also when not supplied (the training X), so the
+            // predict DAG recomputes eta = X beta and returns it with y_rep.
             block_context replaced;
-            if (has_X) replaced["X"] = x_flat;
+            replaced["X"] = has_X ? x_flat : impl_->data().get("X");
             block_context result = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : result) {
                 arma::mat m(1, kv.second.n_elem);
@@ -1066,9 +1068,10 @@ public:
         const arma::vec& X_use = has_X ? x_flat : impl_->data().get("X");
         const std::size_t N_pred = X_use.n_elem / p_;
 
-        // y_rep matrix: n_draws × N_pred. For each draw d:
-        //   y_rep[d, i] = sum_j X[i + j*N_pred] * beta_d[j] + sigma_d * N(0,1)
-        arma::mat yrep_mat(n_draws, N_pred);
+        // eta and y_rep matrices: n_draws × N_pred. For each draw d:
+        //   eta[d, i]   = sum_j X[i + j*N_pred] * beta_d[j]   (predict-DAG node)
+        //   y_rep[d, i] = eta[d, i] + sigma_d * N(0,1)
+        arma::mat eta_mat(n_draws, N_pred), yrep_mat(n_draws, N_pred);
         std::normal_distribution<double> norm01(0.0, 1.0);
         for (std::size_t d = 0; d < n_draws; ++d) {
             const double sigma_d = sigma_hist(d, 0);
@@ -1077,10 +1080,12 @@ public:
                 for (std::size_t j = 0; j < p_; ++j) {
                     xb += X_use[i + j * N_pred] * beta_hist(d, j);
                 }
+                eta_mat(d, i)  = xb;
                 yrep_mat(d, i) = xb + sigma_d * norm01(predict_rng_);
             }
         }
 
+        out.emplace("eta",   std::move(eta_mat));
         out.emplace("y_rep", std::move(yrep_mat));
         return out;
     }

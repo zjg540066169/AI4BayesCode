@@ -403,7 +403,8 @@ public:
     //   * keep_history = FALSE, empty map:
     //       r/rate/y_rep at TRAINING X from the current draw.
     //   * keep_history = FALSE (or last_draw_only = TRUE), X supplied:
-    //       r/rate at X_new from the current trees (1 x N_new).
+    //       r/rate/y_rep at X_new from the current trees (1 x N_new),
+    //       y_rep ~ Poisson(rate) per point.
     //   * keep_history = TRUE,  empty map:
     //       r/rate/y_rep: n_draws x N_train, one row per stored draw.
     //   * keep_history = TRUE,  X supplied:
@@ -474,10 +475,17 @@ public:
                 return out;
             }
 
-            // Stateful mode: single-draw predictive at training X.
+            // Stateful mode: single-draw predictive at training X. r and rate
+            // (kept current by declare_invalidates("r", {"rate"})) are nodes
+            // of the predict DAG and are returned with the y_rep drawn from
+            // that rate.
             const block_context empty;
             block_context result = impl_->predict_at(empty, predict_rng_);
             AI4BayesCode::history_map out;
+            for (const char* key : {"r", "rate"}) {
+                const arma::vec& v = impl_->data().get(key);
+                out.emplace(key, arma::mat(v.t()));
+            }
             for (const auto& kv : result) {
                 arma::mat m(1, kv.second.n_elem);
                 for (std::size_t i = 0; i < kv.second.n_elem; ++i)
@@ -541,13 +549,17 @@ public:
 
         arma::mat r_mat(1, r.n_elem);
         arma::mat rate_mat(1, r.n_elem);
+        arma::mat yrep_mat(1, r.n_elem);
         for (std::size_t i = 0; i < r.n_elem; ++i) {
             r_mat(0, i)    = r[i];
             rate_mat(0, i) = std::exp(r[i]);
+            std::poisson_distribution<int> pois(rate_mat(0, i));
+            yrep_mat(0, i) = static_cast<double>(pois(predict_rng_));
         }
         AI4BayesCode::history_map out;
-        out.emplace("r",    std::move(r_mat));
-        out.emplace("rate", std::move(rate_mat));
+        out.emplace("r",     std::move(r_mat));
+        out.emplace("rate",  std::move(rate_mat));
+        out.emplace("y_rep", std::move(yrep_mat));
         return out;
     }
 

@@ -4,22 +4,22 @@
 //  test_fix_examples_GBartLogistic.cpp
 //
 //  examples/GBartLogistic.cpp stores the forest fit r at the training X and
-//  "prob" = sigmoid(r) in the shared data; get_current() reports r and
-//  predict_at({}) draws y_rep from "prob".
-//    C1  after construction, the shared r is the forest's fit and prob
+//  "p" = sigmoid(r) in the shared data; get_current() reports r and p, and
+//  predict_at({}) draws y_rep from "p".
+//    C1  after construction, the shared r is the forest's fit and p
 //        equals sigmoid(fit);
 //    C2  after 20 sweeps and set_current of a new X (same N): get_current()
 //        reports the forest's fit at the new X (= predict_at({X: new X}) of
-//        the same forest), the shared prob equals sigmoid(fit), and y_rep
+//        the same forest), the shared p equals sigmoid(fit), and y_rep
 //        from predict_at({}) is drawn from sigmoid(fit at the new X): with
 //        w = sigmoid(new fit) - sigmoid(old fit), T = sum w (y_rep -
 //        sigmoid(new fit)) has |T| / sd(T) < 5 (a draw from the old fit
 //        gives E[T] = -sum w^2);
 //    C3  after set_tree of the forest of a second model on the same training
-//        X, r equals that model's r (relative tolerance 1e-12) and prob
+//        X, r equals that model's r (relative tolerance 1e-12) and p
 //        equals sigmoid(fit);
 //    C4  set_current with an X whose length is not a multiple of p throws
-//        and leaves r, prob and X unchanged.
+//        and leaves r, p and X unchanged.
 //  predict_at at new X with keep_history = TRUE and keep_tree = TRUE:
 //    C5  r, p and y_rep have one row per stored draw; row d of r and p
 //        equals the single-draw prediction of a second model loaded with
@@ -36,7 +36,7 @@
 //    C8  a model with clear_history() after K1 sweeps and K2 more sweeps
 //        gives K2 rows of r and p, equal to the last K2 rows of a model
 //        built and stepped with the same seed without the call, bit for bit.
-//  The forest's fit is the block's own current value; prob is compared with
+//  The forest's fit is the block's own current value; p is compared with
 //  sigmoid(fit) computed in this test (relative tolerance 1e-12).
 // ============================================================================
 #include <armadillo>
@@ -113,10 +113,10 @@ arma::vec sigmoid(const arma::vec& r) {
 // The forest's fit at the training X (the block's own value).
 arma::vec fit(const GBartLogistic& m) { return impl(m).child(0).current(); }
 
-// Shared r equals the fit and shared prob equals sigmoid(fit).
+// Shared r equals the fit and shared p equals sigmoid(fit).
 bool shared_exact(const GBartLogistic& m) {
     const auto& d = impl(m).data();
-    return same_bits(d.get("r"), fit(m)) && max_rel(d.get("prob"), sigmoid(fit(m))) <= 1e-12;
+    return same_bits(d.get("r"), fit(m)) && max_rel(d.get("p"), sigmoid(fit(m))) <= 1e-12;
 }
 
 }  // namespace
@@ -135,7 +135,7 @@ int main() {
     }
 
     GBartLogistic m(X, y, 20, 7, false, false);
-    check(shared_exact(m), "C1 r is the forest's fit and prob = sigmoid(fit) after construction");
+    check(shared_exact(m), "C1 r is the forest's fit and p = sigmoid(fit) after construction");
 
     m.step(20);
     const arma::vec p_old = sigmoid(m.get_current().at("r"));
@@ -157,7 +157,7 @@ int main() {
     std::printf("C2 set_current(X): max |get_current r - fit at new X| = %.3g, "
                 "y_rep T/sd = %.3f\n", arma::abs(r_cur - r_new).max(), T / std::sqrt(V));
     check(same_bits(r_cur, r_new), "C2 get_current() reports the forest's fit at the new X");
-    check(shared_exact(m), "C2 shared r is the fit and prob = sigmoid(fit) after set_current(X)");
+    check(shared_exact(m), "C2 shared r is the fit and p = sigmoid(fit) after set_current(X)");
     check(std::abs(T / std::sqrt(V)) < 5.0, "C2 predict_at({}) y_rep drawn from the new fit");
 
     // C3: two models on the same training X; the first loads the forest of
@@ -170,17 +170,17 @@ int main() {
                 max_rel(m3.get_current().at("r"), other.get_current().at("r")));
     check(max_rel(m3.get_current().at("r"), other.get_current().at("r")) <= 1e-12 &&
           shared_exact(m3),
-          "C3 set_tree loads the forest's r and prob = sigmoid(fit)");
+          "C3 set_tree loads the forest's r and p = sigmoid(fit)");
 
     const auto& d = impl(m).data();
-    const arma::vec r0 = d.get("r"), p0 = d.get("prob"), X0 = d.get("X");
+    const arma::vec r0 = d.get("r"), p0 = d.get("p"), X0 = d.get("X");
     AI4BayesCode::state_map bad;
     bad["X"] = arma::vec(N * p + 1, arma::fill::zeros);
     bool threw = false;
     try { m.set_current(bad); } catch (const std::exception&) { threw = true; }
-    check(threw && same_bits(r0, d.get("r")) && same_bits(p0, d.get("prob")) &&
+    check(threw && same_bits(r0, d.get("r")) && same_bits(p0, d.get("p")) &&
           same_bits(X0, d.get("X")),
-          "C4 a failing set_current leaves r, prob and X unchanged");
+          "C4 a failing set_current leaves r, p and X unchanged");
 
     // ---- predict_at at new X in history mode ------------------------------
     const std::size_t K = 25, K1 = 6, K2 = 9, Nn = 40;
