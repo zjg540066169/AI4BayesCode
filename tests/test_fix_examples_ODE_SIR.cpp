@@ -24,7 +24,7 @@
 //    C6  predict_at({}), predict_at({t_obs}) and predict_at({y0, t_obs}) with
 //        the training values give the same I_traj and y_rep bit for bit;
 //    C7  at new times starting after 0 and a new y0: one row per stored
-//        draw; row d of I_traj equals sir_I_at(y0, t, theta_d) bit for bit
+//        draw; row d of I_traj equals sir_I_at(y0, t, theta_d, 1) bit for bit
 //        and a solve with rtol = atol = 1e-10 to 1e-5 relative; y_rep[d, i]
 //        equals I_traj[d, i] * exp(sigma_d * z) bit for bit, with z the
 //        standard normals of a copy of predict_rng_ (a new
@@ -37,7 +37,16 @@
 //    C10 after clear_history() (no stored draw): one row from the current
 //        state;
 //    C11 invalid t_obs / y0 / keys throw std::invalid_argument and leave the
-//        model unchanged.
+//        model unchanged;
+//    C12 accuracy at new times (the solver step is capped at the largest
+//        training spacing, 1 here): for every stored draw, with the count y0
+//        (990, 10, 0) and the fraction y0 (0.99, 0.01, 0), I_traj at
+//        t = 30, 60, 90, 120 requested alone agrees with the same times
+//        within t = 1..120, and both agree with a classical RK4 solve with
+//        step 1/64, to a relative 1e-4; the fraction y0 gives 1/1000 of the
+//        count y0 to a relative 1e-4; at the training times history-mode
+//        I_traj equals ode::rk45(sir_rhs, y0, t_obs, theta_d, 1e-6, 1e-6)
+//        (the solve without the cap) bit for bit, for both y0.
 //  The solution is recomputed in this test with the example's own sir_rhs
 //  and solver settings (relative tolerance 1e-12). Centred: the mean of
 //  log(I_rep / I_traj) / sigma over the 15 times lies within
@@ -150,7 +159,7 @@ row_check check_rows(const arma::mat& I_traj, const arma::mat& y_rep,
     const arma::uword off = ts.n_elem - t.n_elem;
     for (arma::uword r = 0; r < I_traj.n_rows; ++r) {
         const arma::vec th = thetas.row(r).t();
-        const arma::vec ref = sir_I_at(y0, t, th);
+        const arma::vec ref = sir_I_at(y0, t, th, 1.0);   // training spacing 1
         const arma::vec I_r = I_traj.row(r).t();
         if (!same_bits(I_r, ref)) ++rc.I_mismatch;
         const arma::mat tight = AI4BayesCode::ode::rk45(sir_rhs, y0, ts, th, 1e-10, 1e-10);
@@ -164,6 +173,34 @@ row_check check_rows(const arma::mat& I_traj, const arma::mat& y_rep,
         }
     }
     return rc;
+}
+
+// I(t_i) of the SIR solution from y0 at time 0 by classical RK4 with step
+// h = 1/64 (each t_i a multiple of h): the reference of C12.
+arma::vec rk4_I(const arma::vec& y0, const arma::vec& t, const arma::vec& th) {
+    const double h = 1.0 / 64.0;
+    arma::vec out(t.n_elem), y = y0;
+    long long k = 0;
+    for (arma::uword i = 0; i < t.n_elem; ++i) {
+        const long long k_end = std::llround(t[i] / h);
+        for (; k < k_end; ++k) {
+            const double tk = static_cast<double>(k) * h;
+            const arma::vec k1 = sir_rhs(tk, y, th);
+            const arma::vec k2 = sir_rhs(tk + 0.5 * h, y + 0.5 * h * k1, th);
+            const arma::vec k3 = sir_rhs(tk + 0.5 * h, y + 0.5 * h * k2, th);
+            const arma::vec k4 = sir_rhs(tk + h, y + h * k3, th);
+            y += (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+        }
+        out[i] = y[1];
+    }
+    return out;
+}
+
+double max_rel(const arma::vec& a, const arma::vec& b) {
+    double e = 0.0;
+    for (arma::uword i = 0; i < a.n_elem; ++i)
+        e = std::max(e, std::abs(a[i] - b[i]) / std::abs(b[i]));
+    return a.n_elem == b.n_elem ? e : INFINITY;
 }
 
 // Runs one group of checks; an exception counts as a failure of the group
@@ -370,7 +407,7 @@ int main() {
         const auto cur = mp->get_current();
         const arma::vec th{cur.at("beta")[0], cur.at("gamma")[0]};
         check(p.at("I_traj").n_rows == 1 && p.at("y_rep").n_rows == 1 &&
-              same_bits(p.at("I_traj").row(0).t(), sir_I_at(y0, t_new, th)),
+              same_bits(p.at("I_traj").row(0).t(), sir_I_at(y0, t_new, th, 1.0)),
               "C10 after clear_history(): one row from the current state");
     });
     guarded("C11", [&] {
@@ -400,6 +437,50 @@ int main() {
         check(n_ok == static_cast<int>(bad.size()) && same_maps(hist0, mp->get_history()) &&
               p.at("I_traj").n_rows == static_cast<arma::uword>(n_sweeps),
               "C11 invalid new data throws std::invalid_argument; history unchanged, predict_at({}) gives one row per stored draw");
+    });
+
+    guarded("C12", [&] {
+        auto mp = fitted(true);
+        const arma::mat theta = mp->get_history().at("theta");
+        const arma::vec t_far{30.0, 60.0, 90.0, 120.0};
+        const arma::vec t_all = arma::regspace(1.0, 1.0, 120.0);
+        const arma::uvec far_cols{29, 59, 89, 119};
+        const arma::vec y0_frac{0.99, 0.01, 0.0};
+        double e_grid = 0.0, e_rk4 = 0.0, e_scale = 0.0;
+        bool train_same = true, rows_ok = true;
+        arma::mat far_count;
+        for (const arma::vec& y0_k : {y0, y0_frac}) {
+            AI4BayesCode::state_map nd_far; nd_far["t_obs"] = t_far; nd_far["y0"] = y0_k;
+            AI4BayesCode::state_map nd_all; nd_all["t_obs"] = t_all; nd_all["y0"] = y0_k;
+            AI4BayesCode::state_map nd_tr;  nd_tr["y0"] = y0_k;
+            const arma::mat I_far = mp->predict_at(nd_far).at("I_traj");
+            const arma::mat I_all = mp->predict_at(nd_all).at("I_traj");
+            const arma::mat I_tr  = mp->predict_at(nd_tr).at("I_traj");
+            rows_ok = rows_ok && I_far.n_rows == theta.n_rows && I_all.n_rows == theta.n_rows &&
+                      I_tr.n_rows == theta.n_rows;
+            for (arma::uword d = 0; rows_ok && d < theta.n_rows; ++d) {
+                const arma::vec th = theta.row(d).t();
+                const arma::vec ref = rk4_I(y0_k, t_far, th);
+                const arma::vec far = I_far.row(d).t();
+                const arma::vec all = arma::vec(I_all.row(d).t()).elem(far_cols);
+                e_grid = std::max(e_grid, max_rel(far, all));
+                e_rk4  = std::max(e_rk4, std::max(max_rel(far, ref), max_rel(all, ref)));
+                const arma::vec plain = AI4BayesCode::ode::rk45(sir_rhs, y0_k, t_obs, th,
+                                                                1e-6, 1e-6).col(1);
+                train_same = train_same && same_bits(arma::vec(I_tr.row(d).t()), plain);
+            }
+            if (far_count.n_elem == 0) far_count = I_far;
+            else e_scale = std::max(e_scale, arma::mat(arma::abs(1000.0 * I_far - far_count) /
+                                                       arma::abs(far_count)).max());
+        }
+        std::printf("C12 max rel: alone vs within 1..120 %.3g, vs RK4 %.3g, fraction*1000 vs "
+                    "count %.3g; training times bit-identical %d\n",
+                    e_grid, e_rk4, e_scale, train_same ? 1 : 0);
+        check(rows_ok && e_grid < 1e-4 && e_rk4 < 1e-4 && e_scale < 1e-4,
+              "C12 I_traj at t = 30..120 does not depend on the other requested times or the scale of y0, "
+              "and matches RK4");
+        check(rows_ok && train_same,
+              "C12 at the training times I_traj equals the uncapped training solve bit for bit");
     });
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail,

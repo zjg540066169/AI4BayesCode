@@ -416,8 +416,10 @@ public:
     //   * keep_history = TRUE,  X supplied:
     //       f_bart: n_draws x N_new from each stored draw's trees.
     //       y_rep:  n_draws x N_new posterior-predictive samples.
-    //       Requires keep_tree = TRUE (the forests of the stored draws are
-    //       stored only then); without it the call raises an error.
+    //       With more than one stored draw this requires keep_tree = TRUE
+    //       (the forests of the stored draws are stored only then); without
+    //       it the call raises an error. With keep_tree = FALSE and at most
+    //       one stored draw, the one row comes from the current forest.
     //   * keep_history = TRUE,  empty map:
     //       y_rep:  n_draws x N_train posterior-predictive at training X.
     //
@@ -497,16 +499,6 @@ public:
         }
 
         // ---- History mode ---------------------------------------------
-        // At new X, row d is computed from the forest of stored draw d;
-        // bart_block stores the forests only with keep_tree = TRUE.
-        if (has_X && !keep_tree_) {
-            ai4b::stop("BartNoise::predict_at: prediction at new X with "
-                       "keep_history = TRUE requires keep_tree = TRUE at "
-                       "construction (the forests of the stored draws are "
-                       "stored only then). Construct with keep_tree = TRUE, "
-                       "or pass last_draw_only = TRUE to predict from the "
-                       "current forest.");
-        }
         auto& sigma_child = dynamic_cast<univariate_slice_sampling_block&>(impl_->child(1));
         AI4BayesCode::history_map sigma_list = sigma_child.get_history();
         const arma::mat& sigma_hist = sigma_list.at("sigma");
@@ -530,6 +522,20 @@ public:
         }
 
         if (n_draws != F_pred.n_rows) {
+            // At new X, row d is computed from the forest of stored draw d.
+            // bart_block stores the forests only with keep_tree = TRUE;
+            // without them predict_history returns one row (the current
+            // forest), which differs from n_draws once more than one draw
+            // is stored.
+            if (has_X && !keep_tree_) {
+                ai4b::stop("BartNoise::predict_at: prediction at new X with "
+                           "keep_history = TRUE and %d stored draws requires "
+                           "keep_tree = TRUE at construction (the forests of "
+                           "the stored draws are stored only then). Construct "
+                           "with keep_tree = TRUE, or pass "
+                           "last_draw_only = TRUE to predict from the current "
+                           "forest.", (int)n_draws);
+            }
             ai4b::stop("BartNoise::predict_at: inconsistent history sizes "
                        "(bart=%d, sigma=%d)",
                        (int)F_pred.n_rows, (int)n_draws);
@@ -771,7 +777,8 @@ RCPP_MODULE(BartNoise_module) {
                      int, bool, bool, int, bool>(
             "Constructor with keep_tree (BART forest snapshots per step; "
             "EXPENSIVE, required only by predict_at at new X with "
-            "keep_history = TRUE); keep_history defaults FALSE.")
+            "keep_history = TRUE and more than one stored draw); "
+            "keep_history defaults FALSE.")
         // Full constructor: keep_tree + keep_history.
         .constructor<arma::mat, arma::vec,
                      int, double, double, double, double,
@@ -784,8 +791,8 @@ RCPP_MODULE(BartNoise_module) {
             "aug (DART augmentation, default FALSE), "
             "seed (RNG seed, 0 = random), "
             "keep_tree (record forest snapshots per step, required by "
-            "predict_at at new X with keep_history = TRUE; EXPENSIVE; "
-            "default FALSE), "
+            "predict_at at new X with keep_history = TRUE and more than one "
+            "stored draw; EXPENSIVE; default FALSE), "
             "keep_history (record numeric per-step buffers for trace "
             "analysis; cheap; default FALSE).")
         .method("step", (void (BartNoise::*)())    &BartNoise::step, "Run one sweep.")

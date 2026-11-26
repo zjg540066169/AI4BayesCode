@@ -26,8 +26,10 @@
 //    C7  for y, y + 3 and y - 5 (keep_history, 400 sweeps, the last 200):
 //        the mean of f_softbart and of y_rep from predict_at({}) is within
 //        0.05 of mean(y) and the mean of sigma is in (0.4, 0.65) (true 0.5);
-//    C8  keep_history = TRUE, keep_tree = FALSE: predict_at at new X throws
-//        an error that names keep_tree = TRUE and last_draw_only = TRUE, and
+//    C8  keep_history = TRUE, keep_tree = FALSE: predict_at at new X returns
+//        one row (f_softbart from the current forest) after 0 and after 1
+//        sweep, as in 1.1.2; after 5 sweeps it throws an error that names
+//        keep_tree = TRUE and last_draw_only = TRUE, and
 //        predict_at(new X, true) returns one row. keep_tree = TRUE: 5 sweeps,
 //        set_current of y + 1.5 and 5 sweeps; predict_at at the training X
 //        gives f_softbart rows equal to the 10 history rows (to 1e-12), each
@@ -215,9 +217,29 @@ int main() {
 
     {
         SoftBartNoise mk(X, y, 20, 2.0, 10.0, false, 23, 3.0, false, true);
-        mk.step(5);
         AI4BayesCode::state_map at;
         at["X"] = arma::vec(arma::vectorise(X2));
+        bool ok01 = true;
+        for (int sweeps = 0; sweeps <= 1; ++sweeps) {
+            if (sweeps == 1) mk.step(1);
+            AI4BayesCode::history_map r;
+            try { r = mk.predict_at(at); }
+            catch (const std::exception& e) {
+                std::printf("C8 keep_tree = FALSE, %d sweep(s): threw \"%s\"\n", sweeps, e.what());
+                ok01 = false;
+                continue;
+            }
+            const arma::mat F1 = r.at("f_softbart"), Y1 = r.at("y_rep");
+            const arma::mat Fl = mk.predict_at(at, true).at("f_softbart");
+            std::printf("C8 keep_tree = FALSE, %d sweep(s): f_softbart %u x %u, y_rep %u x %u\n",
+                        sweeps, (unsigned)F1.n_rows, (unsigned)F1.n_cols,
+                        (unsigned)Y1.n_rows, (unsigned)Y1.n_cols);
+            ok01 = ok01 && F1.n_rows == 1 && Y1.n_rows == 1 && F1.n_cols == X2.n_rows &&
+                   arma::approx_equal(F1, Fl, "absdiff", 0.0);
+        }
+        check(ok01, "C8 keep_tree = FALSE: 0 and 1 stored draws give one row at new X "
+                    "(f_softbart from the current forest)");
+        mk.step(4);
         std::string msg;
         try { mk.predict_at(at); } catch (const std::exception& e) { msg = e.what(); }
         std::printf("C8 keep_tree = FALSE, predict_at(new X): %s\n", msg.c_str());

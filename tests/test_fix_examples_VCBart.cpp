@@ -26,8 +26,11 @@
 //        the training (X, Z) as new data, row d equals row d of C6 (stored
 //        forest d plus the fmean of sweep d, relative tolerance 1e-12); the
 //        last row equals the last_draw_only prediction bit for bit;
-//    C8  keep_history without keep_tree: new (X, Z) throws, last_draw_only
-//        gives 1 x N_new; after clear_history() and K more sweeps every
+//    C8  keep_history without keep_tree: new (X, Z) gives one row (mu from
+//        the current forests, equal to last_draw_only) after 0 and after 1
+//        sweep; after 5 sweeps it throws with a message that names
+//        keep_tree = TRUE and the 5 stored draws, and last_draw_only gives
+//        1 x N_new; after clear_history() and K more sweeps every
 //        history-mode prediction has K rows.
 //  predict_at y_rep (row d = mu_d + sigma_d * eps, eps iid N(0, 1) drawn
 //  from predict_rng_ with d outer, i inner). Each check copies predict_rng_
@@ -279,9 +282,29 @@ int main() {
 
     // C8
     VCBart mn(X2, Z2, y3, 10, 2.0, 2.0, 0.95, 3.0, 100, 7, true);   // keep_tree = false
-    mn.step(5);
+    bool ok01 = true;
+    for (int sweeps = 0; sweeps <= 1; ++sweeps) {
+        if (sweeps == 1) mn.step(1);
+        try {
+            const auto r = mn.predict_at(nd_new);
+            const arma::mat mu_l = mn.predict_at(nd_new, true).at("mu");
+            ok01 = ok01 && r.at("mu").n_rows == 1 && r.at("y_rep").n_rows == 1 &&
+                   arma::approx_equal(r.at("mu"), mu_l, "absdiff", 0.0);
+            std::printf("C8 keep_tree = false, %d sweep(s): mu %d x %d\n", sweeps,
+                        (int)r.at("mu").n_rows, (int)r.at("mu").n_cols);
+        } catch (const std::exception& e) {
+            std::printf("C8 keep_tree = false, %d sweep(s): threw \"%s\"\n", sweeps, e.what());
+            ok01 = false;
+        }
+    }
+    check(ok01, "C8 keep_tree = false: 0 and 1 stored draws give one row at new (X, Z)");
+    mn.step(4);
     bool threw = false;
-    try { mn.predict_at(nd_new); } catch (const std::exception&) { threw = true; }
+    std::string msg8;
+    try { mn.predict_at(nd_new); }
+    catch (const std::exception& e) { threw = true; msg8 = e.what(); }
+    threw = threw && msg8.find("keep_tree = TRUE") != std::string::npos &&
+            msg8.find("5 stored draws") != std::string::npos;
     const arma::mat p8l = mn.predict_at(nd_new, true).at("mu");
     mh.clear_history();
     mh.step(static_cast<int>(K2));

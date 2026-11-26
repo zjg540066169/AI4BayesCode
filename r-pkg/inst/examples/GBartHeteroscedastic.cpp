@@ -452,9 +452,11 @@ public:
     //       stored at sweep d evaluated at X_new
     //       (genbart_block::predict_history; no offset), mean_d = mean_r_d =
     //       exp(r_d), y_rep_d ~ N(mean_d, phi_d * mean_d) per point, with
-    //       phi_d the phi of sweep d. Requires keep_tree = TRUE (the forests
-    //       of the stored draws are stored only then); without it the call
-    //       raises an error.
+    //       phi_d the phi of sweep d. With more than one stored draw this
+    //       requires keep_tree = TRUE (the forests of the stored draws are
+    //       stored only then); without it the call raises an error. With
+    //       keep_tree = FALSE and at most one stored draw, the one row comes
+    //       from the current forest.
     //
     // X is passed as a FLATTENED column-major vector under key "X"
     // (length N_new * p); reshaped here back into an N_new x p matrix.
@@ -549,17 +551,21 @@ public:
         if (use_history) {
             // History mode: one row per stored draw d, computed from the
             // forest stored at sweep d and the phi of the same sweep.
-            if (!keep_tree_) {
-                ai4b::stop("GBartHeteroscedastic::predict_at: prediction at "
-                           "new X with keep_history = TRUE requires keep_tree "
-                           "= TRUE at construction (the forests of the stored "
-                           "draws are stored only then). Construct with "
-                           "keep_tree = TRUE, or pass last_draw_only = TRUE to "
-                           "predict from the current forest.");
-            }
             arma::mat r_hist = blk.predict_history(X_new);  // n_draws x N_new
             const std::size_t n_draws = r_hist.n_rows;
             if (n_draws != blk.history_size()) {
+                // The forests are stored only with keep_tree = TRUE; without
+                // them predict_history returns one row (the current forest),
+                // which differs from the number of stored draws once more
+                // than one draw is stored.
+                if (!keep_tree_)
+                    ai4b::stop("GBartHeteroscedastic::predict_at: prediction at new X "
+                               "with keep_history = TRUE and %d stored draws "
+                               "requires keep_tree = TRUE at construction (the "
+                               "forests of the stored draws are stored only "
+                               "then). Construct with keep_tree = TRUE, or pass "
+                               "last_draw_only = TRUE to predict from the "
+                               "current forest.", (int)blk.history_size());
                 ai4b::stop("GBartHeteroscedastic::predict_at: inconsistent "
                            "history sizes (forests=%d, r=%d)",
                            (int)n_draws, (int)blk.history_size());
@@ -667,13 +673,15 @@ RCPP_MODULE(GBartHeteroscedastic_module) {
         .constructor<arma::mat, arma::vec, int, double, int, bool>(
             "Ctor with keep_tree only: keep_tree (forest snapshots per "
             "step; EXPENSIVE; required by predict_at at new X with "
-            "keep_history = TRUE); keep_history defaults FALSE.")
+            "keep_history = TRUE and more than one stored draw); "
+            "keep_history defaults FALSE.")
         // Full ctor: keep_tree + keep_history.
         .constructor<arma::mat, arma::vec, int, double, int, bool, bool>(
             "Full ctor: X (N x p), y (length N), ntrees, phi_init (> 0), "
             "seed (RNG seed, 0 = random), keep_tree (forest snapshots; "
             "EXPENSIVE; default FALSE; required by predict_at at new X "
-            "with keep_history = TRUE), keep_history (numeric per-step "
+            "with keep_history = TRUE and more than one stored draw), "
+            "keep_history (numeric per-step "
             "buffers for trace analysis; cheap; default FALSE).")
         .method("step", (void (GBartHeteroscedastic::*)())    &GBartHeteroscedastic::step, "Run one sweep.")
         .method("step", (void (GBartHeteroscedastic::*)(int)) &GBartHeteroscedastic::step,
@@ -698,7 +706,8 @@ RCPP_MODULE(GBartHeteroscedastic_module) {
                 "Predict at new data. Pass list(X = as.vector(X_new)) "
                 "(flattened column-major) for new-X, or an empty list for "
                 "training-X posterior predictive. keep_history = TRUE: one "
-                "row per stored draw (new X requires keep_tree = TRUE). "
+                "row per stored draw (new X with more than one stored draw "
+                "requires keep_tree = TRUE). "
                 "Const, no state mutation.")
         .method("predict_at",
                 (AI4BayesCode::history_map (GBartHeteroscedastic::*)(Rcpp::List, bool) const)

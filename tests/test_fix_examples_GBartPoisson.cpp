@@ -29,9 +29,10 @@
 //        row equals the last_draw_only prediction bit for bit;
 //    C6  with the training X as new data, row d of r equals row d of
 //        get_history() r (relative tolerance 1e-12);
-//    C7  without keep_tree, the history-mode prediction at new X throws with
-//        a message that names keep_tree = TRUE, and last_draw_only gives one
-//        row;
+//    C7  without keep_tree, the history-mode prediction at new X gives one
+//        row (r from the current forest) after 0 and after 1 sweep; after 3
+//        sweeps it throws with a message that names keep_tree = TRUE and the
+//        3 stored draws, and last_draw_only gives one row;
 //    C8  a model with clear_history() after K1 sweeps and K2 more sweeps
 //        gives K2 rows of r and rate, equal to the last K2 rows of a model
 //        built and stepped with the same seed without the call, bit for bit.
@@ -238,11 +239,28 @@ int main() {
 
     // C7
     GBartPoisson mn(X, y, 20, 5, false, true);
-    mn.step(3);
+    bool ok01 = true;
+    for (int sweeps = 0; sweeps <= 1; ++sweeps) {
+        if (sweeps == 1) mn.step(1);
+        try {
+            const auto r01 = mn.predict_at(nd);
+            const arma::mat r_l = mn.predict_at(nd, true).at("r");
+            ok01 = ok01 && r01.at("r").n_rows == 1 && r01.at("y_rep").n_rows == 1 &&
+                   arma::approx_equal(r01.at("r"), r_l, "absdiff", 0.0);
+        } catch (const std::exception& e) {
+            std::printf("C7 keep_tree off, %d sweep(s): threw \"%s\"\n", sweeps, e.what());
+            ok01 = false;
+        }
+    }
+    check(ok01, "C7 without keep_tree, 0 and 1 stored draws give one row at new X "
+                "(r from the current forest)");
+    mn.step(2);
     std::string msg;
     try { mn.predict_at(nd); } catch (const std::exception& e) { msg = e.what(); }
+    std::printf("C7 keep_tree off, 3 sweeps: \"%s\"\n", msg.c_str());
     const arma::mat R7 = mn.predict_at(nd, true).at("r");
-    check(msg.find("keep_tree = TRUE") != std::string::npos && R7.n_rows == 1 &&
+    check(msg.find("keep_tree = TRUE") != std::string::npos &&
+          msg.find("3 stored draws") != std::string::npos && R7.n_rows == 1 &&
           R7.n_cols == Nn,
           "C7 without keep_tree the history-mode prediction at new X names keep_tree = TRUE");
 
