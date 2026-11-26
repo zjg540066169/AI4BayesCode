@@ -21,8 +21,11 @@
  *  length divisible by p is a legitimate n_new -- and that stays the caller's
  *  responsibility.
  *
- *  Rcpp only. pybind11 refuses a 2-D array for an arma::vec argument outright
- *  (TypeError), so the Python side cannot reach this failure by accident.
+ *  Python: the state_map caster (pybind_casters.hpp) flattens a 2-D value
+ *  column-major as Rcpp does, so the same check is needed there. A wrapper
+ *  binds its Python predict_at through a member taking
+ *  AI4BayesCode::py_new_data, which stores the column count of every 2-D
+ *  value, and calls the second predict_input below.
  *
  *  Copyright (C) 2026 AI4BayesCode
  *  SPDX-License-Identifier: Apache-2.0
@@ -83,3 +86,43 @@ inline AI4BayesCode::state_map predict_input(const Rcpp::List& new_data,
 }  // namespace ai4b
 
 #endif  // AI4BAYESCODE_RCPP_MODULE
+
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+
+#include "AI4BayesCode/backend_neutral.hpp"
+#include "AI4BayesCode/pybind_casters.hpp"
+
+#include <cstddef>
+
+namespace ai4b {
+
+/**
+ * The Python counterpart of predict_input above: new_data as converted by the
+ * py_new_data caster, with the column count of the covariate entry checked
+ * when it came as a 2-D array or nested sequence (a 1-D value carries no
+ * shape, as in R). Raises the error the R function raises, with the same
+ * message (RuntimeError in Python).
+ *
+ * @param covariate_key  the key whose column count must match, e.g. "X"
+ * @param p_train        columns the model was fitted with; 0 disables the check
+ */
+inline AI4BayesCode::state_map predict_input(const AI4BayesCode::py_new_data& new_data,
+                                             const char*       covariate_key,
+                                             std::size_t       p_train) {
+    if (p_train > 0) {
+        const auto it = new_data.ncol.find(covariate_key);
+        if (it != new_data.ncol.end() && it->second != p_train) {
+            ai4b::stop(
+                "predict_at: '%s' has %d columns but the model was fitted "
+                "with p = %d. Pass the same predictors, in the same order, "
+                "that the model was built on.",
+                covariate_key, static_cast<int>(it->second),
+                static_cast<int>(p_train));
+        }
+    }
+    return new_data.values;
+}
+
+}  // namespace ai4b
+
+#endif  // AI4BAYESCODE_PYBIND_MODULE

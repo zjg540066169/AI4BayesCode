@@ -58,9 +58,10 @@
 #include <vector>
 
 // Access to the wrapper's composite for W8. OrderMCMCBN declares
-// kernel_control_mixin<OrderMCMCBN> a friend. In this standalone build the
-// primary template has no members, so this explicit specialization, which
-// becomes the base class of OrderMCMCBN, has only the accessor.
+// kernel_control_mixin<OrderMCMCBN> a friend. This explicit specialization,
+// the base class of OrderMCMCBN here in place of the primary template, has
+// only the accessor, so this OrderMCMCBN has no clear_history() (the test
+// calls none).
 class OrderMCMCBN;
 namespace AI4BayesCode {
 template <>

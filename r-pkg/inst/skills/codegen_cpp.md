@@ -2452,9 +2452,13 @@ void clear_extra_history_() { <every such member>.clear(); }
 
 that empties every such member, so that after `clear_history()` and `k` steps
 every `get_history()` / `predict_at()` entry has `k` rows (`keep_history =
-true`). A private hook is a compile error in a wrapper that does not declare
-the mixin a friend. A wrapper without such members defines no hook; the
-mixin's no-op default applies.
+true`). In the class named in `kernel_control_mixin<...>`, a private hook is a
+compile error unless that class declares the mixin a friend. Only that class's
+hook is called: a hook declared in a class derived from a wrapper (`class Sub :
+public Wrapper`) is not. Such a class declares instead
+`void clear_history() { Wrapper::clear_history(); <own members>.clear(); }`,
+which the binding macros call. A wrapper without such members defines no hook;
+the mixin's no-op default applies.
 
 Expose via `RCPP_MODULE(<ClassName>_module) { ... }`.
 
@@ -3013,6 +3017,23 @@ arity needs its own `.method("predict_at", ...)` with an explicit
 member-pointer cast to pick the overload; pybind11 binds the two-argument one
 with `pybind11::arg("last_draw_only") = false`. A wrapper that exposes its R
 entry point as `predict_at_r(Rcpp::List)` needs the same pair there.
+
+A wrapper whose `predict_at_r` checks the covariate's column count with
+`ai4b::predict_input(new_data, "X", p_)` (rcpp_predict_guard.hpp) binds its
+Python `predict_at` through the counterpart member, so that a 2-D numpy `X`
+(flattened column-major, as R flattens a matrix) is checked the same way:
+
+```cpp
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+history_map predict_at_py(const AI4BayesCode::py_new_data& new_data,
+                          bool last_draw_only) const {
+    return predict_at(ai4b::predict_input(new_data, "X", p_), last_draw_only);
+}
+#endif
+// in PYBIND11_MODULE:
+//   .def("predict_at", &ClassName::predict_at_py,
+//        pybind11::arg("new_data"), pybind11::arg("last_draw_only") = false)
+```
 
 NAMING CONSTRAINT ON CONSTRUCTOR PARAMETERS. R reaches a module constructor
 through `methods::new(Class, ...)`, whose own first formal is named `Class`.

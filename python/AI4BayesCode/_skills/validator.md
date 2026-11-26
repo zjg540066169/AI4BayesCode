@@ -225,7 +225,7 @@ registry is the authoritative cross-reference.
 | 23 | readapt_NUTS state-preservation + RNG separation | Semantic | validator.md Sec.23 | wrapper exposes the kernel-control method `readapt_NUTS` (i.e., contains any `nuts_block` / `joint_nuts_block` child) |
 | 24 | Joint-NUTS pathology pre-flight (funnel NCR / constraint kind / lambda completeness) | Semantic | validator.md Sec.24 + joint_nuts_failure.md | cpp constructs a `joint_nuts_block` |
 | 25 | Trans-dimensional / Dirac-spike must use `rjmcmc_block` (reducibility + silent-slab guard) | Semantic | validator.md Sec.25 + codegen_priors.md Sec.3a Class 2b/4 | model is Sec.3a Class 2b (Dirac point-mass spike) or Class 4 (parameter-space dimension is a random variable) -- i.e. posterior support is a union of manifolds of different dimension |
-| 26 | Kernel-control conformance (freeze / unfreeze / get_frozen present + whitelist/blacklist gate + refreeze warning + stale-derived warning) | Semantic | validator.md Sec.26 | always (kernel-control is a universal wrapper category per interface.md Sec.1) |
+| 26 | Kernel-control conformance (freeze / unfreeze / get_frozen / clear_history present + whitelist/blacklist gate + refreeze warning + stale-derived warning) | Semantic | validator.md Sec.26 | always (kernel-control is a universal wrapper category per interface.md Sec.1) |
 
 **Check #12 status note:** Check #12 is the one Layer-2 check that runs a
 numerical comparison (#14 and #15 also compile a throwaway file, but their
@@ -2122,7 +2122,7 @@ defense against mode B.
 
 ---
 
-### 26. Kernel-control conformance (freeze / unfreeze / get_frozen)
+### 26. Kernel-control conformance (freeze / unfreeze / get_frozen / clear_history)
 
 RUNTIME NOTE: sub-checks (b), (c) and (d) below are runtime tests; they are
 executed by R1's member-function conformance sweep, not as L2 steps. What
@@ -2131,28 +2131,28 @@ static reasoning.
 
 **Trigger:** EVERY wrapper. Kernel-control is a universal category per
 interface.md Sec.1 -- every user-facing wrapper class MUST expose
-`freeze` / `unfreeze` / `get_frozen`.
+`freeze` / `unfreeze` / `get_frozen` / `clear_history`.
 
 **Four sub-checks** -- (a) is static (L2); (b)-(d) are runtime (R1). All
 must pass:
 
 **(a) Presence -- static grep.** The wrapper's RCPP_MODULE MUST contain
-`.method("freeze", ...)`, `.method("unfreeze", ...)`, and
-`.method("get_frozen", ...)`. Equivalently, the wrapper source MUST
-include either explicit `.method(` lines OR the
-`AI4BAYESCODE_BIND_KERNEL_CONTROL(ClassName)` macro from
+`.method("freeze", ...)`, `.method("unfreeze", ...)`,
+`.method("get_frozen", ...)` and `.method("clear_history", ...)`.
+Equivalently, the wrapper source MUST include either explicit `.method(`
+lines OR the `AI4BAYESCODE_BIND_KERNEL_CONTROL(ClassName)` macro from
 `include/AI4BayesCode/kernel_control_mixin.hpp`. Missing any of the
-three -> FAIL. Companion pybind check: PYBIND11_MODULE MUST include the
+four -> FAIL. Companion pybind check: PYBIND11_MODULE MUST include the
 corresponding `.def(...)` lines OR the
 `AI4BAYESCODE_PYBIND_KERNEL_CONTROL(ClassName)` macro.
 
 Grep:
 
 ```
-grep -E '\.method\("freeze"|\.method\("unfreeze"|\.method\("get_frozen"|AI4BAYESCODE_BIND_KERNEL_CONTROL' \
-     examples/<ClassName>.cpp   # must find all three (or the macro)
-grep -E '\.def\("freeze"|\.def\("unfreeze"|\.def\("get_frozen"|AI4BAYESCODE_PYBIND_KERNEL_CONTROL' \
-     examples/<ClassName>.cpp   # must find all three (or the macro)
+grep -E '\.method\("freeze"|\.method\("unfreeze"|\.method\("get_frozen"|\.method\("clear_history"|AI4BAYESCODE_BIND_KERNEL_CONTROL' \
+     examples/<ClassName>.cpp   # must find all four (or the macro)
+grep -E '\.def\("freeze"|\.def\("unfreeze"|\.def\("get_frozen"|\.def\("clear_history"|AI4BAYESCODE_PYBIND_KERNEL_CONTROL' \
+     examples/<ClassName>.cpp   # must find all four (or the macro)
 ```
 
 **(b) Whitelist / blacklist gate -- runtime R test.** The validator's R1

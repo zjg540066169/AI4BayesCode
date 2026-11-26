@@ -217,13 +217,7 @@ public:
             // last values in place, the same semantics record_held_history()
             // uses for a frozen block. current_sample still draws fresh
             // samples from the frozen q.
-            if (keep_history()) {
-                history_.elbo.push_back(last_elbo_);
-                history_.mu.push_back(mu_unc_);
-                history_.log_sd.push_back(log_sd_);
-                history_.gamma.push_back(gamma_current_);
-                history_.epoch.push_back(static_cast<int>(epoch_index_));
-            }
+            if (keep_history()) push_state_row_(history_);
             return;
         }
 
@@ -343,6 +337,17 @@ public:
     }
 
     vi_history_t* vi_history_buffer() override { return &history_; }
+
+    /// One trajectory row from the current state; the converged branch of
+    /// step() appends it per sweep, and vi_block::record_held_history() when
+    /// a held block has no row to repeat.
+    void push_state_row_(vi_history_t& h) const override {
+        h.elbo.push_back(last_elbo_);
+        h.mu.push_back(mu_unc_);
+        h.log_sd.push_back(log_sd_);
+        h.gamma.push_back(gamma_current_);
+        h.epoch.push_back(static_cast<int>(epoch_index_));
+    }
 
     // ---- vi_block interface ---------------------------------------------
 

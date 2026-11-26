@@ -23,8 +23,9 @@
 //        false model, return one row (1 x n_q) from the current draw;
 //        predict_at({}) returns no keys;
 //    C6  g that is not an integer in [0, G) (negative, G, 1.5, NaN, two
-//        values, no value) throws an error naming g and G, on both paths;
-//        g = 0 and g = G - 1 are accepted;
+//        values, no value) throws an error naming g and G, on both paths,
+//        with and without t (g = -1 and g = G); g = 0 and g = G - 1 are
+//        accepted; a valid g without t returns no keys;
 //    C7  clear_history() with S as a per-draw buffer
 //        (clear_history_contract.hpp): after k1 sweeps, clear_history() and
 //        k2 sweeps, S has k2 rows and equals the last k2 rows of a run
@@ -263,6 +264,28 @@ int main() {
         check(all_named, "C6 g outside the integers 0..G-1 throws an error naming g and G");
         check(predict_error(h5, ok0, false).empty() && predict_error(h5, ok1, true).empty(),
               "C6 g = 0 and g = G - 1 are accepted");
+
+        // Without t: an invalid g throws the same error, a valid g returns
+        // no keys.
+        bool no_t_named = true;
+        for (double gv : {-1.0, static_cast<double>(G)}) {
+            AI4BayesCode::state_map bad_no_t;
+            bad_no_t["g"] = arma::vec{gv};
+            for (bool last : {false, true}) {
+                const std::string e = predict_error(h5, bad_no_t, last);
+                const bool named = e.find("g") != std::string::npos &&
+                                   e.find("G = " + std::to_string(G)) != std::string::npos;
+                if (!named) std::printf("  g = %g without t (last_draw_only = %d): '%s'\n",
+                                        gv, last ? 1 : 0, e.c_str());
+                no_t_named = no_t_named && named;
+            }
+        }
+        AI4BayesCode::state_map ok_no_t;
+        ok_no_t["g"] = arma::vec{0.0};
+        check(no_t_named, "C6 without t, g = -1 and g = G throw an error naming g and G");
+        check(predict_error(h5, ok_no_t, false).empty() && h5.predict_at(ok_no_t).empty() &&
+              h5.predict_at(ok_no_t, true).empty(),
+              "C6 without t, a valid g returns no keys");
     }
 
     // C7

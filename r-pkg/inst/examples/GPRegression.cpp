@@ -751,6 +751,15 @@ public:
         return predict_at(ai4b::predict_input(new_data, "X", p_), last_draw_only);
     }
 #endif
+#ifdef AI4BAYESCODE_PYBIND_MODULE
+    // Python-facing predict_at: the column count of a 2-D new_data["X"] is
+    // checked against the training p before it is flattened column-major,
+    // as predict_at_r does for an R matrix. See rcpp_predict_guard.hpp.
+    AI4BayesCode::history_map predict_at_py(const AI4BayesCode::py_new_data& new_data,
+                                            bool last_draw_only) const {
+        return predict_at(ai4b::predict_input(new_data, "X", p_), last_draw_only);
+    }
+#endif
 
 
     AI4BayesCode::dag_info get_dag() const { return impl_->get_dag(); }
@@ -920,8 +929,7 @@ PYBIND11_MODULE(GPRegression, m) {
         .def("get_current",  &GPRegression::get_current)
         .def("set_current",  &GPRegression::set_current, pybind11::arg("params"))
         .def("predict_at",
-             (AI4BayesCode::history_map (GPRegression::*)(const AI4BayesCode::state_map&, bool) const)
-                 &GPRegression::predict_at,
+             &GPRegression::predict_at_py,
              pybind11::arg("new_data"),
              pybind11::arg("last_draw_only") = false)
         .def("get_dag",      &GPRegression::get_dag)

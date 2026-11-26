@@ -7,12 +7,13 @@
  *
  *  kernel_control_mixin.hpp  --  CRTP mixin + Rcpp/pybind macros for the
  *                                kernel-control category (freeze / unfreeze /
- *                                get_frozen) per interface.md Sec.1.
+ *                                get_frozen / clear_history; readapt_NUTS has
+ *                                its own macro below) per interface.md Sec.1.
  *
  *  DESIGN
  *  ======
  *  Every user-facing wrapper class inherits kernel_control_mixin<Derived>
- *  to automatically expose the three kernel-control methods via the
+ *  to automatically expose the four kernel-control methods via the
  *  RCPP_MODULE / PYBIND11_MODULE binding macros. The mixin forwards R/Py
  *  argument types to composite_block's C++ freeze/unfreeze/get_frozen and
  *  converts std::runtime_error / std::invalid_argument into Rcpp::stop
@@ -31,12 +32,13 @@
  *
  *  HISTORY RESET
  *  -------------
- *  The mixin also gives every wrapper clear_history() (backend-neutral, bound
- *  by both macros below). It empties the stored draws of every block in
+ *  clear_history(), the fourth kernel-control method, is backend-neutral and
+ *  bound by both macros below. It empties the stored draws of every block in
  *  impl_ and then calls the wrapper's clear_extra_history_() hook. A wrapper
  *  that records per-sweep values in members of its own, outside impl_,
  *  defines that hook PUBLIC and empties those members in it; every other
- *  wrapper inherits the no-op default.
+ *  wrapper inherits the no-op default. Only the hook of the class named in
+ *  kernel_control_mixin<...> is called (see clear_history() below).
  *================================================================================*/
 
 #ifndef AI4BAYESCODE_KERNEL_CONTROL_MIXIN_HPP
@@ -47,6 +49,7 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 // Rcpp / pybind11 are optional. When neither is defined, the mixin still
@@ -93,11 +96,19 @@ public:
     // clear_extra_history_() is a hook: a wrapper that records per-sweep
     // values in members of its own (outside impl_) defines a PUBLIC
     //     void clear_extra_history_() { <those members>.clear(); }
-    // which hides the no-op default below. If the wrapper declares it
-    // private, the call below either does not compile (name lookup finds the
-    // private member) or, in a wrapper that declares this mixin a friend (as
-    // every shipped wrapper built on it does), calls it; in neither case is
-    // the hook skipped.
+    // which hides the no-op default below. The call goes through
+    // static_cast<Derived*>, so it calls the hook declared in Derived (the
+    // class named in kernel_control_mixin<Derived>) or the default. If
+    // Derived declares it private, the call below either does not compile
+    // (name lookup finds the private member) or, in a wrapper that declares
+    // this mixin a friend (as every shipped wrapper built on it does), calls
+    // it; in neither case is Derived's hook skipped. A hook declared in a
+    // class derived from Derived (class Sub : public Derived), public or
+    // private, is NOT called. Such a class declares instead
+    //     void clear_history() { Derived::clear_history(); <own members>.clear(); }
+    // and the binding macros below call that function. The other CRTP
+    // forwards of the mixin resolve in Derived the same way: the no-argument
+    // predict_at calls Derived::predict_at.
     void clear_history() {
         auto self = static_cast<Derived*>(this);
         self->impl_->clear_history();
@@ -206,7 +217,12 @@ public:
         }
         auto warnings = self->impl_->freeze(names, quiet);
         for (const auto& w : warnings) {
-            PyErr_WarnEx(PyExc_UserWarning, w.c_str(), 1);
+            // PyErr_WarnEx returns -1 when the warning filters turn the
+            // warning into an exception (warnings.simplefilter("error"),
+            // python -W error); the exception is then raised to the caller
+            // and the remaining warnings are not issued.
+            if (PyErr_WarnEx(PyExc_UserWarning, w.c_str(), 1) < 0)
+                throw pybind11::error_already_set();
         }
     }
 
@@ -224,7 +240,8 @@ public:
         }
         auto warnings = self->impl_->unfreeze(v);
         for (const auto& w : warnings) {
-            PyErr_WarnEx(PyExc_UserWarning, w.c_str(), 1);
+            if (PyErr_WarnEx(PyExc_UserWarning, w.c_str(), 1) < 0)
+                throw pybind11::error_already_set();   // as in py_freeze
         }
     }
 
@@ -234,6 +251,78 @@ public:
     }
 #endif // AI4BAYESCODE_PYBIND_MODULE
 };
+
+namespace kcm_detail {
+
+template <typename...> struct void_type_ { using type = void; };
+
+/// True when w.clear_history() is a valid call on a W lvalue outside W: W
+/// declares a public clear_history() callable with no argument, or W
+/// declares none and inherits the mixin's.
+template <typename W, typename = void>
+struct no_arg_clear_history : std::false_type {};
+template <typename W>
+struct no_arg_clear_history<
+    W, typename void_type_<decltype(std::declval<W&>().clear_history())>::type>
+    : std::true_type {};
+
+/// The kernel_control_mixin<D> base of a wrapper; D is deduced from W's
+/// public base classes (D = W for a wrapper, D = Base for a class derived
+/// from a wrapper Base).
+template <typename D>
+kernel_control_mixin<D>* mixin_base(kernel_control_mixin<D>* p) { return p; }
+
+template <typename W, typename = void>
+struct has_mixin_base : std::false_type {};
+template <typename W>
+struct has_mixin_base<
+    W, typename void_type_<decltype(kcm_detail::mixin_base(std::declval<W*>()))>::type>
+    : std::true_type {};
+
+/**
+ * clear_history() as bound by AI4BAYESCODE_BIND_KERNEL_CONTROL and
+ * AI4BAYESCODE_PYBIND_KERNEL_CONTROL, a function of W* (Rcpp and pybind11
+ * bind such a function as a method).
+ *
+ * call() calls W's own clear_history() when it is callable with no argument
+ * (in a wrapper that declares none, that is the mixin's). When W declares a
+ * clear_history() that is not (another parameter list, private), call()
+ * calls the mixin's. Both calls name the function directly, so the binding
+ * compiles for every wrapper and never calls a function through a member
+ * pointer of another type. A class with neither (it does not derive from
+ * kernel_control_mixin) is bound under name() = "clear_history_unavailable_"
+ * instead: clear_history is then not a method of the class, and the R and
+ * Python run_chains do not call it.
+ */
+template <typename W>
+struct clear_history_binding {
+    static const char* name() {
+        return (no_arg_clear_history<W>::value || has_mixin_base<W>::value)
+                   ? "clear_history" : "clear_history_unavailable_";
+    }
+    static void call(W* self) {
+        dispatch_(self,
+                  std::integral_constant<bool, no_arg_clear_history<W>::value>{},
+                  std::integral_constant<bool, has_mixin_base<W>::value>{});
+    }
+
+private:
+    template <typename HasMixin>
+    static void dispatch_(W* self, std::true_type, HasMixin) {
+        static_cast<void>(self->clear_history());
+    }
+    static void dispatch_(W* self, std::false_type, std::true_type) {
+        kcm_detail::mixin_base(self)->clear_history();
+    }
+    static void dispatch_(W*, std::false_type, std::false_type) {
+        throw std::logic_error(
+            "clear_history() is not available: the class neither declares a "
+            "clear_history() callable with no argument nor derives from "
+            "AI4BayesCode::kernel_control_mixin");
+    }
+};
+
+} // namespace kcm_detail
 
 } // namespace AI4BayesCode
 
@@ -245,54 +334,57 @@ public:
 // from R.
 
 #ifdef AI4BAYESCODE_RCPP_MODULE
-// All four .method() entries CAST the function pointer to a
-// derived-class member-function type. Required because the mixin
-// forwarders are inherited from `kernel_control_mixin<CLASSNAME>` base;
-// Rcpp's class_<T>::method template can't resolve a
-// pointer-to-base-member against class_<Derived>. Explicit derived-
-// class cast makes both sides match.
+// Every member-pointer entry converts the pointer with static_cast to a
+// member-function type of CLASSNAME. Required because the mixin forwarders
+// are inherited from the `kernel_control_mixin<CLASSNAME>` base; Rcpp's
+// class_<T>::method template can't resolve a pointer-to-base-member against
+// class_<Derived>. static_cast performs that base-to-derived conversion and
+// selects the named overload; when CLASSNAME declares a member of the same
+// name with another signature, the build stops with an error (a C-style cast
+// would reinterpret the pointer, and the call would pass arguments the member
+// does not take). clear_history is bound through
+// kcm_detail::clear_history_binding (see there).
 #define AI4BAYESCODE_BIND_KERNEL_CONTROL(CLASSNAME)                       \
     .method("freeze",                                                     \
-            (void (CLASSNAME::*)(const Rcpp::CharacterVector&))           \
-                &CLASSNAME::freeze_names,                                 \
+            static_cast<void (CLASSNAME::*)(const Rcpp::CharacterVector&)>( \
+                &CLASSNAME::freeze_names),                                \
             "Fix sub-kernel(s) at current value (kernel-control category)") \
     .method("freeze",                                                     \
-            (void (CLASSNAME::*)(const Rcpp::CharacterVector&, bool))     \
-                &CLASSNAME::freeze_names_quiet,                           \
+            static_cast<void (CLASSNAME::*)(const Rcpp::CharacterVector&, bool)>( \
+                &CLASSNAME::freeze_names_quiet),                          \
             "Fix sub-kernel(s); quiet=TRUE suppresses redundant-refreeze warning") \
     .method("unfreeze",                                                   \
-            (void (CLASSNAME::*)())                                       \
-                &CLASSNAME::unfreeze_names_all,                           \
+            static_cast<void (CLASSNAME::*)()>(                           \
+                &CLASSNAME::unfreeze_names_all),                          \
             "Release ALL frozen sub-kernels (no-arg form)")               \
     .method("unfreeze",                                                   \
-            (void (CLASSNAME::*)(Rcpp::Nullable<Rcpp::CharacterVector>))  \
-                &CLASSNAME::unfreeze_names,                               \
+            static_cast<void (CLASSNAME::*)(Rcpp::Nullable<Rcpp::CharacterVector>)>( \
+                &CLASSNAME::unfreeze_names),                              \
             "Release specific sub-kernel(s); NULL = all")                 \
     .method("get_frozen",                                                 \
-            (Rcpp::CharacterVector (CLASSNAME::*)() const)                \
-                &CLASSNAME::get_frozen_names,                             \
+            static_cast<Rcpp::CharacterVector (CLASSNAME::*)() const>(    \
+                &CLASSNAME::get_frozen_names),                            \
             "List currently-frozen block names (DFS pre-order)")          \
-    .method("clear_history",                                              \
-            (void (CLASSNAME::*)())                                       \
-                &CLASSNAME::clear_history,                                \
+    .method(AI4BayesCode::kcm_detail::clear_history_binding<CLASSNAME>::name(), \
+            &AI4BayesCode::kcm_detail::clear_history_binding<CLASSNAME>::call,   \
             "Discard the stored draws; the current state and tuning are " \
             "kept, and the next step() records the first draw of a new "  \
             "history")                                                    \
     .method("set_current",                                                \
-            (void (CLASSNAME::*)(SEXP, SEXP))                             \
-                &CLASSNAME::set_current_misuse_,                          \
+            static_cast<void (CLASSNAME::*)(SEXP, SEXP)>(                 \
+                &CLASSNAME::set_current_misuse_),                         \
             "Misuse guard: wrap the values in ONE list()")                \
     .method("set_current",                                                \
-            (void (CLASSNAME::*)(SEXP, SEXP, SEXP))                       \
-                &CLASSNAME::set_current_misuse3_,                         \
+            static_cast<void (CLASSNAME::*)(SEXP, SEXP, SEXP)>(           \
+                &CLASSNAME::set_current_misuse3_),                        \
             "Misuse guard: wrap the values in ONE list()")                \
     .method("predict_at",                                                 \
-            (void (CLASSNAME::*)(SEXP, SEXP))                             \
-                &CLASSNAME::predict_at_misuse_,                           \
-            "Misuse guard: wrap the values in ONE list()")        \
-    .method("predict_at",                                                \
-            (AI4BayesCode::history_map (CLASSNAME::*)() const)            \
-                &CLASSNAME::predict_at_noarg_,                             \
+            static_cast<void (CLASSNAME::*)(SEXP, SEXP)>(                 \
+                &CLASSNAME::predict_at_misuse_),                          \
+            "Misuse guard: wrap the values in ONE list()")                \
+    .method("predict_at",                                                 \
+            static_cast<AI4BayesCode::history_map (CLASSNAME::*)() const>( \
+                &CLASSNAME::predict_at_noarg_),                           \
             "No-argument form: predict_at() == predict_at(list())")
 #endif // AI4BAYESCODE_RCPP_MODULE
 
@@ -331,8 +423,8 @@ public:
     .def("get_frozen",                                                    \
          &CLASSNAME::py_get_frozen,                                       \
          "List currently-frozen block names (DFS pre-order)")             \
-    .def("clear_history",                                                 \
-         &CLASSNAME::clear_history,                                       \
+    .def(AI4BayesCode::kcm_detail::clear_history_binding<CLASSNAME>::name(), \
+         &AI4BayesCode::kcm_detail::clear_history_binding<CLASSNAME>::call,   \
          "Discard the stored draws; the current state and tuning are "    \
          "kept, and the next step() records the first draw of a new "     \
          "history")
@@ -348,7 +440,7 @@ public:
 //
 //  This is deliberately NOT folded into AI4BAYESCODE_BIND_KERNEL_CONTROL. That
 //  macro is unconditional -- every wrapper inherits freeze / unfreeze /
-//  get_frozen from kernel_control_mixin -- whereas readapt_NUTS exists only on
+//  get_frozen / clear_history from kernel_control_mixin -- whereas readapt_NUTS exists only on
 //  models that actually have a NUTS kernel (22 of the 42 shipped examples), so
 //  folding it in would fail to compile for the other 20.
 //
@@ -366,16 +458,19 @@ public:
 //      AI4BAYESCODE_BIND_KERNEL_CONTROL(MyModel)
 // ----------------------------------------------------------------------------
 #ifdef AI4BAYESCODE_RCPP_MODULE
+//  Both entries select the overload with static_cast (see the comment above
+//  AI4BAYESCODE_BIND_KERNEL_CONTROL): a class without an overload of exactly
+//  that signature stops the build instead of binding another function.
 #define AI4BAYESCODE_BIND_READAPT_NUTS(CLASSNAME)                          \
     .method("readapt_NUTS",                                                \
-            (void (CLASSNAME::*)(int, bool, int))                          \
-                &CLASSNAME::readapt_NUTS,                                   \
+            static_cast<void (CLASSNAME::*)(int, bool, int)>(              \
+                &CLASSNAME::readapt_NUTS),                                  \
             "Re-tune NUTS dual-averaging: readapt_NUTS(n, reset, "          \
             "max_tree_depth). Pass all three -- Rcpp dispatches on arity "  \
             "and does not honour the C++ default arguments.")               \
     .method("readapt_NUTS",                                                \
-            (void (CLASSNAME::*)(int, bool, int, double))                   \
-                &CLASSNAME::readapt_NUTS,                                   \
+            static_cast<void (CLASSNAME::*)(int, bool, int, double)>(      \
+                &CLASSNAME::readapt_NUTS),                                  \
             "Re-tune NUTS; 4th argument target_accept in (0, 1] overrides " \
             "the block's target (default 0.55) for this re-adaptation.")
 #endif // AI4BAYESCODE_RCPP_MODULE
@@ -383,8 +478,8 @@ public:
 #ifdef AI4BAYESCODE_PYBIND_MODULE
 #define AI4BAYESCODE_PYBIND_READAPT_NUTS(CLASSNAME)                        \
     .def("readapt_NUTS",                                                   \
-         (void (CLASSNAME::*)(int, bool, int, double))                     \
-             &CLASSNAME::readapt_NUTS,                                      \
+         static_cast<void (CLASSNAME::*)(int, bool, int, double)>(         \
+             &CLASSNAME::readapt_NUTS),                                     \
          pybind11::arg("n"), pybind11::arg("reset") = false,               \
          pybind11::arg("max_tree_depth") = -1,                             \
          pybind11::arg("target_accept") = -1.0,                            \

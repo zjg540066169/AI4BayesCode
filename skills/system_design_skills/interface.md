@@ -97,7 +97,10 @@ clear_history () -> void -- always
      unchanged; the next step() records the first draw of the new history;
    * a wrapper that records per-sweep values in members outside impl_
      defines a PUBLIC void clear_extra_history_() that empties them
-     (codegen_cpp.md Sec.8);
+     (codegen_cpp.md Sec.8); only the hook of the class named in
+     kernel_control_mixin<...> is called, so a class derived from a
+     wrapper declares clear_history() { Wrapper::clear_history(); ... }
+     instead;
    * ai4bayescode_run_chains() / run_chains() call it after the warmup
      sweeps.
 
@@ -205,10 +208,10 @@ using dbarts / mcmclib / etc. directly.
   but not in `names()`. Either way, no extra names / functions
   outside the formula above should appear.
 - Validator Check #23 verifies `readapt_NUTS` presence/absence + state
-  preservation; validator Check #26 verifies freeze/unfreeze/get_frozen
-  presence + whitelist/blacklist gate + refreeze warning + stale-derived
-  warning; the R1 member-function sweep (validator.md Layer 3) verifies
-  clear_history.
+  preservation; validator Check #26 verifies freeze/unfreeze/get_frozen/
+  clear_history presence + whitelist/blacklist gate + refreeze warning +
+  stale-derived warning; the R1 member-function sweep (validator.md Layer 3)
+  verifies the clear_history invariants.
 
 **Freeze name resolution -- resolver step order.** `composite_block`
 resolves each name passed to `freeze(...)` in this fixed order (see
