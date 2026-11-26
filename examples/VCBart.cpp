@@ -51,7 +51,8 @@
 //
 //  Prediction (predict_at)
 //  -----------------------
-//  Output keys mu and y_rep. new_data is empty (training data) or holds both
+//  Output keys mu and y_rep, in this order in the R list and the Python dict
+//  (mu first, as in 1.1.2). new_data is empty (training data) or holds both
 //  Z (N_new x q) and X (N_new x p), flattened column-major; x_i0 = 1.
 //    * single draw (keep_history = FALSE, or last_draw_only = TRUE), 1 x N:
 //        mu_i = sum_{j=0..p} x_ij beta_j(Z_i), each beta_j evaluated from the
@@ -521,8 +522,13 @@ public:
             arma::mat y_rep(1, n_new);
             for (std::size_t i = 0; i < n_new; ++i)
                 y_rep(0, i) = mu(0, i) + sigma * norm01(predict_rng_);
-            out.emplace("mu", std::move(mu));
+            // The R list and the Python dict are built in the iteration order
+            // of history_map (an unordered_map). With libc++ and libstdc++ the
+            // iteration order of two keys inserted into an empty map is the
+            // reverse of the insertion order, so y_rep is inserted first and
+            // mu is the first element, as in 1.1.2, where mu was the only key.
             out.emplace("y_rep", std::move(y_rep));
+            out.emplace("mu", std::move(mu));
             return out;
         }
 
@@ -576,8 +582,10 @@ public:
             for (std::size_t i = 0; i < n_new; ++i)
                 y_rep(d, i) = mu(d, i) + sigma_d * norm01(predict_rng_);
         }
-        out.emplace("mu", std::move(mu));
+        // y_rep first, so mu is the first element of the R list and the
+        // Python dict (see the single-draw branch).
         out.emplace("y_rep", std::move(y_rep));
+        out.emplace("mu", std::move(mu));
         return out;
     }
 

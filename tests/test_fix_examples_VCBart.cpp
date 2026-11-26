@@ -40,6 +40,11 @@
 //        row of y_rep from the current sigma;
 //    C11 predict_at calls between sweeps leave every get_history() and
 //        get_current() entry of the chain bit-identical.
+//    C12 the iteration order of the keys of every predict_at output of C9
+//        and C10, and of the one-argument predict_at (single draw and history
+//        mode), is mu, y_rep: the R list and the Python dict are built in the
+//        iteration order, so mu is the first element, as in 1.1.2, where it
+//        was the only key.
 // ============================================================================
 #include <armadillo>
 #include <algorithm>
@@ -118,14 +123,23 @@ arma::mat replay_y_rep(std::mt19937_64& g, const arma::mat& mu, const arma::vec&
     return out;
 }
 
+// The keys of a map in its iteration order, joined by ','.
+std::string key_list(const AI4BayesCode::history_map& h) {
+    std::string s;
+    for (const auto& kv : h) s += (s.empty() ? "" : ",") + kv.first;
+    return s;
+}
+
 // predict_at(nd, last) with the y_rep of the call compared to a replay of
-// predict_rng_: max relative error, and whether the stream positions agree.
-struct yrep_check { arma::mat mu, y_rep; double err; bool same_stream; };
+// predict_rng_: max relative error, whether the stream positions agree, and
+// the keys of the output in iteration order.
+struct yrep_check { arma::mat mu, y_rep; double err; bool same_stream; std::string keys; };
 yrep_check check_y_rep(VCBart& m, const AI4BayesCode::state_map& nd, bool last,
                        const arma::vec& sig_or_empty) {
     std::mt19937_64 g = m.*member_of(prng_tag{});
     const AI4BayesCode::history_map pr = m.predict_at(nd, last);
     yrep_check c;
+    c.keys = key_list(pr);
     c.mu = pr.at("mu");
     c.y_rep = pr.at("y_rep");
     arma::vec sig = sig_or_empty;
@@ -357,6 +371,23 @@ int main() {
                 "keys, %d current keys, all bit-identical %d\n",
                 (int)ha.size(), (int)ca.size(), same11 ? 1 : 0);
     check(same11, "C11 predict_at between sweeps leaves the chain unchanged");
+
+    // C12: m5 is a single-draw model, mn a history-mode model with 5 stored
+    // draws (keep_tree = false).
+    const std::string k12a = key_list(m5.predict_at(empty));
+    const std::string k12b = key_list(mn.predict_at(empty));
+    std::printf("C12 keys in iteration order: single training {%s}, single new {%s}, history "
+                "training {%s}, history new {%s}, last_draw_only {%s}, keep_tree = false "
+                "training {%s}, after clear_history() training {%s} and new {%s}, "
+                "one-argument predict_at single {%s} and history {%s}\n",
+                c9a.keys.c_str(), c9b.keys.c_str(), c9c.keys.c_str(), c9d.keys.c_str(),
+                c9e.keys.c_str(), c9f.keys.c_str(), c10a.keys.c_str(), c10b.keys.c_str(),
+                k12a.c_str(), k12b.c_str());
+    bool order12 = k12a == "mu,y_rep" && k12b == "mu,y_rep";
+    for (const yrep_check* c : {&c9a, &c9b, &c9c, &c9d, &c9e, &c9f, &c10a, &c10b})
+        order12 = order12 && c->keys == "mu,y_rep";
+    check(order12, "C12 mu is the first key of predict_at in every mode (the first element of "
+                   "the R list and the Python dict, as in 1.1.2)");
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail,
                 g_fail == 1 ? "" : "s");
