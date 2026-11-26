@@ -10,8 +10,8 @@
 #' automatically.
 #'
 #' The flags include `-include AI4BayesCode/arma_aligned_alloc.hpp`, so, as
-#' with [ai4bayescode_source()], Armadillo takes its heap arrays from memory
-#' aligned to 64 bytes. Rcpp keys its build cache on the source file alone: a
+#' with [ai4bayescode_source()], Armadillo allocates its heap arrays on
+#' 256-byte boundaries. Rcpp keys its build cache on the source file alone: a
 #' module built through this plugin by an earlier version of AI4BayesCode and
 #' kept in a lasting `rcpp.cache.dir` folder is loaded again for an unchanged
 #' file unless `rebuild = TRUE` is passed to [Rcpp::sourceCpp()].
@@ -52,13 +52,15 @@ inlineCxxPlugin <- function() {
         # compile then opens with a macro-redefinition warning.
         "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_RCPP_MODULE",
-        # Armadillo takes its heap arrays from 64-byte-aligned memory, as in
+        # Armadillo allocates its heap arrays on 256-byte boundaries, as in
         # ai4bayescode_source() (see AI4BayesCode/arma_aligned_alloc.hpp).
-        # -include reads the header before the first line of the source, so
-        # before <RcppArmadillo.h>. The relative name needs no quoting: the
-        # compiler looks for it in its working directory (Rcpp's build
-        # folder), then in R's include folder, then under the first -I above,
-        # and only the last has an AI4BayesCode folder.
+        # With -include the preprocessor processes the header before the
+        # first line of the source, so before <RcppArmadillo.h>. The relative
+        # name needs no quoting: the compiler resolves a relative -include
+        # name against its working directory (Rcpp's build folder) first,
+        # then R's include folder, then the -I folders in order; of these,
+        # only AI4BayesCode's include root, the first -I above, contains a
+        # folder AI4BayesCode.
         "-include AI4BayesCode/arma_aligned_alloc.hpp"
     )
 

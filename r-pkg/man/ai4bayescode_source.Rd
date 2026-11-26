@@ -104,12 +104,16 @@ to R's temporary folder.
 \section{Memory alignment and the build cache}{
 
 Every build force-includes `AI4BayesCode/arma_aligned_alloc.hpp`, so
-Armadillo takes its heap arrays from memory aligned to 64 bytes. Some BLAS
-and LAPACK libraries (macOS Accelerate among them) add up the terms of a
-dot product or a triangular solve in an order that depends on the
-alignment of the operands; with every heap array on a 64-byte boundary,
-the results of these routines, and so the draws of a model built with a
-given seed, do not depend on where the arrays lie in memory.
+Armadillo allocates its heap arrays on 256-byte boundaries. On an Apple M2
+Max with macOS 27.0.1, the results of Accelerate routines that Armadillo
+calls, among them ddot (`dot()`, `accu(A % B)`) and dtrtrs
+(`solve(trimatl(L), b)`), depend on the addresses of the operands modulo
+256 bytes, and with every operand at a multiple of 256 bytes each routine
+gave one result; the header lists the routines and sizes measured. On that
+machine `GPRegression` (N = 100, 110, 120), `GPClassification` (N = 100,
+110) and `HSGPRegression` (N = 80, 110), each built six times with one seed
+in each of three R sessions, gave bit-identical draws within and across
+the sessions.
 
 Rcpp keys its build cache on the source file alone, so the build is kept
 in a subfolder of the cache folder (`cacheDir`, by default

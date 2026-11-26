@@ -138,15 +138,16 @@ ai4bayescode_source_checkout <- function(cpp_file,
         # compile then opens with a macro-redefinition warning.
         "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_RCPP_MODULE",
-        # Armadillo takes its heap arrays from 64-byte-aligned memory, so BLAS
-        # and LAPACK results do not depend on where an array lies (see
-        # include/AI4BayesCode/arma_aligned_alloc.hpp). -include reads the
-        # header before the first line of the source, so before
-        # <RcppArmadillo.h>. The relative name needs no quoting: the compiler
-        # looks for it in its working directory (Rcpp's build folder), then
-        # in R's include folder, then under the checkout's include root, the
-        # first -I of PKG_CPPFLAGS, and only the last has an AI4BayesCode
-        # folder.
+        # Armadillo allocates its heap arrays on 256-byte boundaries (see
+        # include/AI4BayesCode/arma_aligned_alloc.hpp for the Accelerate
+        # routines whose results depend on the operand addresses modulo 256
+        # bytes). With -include the preprocessor processes the header before
+        # the first line of the source, so before <RcppArmadillo.h>. The
+        # relative name needs no quoting: the compiler resolves a relative
+        # -include name against its working directory (Rcpp's build folder)
+        # first, then R's include folder, then the -I folders in order; of
+        # these, only the checkout's include root, the first -I of
+        # PKG_CPPFLAGS, contains a folder AI4BayesCode.
         "-include AI4BayesCode/arma_aligned_alloc.hpp",
         extra_cppflags
     )

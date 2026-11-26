@@ -4,32 +4,40 @@
 //  test_fix_arma_aligned_alloc.cpp
 //
 //  AI4BayesCode/arma_aligned_alloc.hpp, included before <armadillo> as the R
-//  and Python packages include it (-include):
+//  and Python packages include it (-include). A = arma_heap_alignment.
 //    1. ARMA_ALIEN_MEM_ALLOC_FUNCTION and ARMA_ALIEN_MEM_FREE_FUNCTION are
 //       defined, and arma::memory::acquire / release go through the two
 //       functions of the header.
-//    2. Every heap array of a Mat, Col, Row, Cube and SpMat lies on a 64-byte
+//    2. Every heap array of a Mat, Col, Row, Cube and SpMat lies on an A-byte
 //       boundary: after construction, set_size, resize, copy and move, for
 //       the results of arithmetic, chol, solve, inv and vectorise, and for
 //       Mat objects held in a std::vector. Arrays of at most 16 elements
 //       (Mat) or 64 (Cube) are stored inside the object and are not checked.
 //    3. dot(y, y), accu(W % S), solve(trimatl(L), y) and
-//       solve(trimatu(L.t()), y) (N = 120) of the same values give
-//       bit-identical results in 24 repetitions, each on new copies of the
-//       operands made after allocations of other sizes, with the arrays of
-//       earlier repetitions still allocated. With macOS Accelerate,
-//       accu(W % S) and solve(trimatu(L.t()), y) give other bits when their
-//       arrays lie 16, 32 or 48 bytes past a 64-byte boundary.
+//       solve(trimatu(L.t()), y) of the same values, for N = 110 (vectors of
+//       880 bytes) and N = 120, give bit-identical results in 24
+//       repetitions, each on new copies of the operands made after
+//       allocations of other sizes, with the arrays of earlier repetitions
+//       still allocated.
 //    4. examples/GPRegression.cpp (joint NUTS over the hyperparameters of the
 //       marginal GP likelihood, whose gradient uses accu(W % dK) and
-//       triangular solves): four models built with the same seed, each after
-//       different heap allocations, give bit-identical get_history() and
-//       get_current() after the same number of sweeps.
+//       triangular solves), N = 110 and N = 120: four models built with the
+//       same seed, each after different heap allocations, give bit-identical
+//       get_history() and get_current() after the same number of sweeps.
 //    5. The objects the header does not cover: a Mat with at most 16
 //       elements (arma_config::mat_prealloc) and a Cube with at most 64
 //       elements (Cube_prealloc::mem_n_elem) hold their elements inside the
-//       object; with one element more the elements are on the heap, on a
-//       64-byte boundary.
+//       object; with one element more the elements are on the heap, on an
+//       A-byte boundary.
+//    6. ddot (n = 5000, 14400), dtrtrs (n = 110, one right-hand side) and
+//       dgetrf + dgetrs (n = 110, one right-hand side), called with every
+//       operand at offset k * 64 bytes from a 16384-byte boundary,
+//       k = 0, ..., 255, give one result per class of the offset modulo A.
+//       On an Apple M2 Max with macOS 27.0.1 these Accelerate routines give
+//       results that depend on the offset modulo 256 bytes, so there this
+//       check fails for A = 64 or A = 128. Sections 3 and 4 depend on the
+//       addresses that malloc returns; this section places the operands
+//       itself.
 // ============================================================================
 #include "AI4BayesCode/arma_aligned_alloc.hpp"
 
@@ -41,9 +49,11 @@
 #endif
 #include <armadillo>
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <random>
 #include <string>
@@ -61,14 +71,22 @@ void check(bool ok, const std::string& what) {
     if (!ok) ++g_fail;
 }
 
+const std::size_t A_BYTES = AI4BayesCode::arma_heap_alignment;
+const std::string A_STR = std::to_string(AI4BayesCode::arma_heap_alignment);
+
 bool on_boundary(const void* p) {
-    return reinterpret_cast<std::uintptr_t>(p) % AI4BayesCode::arma_heap_alignment == 0;
+    return reinterpret_cast<std::uintptr_t>(p) % A_BYTES == 0;
 }
 
 bool same_bits(const arma::mat& a, const arma::mat& b) {
     return a.n_rows == b.n_rows && a.n_cols == b.n_cols &&
            (a.n_elem == 0 ||
             std::memcmp(a.memptr(), b.memptr(), a.n_elem * sizeof(double)) == 0);
+}
+
+bool same_bits(const std::vector<double>& a, const std::vector<double>& b) {
+    return a.size() == b.size() &&
+           (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(double)) == 0);
 }
 
 // Heap blocks of sizes drawn from `rng`, kept alive by the caller, so the
@@ -96,7 +114,8 @@ void allocator_macros() {
         blocks.push_back(p);
     }
     for (double* p : blocks) arma::memory::release(p);
-    check(all_on, "arma::memory::acquire<double>(n) is 64-byte aligned for n = 1..4096");
+    check(all_on, "arma::memory::acquire<double>(n) is " + A_STR +
+                  "-byte aligned for n = 1..4096");
 }
 
 // ---- 2. heap arrays of Armadillo objects -----------------------------------
@@ -144,21 +163,21 @@ void heap_arrays() {
         if (Sp.n_nonzero > 0) rec(Sp.values, Sp.n_nonzero, 0);
     }
     check(n_checked > 2000 && n_on == n_checked,
-          "every heap array on a 64-byte boundary (" + std::to_string(n_on) + " of " +
-          std::to_string(n_checked) + ")");
+          "every heap array on a " + A_STR + "-byte boundary (" + std::to_string(n_on) +
+          " of " + std::to_string(n_checked) + ")");
 }
 
 // ---- 3. alignment-dependent BLAS / LAPACK results --------------------------
-void blas_results() {
-    std::printf("3. dot, accu(W %% S), solve(trimatl(L), y), solve(trimatu(L.t()), y)\n");
-    const arma::uword N = 120;
+void blas_results(const arma::uword N) {
+    std::printf("3. dot, accu(W %% S), solve(trimatl(L), y), solve(trimatu(L.t()), y), "
+                "N = %u\n", static_cast<unsigned>(N));
     arma::arma_rng::set_seed(17);
     const arma::mat B0 = arma::randn(N, N);
     const arma::mat S0 = B0 * B0.t() + static_cast<double>(N) * arma::eye(N, N);
     const arma::mat L0 = arma::chol(S0, "lower");
     const arma::mat W0 = arma::randn(N, N);
     const arma::vec y0 = arma::randn(N);
-    std::mt19937_64 rng(5);
+    std::mt19937_64 rng(5 + N);
     std::vector<std::vector<char>> keep;
     std::vector<arma::mat> held;   // no array of one repetition is freed before the next
     arma::mat ref[4];
@@ -180,16 +199,17 @@ void blas_results() {
         }
         held.push_back(y);
     }
-    check(same[0], "dot(y, y): 24 repetitions bit-identical");
-    check(same[1], "accu(W % S): 24 repetitions bit-identical");
-    check(same[2], "solve(trimatl(L), y): 24 repetitions bit-identical");
-    check(same[3], "solve(trimatu(L.t()), y): 24 repetitions bit-identical");
+    const std::string sn = " (N = " + std::to_string(N) + ")";
+    check(same[0], "dot(y, y): 24 repetitions bit-identical" + sn);
+    check(same[1], "accu(W % S): 24 repetitions bit-identical" + sn);
+    check(same[2], "solve(trimatl(L), y): 24 repetitions bit-identical" + sn);
+    check(same[3], "solve(trimatu(L.t()), y): 24 repetitions bit-identical" + sn);
 }
 
 // ---- 4. GPRegression, same seed, different heap states ---------------------
-void gp_regression_repeats() {
-    std::printf("4. examples/GPRegression.cpp built four times with seed 11\n");
-    const std::size_t N = 120;
+void gp_regression_repeats(const std::size_t N) {
+    std::printf("4. examples/GPRegression.cpp built four times with seed 11, N = %u\n",
+                static_cast<unsigned>(N));
     arma::mat X(N, 1);
     arma::vec y(N);
     std::mt19937_64 sim(2024);
@@ -199,7 +219,7 @@ void gp_regression_repeats() {
         X(i, 0) = x;
         y[i] = std::sin(3.0 * x) + 0.5 * x + noise(sim);
     }
-    std::mt19937_64 rng(9);
+    std::mt19937_64 rng(9 + N);
     std::vector<std::vector<char>> keep;
     std::vector<std::unique_ptr<GPRegression>> others;
     std::vector<AI4BayesCode::history_map> hist;
@@ -228,9 +248,10 @@ void gp_regression_repeats() {
                        same_bits(arma::mat(it->second), arma::mat(kv.second));
         }
     }
-    check(hist[0].at("amplitude").n_rows == 150, "get_history() has 150 rows");
-    check(same_hist, "get_history() bit-identical in the four builds");
-    check(same_cur,  "get_current() bit-identical in the four builds");
+    const std::string sn = " (N = " + std::to_string(N) + ")";
+    check(hist[0].at("amplitude").n_rows == 150, "get_history() has 150 rows" + sn);
+    check(same_hist, "get_history() bit-identical in the four builds" + sn);
+    check(same_cur,  "get_current() bit-identical in the four builds" + sn);
 }
 
 // ---- 5. elements stored inside the object ----------------------------------
@@ -260,20 +281,128 @@ void elements_inside_the_object() {
         cube65 = cube65 && !inside(&r, sizeof(r), r.memptr()) && on_boundary(r.memptr());
     }
     check(mat16,  "Mat with 16 elements: elements inside the object");
-    check(mat17,  "Mat with 17 elements: elements on the heap, on a 64-byte boundary");
+    check(mat17,  "Mat with 17 elements: elements on the heap, on a " + A_STR + "-byte boundary");
     check(cube64, "Cube with 64 elements: elements inside the object");
-    check(cube65, "Cube with 65 elements: elements on the heap, on a 64-byte boundary");
+    check(cube65, "Cube with 65 elements: elements on the heap, on a " + A_STR + "-byte boundary");
+}
+
+// ---- 6. routine results at offsets k * 64 from a 16384-byte boundary --------
+// Room for n_bytes at every offset k * 64 bytes, k = 0..255, from a
+// 16384-byte boundary inside the buffer.
+class OffsetBuffer {
+public:
+    explicit OffsetBuffer(std::size_t n_bytes) : raw_(n_bytes + 2 * 16384) {
+        const std::uintptr_t p = reinterpret_cast<std::uintptr_t>(raw_.data());
+        base_ = raw_.data() + (16384 - p % 16384) % 16384;
+    }
+    template <class T> T* at(std::size_t off) { return reinterpret_cast<T*>(base_ + off); }
+private:
+    std::vector<unsigned char> raw_;
+    unsigned char* base_;
+};
+
+// f(off) returns the result of one call with every operand at offset off.
+// Returns true if all offsets in one class of the offset modulo A give the
+// same bits; n_distinct is the number of different results over all offsets.
+template <class F>
+bool one_result_per_class(F f, std::size_t& n_distinct) {
+    std::map<std::size_t, std::vector<double>> first;   // class -> result
+    std::vector<std::vector<double>> distinct;
+    bool ok = true;
+    for (std::size_t k = 0; k < 256; ++k) {
+        const std::size_t off = 64 * k;
+        const std::vector<double> r = f(off);
+        bool seen = false;
+        for (const auto& d : distinct) seen = seen || same_bits(d, r);
+        if (!seen) distinct.push_back(r);
+        const auto it = first.find(off % A_BYTES);
+        if (it == first.end()) first.emplace(off % A_BYTES, r);
+        else ok = ok && same_bits(it->second, r);
+    }
+    n_distinct = distinct.size();
+    return ok;
+}
+
+std::vector<double> normal_draws(std::size_t n, std::uint64_t seed) {
+    std::mt19937_64 rng(seed);
+    std::normal_distribution<double> nd;
+    std::vector<double> v(n);
+    for (auto& x : v) x = nd(rng);
+    return v;
+}
+
+void routine_offset_classes() {
+    std::printf("6. ddot, dtrtrs and dgetrf + dgetrs with operands at offsets k * 64 bytes\n");
+    std::size_t n_distinct = 0;
+    for (const int n : {5000, 14400}) {
+        const std::size_t nn = static_cast<std::size_t>(n);
+        const std::vector<double> x0 = normal_draws(nn, 21), y0 = normal_draws(nn, 22);
+        OffsetBuffer bx(nn * 8), by(nn * 8);
+        const bool ok = one_result_per_class([&](std::size_t off) {
+            double* x = bx.at<double>(off); double* y = by.at<double>(off);
+            std::memcpy(x, x0.data(), nn * 8); std::memcpy(y, y0.data(), nn * 8);
+            return std::vector<double>{arma::blas::dot(arma::uword(n), x, y)};
+        }, n_distinct);
+        check(ok, "ddot, n = " + std::to_string(n) + ": one result per class of the offset "
+                  "modulo " + A_STR + " (" + std::to_string(n_distinct) +
+                  " different results over the 256 offsets)");
+    }
+    // not const: Armadillo releases before 15.8 declare the LAPACK wrappers
+    // with non-const pointer parameters
+    arma::blas_int n = 110, n_rhs = 1;
+    const std::size_t nn = 110, n2 = nn * nn;
+    const std::vector<double> a0 = normal_draws(n2, 23), b0 = normal_draws(nn, 24);
+    std::vector<double> L0(n2, 0.0), G0(a0);
+    for (std::size_t j = 0; j < nn; ++j) {
+        for (std::size_t i = j; i < nn; ++i)
+            L0[i + j * nn] = (i == j) ? 5.0 + std::fabs(a0[i + j * nn]) : 0.3 * a0[i + j * nn];
+        G0[j + j * nn] += static_cast<double>(nn);
+    }
+    {
+        OffsetBuffer bL(n2 * 8), bb(nn * 8);
+        const bool ok = one_result_per_class([&](std::size_t off) {
+            double* L = bL.at<double>(off); double* b = bb.at<double>(off);
+            std::memcpy(L, L0.data(), n2 * 8); std::memcpy(b, b0.data(), nn * 8);
+            char uplo = 'L', trans = 'N', diag = 'N';
+            arma::blas_int info = 0;
+            arma::lapack::trtrs<double>(&uplo, &trans, &diag, &n, &n_rhs, L, &n, b, &n, &info);
+            return std::vector<double>(b, b + nn);
+        }, n_distinct);
+        check(ok, "dtrtrs (lower, n = 110, one right-hand side): one result per class of the "
+                  "offset modulo " + A_STR + " (" + std::to_string(n_distinct) +
+                  " different results over the 256 offsets)");
+    }
+    {
+        OffsetBuffer bA(n2 * 8), bb(nn * 8), bp(nn * sizeof(arma::blas_int));
+        const bool ok = one_result_per_class([&](std::size_t off) {
+            double* G = bA.at<double>(off); double* b = bb.at<double>(off);
+            arma::blas_int* ipiv = bp.at<arma::blas_int>(off);
+            std::memcpy(G, G0.data(), n2 * 8); std::memcpy(b, b0.data(), nn * 8);
+            char trans = 'N';
+            arma::blas_int info = 0;
+            arma::lapack::getrf<double>(&n, &n, G, &n, ipiv, &info);
+            arma::lapack::getrs<double>(&trans, &n, &n_rhs, G, &n, ipiv, b, &n, &info);
+            return std::vector<double>(b, b + nn);
+        }, n_distinct);
+        check(ok, "dgetrf + dgetrs (n = 110, one right-hand side): one result per class of "
+                  "the offset modulo " + A_STR + " (" + std::to_string(n_distinct) +
+                  " different results over the 256 offsets)");
+    }
 }
 
 }  // namespace
 
 int main() {
-    std::printf("=== test_fix_arma_aligned_alloc ===\n\n");
+    std::printf("=== test_fix_arma_aligned_alloc (arma_heap_alignment = %s) ===\n\n",
+                A_STR.c_str());
     allocator_macros();
     heap_arrays();
-    blas_results();
-    gp_regression_repeats();
+    blas_results(110);
+    blas_results(120);
+    gp_regression_repeats(110);
+    gp_regression_repeats(120);
     elements_inside_the_object();
+    routine_offset_classes();
     std::printf("\ntest_fix_arma_aligned_alloc: %d failed check(s)\n", g_fail);
     return g_fail == 0 ? 0 : 1;
 }
