@@ -26,7 +26,8 @@
 //  C. softbart_block with set_context + step and set_X, set_tree (round trip
 //     and an earlier forest) and set_data between sweeps, under and above the
 //     bound, against the same block whose model is advanced by
-//     Forest::do_gibbs.
+//     Forest::do_gibbs (with the kernel stream seeded before the first sweep
+//     as the block's first step() seeds it).
 //  D. A forest with update_num_tree, with the bound placed at the number of
 //     trees before each sweep: a sweep that adds a tree ends without the
 //     store, and with the bound one below, a sweep that removes a tree ends
@@ -221,6 +222,11 @@ static BlockRun run_block(const arma::mat& X, const arma::mat& X2, const arma::v
         b.set_context(ctx);
         Sweep w;
         if (reference) {
+            // The block's first step() seeds the kernel stream from the step
+            // generator (here std::mt19937_64(1)) and the block name.
+            if (s == 0)
+                bart_rng::set_seed(AI4BayesCode::detail::kernel_stream_seed(
+                    std::mt19937_64(1), b.name()));
             // The block's preprocessing (center_Y = false): X mapped to
             // [0, 1], Z = (y - midrange(y_init)) / y_scale, sigma / y_scale.
             Forest* f = b.underlying()->forest();

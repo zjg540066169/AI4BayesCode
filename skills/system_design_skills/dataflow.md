@@ -333,10 +333,15 @@ state -- see Sec.13).
 
 ### BART-family additional rule
 
-BART uses R's RNG via `arn` (bart_pure_cpp/src/BART/rn.h). The mt19937 argument
-to bart_block::step is IGNORED. Reproducibility requires R-level
-`set.seed()` before the MCMC loop AND the two-or-three mt19937
-streams for the NON-BART siblings.
+Under the R (Rcpp) backend BART uses R's RNG via `arn`
+(bart_pure_cpp/src/BART/rn.h) and the mt19937 argument to bart_block::step
+is not used. Reproducibility requires R-level `set.seed()` before the MCMC
+loop AND the two-or-three mt19937 streams for the NON-BART siblings. Under
+the pybind / standalone backends the kernels draw from the thread-local
+stream `bart_rng`; the first `step()` of each bart_block / genbart_block /
+softbart_block seeds it from a copy of the mt19937 argument and the block
+name (`detail::kernel_stream_seed`), so the chain's own stream is not
+advanced and the kernel draws follow from `rng_seed`.
 
 ### Validator checks
 

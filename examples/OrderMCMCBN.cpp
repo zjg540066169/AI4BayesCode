@@ -38,8 +38,8 @@
 //  get_dag() returns AI4BayesCode's INTERNAL Gibbs/Predict DAG (one node,
 //  "order_mcmc"), NOT the learned Bayesian network DAG. The learned BN
 //  DAG is in `get_current()$sampled_DAG`, and with keep_history one per
-//  stored sweep in `get_history()$order_sampled_DAG` and
-//  `predict_at(list())$sampled_DAG`.
+//  stored sweep in `predict_at(list())$sampled_DAG` (get_history() has the
+//  keys of 1.1.2, order and order_log_score).
 //
 //  KNOWN BIAS (FK 2003 Sec.4.1)
 //  -------------------------
@@ -112,11 +112,9 @@
 //                                    in get_current(); one row per sweep
 //                                    with keep_history, else the current
 //                                    sequence), "order_log_score" (one row
-//                                    per sweep with keep_history),
-//                                    "order_sampled_DAG" (one row per sweep
-//                                    with keep_history: the DAG stored for
-//                                    that sweep, n*n column-major as
-//                                    get_current()'s sampled_DAG) }.
+//                                    per sweep with keep_history) }, the
+//                                    keys of 1.1.2; the stored DAGs are
+//                                    returned by predict_at(list()).
 //    Stored DAGs: the DAG stored for a sweep is the DAG sampled by the
 //    block's step() in that sweep. In a held sweep of the frozen block
 //    (freeze(), ai4bayescode_new_frozen() / new_frozen()) the block's step()
@@ -517,24 +515,12 @@ public:
 
     AI4BayesCode::dag_info     get_dag()     const { return impl_->get_dag(); }
 
-    // The composite's history with "order" 1-based, as in get_current(), and
-    // each row of "order_sampled_DAG" flattened column-major as
-    // get_current()'s sampled_DAG: column i + j*n is column i*n + j of the
-    // block's row (the block stores element i*n + j = 1 when j is a parent
-    // of i).
+    // The composite's history (order, order_log_score) with "order" 1-based,
+    // as in get_current().
     AI4BayesCode::history_map  get_history() const {
         AI4BayesCode::history_map h = impl_->get_history();
         const auto it = h.find("order");
         if (it != h.end()) it->second += 1.0;
-        const auto it_dag = h.find("order_sampled_DAG");
-        if (it_dag != h.end()) {
-            arma::uvec from(n_ * n_);
-            for (std::size_t i = 0; i < n_; ++i)
-                for (std::size_t j = 0; j < n_; ++j)
-                    from[i + j * n_] = i * n_ + j;
-            arma::mat col_major = it_dag->second.cols(from);
-            it_dag->second = std::move(col_major);
-        }
         return h;
     }
 
@@ -685,7 +671,7 @@ RCPP_MODULE(OrderMCMCBN_module) {
                 "the history; FALSE is predict_at(list()).")
         .method("get_dag",     &OrderMCMCBN::get_dag)
         .method("get_history", &OrderMCMCBN::get_history,
-                "Returns list(order = node sequences, 1-based as in get_current(), one row per sweep when keep_history = TRUE, else the current sequence; order_log_score = log P(D | partition), one row per sweep when keep_history = TRUE; order_sampled_DAG = the DAG stored for each sweep (the DAG sampled in that sweep, or, in a held sweep of the frozen block, the held DAG, get_current()$sampled_DAG at the freeze or after a later load, so the rows of held sweeps are copies of one DAG), n*n flattened COLUMN-MAJOR as get_current()$sampled_DAG, one row per sweep when keep_history = TRUE).")
+                "Returns list(order = node sequences, 1-based as in get_current(), one row per sweep when keep_history = TRUE, else the current sequence; order_log_score = log P(D | partition), one row per sweep when keep_history = TRUE). The DAG stored for each sweep is in predict_at(list())$sampled_DAG.")
         AI4BAYESCODE_BIND_KERNEL_CONTROL(OrderMCMCBN);
 }
 #endif
@@ -764,13 +750,8 @@ PYBIND11_MODULE(OrderMCMCBN, m) {
              "Returns {'order': node sequences, 1-based as in get_current(), "
              "one row per sweep when keep_history=True, else the current "
              "sequence; 'order_log_score': log P(D | partition), one row per "
-             "sweep when keep_history=True; 'order_sampled_DAG': the DAG "
-             "stored for each sweep (the DAG sampled in that sweep, or, in a "
-             "held sweep of the frozen block, the held DAG, get_current()"
-             "['sampled_DAG'] at the freeze or after a later load, so the rows "
-             "of held sweeps are copies of one DAG), n*n flattened "
-             "COLUMN-MAJOR as get_current()['sampled_DAG'], one row per sweep "
-             "when keep_history=True}.")
+             "sweep when keep_history=True}. The DAG stored for each sweep is "
+             "in predict_at({})['sampled_DAG'].")
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(OrderMCMCBN);
 }
 #endif

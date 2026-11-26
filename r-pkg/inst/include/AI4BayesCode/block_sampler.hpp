@@ -86,6 +86,7 @@
 #ifndef AI4BAYESCODE_BLOCK_SAMPLER_HPP
 #define AI4BAYESCODE_BLOCK_SAMPLER_HPP
 
+#include <cstdint>
 #include <random>
 #include <string>
 #include <unordered_map>
@@ -131,6 +132,26 @@ inline history_map make_history_map(const std::string& name,
     history_map out;
     out.emplace(name, std::move(m));
     return out;
+}
+
+/**
+ * Seed of the thread-local BART kernel stream (bart_rng) that bart_block,
+ * genbart_block and softbart_block set at their first step() in a pybind or
+ * standalone build: the next output of a COPY of the chain generator `rng`
+ * (so `rng` itself is not advanced and the other draws of the chain are
+ * unchanged), XOR the 64-bit FNV-1a hash of the block name. Blocks of one
+ * model take their first step() with the same generator state; the name
+ * gives each of them a different seed.
+ */
+inline std::uint64_t kernel_stream_seed(const std::mt19937_64& rng,
+                                        const std::string& name) {
+    std::mt19937_64 copy = rng;
+    std::uint64_t h = 14695981039346656037ULL;          // FNV-1a offset basis
+    for (const unsigned char ch : name) {
+        h ^= ch;
+        h *= 1099511628211ULL;                           // FNV-1a prime
+    }
+    return copy() ^ h;
 }
 
 } // namespace detail
