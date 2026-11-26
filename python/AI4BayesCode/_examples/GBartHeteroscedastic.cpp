@@ -79,6 +79,13 @@
 //   mod <- new(GBartHeteroscedastic, X, y, rng_seed = 42L)   # ntrees 50, phi_init 1.0
 //   #          X,  y, ntrees, phi_init, seed, keep_tree
 //   mod$step(2000); str(mod$get_current())           # $r, $mean, $phi
+//   # ---- Posterior at new X from every stored draw: keep_tree = TRUE ----
+//   # (predict(run, list(X = Xn)) requires keep_tree = TRUE in the factory as well)
+//   mh <- new(GBartHeteroscedastic, X, y, rng_seed = 42L, keep_tree = TRUE, keep_history = TRUE)
+//   mh$step(500L); mh$clear_history(); mh$step(500L)  # 500 stored draws, forest and phi of each
+//   Xn <- cbind(seq(-1, 1, by = 0.25), 0)             # 9 new points on the x1 axis
+//   pn <- mh$predict_at(list(X = Xn)); dim(pn$mean)   # $r, $mean, $mean_r, $y_rep: 500 x 9 each
+//   rbind(colMeans(pn$mean), exp(1 + 0.8 * pmax(Xn[, 1], 0)))  # posterior mean vs truth
 // @example:python
 //   import numpy as np, AI4BayesCode
 //   rng = np.random.default_rng(42); N = 600          # well-identified DGP
@@ -96,6 +103,13 @@
 //   # ---- Advanced: stateful single-chain control ----
 //   m_ = Mod.GBartHeteroscedastic(X, y, rng_seed=42)   # ntrees 50, phi_init 1.0
 //   m_.step(2000); print(m_.get_current())            # r, mean, phi
+//   # ---- Posterior at new X from every stored draw: keep_tree=True ----
+//   # (AI4BayesCode.predict(chains, {"X": ...}) requires keep_tree=True in the factory as well)
+//   mh = Mod.GBartHeteroscedastic(X, y, rng_seed=42, keep_tree=True, keep_history=True)
+//   mh.step(500); mh.clear_history(); mh.step(500)     # 500 stored draws, forest and phi of each
+//   Xn = np.column_stack([np.linspace(-1, 1, 9), np.zeros(9)])  # 9 new points on the x1 axis
+//   pn = mh.predict_at({"X": Xn.flatten(order="F")})   # r, mean, mean_r, y_rep: (500, 9) each
+//   print(pn["mean"].mean(axis=0), np.exp(1 + 0.8 * np.maximum(Xn[:, 0], 0)))  # posterior mean vs truth
 // @example:end
 // ============================================================================
 
@@ -429,11 +443,18 @@ public:
     //       y_rep: n_draws x N posterior-predictive at training X, one
     //              row per stored draw (documented shadow loop -- tree
     //              forests cannot pass predict_at replaced-validation).
-    //   * X supplied, keep_history = FALSE:
+    //   * X supplied, keep_history = FALSE (or last_draw_only = TRUE):
     //       r, mean: from current trees at X_new.
     //       mean_r, y_rep: routed through the predict DAG (real
     //              posterior-predictive at X_new from the current draw).
-    //   * X supplied, keep_history = TRUE: not supported (errors).
+    //   * X supplied, keep_history = TRUE: r, mean, mean_r, y_rep, each
+    //       n_draws x N_new, one row per stored draw d. r_d = the forest
+    //       stored at sweep d evaluated at X_new
+    //       (genbart_block::predict_history; no offset), mean_d = mean_r_d =
+    //       exp(r_d), y_rep_d ~ N(mean_d, phi_d * mean_d) per point, with
+    //       phi_d the phi of sweep d. Requires keep_tree = TRUE (the forests
+    //       of the stored draws are stored only then); without it the call
+    //       raises an error.
     //
     // X is passed as a FLATTENED column-major vector under key "X"
     // (length N_new * p); reshaped here back into an N_new x p matrix.
@@ -513,14 +534,6 @@ public:
         }
 
         // ---- New-X prediction -------------------------------------------
-        if (use_history) {
-            ai4b::stop("GBartHeteroscedastic::predict_at: new-X prediction in "
-                       "history mode (keep_history=TRUE) is not yet "
-                       "implemented. Either (a) empty map for training-X "
-                       "posterior predictive over all draws, or (b) "
-                       "keep_history=FALSE for new-X.");
-        }
-
         // Reconstruct X_new (N_new x p) from the flattened input.
         const arma::vec& x_flat = new_data.at("X");
         if (x_ncol_ == 0 || (x_flat.n_elem % x_ncol_) != 0) {
@@ -532,6 +545,55 @@ public:
         arma::mat X_new = arma::reshape(x_flat, n_new, x_ncol_);
 
         auto& blk = dynamic_cast<genbart_block&>(impl_->child(0));
+
+        if (use_history) {
+            // History mode: one row per stored draw d, computed from the
+            // forest stored at sweep d and the phi of the same sweep.
+            if (!keep_tree_) {
+                ai4b::stop("GBartHeteroscedastic::predict_at: prediction at "
+                           "new X with keep_history = TRUE requires keep_tree "
+                           "= TRUE at construction (the forests of the stored "
+                           "draws are stored only then). Construct with "
+                           "keep_tree = TRUE, or pass last_draw_only = TRUE to "
+                           "predict from the current forest.");
+            }
+            arma::mat r_hist = blk.predict_history(X_new);  // n_draws x N_new
+            const std::size_t n_draws = r_hist.n_rows;
+            if (n_draws != blk.history_size()) {
+                ai4b::stop("GBartHeteroscedastic::predict_at: inconsistent "
+                           "history sizes (forests=%d, r=%d)",
+                           (int)n_draws, (int)blk.history_size());
+            }
+            // Before the first sweep, or right after clear_history(), the
+            // history is the current state (one row) and no phi is stored:
+            // that row uses the current phi.
+            if (!phi_hist_.empty() && phi_hist_.size() != n_draws) {
+                ai4b::stop("GBartHeteroscedastic::predict_at: inconsistent "
+                           "history sizes (r=%d, phi=%d)",
+                           (int)n_draws, (int)phi_hist_.size());
+            }
+            auto* lik_ptr = static_cast<genbart::lik::heteroscedastic_lik*>(
+                likelihood_.get());
+            arma::mat mean_mat(n_draws, n_new), yrep_mat(n_draws, n_new);
+            std::normal_distribution<double> norm(0.0, 1.0);
+            for (std::size_t d = 0; d < n_draws; ++d) {
+                const double phi =
+                    phi_hist_.empty() ? lik_ptr->phi() : phi_hist_[d];
+                for (std::size_t i = 0; i < n_new; ++i) {
+                    const double m  = std::exp(r_hist(d, i));
+                    const double sd = std::sqrt(phi * m);
+                    mean_mat(d, i) = m;
+                    yrep_mat(d, i) = m + sd * norm(predict_rng_);
+                }
+            }
+            AI4BayesCode::history_map out;
+            out.emplace("r",      std::move(r_hist));
+            out.emplace("mean",   mean_mat);
+            out.emplace("mean_r", std::move(mean_mat));
+            out.emplace("y_rep",  std::move(yrep_mat));
+            return out;
+        }
+
         arma::vec r = blk.predict_r(X_new);
 
         // Route through the framework predict DAG so the new-X path returns
@@ -604,13 +666,14 @@ RCPP_MODULE(GBartHeteroscedastic_module) {
         // Ctor with keep_tree only (keep_history defaults FALSE).
         .constructor<arma::mat, arma::vec, int, double, int, bool>(
             "Ctor with keep_tree only: keep_tree (forest snapshots per "
-            "step; EXPENSIVE; required for predict_history); keep_history "
-            "defaults FALSE.")
+            "step; EXPENSIVE; required by predict_at at new X with "
+            "keep_history = TRUE); keep_history defaults FALSE.")
         // Full ctor: keep_tree + keep_history.
         .constructor<arma::mat, arma::vec, int, double, int, bool, bool>(
             "Full ctor: X (N x p), y (length N), ntrees, phi_init (> 0), "
             "seed (RNG seed, 0 = random), keep_tree (forest snapshots; "
-            "EXPENSIVE; default FALSE), keep_history (numeric per-step "
+            "EXPENSIVE; default FALSE; required by predict_at at new X "
+            "with keep_history = TRUE), keep_history (numeric per-step "
             "buffers for trace analysis; cheap; default FALSE).")
         .method("step", (void (GBartHeteroscedastic::*)())    &GBartHeteroscedastic::step, "Run one sweep.")
         .method("step", (void (GBartHeteroscedastic::*)(int)) &GBartHeteroscedastic::step,
@@ -634,7 +697,9 @@ RCPP_MODULE(GBartHeteroscedastic_module) {
                     &GBartHeteroscedastic::predict_at_r,
                 "Predict at new data. Pass list(X = as.vector(X_new)) "
                 "(flattened column-major) for new-X, or an empty list for "
-                "training-X posterior predictive. Const, no state mutation.")
+                "training-X posterior predictive. keep_history = TRUE: one "
+                "row per stored draw (new X requires keep_tree = TRUE). "
+                "Const, no state mutation.")
         .method("predict_at",
                 (AI4BayesCode::history_map (GBartHeteroscedastic::*)(Rcpp::List, bool) const)
                     &GBartHeteroscedastic::predict_at_r,

@@ -76,6 +76,13 @@
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GBartPoisson, X, y, 50L, 42L, FALSE, TRUE)  # X, y, ntrees, seed, keep_tree, keep_history
 //   m$step(2000); str(m$get_current())                  # $r (log rate), $rate=exp(r)
+//   # ---- Posterior at new X from every stored draw: keep_tree = TRUE ----
+//   # (predict(run, list(X = Xn)) requires keep_tree = TRUE in the factory as well)
+//   mh <- new(GBartPoisson, X, y, 50L, 42L, TRUE, TRUE)   # keep_tree, keep_history
+//   mh$step(500L); mh$clear_history(); mh$step(500L)      # 500 stored draws, forest of each
+//   Xn <- cbind(seq(-1.5, 1.5, by = 0.5), 0, 0)           # 7 new points on the x1 axis
+//   pn <- mh$predict_at(list(X = Xn)); dim(pn$rate)       # $r, $rate, $y_rep: 500 x 7 each
+//   rbind(colMeans(pn$rate), exp(0.8 * pmax(Xn[, 1], 0)))  # posterior mean rate vs truth
 // @example:python
 //   import numpy as np, AI4BayesCode
 //   rng = np.random.default_rng(1)                       # well-identified DGP
@@ -92,6 +99,13 @@
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GBartPoisson(X, y, 50, 42, False, True); m.step(2000); print(m.get_current())
+//   # ---- Posterior at new X from every stored draw: keep_tree=True ----
+//   # (AI4BayesCode.predict(chains, {"X": ...}) requires keep_tree=True in the factory as well)
+//   mh = Mod.GBartPoisson(X, y, 50, 42, True, True)        # keep_tree, keep_history
+//   mh.step(500); mh.clear_history(); mh.step(500)          # 500 stored draws, forest of each
+//   Xn = np.column_stack([np.linspace(-1.5, 1.5, 7), np.zeros(7), np.zeros(7)])  # 7 new points
+//   pn = mh.predict_at({"X": Xn.flatten(order="F")})        # r, rate, y_rep: (500, 7) each
+//   print(pn["rate"].mean(axis=0), np.exp(0.8 * np.maximum(Xn[:, 0], 0)))  # posterior mean vs truth
 // @example:end
 // ============================================================================
 
@@ -388,11 +402,17 @@ public:
     // X was supplied:
     //   * keep_history = FALSE, empty map:
     //       r/rate/y_rep at TRAINING X from the current draw.
-    //   * keep_history = FALSE, X supplied:
-    //       r/rate at X_new from the current trees.
+    //   * keep_history = FALSE (or last_draw_only = TRUE), X supplied:
+    //       r/rate at X_new from the current trees (1 x N_new).
     //   * keep_history = TRUE,  empty map:
     //       r/rate/y_rep: n_draws x N_train, one row per stored draw.
-    //   * keep_history = TRUE,  X supplied: not implemented (errors).
+    //   * keep_history = TRUE,  X supplied:
+    //       r/rate/y_rep: n_draws x N_new, one row per stored draw d.
+    //       r_d = the forest stored at sweep d evaluated at X_new
+    //       (genbart_block::predict_history; no offset), rate_d = exp(r_d),
+    //       y_rep_d ~ Poisson(rate_d) per point. Requires keep_tree = TRUE
+    //       (the forests of the stored draws are stored only then); without
+    //       it the call raises an error.
     //
     // Uses predict_rng_ (const-preserving, persistent, seeded at
     // construction) so posterior-predictive draws are reproducible given
@@ -467,12 +487,6 @@ public:
         }
 
         // ---- Keyed branch: X-override (test-set prediction) ------------
-        if (use_history) {
-            ai4b::stop("GBartPoisson::predict_at: new-X prediction in "
-                       "history mode is not yet implemented. Use empty map "
-                       "or construct with keep_history=FALSE.");
-        }
-
         const arma::vec& x_flat = new_data.at("X");
         if (x_ncol_ == 0 || (x_flat.n_elem % x_ncol_) != 0) {
             ai4b::stop("GBartPoisson::predict_at: flattened X length %d "
@@ -483,6 +497,41 @@ public:
         arma::mat X_new = arma::reshape(x_flat, n_new, x_ncol_);
 
         auto& blk = dynamic_cast<genbart_block&>(impl_->child(0));
+
+        if (use_history) {
+            // History mode: one row per stored draw d, computed from the
+            // forest stored at sweep d (no offset in this model).
+            if (!keep_tree_) {
+                ai4b::stop("GBartPoisson::predict_at: prediction at new X "
+                           "with keep_history = TRUE requires keep_tree = TRUE "
+                           "at construction (the forests of the stored draws "
+                           "are stored only then). Construct with keep_tree = "
+                           "TRUE, or pass last_draw_only = TRUE to predict "
+                           "from the current forest.");
+            }
+            arma::mat r_hist = blk.predict_history(X_new);  // n_draws x N_new
+            const std::size_t n_draws = r_hist.n_rows;
+            if (n_draws != blk.history_size()) {
+                ai4b::stop("GBartPoisson::predict_at: inconsistent history "
+                           "sizes (forests=%d, r=%d)",
+                           (int)n_draws, (int)blk.history_size());
+            }
+            arma::mat rate_mat(n_draws, n_new), yrep_mat(n_draws, n_new);
+            for (std::size_t d = 0; d < n_draws; ++d) {
+                for (std::size_t i = 0; i < n_new; ++i) {
+                    const double lam = std::exp(r_hist(d, i));
+                    rate_mat(d, i) = lam;
+                    std::poisson_distribution<int> pois(lam);
+                    yrep_mat(d, i) = static_cast<double>(pois(predict_rng_));
+                }
+            }
+            AI4BayesCode::history_map out;
+            out.emplace("r",     std::move(r_hist));
+            out.emplace("rate",  std::move(rate_mat));
+            out.emplace("y_rep", std::move(yrep_mat));
+            return out;
+        }
+
         arma::vec r = blk.predict_r(X_new);
 
         arma::mat r_mat(1, r.n_elem);
@@ -540,8 +589,9 @@ RCPP_MODULE(GBartPoisson_module) {
         // Constructor with keep_tree only (keep_history defaults FALSE).
         .constructor<arma::mat, arma::vec, int, int, bool>(
             "Ctor with keep_tree only. X, y, ntrees, seed, keep_tree "
-            "(forest snapshots per step; EXPENSIVE, required only for "
-            "predict_history); keep_history defaults FALSE.")
+            "(forest snapshots per step; EXPENSIVE, required only by "
+            "predict_at at new X with keep_history = TRUE); keep_history "
+            "defaults FALSE.")
         // Full constructor: keep_tree + keep_history.
         .constructor<arma::mat, arma::vec, int, int, bool, bool>(
             "Full ctor: X (N x p), y (non-negative counts), ntrees, "
@@ -549,7 +599,8 @@ RCPP_MODULE(GBartPoisson_module) {
             "seed here drives only the mutable predict_at RNG stream -- "
             "for reproducible MCMC, call set.seed() in R before step()), "
             "keep_tree (forest snapshots per step; EXPENSIVE; default "
-            "FALSE), keep_history (numeric per-step buffers; cheap; "
+            "FALSE; required by predict_at at new X with keep_history = "
+            "TRUE), keep_history (numeric per-step buffers; cheap; "
             "default FALSE).")
         .method("step", (void (GBartPoisson::*)())    &GBartPoisson::step, "Run one sweep.")
         .method("step", (void (GBartPoisson::*)(int)) &GBartPoisson::step,
@@ -574,7 +625,9 @@ RCPP_MODULE(GBartPoisson_module) {
                 "Predict log rate and rate at training or new X. Pass "
                 "list(X = as.vector(X_new)) (flattened column-major) for "
                 "test-set prediction, or an empty list for posterior-"
-                "predictive y_rep at training X. Const, no state mutation.")
+                "predictive y_rep at training X. keep_history = TRUE: one "
+                "row per stored draw (at new X r, rate and y_rep, which "
+                "requires keep_tree = TRUE). Const, no state mutation.")
         .method("predict_at",
                 (AI4BayesCode::history_map (GBartPoisson::*)(Rcpp::List, bool) const)
                     &GBartPoisson::predict_at_r,
