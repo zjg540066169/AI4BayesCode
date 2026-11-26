@@ -27,7 +27,7 @@
 //      `joint_nuts_block` and its dense-metric pilot phase, with the
 //      log|Jacobian| added by hand in step 3 so it stays explicit.
 //      (A POSITIVE slice would apply the same log transform internally
-//      and is equally compatible with the dense metric -- the pilot sees
+//      and is equally compatible with the dense metric -- the pilot runs on
 //      the unconstrained vector either way.)
 //   2. Put ALL real parameters into ONE `joint_nuts_block` and set
 //      `cfg.use_dense_metric = true`. The Welford pilot covariance learns
@@ -93,7 +93,7 @@
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.HSGPRegression(y, x, M, seed, True),
-//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----

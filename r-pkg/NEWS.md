@@ -1,36 +1,241 @@
 # AI4BayesCode 1.1.3
 
-* Every model class has `clear_history()`. It empties the stored draws and
-  leaves the current state, the random number streams and the tuning
-  unchanged, so the next `step()` records the first draw of a new history. A
-  model class that records per-sweep values in members of its own defines a
-  public `clear_extra_history_()` that empties them.
-* `ai4bayescode_run_chains()` returns the models (`keep_models = TRUE`). It calls
-  `clear_history()` after the `n_burn` warmup sweeps, so each model's
-  `get_history()` and `predict_at()` cover the `n_keep` kept draws only. In a
-  parallel run each model is in a worker process that is not stopped at the
-  end of the run, and `run$models[[i]]$f(...)` calls `f` on the model of chain
-  `i` in that process; in a sequential run `run$models[[i]]` is the model
-  itself. The result has class `"ai4bayescode_run"` with `histories`,
-  `models`, `seeds`, `wall`, `n_burn`, `n_keep` and `history_cleared`, and
-  prints a summary. A model compiled against older headers has no
-  `clear_history()`: its histories are stripped as before, and a message is
-  printed that its own `get_history()` and `predict_at()` include the warmup
-  draws. With `keep_models = FALSE` the chains run as before and
-  `run$models` is `NULL`.
-* `ai4bayescode_run_chains()` takes the number of worker processes as
-  `n_cores`; `mc.cores` is still accepted.
-* `ai4bayescode_predict(run, newdata)` and `predict(run, newdata)` call
-  `predict_at(newdata)` on the model of every chain and stack the chains for
-  each output; `pool = FALSE` returns one list per chain, and
-  `newdata = list()` gives the posterior predictive at the training data.
-* `ai4bayescode_close_models(run)` stops the worker processes that hold the
-  models of a run. The worker processes are also stopped when the worker pool
-  of the run is garbage-collected or R exits.
+## The models of a run
+
+* Every model class has `clear_history()` (from `kernel_control_mixin`). It
+  empties the stored draws and leaves the current state, the random number
+  streams and the tuning unchanged, so the next `step()` records the first
+  draw of a new history; until then `get_history()` and `predict_at()` return
+  the current draw as one row. A model class that records per-sweep values in
+  members of its own defines a public `clear_extra_history_()` that empties
+  them; a class that declares its own no-argument `clear_history()` is bound
+  to that one.
+* `ai4bayescode_run_chains()` takes `n_cores` (`mc.cores` is still accepted)
+  and `keep_models = TRUE`. Each chain runs `n_burn` sweeps, `clear_history()`
+  when the model has it, and `n_keep` sweeps, so the model's own
+  `get_history()` and `predict_at()` cover the kept draws only. The result has
+  class `"ai4bayescode_run"` with `histories`, `seeds`, `wall`, `models`,
+  `n_burn`, `n_keep` and `history_cleared`, in this order, and prints a
+  summary. After a parallel run, `run$models[[i]]` is a handle (class
+  `"ai4bayescode_chain_model"`): `run$models[[i]]$f(...)` calls `f` on the
+  model of chain `i` in the worker process that holds it, from the R process
+  that ran the chains only. After a sequential run it is the model itself.
+  With `keep_models = FALSE` no model is kept, and the result is the plain
+  list of 1.1.2 (`histories`, `seeds`, `wall`) followed by `n_burn`, `n_keep`
+  and `history_cleared`.
+* `ai4bayescode_predict(run, newdata = list(), pool = TRUE)`, also
+  `predict(run, newdata)`, calls `predict_at(newdata)` on the model of every
+  chain and stacks the chains along the first axis of each output, which keeps
+  its number of dimensions; `pool = FALSE` returns one list per chain.
+  `newdata = list()` (or `NULL`) gives the posterior predictive at the
+  training data; a matrix or a data frame as `newdata` raises an error that
+  shows the call `predict(run, list(X = X_new))`.
+  `ai4bayescode_close_models(run)` terminates the worker processes of a run.
+* The worker processes of a kept run are also terminated when the run and
+  every handle taken from it are garbage-collected, when R exits, and to make
+  room for a later run: at most `getOption("ai4bayescode.max_workers")`, else
+  the environment variable `AI4BAYESCODE_MAX_WORKERS`, else
+  `max(8, 4 * parallel::detectCores())` worker processes of kept runs exist
+  at a time. Before a run starts its worker processes, those of the least
+  recently used runs are terminated until the new ones fit and
+  `n_workers + 2` R connections are free, with one warning, and a call on a
+  handle of such a run raises an error that names the reason; when that is
+  not possible, the chains run in the session. A worker process that exits
+  ends the models of its own chains only. An interrupt (Ctrl+C) during a call
+  on a handle leaves the run usable.
+* An R error in a chain stops `ai4bayescode_run_chains()` with
+  "chain i (seed s): <message>". Only a worker process that exits during the
+  run makes every chain run again sequentially; in 1.1.2 a failed parallel
+  chain did, and the error did not name the chain.
+* `ai4bayescode_run_chains()` calls `set.seed(seeds[i])` immediately before
+  `model_ctor(seeds[i])` in every path and restores the caller's
+  `.Random.seed` (or its absence) afterwards. The draws of models that use
+  R's generator (`bart_block`, `genbart_block` and `softbart_block` under
+  Rcpp, and constructor code that calls it) are therefore determined by
+  `seeds`, one stream per chain, and differ from 1.1.2; other models give the
+  same draws. With `keep_models = FALSE` a single chain runs sequentially.
 * Python: `run_chains()` takes `n_cores` (`n_jobs` is still accepted) and
-  `keep_models`, puts the model of each chain under `"model"`, and returns a
-  `ChainsResult`; `AI4BayesCode.predict(chains, newdata)` and
-  `AI4BayesCode.close_models(chains)` correspond to the R functions.
+  `keep_models=True`, and returns a `ChainsResult`: the list of per-chain
+  dicts with the keys of 1.1.2 (`"seed"`, `"wall"`, `"hist"`; `"error"` and
+  `"error_type"` for a failed chain), which prints a summary. The models are
+  in `chains.models`: a `ChainModel` handle per chain after a parallel run,
+  the model object after a sequential run, `None` for a failed chain, and
+  `None` as a whole with `keep_models=False`.
+  `AI4BayesCode.predict(chains, newdata)` (`chains.predict()`) and
+  `AI4BayesCode.close_models(chains)` (`chains.close()`) correspond to the R
+  functions and take the result itself, not a slice of it; `predict()`
+  flattens a 2-D array in `newdata` column-major, also for models compiled
+  before 1.1.3. The worker processes are not daemonic, so a model can start
+  processes of its own; they are terminated by `close_models()`, when the
+  result and its handles are garbage-collected, at interpreter exit, and,
+  least recently used runs first, to keep at most `AI4BAYESCODE_MAX_WORKERS`
+  (default `max(8, 4 * os.cpu_count())`) of them within the soft limit on
+  open files. The output and the warnings of the chains and of calls on
+  handles are shown in the calling process, and an error raised by the model
+  of chain `i` has `"chain i: "` in front of its message.
+* Python: `run_chains()` calls `np.random.seed(seeds[i] % 2**32)` and
+  `random.seed(seeds[i])` before `factory(seeds[i])` on every path (in 1.1.2
+  every forked chain drew the same numbers from numpy's global generator) and
+  restores the caller's states after a run in the calling process.
+  `n_cores <= 1` runs the chains sequentially, and `n_chains` together with
+  `seeds` of another length raises `ValueError` (1.1.2 ignored `n_chains`).
+* Compatibility. Code written for 1.1.2 runs unchanged: `run$histories`,
+  `run$seeds`, `run$wall` and `run[[1]]` to `run[[3]]` in R, and the
+  per-chain dicts and `n_jobs=` in Python, are as before. With the default
+  `keep_models = TRUE` the R result has a class and prints a summary, and the
+  worker processes of a parallel run are terminated only as described above;
+  `keep_models = FALSE` (Python: `keep_models=False`) gives the 1.1.2 value. A
+  sampler generated with 1.1.2 is compiled again on its first use (see the
+  Armadillo item below) and then has `clear_history()` from
+  `kernel_control_mixin`. If it records per-sweep values in members of its
+  own, the history entries that `clear_history()` leaves with more than
+  `n_keep` rows are cut in the returned histories and named in a warning (in R
+  when the models are kept) until the class defines `clear_extra_history_()`.
+  A model without `clear_history()` (a module compiled against older headers,
+  or a custom object) runs as in 1.1.2, and `predict()` drops its warmup
+  draws.
+
+## Prediction in the shipped examples
+
+* With `keep_history = TRUE`, `predict_at()` of every shipped example (except
+  the prior-only GMRFPrior and IsingPrior, whose output is empty) returns one
+  row per stored draw, computed from that draw's own values, so `predict(run)`
+  gives `n_chains * n_keep` rows; `predict_at(new_data, last_draw_only = TRUE)`
+  (Python: `last_draw_only=True`) returns one row from the current state, as
+  with `keep_history = FALSE`. New in this release:
+  - `BSplineRegression`, `HSGPRegression` (`f`, `mu`, `y_rep`), `PehSurvival`
+    and `PehSharedFrailty` (`S`); their single-draw outputs are 1 x N rows
+    instead of N x 1 columns. `PehSharedFrailty` raises an error unless `g` is
+    one integer with 0 <= g < G (it read `w[g]` out of range).
+  - `OrderMCMCBN`: `sampled_DAG`, the DAG stored for each sweep (it returned
+    the current DAG only); `get_history()` gains `order_sampled_DAG`. In a held
+    sweep of the frozen block the stored DAG is the held DAG.
+  - `CategoricalIsingChainVI`, `StructuredPottsVI`: `z_samples`, the stored
+    per-sweep q-draws (`new_data` must be empty). The single-draw path returns
+    `n_draws` new samples from the current q, as before.
+  - `IsingHiddenPotts`, `ICARSpatialGMRF`: `y_rep` from the observation
+    equation (it was an empty list).
+  - `GPTimeSeries`, at the training times (`list()`) and at new times
+    (`list(t = ...)`): `f_mean`, `f_sd`, `f_star` (one joint draw of f over the
+    requested times from its posterior given y and the draw's amp, tau and
+    sigma) and `y_rep = f_star + sigma * e`, in O(N + N_new) time per draw
+    from the state-space form of the exponential kernel. In 1.1.2, `list()`
+    returned `y + sigma * e` and f was drawn independently at each new time,
+    so `f_star` and `y_rep` differ; `f_mean` and `f_sd` agree up to rounding,
+    and the sampler's draws are unchanged. The declared data input is `t` (it
+    was `t_new_flag` and `y`); another key or a non-finite time raises an
+    error.
+  - `ODE_SIR`: new observation times `t_obs` and initial state `y0`, with
+    `I_traj` and `y_rep` per draw.
+  - `VCBart`: `mu` per draw, at new `(X, Z)` with the new constructor argument
+    `keep_tree = TRUE`, and the new output `y_rep` (`mu` plus the draw's sigma
+    times N(0, 1) noise); `mu` is still the first element. The single-draw
+    prediction at the training data multiplied `beta_j` by the wrong column of
+    `X`.
+  - `GBartLogistic`, `GBartPoisson`, `GBartMultinomial`,
+    `GBartHeteroscedastic`: prediction at new X from the forest stored at each
+    sweep (it stopped with "not yet implemented").
+  - `ARDLasso`: `predict_at(new_data, last_draw_only)`, and `m$predict_at()`
+    in R.
+* BART-family models predict at new X from every stored draw only when built
+  with `keep_tree = TRUE`, so `predict(run, list(X = X_new))` needs it in
+  `model_ctor`. Without it, BartNoise, SoftBartNoise, the GBart models and
+  VCBart raise an error that names `keep_tree = TRUE` and
+  `last_draw_only = TRUE` (BartNoise and SoftBartNoise stopped with
+  "inconsistent history sizes").
+* `HierarchicalLM_joint`, `HierarchicalLM_MultivariateRE`: `predict_at()`
+  checks `g_idx` / `group_idx` (one integer per row, >= 0, resp. >= 1). A
+  group without training rows gets its random effect drawn once per group and
+  draw from N(0, tau_d^2), resp. N(0, diag(tau_d) L_d L_d' diag(tau_d)); it was
+  an error.
+* `bart_block::predict_history()` adds to each stored forest the mean of the
+  working response of the sweep that drew it; predictions at new X were off
+  by the change of that mean between sweeps (e.g. with VCBart's partial
+  residuals). `softbart_block` stores the level `m` of each forest likewise.
+  `bart_block`, `genbart_block`, `softbart_block` and `hmm_block` gain
+  `record_held_history()`: inside a nested composite frozen within another
+  composite, their histories have one entry per outer sweep. A VI block held
+  through a frozen composite before its first stored row appends one row per
+  sweep (it kept one row).
+* `predict_at()` of a model built on `composite_block` computes each node
+  after every parent that the same call recomputes; before, a node could use
+  the current-state value of such a parent.
+* `set_current()` with an `X` of another row count in `LogisticRegression`,
+  `LinearRegJointMixed` and `SpikeSlabRJMCMC` empties the stored draws through
+  `clear_history()` also when one draw is stored (that draw was kept). The
+  "clearing history" warning of `LogisticRegression` and `SpikeSlabRJMCMC`
+  comes after `X`, `N`, `y` and the derived keys are written, so a warning
+  turned into an error leaves a consistent model. The `set_current` template
+  in `codegen_cpp.md` is changed the same way.
+
+## Draws that change
+
+* `softbart_block` with `center_Y = TRUE` (the default, and SoftBartNoise's
+  setting) adds back the mean `m` of the working response that it subtracts
+  before the fit: `f`, `current()` and the predictions are
+  `m + y_scale * f_Z` on the scale of `y`. Before, SoftBartNoise's `sigma`
+  and `y_rep` left out the level of `y` (with `y + 3`, `sigma` was 3.28
+  instead of 0.51). SoftBartNoise draws change; `center_Y = FALSE` draws do
+  not.
+* Python: `BartNoise`, `GBartLogistic`, `GBartMultinomial`,
+  `GBartHeteroscedastic` and `VCBart` seed the BART kernel from a non-zero
+  `rng_seed`, as `SoftBartNoise` and `GBartPoisson` already did, so chains
+  with different seeds differ and parallel and sequential `run_chains()` give
+  the same chains. The kernel stream is one per thread and compiled module: a
+  chain is reproduced when no other BART-family model of the same module is
+  built or stepped in that thread in between, as in `run_chains()`. The
+  Python draws of these five models change; R draws do not.
+* Every model compiled by `ai4bayescode_source()`,
+  `ai4bayescode_source_checkout()`, the Rcpp plugin
+  (`// [[Rcpp::depends(AI4BayesCode)]]` with `Rcpp::sourceCpp()`) or
+  `AI4BayesCode.source()` allocates Armadillo's heap arrays on 256-byte
+  boundaries. With macOS Accelerate, the results of BLAS and LAPACK routines
+  (dot products, triangular and LU / Cholesky solves) depend on the operand
+  addresses modulo 256 bytes, so one model built several times with one seed
+  gave different draws (`GPRegression` in R); such builds now give
+  bit-identical draws. R draws of `GPRegression` differ from 1.1.2, and draws
+  of other models that call these routines can differ in the last bits.
+  `ai4bayescode_source()` and `ai4bayescode_source_checkout()` build in a
+  subfolder of the Rcpp cache folder named after a fingerprint of the
+  compiler flags and the header, and the Python build signature covers the
+  header, so modules built by earlier versions are compiled again. A module
+  built through the plugin and kept in a lasting `rcpp.cache.dir` folder is
+  loaded again for an unchanged file unless `rebuild = TRUE`.
+
+## Other changes
+
+* Python: a `state_map` argument (`predict_at()`, `set_current()`) accepts a
+  Mapping whose values are numbers, 0-d, 1-D or 2-D arrays, or nested
+  sequences; a 2-D value is flattened column-major, as R flattens a matrix,
+  so `m.predict_at({"X": X_new})` takes an `N_new x p` array. The 13 examples
+  whose R `predict_at()` checks the column count of `X` check it in Python
+  too.
+* Python: under `warnings.simplefilter("error")`, `freeze()` and `unfreeze()`
+  raise the `UserWarning` instead of `SystemError`.
+* `AI4BAYESCODE_BIND_KERNEL_CONTROL`, `AI4BAYESCODE_BIND_READAPT_NUTS` and
+  `AI4BAYESCODE_PYBIND_READAPT_NUTS` select each member with `static_cast`: a
+  wrapper that redeclares one of these members with another signature stops
+  at compile time (before, the call passed arguments the function does not
+  take).
+* `ai4bayescode_doc()` / `AI4BayesCode.doc()`: the Methods list has
+  `clear_history()`, `freeze()`, `unfreeze()`, `get_frozen()` and
+  `readapt_NUTS()` also when the binding macros register them, and
+  `get_history()` is described as the draws since construction or the last
+  `clear_history()` (it said "warmup included").
+* Checkout mode: `R/AI4BayesCode_helpers.R` defines every function of the
+  package identically, so its `ai4bayescode_diagnose()` warns about
+  non-finite draws, `ai4bayescode_rhat_summary()` checks `drop_burn`,
+  `ai4bayescode_new_frozen()` rejects dot-path names and
+  `ai4bayescode_perf_hint()` is deprecated; sourced into an environment other
+  than the global one, it runs the chains in worker processes and registers
+  its S3 methods. The deprecation message of `ai4bayescode_perf_hint()` shows
+  `sum(run$wall)` instead of the non-existent `run$chains`.
+* Documentation: the READMEs and skills describe the models of a run,
+  `n_cores`, the worker limit, `keep_models = FALSE` and `keep_tree = TRUE`
+  for BART prediction at new X; `?ai4bayescode_diagnose` says to pass
+  `n_burn` only for a history that contains the warmup draws; the
+  `@example:python` blocks pass `n_cores=1`; the package description and
+  README count 43 bundled examples.
 
 # AI4BayesCode 1.1.2
 

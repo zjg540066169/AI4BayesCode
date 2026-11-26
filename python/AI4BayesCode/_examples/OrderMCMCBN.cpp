@@ -171,7 +171,7 @@
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.OrderMCMCBN(data, cards, "fk_eq2", 1.0, 3, 20, 4000, 10.0, 0.5, np.zeros(0), seed, True),
-//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=10000, n_jobs=1)
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=10000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose({k: chains[0]["hist"][k] for k in ("order", "order_log_score")})   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----

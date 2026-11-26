@@ -93,7 +93,7 @@
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.BartNoise(X, y, 200, 2.0, 2.0, 0.95, 3.0, 100, False, False, seed, False, True),
-//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=6000, n_jobs=1)
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=6000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----

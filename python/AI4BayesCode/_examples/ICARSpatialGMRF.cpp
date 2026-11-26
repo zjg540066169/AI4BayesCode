@@ -56,9 +56,6 @@
 //  GMRF block (row d of get_history()$Intercept, $sigma, $phi). keep_history
 //  = FALSE, or last_draw_only = TRUE: one row, from the current state. The
 //  model has no covariate inputs, so predict_at() takes an empty map/list.
-//
-//  cross-validation target: ICARSpatialGMRF.cpp (same model, same data,
-//  posteriors must match under R-hat + means/sd/ESS comparison).
 // ============================================================================
 
 // @example:R
@@ -98,7 +95,7 @@
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.ICARSpatialGMRF(y, node.astype(float), N, ei.astype(float), ej.astype(float), seed, True),
-//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   yrep = AI4BayesCode.predict(chains)["y_rep"]   # posterior predictive y_rep:

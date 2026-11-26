@@ -2441,8 +2441,9 @@ valid R1 result: binding, dispatch and state bugs only surface on a real call.
      by `step()`; no-argument `unfreeze()` clears; `get_frozen()` reflects
      every transition.
    - `clear_history()` (keep_history mode): `get_current()` is identical
-     before and after the call; after `clear_history()` and `step(k)`, every
-     `get_history()` entry and every `predict_at(list())` entry has `k` rows.
+     before and after the call; after `clear_history()` and `step(k)` with
+     `k >= 1`, every `get_history()` entry and every `predict_at(list())`
+     entry has `k` rows.
    - `readapt_NUTS` (when bound): the call returns and leaves chain state
      unchanged (`get_current()` identical before and after).
 

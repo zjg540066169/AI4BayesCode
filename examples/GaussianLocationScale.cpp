@@ -20,19 +20,13 @@
 //      The joint log-density is the FULL joint log p(mu, sigma | y) on the
 //      NATURAL scale (the sum of every model term, each appearing exactly
 //      once); joint_nuts_block adds the POSITIVE-slice Jacobian (+log sigma)
-//      internally. This matches GaussianLocationScale.cpp's per-conditional
-//      decomposition exactly:
+//      internally. In terms of the full conditionals:
 //        - mu conditional:    -0.5 sum_sq/sigma^2 - 0.5 mu^2/prior_var
 //        - sigma conditional: -(N+1) log sigma   - 0.5 sum_sq/sigma^2
 //        joint = likelihood (-N log sigma - sum_sq/(2 sigma^2))
 //              + mu prior   (-0.5 mu^2/prior_var)
 //              + Jeffreys   (-log sigma)
 //              = -(N+1) log sigma - 0.5 sum_sq/sigma^2 - 0.5 mu^2/prior_var.
-//
-//  This file is for cross-validation against GaussianLocationScale.cpp (it uses
-//  a distinct class/module name so both can be loaded in one R session). Once
-//  the two posteriors are confirmed equal (R-hat + means/sd/ESS), this becomes
-//  the canonical GaussianLocationScale.
 //
 // @example:R
 //   library(AI4BayesCode)
@@ -56,7 +50,7 @@
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.GaussianLocationScale(y, seed, True),
-//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----

@@ -7,7 +7,7 @@
 //  REFERENCE TEMPLATE for Bayesian-nonparametric (BNP) Gaussian mixture
 //  modelling via the Dirichlet Process. Uses the TRUNCATED STICK-
 //  BREAKING REPRESENTATION (Ishwaran & James 2001) at level K_trunc;
-//  each component carries a diagonal-Gaussian likelihood with
+//  each component has a diagonal-Gaussian likelihood with
 //  conjugate Normal-Gamma cluster prior (Bishop PRML Sec.2.3.6 / Murphy
 //  2007 Sec.4).
 //
@@ -137,7 +137,7 @@
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
 //       lambda seed: Mod.DPGaussianMixture(y, 60, seed, True),
-//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
+//       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains, keys=["alpha", "pi", "stick_V", "mu", "lambda"], order_components=True))  # label-invariant (sorted per draw)
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
 //   # ---- Advanced: stateful single-chain control ----
