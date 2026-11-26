@@ -45,9 +45,30 @@
 //  -------------------
 //      (beta, gamma, sigma) : ONE joint_nuts_block, sub_params
 //          [{ "theta", 2, POSITIVE }, { "sigma", 1, POSITIVE }]
-//      (theta = [beta, gamma]; naming matches ODE_SIR.cpp data() layout.)
+//      (theta = [beta, gamma], the data() key of both rates.)
 //
-//  Cross-validated against ODE_SIR.cpp (same posterior, R-hat).
+//  Posterior predictive (predict_at)
+//  ---------------------------------
+//  new_data is empty or holds "t_obs" (prediction times t_1 < ... < t_n,
+//  finite, t_1 >= 0) and/or "y0" (initial compartments (S0, I0, R0) at time
+//  0, finite, >= 0, S0 + I0 + R0 > 0); a key left out is set to its
+//  training value. For stored draw d (row d of get_history()$theta =
+//  (beta_d, gamma_d) and of get_history()$sigma = sigma_d):
+//      I_traj[d, i] = I(t_i; beta_d, gamma_d, y0)
+//      y_rep[d, i]  = I_traj[d, i] * exp(sigma_d * z_{d,i}),  z ~ N(0, 1),
+//  i.e. y_rep[d, i] ~ LogNormal(log I_traj[d, i], sigma_d^2), the likelihood
+//  above. I(t; beta, gamma, y0) is the infected compartment at time t of the
+//  SIR solution with state y0 at time 0, computed by ode::rk45 with
+//  rtol = atol = 1e-6 (the training path's solver): when t_1 > 0, time 0 is
+//  added to the solver's output times and its row is dropped. The absolute
+//  accuracy of I_traj is the solver's atol: where the exact I(t) is below
+//  about 1e-6 (long after the epidemic), I_traj can be of order 1e-6.
+//  z_{d,i} comes from predict_rng_, in the order i = 1..n within
+//  d = 1..n_draws. Output: I_traj and y_rep, n_draws x n (history mode, one
+//  row per stored draw), or 1 x n from the current (beta, gamma, sigma)
+//  (keep_history = false or last_draw_only = true). The single-draw path
+//  with an EMPTY new_data returns y_rep only, drawn around the I_traj of the
+//  current state, as in 1.1.2.
 // ============================================================================
 
 // @example:R
@@ -71,9 +92,11 @@
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   fc <- predict(run, list(t_obs = 0:28))         # I_traj, y_rep at t = 0..28: 8000 x 29
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(ODE_SIR, S0, I0, R0, t_obs, I_obs, 7L, TRUE)   # S0,I0,R0,t_obs,I_obs,seed,keep_history
 //   m$step(2500); str(m$get_current())
+//   str(m$predict_at(list(t_obs = c(20, 30), y0 = c(900, 100, 0)), TRUE))  # current draw only
 // @example:python
 //   import numpy as np, AI4BayesCode
 //   beta_t, gamma_t, sigma_t = 0.6, 0.2, 0.05              # ground truth
@@ -95,8 +118,11 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_jobs=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   fc = chains.predict({"t_obs": np.arange(29.0)})  # I_traj, y_rep at t = 0..28: 8000 x 29
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.ODE_SIR(S0, I0, R0, t_obs, I_obs, 7, True); m.step(2500); print(m.get_current())
+//   nd = {"t_obs": np.array([20.0, 30.0]), "y0": np.array([900.0, 100.0, 0.0])}
+//   print(m.predict_at(nd, True))              # current draw only
 // @example:end
 
 // [[Rcpp::depends(RcppArmadillo)]]
@@ -129,6 +155,10 @@
 #include <limits>
 #include <memory>
 #include <random>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 using AI4BayesCode::block_context;
@@ -143,7 +173,7 @@ namespace ode         = AI4BayesCode::ode;
 
 namespace {
 
-// SIR RHS -- identical to ODE_SIR.cpp.
+// SIR RHS.
 inline arma::vec sir_rhs(double /*t*/, const arma::vec& y,
                          const arma::vec& theta_ode) {
     const double beta  = theta_ode[0];
@@ -178,6 +208,25 @@ inline arma::vec solve_sir_I(double beta, double gamma,
     arma::mat y_traj = ode::rk45(sir_rhs, y0, t_obs, theta_ode,
                                   /*rtol=*/1e-6, /*atol=*/1e-6);  // Stan integrate_ode_rk45 default; 1e-8 forces tiny adaptive steps (~tens x slower) for no MCMC-relevant accuracy gain
     return y_traj.col(1);   // infected compartment
+}
+
+// I(t_i) of the SIR solution with state y0 at time 0, at the times t
+// (strictly increasing, t[0] >= 0). ode::rk45 uses its first output time as
+// the initial time, so when t[0] > 0, time 0 is put in front of t and the row
+// of time 0 is dropped from the result. With t[0] == 0 (every training t_obs)
+// this is the call ode::rk45(sir_rhs, y0, t, theta, 1e-6, 1e-6).col(1).
+inline arma::vec sir_I_at(const arma::vec& y0, const arma::vec& t,
+                          const arma::vec& theta) {
+    if (t.n_elem > 0 && t[0] > 0.0) {
+        arma::vec ts(t.n_elem + 1);
+        ts[0] = 0.0;
+        ts.subvec(1, t.n_elem) = t;
+        const arma::mat y_traj = ode::rk45(sir_rhs, y0, ts, theta, 1e-6, 1e-6);
+        return y_traj(arma::span(1, t.n_elem), 1);   // rows of t[0], ..., t[n-1]
+    }
+    const arma::mat y_traj = ode::rk45(sir_rhs, y0, t, theta,
+                                       1e-6, 1e-6);  // Stan rk45 default (was 1e-8: needlessly tight, ~tens x slower)
+    return y_traj.col(1);
 }
 
 // ----------------------------------------------------------------------------
@@ -335,7 +384,7 @@ public:
         impl_->data().set("theta", theta_init);
         impl_->data().set("sigma", arma::vec{sigma_init});
 
-        // y_rep and I_traj (identical to ODE_SIR.cpp).
+        // Predictive keys: I_traj (I at t_obs) and y_rep (a replicate of I_obs).
         impl_->data().set("y_rep",  arma::vec(t_obs.n_elem, arma::fill::zeros));
         impl_->data().set("I_traj", arma::vec(t_obs.n_elem, arma::fill::zeros));
 
@@ -350,37 +399,38 @@ public:
         impl_->data().declare_dependencies(
             "theta_sigma_joint", {"y0", "t_obs", "I_obs"});
 
-        // Fixed data inputs for predict_at BFS.
+        // Data inputs of predict_at (get_dag()$data_inputs): the keys of
+        // new_data. A key left out of a non-empty new_data is set to its
+        // training value; predict_at passes both to the BFS.
         impl_->data().declare_data_input("y0");
         impl_->data().declare_data_input("t_obs");
 
-        // ---- Predict DAG (same structure as ODE_SIR.cpp) ------------------
-        //   y0, t_obs, theta -> I_traj  (deterministic ODE solve)
+        // ---- Predict DAG ----------------------------------------------------
+        //   y0, t_obs, theta -> I_traj  (deterministic ODE solve, sir_I_at)
         //   I_traj, sigma    -> y_rep   (LogNormal noise draw)
-        // declare_predict_edges and declare_context_edges are keyed by
-        // SUB-PARAM NAME (unchanged from the original).
+        // declare_predict_edges is keyed by SUB-PARAM NAME (theta, sigma),
+        // not by the joint block's name.
         impl_->data().declare_predict_edges("y0",     {"I_traj"});
         impl_->data().declare_predict_edges("t_obs",  {"I_traj"});
         impl_->data().declare_predict_edges("theta",  {"I_traj"});
         impl_->data().declare_predict_edges("I_traj", {"y_rep"});
         impl_->data().declare_predict_edges("sigma",  {"y_rep"});
 
-        // I_traj refresher: identical to ODE_SIR.cpp.
+        // I_traj refresher: I at t_obs of the solution from y0 at time 0 with
+        // the rates theta. At the training t_obs (t_obs[0] == 0) sir_I_at is
+        // the plain rk45 solve; a t_obs that predict_at installs may start
+        // after time 0.
         impl_->data().register_refresher(
             "I_traj",
             [](const AI4BayesCode::shared_data_t& d) -> arma::vec {
-                const arma::vec& y0    = d.get("y0");
-                const arma::vec& t_obs = d.get("t_obs");
-                const arma::vec& theta = d.get("theta");
-                arma::mat y_traj = ode::rk45(sir_rhs, y0, t_obs, theta,
-                                             1e-6, 1e-6);  // Stan rk45 default (was 1e-8: needlessly tight, ~tens x slower)
-                return y_traj.col(1);
+                return sir_I_at(d.get("y0"), d.get("t_obs"), d.get("theta"));
             });
         // Keyed under the JOINT BLOCK NAME (the joint block updates theta+sigma
         // together; composite_block calls refresh_derived_for(block_name)).
         impl_->data().declare_invalidates("theta_sigma_joint", {"I_traj"});
 
-        // y_rep stochastic refresher: identical to ODE_SIR.cpp.
+        // y_rep stochastic refresher: y_rep[k] = I_traj[k] * exp(sigma * z_k),
+        // z_k ~ N(0, 1), i.e. LogNormal(log I_traj[k], sigma^2).
         impl_->data().register_stochastic_refresher(
             "y_rep",
             [](const AI4BayesCode::shared_data_t& d,
@@ -493,29 +543,57 @@ public:
         }
     }
 
-    /// Unchanged one-argument form: predict_at(new_data) means exactly what
-    /// it always did. The overload below adds the trailing switch.
+    /// One-argument form: predict_at(new_data) = predict_at(new_data, false).
+    /// The overload below adds the trailing switch.
     AI4BayesCode::history_map predict_at(
             const AI4BayesCode::state_map& new_data) const {
         return predict_at(new_data, /*last_draw_only=*/false);
     }
 
-    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
-    /// function already takes when keep_history is false -- without giving up
-    /// the retained history.
+    /// new_data: empty, or "t_obs" (prediction times) and/or "y0" (initial
+    /// compartments at time 0); a key left out is set to its training value.
+    /// Output: I_traj and y_rep at those times (formulas: "Posterior
+    /// predictive" in the file header), one row per stored draw in history
+    /// mode. last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function takes when keep_history is false -- without giving up the
+    /// retained history: one row from the current (beta, gamma, sigma); with
+    /// an empty new_data, y_rep only.
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
             bool last_draw_only) const {
         const bool use_history = keep_history_ && !last_draw_only;
 
-        if (!new_data.empty()) {
-            throw std::runtime_error(
-                "ODE_SIR.predict_at() takes an empty map/list "
-                "(returns I_rep at training t_obs)");
+        // The declared data inputs (get_dag()$data_inputs: y0, t_obs) are
+        // the only keys accepted. The training values fill the keys that
+        // new_data leaves out.
+        arma::vec y0_new    = impl_->data().get("y0");
+        arma::vec t_obs_new = impl_->data().get("t_obs");
+        for (const auto& kv : new_data) {
+            if (impl_->data().valid_predict_inputs().count(kv.first) == 0u)
+                throw std::invalid_argument(
+                    "ODE_SIR.predict_at: unknown key '" + kv.first + "'. Valid: "
+                    "'t_obs' (prediction times) and 'y0' (initial compartments "
+                    "S0, I0, R0 at time 0), or an empty map/list for the "
+                    "training t_obs and y0.");
+            if (kv.first == "t_obs") {
+                check_t_obs_(kv.second);
+                t_obs_new = kv.second;
+            } else {
+                check_y0_(kv.second);
+                y0_new = kv.second;
+            }
         }
         AI4BayesCode::history_map out;
 
         if (!use_history) {
+            // With an empty new_data nothing is installed: y_rep is drawn
+            // around the I_traj of the current state (the 1.1.2 output).
+            // Otherwise both inputs are installed, so the BFS recomputes
+            // I_traj from them and the current theta before y_rep is drawn.
             block_context replaced;
+            if (!new_data.empty()) {
+                replaced["y0"]    = y0_new;
+                replaced["t_obs"] = t_obs_new;
+            }
             block_context result = impl_->predict_at(replaced, predict_rng_);
             for (const auto& kv : result) {
                 arma::mat m(1, kv.second.n_elem);
@@ -528,24 +606,20 @@ public:
 
         // History mode: theta and sigma are sub-outputs of the joint block
         // (keyed by sub-param name in get_history(), NOT by block name).
-        // Compute y_rep manually per draw (cf. IRT1PL_joint.cpp, GaussianLocationScale.cpp).
+        // For each stored draw d, the BFS recomputes I_traj from y0, t_obs and
+        // theta_d and draws y_rep from I_traj and sigma_d.
         AI4BayesCode::history_map hist = impl_->get_history();
         const arma::mat& theta_hist = hist.at("theta");   // n_draws x 2: [beta, gamma]
         const arma::mat& sigma_hist = hist.at("sigma");   // n_draws x 1
         const std::size_t n_draws   = theta_hist.n_rows;
-
-        const arma::vec y0_tr    = impl_->data().get("y0");
-        const arma::vec t_obs_tr = impl_->data().get("t_obs");
-        const arma::vec& I_obs   = impl_->data().get("I_obs");
-        const std::size_t n_obs  = t_obs_tr.n_elem;
 
         std::unordered_map<std::string, std::vector<arma::vec>> collected;
         for (std::size_t d = 0; d < n_draws; ++d) {
             // Inject sub-param draws so the predict DAG BFS can run.
             // theta and sigma are keyed by sub-param name (not block name).
             block_context replaced;
-            replaced["y0"]    = y0_tr;
-            replaced["t_obs"] = t_obs_tr;
+            replaced["y0"]    = y0_new;
+            replaced["t_obs"] = t_obs_new;
             replaced["theta"] = theta_hist.row(d).t();
             replaced["sigma"] = arma::vec{sigma_hist(d, 0)};
             block_context result = impl_->predict_at(replaced, predict_rng_);
@@ -587,6 +661,49 @@ public:
     }
 
 private:
+    // Checks of the predict_at inputs. t_obs: at least one time, each finite
+    // and >= 0 (y0 is the state at time 0), strictly increasing (ode::rk45
+    // requires strictly increasing output times). y0 = (S0, I0, R0): finite,
+    // >= 0, with a finite S0 + I0 + R0 > 0 (the SIR right-hand side divides
+    // by N = S + I + R).
+    static std::string num_(double x) {
+        std::ostringstream os;
+        os << x;
+        return os.str();
+    }
+    static void check_t_obs_(const arma::vec& t) {
+        if (t.n_elem == 0)
+            throw std::invalid_argument(
+                "ODE_SIR.predict_at: 't_obs' has no elements; pass at least one "
+                "prediction time, or leave 't_obs' out for the training times.");
+        for (arma::uword i = 0; i < t.n_elem; ++i) {
+            if (!std::isfinite(t[i]) || t[i] < 0.0)
+                throw std::invalid_argument(
+                    "ODE_SIR.predict_at: every 't_obs' must be finite and >= 0 "
+                    "(y0 is the state at time 0); got " + num_(t[i]) + ".");
+            if (i > 0 && !(t[i] > t[i - 1]))
+                throw std::invalid_argument(
+                    "ODE_SIR.predict_at: 't_obs' must be strictly increasing; got "
+                    + num_(t[i]) + " after " + num_(t[i - 1]) + ".");
+        }
+    }
+    static void check_y0_(const arma::vec& y0) {
+        if (y0.n_elem != 3)
+            throw std::invalid_argument(
+                "ODE_SIR.predict_at: 'y0' must have 3 elements (S0, I0, R0); got "
+                + std::to_string(y0.n_elem) + ".");
+        for (arma::uword i = 0; i < 3; ++i)
+            if (!std::isfinite(y0[i]) || y0[i] < 0.0)
+                throw std::invalid_argument(
+                    "ODE_SIR.predict_at: every element of 'y0' = (S0, I0, R0) must "
+                    "be finite and >= 0; got " + num_(y0[i]) + ".");
+        const double N0 = y0[0] + y0[1] + y0[2];
+        if (!(N0 > 0.0) || !std::isfinite(N0))
+            throw std::invalid_argument(
+                "ODE_SIR.predict_at: 'y0' must have a finite S0 + I0 + R0 > 0 "
+                "(the SIR equations divide by N = S + I + R).");
+    }
+
     std::mt19937_64                  rng_;
     mutable std::mt19937_64          predict_rng_;
     mutable std::mt19937_64          readapt_rng_;
@@ -617,7 +734,14 @@ RCPP_MODULE(ODE_SIR_module) {
         .method("predict_at",
                 (AI4BayesCode::history_map (ODE_SIR::*)(const AI4BayesCode::state_map&) const)
                     &ODE_SIR::predict_at,
-                "Predict at new_data. Unchanged.")
+                "predict_at(new_data): new_data = list() for the training t_obs "
+                "and y0, or list(t_obs = <times: finite, >= 0, strictly "
+                "increasing>, y0 = c(S0, I0, R0)), either key optional (a key "
+                "left out is set to its training value). Returns I_traj (I(t) of "
+                "the SIR solution from y0 at time 0) and y_rep (LogNormal("
+                "log I_traj, sigma^2)), one row per stored draw of (beta, "
+                "gamma, sigma) with keep_history = TRUE, else one row from the "
+                "current draw (y_rep only for list()).")
         .method("predict_at",
                 (AI4BayesCode::history_map (ODE_SIR::*)(const AI4BayesCode::state_map&, bool) const)
                     &ODE_SIR::predict_at,
@@ -655,7 +779,16 @@ PYBIND11_MODULE(ODE_SIR, m) {
              (AI4BayesCode::history_map (ODE_SIR::*)(const AI4BayesCode::state_map&, bool) const)
                  &ODE_SIR::predict_at,
              pybind11::arg("new_data"),
-             pybind11::arg("last_draw_only") = false)
+             pybind11::arg("last_draw_only") = false,
+             "predict_at(new_data, last_draw_only=False): new_data = {} for the "
+             "training t_obs and y0, or {'t_obs': <times: finite, >= 0, strictly "
+             "increasing>, 'y0': [S0, I0, R0]} as numpy arrays, either key "
+             "optional (a key left out is set to its training value). Returns "
+             "I_traj (I(t) of the SIR solution from y0 at time 0) and y_rep "
+             "(LogNormal(log I_traj, sigma^2)), one row per stored draw of "
+             "(beta, gamma, sigma) with keep_history=True, else one row from "
+             "the current draw (y_rep only for {}). last_draw_only=True takes "
+             "the single-draw path without discarding the history.")
         .def("get_dag",      &ODE_SIR::get_dag)
         .def("get_history",  &ODE_SIR::get_history)
         .def("readapt_NUTS", (void (ODE_SIR::*)(int, bool, int, double)) &ODE_SIR::readapt_NUTS,
