@@ -426,9 +426,8 @@ public:
         return predict_at(new_data, /*last_draw_only=*/false);
     }
 
-    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
-    /// function already takes when keep_history is false -- without giving up
-    /// the retained history.
+    /// last_draw_only = true returns the single-draw output (the
+    /// keep_history = false output) and leaves the stored draws unchanged.
     AI4BayesCode::history_map
     predict_at(const AI4BayesCode::state_map& new_data,
             bool last_draw_only) const {

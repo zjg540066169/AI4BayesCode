@@ -477,10 +477,11 @@ public:
     //   * keep_history = FALSE, empty map:
     //       y_rep:      posterior-predictive at TRAINING X from current draw.
     //   * keep_history = TRUE,  X supplied (with more than one stored draw
-    //     this needs keep_tree = TRUE, which stores the forest of every draw;
-    //     without it this mode stops with an error that names keep_tree =
-    //     TRUE and last_draw_only = TRUE; with keep_tree = FALSE and at most
-    //     one stored draw, the one row comes from the current forest):
+    //     this requires keep_tree = TRUE, which stores the forest of every
+    //     draw; without it this mode stops with an error that names
+    //     keep_tree = TRUE and last_draw_only = TRUE; with keep_tree = FALSE
+    //     and at most one stored draw, the one row comes from the current
+    //     forest):
     //       f_softbart: n_draws x N_new; row d = m_d + y_scale * (stored
     //                   forest d at X_new), m_d = mean(y) of sweep d.
     //       y_rep:      n_draws x N_new; row d = f_softbart row d +
@@ -502,9 +503,8 @@ public:
         return predict_at(new_data, /*last_draw_only=*/false);
     }
 
-    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
-    /// function already takes when keep_history is false -- without giving up
-    /// the retained history.
+    /// last_draw_only = true returns the single-draw output (the
+    /// keep_history = false output) and leaves the stored draws unchanged.
     AI4BayesCode::history_map
     predict_at(const AI4BayesCode::state_map& new_data,
             bool last_draw_only) const {

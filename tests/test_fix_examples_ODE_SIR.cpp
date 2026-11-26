@@ -477,8 +477,8 @@ int main() {
                     "count %.3g; training times bit-identical %d\n",
                     e_grid, e_rk4, e_scale, train_same ? 1 : 0);
         check(rows_ok && e_grid < 1e-4 && e_rk4 < 1e-4 && e_scale < 1e-4,
-              "C12 I_traj at t = 30..120 does not depend on the other requested times or the scale of y0, "
-              "and matches RK4");
+              "C12 I_traj at t = 30..120 does not depend on the other requested times or "
+              "the scale of y0, and matches RK4");
         check(rows_ok && train_same,
               "C12 at the training times I_traj equals the uncapped training solve bit for bit");
     });

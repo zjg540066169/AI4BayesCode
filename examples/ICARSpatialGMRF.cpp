@@ -425,9 +425,9 @@ public:
 
         // ---- posterior predictive y_rep_t ~ N(Intercept + phi[node_idx[t]],
         //      sigma²) --------------------------------------------------------
-        // Only predict_at() runs this refresher. It reads Intercept, phi and
-        // sigma from predict_at's scratch copy of the shared data: the current
-        // state, or the values of a stored draw.
+        // This refresher is called only by predict_at(). Intercept, phi and
+        // sigma come from predict_at's scratch copy of the shared data: the
+        // current state, or the values of a stored draw.
         impl_->data().set("y_rep", arma::vec(T, arma::fill::zeros));
         impl_->data().declare_predict_edges("Intercept", {"y_rep"});
         impl_->data().declare_predict_edges("phi",       {"y_rep"});
