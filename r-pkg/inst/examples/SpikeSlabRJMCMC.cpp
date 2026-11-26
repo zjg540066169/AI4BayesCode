@@ -905,6 +905,10 @@ public:
         auto it_y = params.find("y");
         const bool has_X_in = (it_X != params.end());
         const bool has_y_in = (it_y != params.end());
+        // N before this call, and whether the X branch below clears the
+        // history; the warning about the clear is the last statement.
+        const std::size_t N_old = N_;
+        bool history_cleared = false;
         if (has_X_in) {
             const arma::vec& x_flat = it_X->second;
             if (p_ == 0 || x_flat.n_elem % p_ != 0)
@@ -927,23 +931,13 @@ public:
                                   arma::vec(N_new, arma::fill::zeros));
                 impl_->data().set("N",
                                   arma::vec{static_cast<double>(N_new)});
-                if (keep_history_ && impl_->history_size() > 1) {
-                    // Non-fatal warning. backend_neutral.hpp's installed R
-                    // copy only guarantees ai4b::stop (not ai4b::warning),
-                    // so guard the warning by backend: Rcpp::warning under R
-                    // (identical to the original behavior), stderr under
-                    // pybind/standalone.
-#ifdef AI4BAYESCODE_RCPP_MODULE
-                    Rcpp::warning("set_current: X row count changed from "
-                                  "%zu to %zu; clearing history (mixed-N "
-                                  "history is unsupported).", N_, N_new);
-#else
-                    std::fprintf(stderr,
-                                 "warning: set_current: X row count changed "
-                                 "from %zu to %zu; clearing history (mixed-N "
-                                 "history is unsupported).\n", N_, N_new);
-#endif
-                    impl_->clear_history();
+                // Every stored draw is discarded when N changes; the condition
+                // is keep_history_ alone, because history_size() returns 1
+                // with 0 and with 1 stored draw. The mixin's clear_history()
+                // calls impl_->clear_history() and then clear_extra_history_().
+                if (keep_history_) {
+                    clear_history();
+                    history_cleared = true;
                 }
             }
             N_ = N_new;
@@ -954,6 +948,27 @@ public:
                 ai4b::stop("set_current: y length %zu != current N = %zu",
                            (std::size_t)y_new.n_elem, N_);
             impl_->data().set("y", y_new);
+        }
+        // Raised after every write above: under R, Rcpp::warning calls
+        // Rf_warning, which under options(warn = 2) or a
+        // tryCatch(warning = ...) handler ends the call by a longjmp, so no
+        // statement after it runs.
+        if (history_cleared) {
+            // Non-fatal warning. backend_neutral.hpp's installed R
+            // copy only guarantees ai4b::stop (not ai4b::warning),
+            // so guard the warning by backend: Rcpp::warning under R
+            // (identical to the original behavior), stderr under
+            // pybind/standalone.
+#ifdef AI4BAYESCODE_RCPP_MODULE
+            Rcpp::warning("set_current: X row count changed from "
+                          "%zu to %zu; clearing history (mixed-N "
+                          "history is unsupported).", N_old, N_);
+#else
+            std::fprintf(stderr,
+                         "warning: set_current: X row count changed "
+                         "from %zu to %zu; clearing history (mixed-N "
+                         "history is unsupported).\n", N_old, N_);
+#endif
         }
     }
 
