@@ -1727,9 +1727,13 @@ def predict(chains, newdata=None, pool=True):
     (``chains.models[i]``); the worker processes holding models compute their
     chains concurrently. Each chain gives one row per stored draw, computed by
     the model from that draw's own values. ``newdata=None`` means ``{}``: the
-    posterior predictive at the training data. For a chain whose model had no
-    clear_history() (``chains.history_cleared[i]`` is False), the first
-    ``n_burn`` rows of every entry with ``n_burn + n_keep`` rows are dropped.
+    posterior predictive at the training data. The first ``n_burn`` rows of
+    every entry with ``n_burn + n_keep`` rows are dropped: such an entry holds
+    the warmup draws too (a model without clear_history(), or one that stores
+    per-sweep values outside the buffers clear_history() empties; the latter
+    with a warning). With ``pool=True``, an entry whose first dimension is
+    neither ``n_keep`` nor 1 gives a warning, because that axis is then not
+    one row per stored draw.
     A chain that failed in run_chains() is left out, with a warning. The
     output and the warnings of each chain's predict_at() are shown here, in
     chain order; an exception raised by the model of chain i is raised with
@@ -1836,16 +1840,38 @@ def predict(chains, newdata=None, pool=True):
         outs[i] = value
         value = None
 
+    # An entry with n_burn + n_keep rows holds the warmup draws too: from a
+    # model without clear_history(), or from per-sweep values that a model
+    # stores outside the buffers clear_history() empties. Its first n_burn
+    # rows are dropped; for a model that has clear_history(), with a warning.
     n_burn, n_keep = chains.n_burn, chains.n_keep
     if n_burn > 0:
         for i in use:
-            if not cleared[i] and isinstance(outs[i], Mapping):
-                outs[i] = {k: (np.asarray(v)[n_burn:]
-                               if np.ndim(v) > 0 and np.shape(v)[0] == n_burn + n_keep
-                               else v)
-                           for k, v in outs[i].items()}
+            if not isinstance(outs[i], Mapping):
+                continue
+            full = [k for k, v in outs[i].items()
+                    if np.ndim(v) > 0 and np.shape(v)[0] == n_burn + n_keep]
+            if not full:
+                continue
+            outs[i] = {k: (np.asarray(v)[n_burn:] if k in full else v)
+                       for k, v in outs[i].items()}
+            if cleared[i]:
+                _warn(f"predict: chain {i}: predict_at() returned n_burn + n_keep = "
+                      f"{n_burn + n_keep} rows for {', '.join(map(repr, full))} although "
+                      f"clear_history() was called after the warmup; the first n_burn = "
+                      f"{n_burn} rows (the warmup draws) were dropped. The model stores "
+                      f"these draws outside the buffers that clear_history() empties.")
     if not pool:
         return [outs.get(i) for i in range(n_chains)]
+    if n_keep > 0:
+        odd = sorted({k for i in use if isinstance(outs[i], Mapping)
+                      for k, v in outs[i].items()
+                      if np.ndim(v) > 0 and np.shape(v)[0] not in (1, n_keep)})
+        if odd:
+            _warn("predict: the first dimension of " + ", ".join(map(repr, odd))
+                  + f" is neither n_keep = {n_keep} nor 1, so it is not one row per "
+                  "stored draw; pool=True stacks the chains along it. Use pool=False "
+                  "to get the entries of each chain unchanged.")
 
     for i in use:
         if not isinstance(outs[i], Mapping):

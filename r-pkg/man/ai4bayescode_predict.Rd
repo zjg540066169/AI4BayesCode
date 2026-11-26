@@ -42,9 +42,12 @@ Calls `predict_at(newdata)` on the model of every chain of a
   After a parallel run, `ai4bayescode_predict()` sends one request to each
   worker process, and the worker processes compute their chains
   concurrently. Each chain gives the draws its model's `predict_at()`
-  returns, i.e. one row per post-warmup draw; for a chain whose model has
-  no `clear_history()` (`run$history_cleared[i]` is `FALSE`) the first
-  `n_burn` rows of every entry with `n_burn + n_keep` rows are dropped.
+  returns, i.e. one row per post-warmup draw. The first `n_burn` rows of
+  every entry with `n_burn + n_keep` rows are dropped: such an entry holds
+  the warmup draws too (a model without `clear_history()`, or one that
+  stores per-sweep values outside the buffers `clear_history()` empties;
+  the latter with a warning). With `pool = TRUE`, an entry whose first
+  dimension is neither `n_keep` nor 1 gives a warning.
   The value of each chain's `predict_at()` must be a list with unique
   non-empty names; otherwise an error names the chain. `predict(run,
   newdata)` is the same call.

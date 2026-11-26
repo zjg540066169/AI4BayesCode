@@ -1113,18 +1113,46 @@ ai4bayescode_predict <- function(run, newdata = list(), pool = TRUE) {
     }
     for (i in seq_len(n_chains)) .ai4b_rc_check_prediction(preds[[i]], i)
 
-    # A model without clear_history() predicts from its warmup draws too.
+    # An entry with n_burn + n_keep rows holds the warmup draws too: from a
+    # model without clear_history(), or from per-sweep values that a model
+    # stores outside the buffers clear_history() empties. Its first n_burn
+    # rows are dropped; for a model that has clear_history(), with a warning.
     n_burn  <- if (is.null(run$n_burn)) 0L else as.integer(run$n_burn)
     n_keep  <- if (is.null(run$n_keep)) 0L else as.integer(run$n_keep)
     cleared <- run$history_cleared
-    if (n_burn > 0L && length(cleared) == n_chains) {
-        for (i in which(!cleared)) {
-            preds[[i]] <- lapply(preds[[i]], function(x)
-                if (.ai4b_rc_n_rows(x) == n_burn + n_keep)
-                    .ai4b_rc_strip_burn(x, n_burn) else x)
+    if (length(cleared) != n_chains) cleared <- rep(FALSE, n_chains)
+    if (n_burn > 0L) {
+        for (i in seq_len(n_chains)) {
+            full <- vapply(preds[[i]], function(x)
+                .ai4b_rc_n_rows(x) == n_burn + n_keep, logical(1))
+            if (!any(full)) next
+            preds[[i]][full] <- lapply(preds[[i]][full], .ai4b_rc_strip_burn,
+                                       nb = n_burn)
+            if (isTRUE(cleared[i]))
+                warning(sprintf(paste0(
+                    "chain %d: predict_at() returned n_burn + n_keep = %d rows ",
+                    "for %s although clear_history() was called after the ",
+                    "warmup; the first n_burn = %d rows (the warmup draws) were ",
+                    "dropped. The model stores these draws outside the buffers ",
+                    "that clear_history() empties."),
+                    i, n_burn + n_keep,
+                    paste(sQuote(names(preds[[i]])[full], FALSE), collapse = ", "),
+                    n_burn), call. = FALSE)
         }
     }
     if (isFALSE(pool)) return(preds)
+    if (n_keep > 0L) {
+        odd <- unique(unlist(lapply(preds, function(p)
+            names(p)[vapply(p, function(x) !(.ai4b_rc_n_rows(x) %in% c(1L, n_keep)),
+                            logical(1))])))
+        if (length(odd))
+            warning(sprintf(paste0(
+                "ai4bayescode_predict(): the first dimension of %s is neither ",
+                "n_keep = %d nor 1, so it is not one row per stored draw; ",
+                "pool = TRUE stacks the chains along it. Use pool = FALSE to get ",
+                "the entries of each chain unchanged."),
+                paste(sQuote(odd, FALSE), collapse = ", "), n_keep), call. = FALSE)
+    }
     .ai4b_rc_pool_predictions(preds)
 }
 
