@@ -1645,7 +1645,10 @@ def test_the_bound_follows_the_environment_variable(monkeypatch):
 
 
 FD_LIMIT_SCRIPT = '''
-    import resource, sys, warnings
+    import os, resource, sys, warnings
+    # A worker bound above the 50 workers of the 25 runs, so that the limit on
+    # open files, not the bound, closes the earlier runs.
+    os.environ["AI4BAYESCODE_MAX_WORKERS"] = "1000"
     import AI4BayesCode
 
     class M:

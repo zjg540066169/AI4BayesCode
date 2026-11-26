@@ -211,10 +211,10 @@ test_that("an interrupted call with a large reply, then a large request", {
     # 8 MB reply per worker, interrupted while the workers compute it.
     expect_false(returned_before(predict(run, list(sleep = 1, n = 1e6)), 0.3))
     # 8 MB request: the replies of the interrupted call are read first.
-    r <- within(predict(run, list(payload = stats::rnorm(1e6), n = 3)), 30)
+    r <- within(suppressWarnings(predict(run, list(payload = stats::rnorm(1e6), n = 5))), 30)
     expect_false(identical(r, "HUNG"))
     expect_equal(r$len, c(1e6, 1e6))
-    expect_identical(r$out, rep(c(104, 205), each = 3))
+    expect_identical(r$out, rep(c(104, 205), each = 5))
     expect_identical(within(predict(run)$out, 10), rep(c(104, 205), each = 2))
     expect_identical(run$models[[1]]$pid(), workers_of(run)[1])
     expect_identical(run$models[[2]]$pid(), workers_of(run)[2])
@@ -231,7 +231,7 @@ test_that("SIGINT while a large request is written or a large reply is read", {
         expect_identical(within(predict(run)$out, 30), c(104, 104, 205, 205))
     }
     for (d in c(0.1, 0.3)) {
-        returned_before(predict(run, list(n = 2.5e7)), d)
+        returned_before(suppressWarnings(predict(run, list(n = 2.5e7))), d)
         expect_identical(within(predict(run)$out, 30), c(104, 104, 205, 205))
     }
     expect_identical(run$models[[2]]$get_history(), run$histories[[2]])
@@ -259,7 +259,7 @@ test_that("an unread reply leaves no file after close or garbage collection", {
     for (d in c(0.3, 0.8)) {
         run  <- kept_run()
         pids <- workers_of(run)
-        returned_before(predict(run, list(n = 2.5e7)), d)
+        returned_before(suppressWarnings(predict(run, list(n = 2.5e7))), d)
         ai4bayescode_close_models(run)
         expect_true(all_exited(pids))
         expect_length(spill_files(), 0L)

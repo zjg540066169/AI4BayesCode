@@ -1144,7 +1144,8 @@ ai4bayescode_predict <- function(run, newdata = list(), pool = TRUE) {
     if (isFALSE(pool)) return(preds)
     if (n_keep > 0L) {
         odd <- unique(unlist(lapply(preds, function(p)
-            names(p)[vapply(p, function(x) !(.ai4b_rc_n_rows(x) %in% c(1L, n_keep)),
+            names(p)[vapply(p, function(x) is.atomic(x) && !is.null(x) &&
+                                !(.ai4b_rc_n_rows(x) %in% c(1L, n_keep)),
                             logical(1))])))
         if (length(odd))
             warning(sprintf(paste0(
