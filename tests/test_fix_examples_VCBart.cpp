@@ -28,8 +28,8 @@
 //        last row equals the last_draw_only prediction bit for bit;
 //    C8  keep_history without keep_tree: new (X, Z) gives one row (mu from
 //        the current forests, equal to last_draw_only) after 0 and after 1
-//        sweep; after 5 sweeps it throws with a message that names
-//        keep_tree = TRUE and the 5 stored draws, and last_draw_only gives
+//        sweep; after 5 sweeps it still gives that one row (as in 1.1.2, with
+//        a warning that names keep_tree = TRUE), and last_draw_only gives
 //        1 x N_new; after clear_history() and K more sweeps every
 //        history-mode prediction has K rows.
 //  predict_at y_rep (row d = mu_d + sigma_d * eps, eps iid N(0, 1) drawn
@@ -299,22 +299,26 @@ int main() {
     }
     check(ok01, "C8 keep_tree = false: 0 and 1 stored draws give one row at new (X, Z)");
     mn.step(4);
-    bool threw = false;
-    std::string msg8;
-    try { mn.predict_at(nd_new); }
-    catch (const std::exception& e) { threw = true; msg8 = e.what(); }
-    threw = threw && msg8.find("keep_tree = TRUE") != std::string::npos &&
-            msg8.find("5 stored draws") != std::string::npos;
     const arma::mat p8l = mn.predict_at(nd_new, true).at("mu");
+    bool one_row = false;
+    try {
+        const auto r8 = mn.predict_at(nd_new);
+        one_row = r8.at("mu").n_rows == 1 && r8.at("y_rep").n_rows == 1 &&
+                  arma::approx_equal(r8.at("mu"), p8l, "absdiff", 0.0);
+    } catch (const std::exception& e) {
+        std::printf("C8 keep_tree = false, 5 sweeps: threw \"%s\"\n", e.what());
+    }
+    const bool threw = !one_row;
     mh.clear_history();
     mh.step(static_cast<int>(K2));
     const std::size_t r0 = mh.predict_at(empty).at("mu").n_rows;
     const std::size_t r1 = mh.predict_at(nd_new).at("mu").n_rows;
-    std::printf("C8 keep_tree = false: new (X, Z) threw = %d, last_draw_only %d x %d; "
+    std::printf("C8 keep_tree = false: new (X, Z) one row = %d, last_draw_only %d x %d; "
                 "after clear_history() + %d sweeps: rows %d (training), %d (new)\n",
-                threw ? 1 : 0, (int)p8l.n_rows, (int)p8l.n_cols, (int)K2, (int)r0, (int)r1);
-    check(threw && p8l.n_rows == 1 && p8l.n_cols == Nn && r0 == K2 && r1 == K2,
-          "C8 new (X, Z) in history mode needs keep_tree; row counts follow clear_history()");
+                threw ? 0 : 1, (int)p8l.n_rows, (int)p8l.n_cols, (int)K2, (int)r0, (int)r1);
+    check(!threw && p8l.n_rows == 1 && p8l.n_cols == Nn && r0 == K2 && r1 == K2,
+          "C8 new (X, Z) without keep_tree: one row from the current forests (as in 1.1.2); "
+          "row counts follow clear_history()");
 
     // C9: m5 is a single-draw model; mh holds the K2 draws stored after C8.
     const arma::vec none;
