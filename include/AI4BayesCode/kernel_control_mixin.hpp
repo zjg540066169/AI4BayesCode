@@ -440,16 +440,16 @@ private:
 //
 //  This is deliberately NOT folded into AI4BAYESCODE_BIND_KERNEL_CONTROL. That
 //  macro is unconditional -- every wrapper inherits freeze / unfreeze /
-//  get_frozen / clear_history from kernel_control_mixin -- whereas readapt_NUTS exists only on
-//  models that actually have a NUTS kernel (22 of the 42 shipped examples), so
-//  folding it in would fail to compile for the other 20.
+//  get_frozen / clear_history from kernel_control_mixin -- whereas
+//  readapt_NUTS exists only on models that have a NUTS kernel (16 of the 43
+//  shipped examples), so folding it in would fail to compile for the other 27.
 //
 //  BOTH arities are bound, and that is the point of having a macro at all:
 //  Rcpp modules dispatch on ARITY and ignore C++ default arguments, so binding
 //  only (int, bool, int) leaves the documented 4-argument call unreachable,
 //  and binding only the 4-argument form breaks every 3-argument call site.
-//  Written by hand 22 times, that is 22 chances to bind one and forget the
-//  other.
+//  Written by hand in each of the 16 examples, either arity could be left
+//  out.
 //
 //  Usage, inside RCPP_MODULE, on a class defining both overloads:
 //
