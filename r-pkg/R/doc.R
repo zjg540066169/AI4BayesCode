@@ -180,11 +180,17 @@
     open_re <- sprintf("^\\s*//\\s*@example:%s\\b", lang)
     st <- which(grepl(open_re, lines, perl = TRUE, ignore.case = TRUE))
     if (!length(st)) return(NULL)
+    # A header line can mention the tag in prose ("@example:R -- runnable
+    # DGP ..."); a line holding only the tag opens the block when one exists.
+    alone <- st[grepl(sprintf("^\\s*//\\s*@example:%s\\s*$", lang), lines[st],
+                      perl = TRUE, ignore.case = TRUE)]
+    if (length(alone)) st <- alone
     out <- character(0); i <- st[1] + 1L
     while (i <= length(lines)) {
         ln <- lines[i]
         if (grepl("^\\s*//\\s*@example:", ln, perl = TRUE)) break   # next tag or :end
         if (!grepl("^\\s*//", ln)) break                            # left the comment block
+        if (grepl("^\\s*//\\s*[=-]{4,}\\s*$", ln, perl = TRUE)) break  # separator line
         out <- c(out, sub("^\\s*//\\s?", "", ln))
         i <- i + 1L
     }

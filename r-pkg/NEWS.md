@@ -185,6 +185,14 @@
   and `y_rep` left out the level of `y` (with `y + 3`, `sigma` was 3.28
   instead of 0.51). SoftBartNoise draws change; `center_Y = FALSE` draws do
   not.
+* `GPTimeSeries`: the prior of the time scale `tau` is InverseGamma(a, b)
+  with `a` and `b` chosen at construction so that the prior probability is
+  0.01 below the smallest gap between time points and 0.01 above the time
+  span (it was InverseGamma(5, 5 * median gap), which put probability
+  2.3e-7 above 40 gaps and pulled the posterior of `tau` far below a long
+  true time scale: in a simulation with true `tau` = 40 and gap 1, the
+  posterior median moved from about 18 to about 36). GPTimeSeries draws
+  change.
 * Python: at its first `step()`, each `bart_block`, `genbart_block` and
   `softbart_block` seeds the BART kernel from a copy of the chain's
   random-number generator (the chain's own stream does not advance), and
@@ -217,6 +225,9 @@
 
 ## Other changes
 
+* `GBartHeteroscedastic`: `get_history()` also returns `phi`, the
+  dispersion of each stored sweep (`n_draws x 1`), so its posterior and
+  R-hat are available; the other entries and the draws are unchanged.
 * Python: a `state_map` argument (`predict_at()`, `set_current()`) accepts a
   Mapping whose values are numbers, 0-d, 1-D or 2-D arrays, or nested
   sequences; a 2-D value is flattened column-major, as R flattens a matrix,

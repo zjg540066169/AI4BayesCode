@@ -19,7 +19,9 @@
 //   f             ~  GP(0, k_amp_tau(t, t')),
 //          k(dt)  =  amp^2 * exp(-|dt| / tau)
 //   amp           ~  half-Normal(0, sd(y))
-//   tau           ~  InverseGamma(5, 5 * median_dt)   [timescale]
+//   tau           ~  InverseGamma(a, b)   [timescale; a, b give prior
+//                    probability 0.01 below the smallest time gap and
+//                    0.01 above the time span]
 //   sigma (noise) ~  Jeffreys p(sigma) oc 1/sigma
 //
 // Latent f is MARGINALIZED OUT (conjugate Gaussian-Gaussian); no explicit
@@ -151,6 +153,61 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+
+// ---- Inverse-gamma prior of the OU time scale from two tail conditions ----
+namespace gpts_prior {
+// P(a, x): regularized lower incomplete gamma function, by its series for
+// x < a + 1 and by the continued fraction of Q(a, x) = 1 - P(a, x) otherwise.
+inline double gamma_p(double a, double x) {
+    if (x <= 0.0) return 0.0;
+    const double log_pref = -x + a * std::log(x) - std::lgamma(a);
+    if (x < a + 1.0) {
+        double ap = a, del = 1.0 / a, sum = del;
+        for (int n = 0; n < 2000; ++n) {
+            ap += 1.0; del *= x / ap; sum += del;
+            if (std::fabs(del) < std::fabs(sum) * 1e-15) break;
+        }
+        return std::min(1.0, sum * std::exp(log_pref));
+    }
+    const double tiny = std::numeric_limits<double>::min() / std::numeric_limits<double>::epsilon();
+    double b = x + 1.0 - a, c = 1.0 / tiny, d = 1.0 / b, h = d;
+    for (int i = 1; i < 2000; ++i) {
+        const double an = -i * (i - a);
+        b += 2.0;
+        d = an * d + b; if (std::fabs(d) < tiny) d = tiny;
+        c = b + an / c; if (std::fabs(c) < tiny) c = tiny;
+        d = 1.0 / d;
+        const double del = d * c; h *= del;
+        if (std::fabs(del - 1.0) < 1e-15) break;
+    }
+    return std::max(0.0, 1.0 - std::exp(log_pref) * h);
+}
+// Shape a and scale b of tau ~ InvGamma(a, b), i.e. 1/tau ~ Gamma(a, rate b),
+// with P(tau < lo) = p and P(tau > hi) = p. P(tau > hi) = P(a, b / hi) and
+// P(tau < lo) = 1 - P(a, b / lo). For each a, b solves P(a, b / hi) = p (the
+// left side increases in b); then a solves P(a, b(a) / lo) = 1 - p (the left
+// side increases in a). Both by bisection; requires hi > lo > 0.
+inline void inv_gamma_from_tails(double lo, double hi, double p,
+                                 double& a_out, double& b_out) {
+    auto b_of = [&](double a) {
+        double b_lo = 0.0, b_hi = hi;
+        while (gamma_p(a, b_hi / hi) < p) b_hi *= 2.0;
+        for (int k = 0; k < 120; ++k) {
+            const double m = 0.5 * (b_lo + b_hi);
+            if (gamma_p(a, m / hi) < p) b_lo = m; else b_hi = m;
+        }
+        return 0.5 * (b_lo + b_hi);
+    };
+    double a_lo = 1e-3, a_hi = 1e3;
+    for (int k = 0; k < 120; ++k) {
+        const double m = std::sqrt(a_lo * a_hi);
+        if (gamma_p(m, b_of(m) / lo) < 1.0 - p) a_lo = m; else a_hi = m;
+    }
+    a_out = std::sqrt(a_lo * a_hi);
+    b_out = b_of(a_out);
+}
+}  // namespace gpts_prior
 #include <cstdint>
 #include <memory>
 #include <numeric>
@@ -461,13 +518,23 @@ public:
         impl_->data().set("amp_prior_sd",
             arma::vec{std::max(sd_y, 0.1)});
 
-        // tau prior: median successive gap is a natural timescale.
+        // tau prior: InvGamma(shape, scale) with prior probability 0.01 below
+        // the smallest gap between time points and 0.01 above the time span;
+        // time scales outside that range are not identified by the data.
+        // When the span does not exceed the smallest gap (two time points),
+        // the prior is InvGamma(5, 5 * median gap).
         arma::vec gaps(N - 1);
         for (std::size_t i = 0; i < N - 1; ++i) gaps[i] = t_arma[i+1] - t_arma[i];
         arma::vec gaps_sorted = arma::sort(gaps);
         const double median_dt = gaps_sorted[gaps_sorted.n_elem / 2];
-        impl_->data().set("tau_prior_shape", arma::vec{5.0});
-        impl_->data().set("tau_prior_scale", arma::vec{5.0 * median_dt});
+        double min_gap = 0.0;
+        for (double g : gaps_sorted) if (g > 0.0) { min_gap = g; break; }
+        const double span = t_arma.max() - t_arma.min();
+        double tau_shape = 5.0, tau_scale = 5.0 * median_dt;
+        if (min_gap > 0.0 && span > 1.001 * min_gap)
+            gpts_prior::inv_gamma_from_tails(min_gap, span, 0.01, tau_shape, tau_scale);
+        impl_->data().set("tau_prior_shape", arma::vec{tau_shape});
+        impl_->data().set("tau_prior_scale", arma::vec{tau_scale});
 
         const double amp_init   = std::max(sd_y, 0.1);
         const double tau_init   = 5.0 * median_dt;

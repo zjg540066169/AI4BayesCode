@@ -170,14 +170,20 @@ def _parse_example(src: str, lang: str = "python"):
     open_re = re.compile(r"^\s*//\s*@example:" + re.escape(lang) + r"\b", re.I)
     tag_re = re.compile(r"^\s*//\s*@example:")
     cmt_re = re.compile(r"^\s*//")
-    st = next((i for i, ln in enumerate(lines) if open_re.search(ln)), None)
-    if st is None:
+    cand = [i for i, ln in enumerate(lines) if open_re.search(ln)]
+    if not cand:
         return None
+    # A header line can mention the tag in prose ("@example:R -- runnable
+    # DGP ..."); a line holding only the tag opens the block when one exists.
+    alone_re = re.compile(r"^\s*//\s*@example:" + re.escape(lang) + r"\s*$", re.I)
+    st = ([i for i in cand if alone_re.search(lines[i])] or cand)[0]
     out: list[str] = []
     for ln in lines[st + 1:]:
         if tag_re.search(ln):       # next @example:* tag or :end
             break
         if not cmt_re.search(ln):   # left the comment block
+            break
+        if re.match(r"^\s*//\s*[=-]{4,}\s*$", ln):   # separator line
             break
         out.append(re.sub(r"^\s*//\s?", "", ln))
     while out and not out[-1].strip():

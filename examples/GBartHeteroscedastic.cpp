@@ -662,7 +662,21 @@ public:
         return out;
     }
 
-    AI4BayesCode::history_map get_history() const { return impl_->get_history(); }
+    // The stored draws of impl_ plus "phi": the dispersion of each stored
+    // sweep (phi_hist_, n_draws x 1). With no stored sweep, the current phi
+    // as one row, as the block entries return their current value.
+    AI4BayesCode::history_map get_history() const {
+        AI4BayesCode::history_map h = impl_->get_history();
+        arma::mat phi;
+        if (!phi_hist_.empty())
+            phi = arma::mat(arma::conv_to<arma::vec>::from(phi_hist_));
+        else
+            phi = arma::mat(1, 1, arma::fill::value(
+                static_cast<genbart::lik::heteroscedastic_lik*>(
+                    likelihood_.get())->phi()));
+        h.emplace("phi", std::move(phi));
+        return h;
+    }
 
     // Called by clear_history() after impl_ is cleared: empties phi_hist_.
     void clear_extra_history_() { phi_hist_.clear(); }
@@ -750,7 +764,7 @@ RCPP_MODULE(GBartHeteroscedastic_module) {
                 "Return the predict DAG as a named list of edges.")
         .method("get_history", &GBartHeteroscedastic::get_history,
                 "Return the history as a named list of matrices "
-                "(r [n_draws x N]).")
+                "(r [n_draws x N], phi [n_draws x 1]).")
         .method("get_tree_history", &GBartHeteroscedastic::get_tree_history,
                 "Return per-draw serialized genBART forests (one per stored "
                 "draw when keep_tree=TRUE; else the current forest).")
