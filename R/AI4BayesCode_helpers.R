@@ -1757,7 +1757,7 @@ if (!exists(".ai4b_rc_env", inherits = FALSE))
 
 # Upper bound on the worker processes that the kept runs of this session
 # hold: getOption("ai4bayescode.max_workers"), else the environment variable
-# AI4BAYESCODE_MAX_WORKERS, else max(8, 4 * number of cores).
+# AI4BAYESCODE_MAX_WORKERS, else max(8, number of cores).
 .ai4b_rc_max_workers <- function() {
     v <- getOption("ai4bayescode.max_workers")
     src <- "getOption(\"ai4bayescode.max_workers\")"
@@ -1768,7 +1768,7 @@ if (!exists(".ai4b_rc_env", inherits = FALSE))
     if (is.null(v)) {
         nc <- suppressWarnings(parallel::detectCores())
         if (length(nc) != 1L || is.na(nc) || nc < 1) nc <- 1L
-        return(as.integer(max(8, 4 * nc)))
+        return(as.integer(max(8, nc)))
     }
     n <- suppressWarnings(as.numeric(v))
     if (length(n) != 1L || is.na(n) || n < 1 || n != floor(n))
@@ -2054,7 +2054,7 @@ if (!exists(".ai4b_rc_env", inherits = FALSE))
             "the %d worker processes of this run ",
             "exceed max_workers = %d (getOption(\"ai4bayescode.max_workers\"), ",
             "the environment variable AI4BAYESCODE_MAX_WORKERS, or ",
-            "max(8, 4 * number of cores)); the chains run sequentially in this ",
+            "max(8, number of cores)); the chains run sequentially in this ",
             "session. Raise that bound, or pass a smaller n_cores."),
             n_workers, max_w))
     if (.ai4b_rc_free_slots(need) + held < need)

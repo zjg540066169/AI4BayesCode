@@ -110,7 +110,7 @@ Runs `n_chains` chains from a deterministic constructor
   the worker process, it can hold its own copy of the session's R objects.
   At most `max_workers` worker processes of kept runs exist at a time:
   `getOption("ai4bayescode.max_workers")`, else the environment variable
-  `AI4BAYESCODE_MAX_WORKERS`, else `max(8, 4 * parallel::detectCores())`.
+  `AI4BAYESCODE_MAX_WORKERS`, else `max(8, parallel::detectCores())`.
   Before the worker processes of a run are started, those of earlier runs
   are terminated, least recently used (created or called) first, until the
   new ones fit under `max_workers` and `n_workers + 2` connections are

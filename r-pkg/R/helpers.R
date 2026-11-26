@@ -681,7 +681,7 @@ ai4bayescode_diagnose <- function(hist, n_burn = 0, plot = TRUE, order_component
 #'   the worker process, it can hold its own copy of the session's R objects.
 #'   At most `max_workers` worker processes of kept runs exist at a time:
 #'   `getOption("ai4bayescode.max_workers")`, else the environment variable
-#'   `AI4BAYESCODE_MAX_WORKERS`, else `max(8, 4 * parallel::detectCores())`.
+#'   `AI4BAYESCODE_MAX_WORKERS`, else `max(8, parallel::detectCores())`.
 #'   Before the worker processes of a run are started, those of earlier runs
 #'   are terminated, least recently used (created or called) first, until the
 #'   new ones fit under `max_workers` and `n_workers + 2` connections are
@@ -1707,7 +1707,7 @@ print.ai4bayescode_chain_model <- function(x, ...) {
 
 # Upper bound on the worker processes that the kept runs of this session
 # hold: getOption("ai4bayescode.max_workers"), else the environment variable
-# AI4BAYESCODE_MAX_WORKERS, else max(8, 4 * number of cores).
+# AI4BAYESCODE_MAX_WORKERS, else max(8, number of cores).
 .ai4b_rc_max_workers <- function() {
     v <- getOption("ai4bayescode.max_workers")
     src <- "getOption(\"ai4bayescode.max_workers\")"
@@ -1718,7 +1718,7 @@ print.ai4bayescode_chain_model <- function(x, ...) {
     if (is.null(v)) {
         nc <- suppressWarnings(parallel::detectCores())
         if (length(nc) != 1L || is.na(nc) || nc < 1) nc <- 1L
-        return(as.integer(max(8, 4 * nc)))
+        return(as.integer(max(8, nc)))
     }
     n <- suppressWarnings(as.numeric(v))
     if (length(n) != 1L || is.na(n) || n < 1 || n != floor(n))
@@ -2004,7 +2004,7 @@ print.ai4bayescode_chain_model <- function(x, ...) {
             "the %d worker processes of this run ",
             "exceed max_workers = %d (getOption(\"ai4bayescode.max_workers\"), ",
             "the environment variable AI4BAYESCODE_MAX_WORKERS, or ",
-            "max(8, 4 * number of cores)); the chains run sequentially in this ",
+            "max(8, number of cores)); the chains run sequentially in this ",
             "session. Raise that bound, or pass a smaller n_cores."),
             n_workers, max_w))
     if (.ai4b_rc_free_slots(need) + held < need)

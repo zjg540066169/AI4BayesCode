@@ -1580,7 +1580,7 @@ def test_a_nested_run_runs_in_parallel_and_is_closed_with_its_worker():
 def test_forty_kept_runs_stay_within_the_bound(monkeypatch):
     monkeypatch.delenv("AI4BAYESCODE_MAX_WORKERS", raising=False)
     bound = rc._max_workers()
-    assert bound == max(8, 4 * (os.cpu_count() or 1))
+    assert bound == max(8, os.cpu_count() or 1)
     if bound > 64:                      # 40 runs of 4 workers must exceed the bound
         monkeypatch.setenv("AI4BAYESCODE_MAX_WORKERS", "64")
         bound = 64

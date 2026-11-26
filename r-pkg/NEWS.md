@@ -35,7 +35,7 @@
   every handle taken from it are garbage-collected, when R exits, and to make
   room for a later run: at most `getOption("ai4bayescode.max_workers")`, else
   the environment variable `AI4BAYESCODE_MAX_WORKERS`, else
-  `max(8, 4 * parallel::detectCores())` worker processes of kept runs exist
+  `max(8, parallel::detectCores())` worker processes of kept runs exist
   at a time. Before a run starts its worker processes, those of the least
   recently used runs are terminated until the new ones fit and
   `n_workers + 2` R connections are free, with one warning, and a call on a
@@ -69,7 +69,7 @@
   processes of its own; they are terminated by `close_models()`, when the
   result and its handles are garbage-collected, at interpreter exit, and,
   least recently used runs first, to keep at most `AI4BAYESCODE_MAX_WORKERS`
-  (default `max(8, 4 * os.cpu_count())`) of them within the soft limit on
+  (default `max(8, os.cpu_count())`) of them within the soft limit on
   open files. The output and the warnings of the chains and of calls on
   handles are shown in the calling process, and an error raised by the model
   of chain `i` has `"chain i: "` in front of its message.

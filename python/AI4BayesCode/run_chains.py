@@ -1457,7 +1457,7 @@ def _finish(results, models, n_burn, n_keep, *, walls=False,
 # ---------------------------------------------------------------------------
 def _max_workers() -> int:
     """The environment variable AI4BAYESCODE_MAX_WORKERS, else
-    max(8, 4 * os.cpu_count())."""
+    max(8, os.cpu_count())."""
     v = os.environ.get("AI4BAYESCODE_MAX_WORKERS", "").strip()
     if v:
         try:
@@ -1469,7 +1469,7 @@ def _max_workers() -> int:
                              "AI4BAYESCODE_MAX_WORKERS must be a positive integer; "
                              f"it is {v!r}")
         return n
-    return max(8, 4 * (os.cpu_count() or 1))
+    return max(8, os.cpu_count() or 1)
 
 
 def _fd_usage() -> Optional[tuple[int, int]]:
@@ -1966,7 +1966,7 @@ def run_chains(
         processes are stopped by :func:`close_models`, when the result and
         its handles are garbage-collected, or at interpreter exit. At most
         ``AI4BAYESCODE_MAX_WORKERS`` (an environment variable; default
-        ``max(8, 4 * os.cpu_count())``) such worker processes are kept over
+        ``max(8, os.cpu_count())``) such worker processes are kept over
         all runs of the session: before a run starts its workers, the
         workers of earlier runs are closed, least recently used first, when
         the limit, or the soft limit on open files (each worker uses 3 file
