@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import contextlib
 import gc
+import inspect
 import io
 import itertools
 import multiprocessing as mp
@@ -122,22 +123,24 @@ def _write(stream, text: str) -> None:
 
 
 def _warning_records(records) -> list:
-    """``(category, text)`` for each recorded warning. The category is the
-    class itself when it pickles, else its qualified name."""
+    """``(pickled category or None, category name, text)`` for each recorded
+    warning. The category is pickled separately from the message that carries
+    it, so a category that the calling process cannot unpickle affects only
+    that warning (`_warning_for`), not the reply."""
     out = []
     for w in records:
         cat = w.category
         try:
-            pickle.dumps(cat)
-            ref = cat
+            blob = pickle.dumps(cat, protocol=pickle.HIGHEST_PROTOCOL)
         except Exception:  # noqa: BLE001
-            ref = (f"{getattr(cat, '__module__', '?')}."
-                   f"{getattr(cat, '__qualname__', getattr(cat, '__name__', '?'))}")
+            blob = None
+        name = (f"{getattr(cat, '__module__', '?')}."
+                f"{getattr(cat, '__qualname__', getattr(cat, '__name__', '?'))}")
         try:
             text = str(w.message)
         except Exception:  # noqa: BLE001
             text = repr(w.message)
-        out.append((ref, text))
+        out.append((blob, name, text))
     return out
 
 
@@ -168,13 +171,22 @@ def _captured(fn):
         exc = None
 
 
-def _warning_for(cat, text) -> Warning:
+def _warning_for(blob, name, text) -> Warning:
+    """The warning of one `_warning_records` entry: of its own category when
+    that unpickles here, else a UserWarning whose text starts with the
+    category name."""
+    cat = None
+    if blob is not None:
+        try:
+            cat = pickle.loads(blob)
+        except Exception:  # noqa: BLE001
+            cat = None
     if isinstance(cat, type) and issubclass(cat, Warning):
         try:
             return cat(text)
         except Exception:  # noqa: BLE001
-            cat = getattr(cat, "__name__", str(cat))
-    return UserWarning(f"{cat}: {text}")
+            pass
+    return UserWarning(f"{name}: {text}")
 
 
 def _relay(cap) -> None:
@@ -187,8 +199,8 @@ def _relay(cap) -> None:
     out, err, warns = cap
     _write(sys.stdout, out)
     _write(sys.stderr, err)
-    for cat, text in warns:
-        warnings.warn(_warning_for(cat, text), stacklevel=_outside_stacklevel())
+    for blob, name, text in warns:
+        warnings.warn(_warning_for(blob, name, text), stacklevel=_outside_stacklevel())
 
 
 def _name_chain(exc: BaseException, chain: int) -> BaseException:
@@ -260,6 +272,19 @@ class _CallerRandomState:
         return False
 
 
+def _compiled_predict(m) -> bool:
+    """True when ``m.predict_at`` is a compiled (pybind11) method, False for
+    one written in Python. For a `ChainModel` handle, the value recorded for
+    the model in its worker process."""
+    if isinstance(m, ChainModel):
+        return bool(m._native)
+    try:
+        f = getattr(m, "predict_at", None)
+        return inspect.isbuiltin(getattr(f, "__func__", f))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _failed_result(seed, e, t0) -> dict:
     # Unlike R's ai4bayescode_run_chains, which stops the whole run on a
     # chain failure, a failed chain gives a warning and a result marked as
@@ -276,9 +301,9 @@ def _run_chain(factory: Callable[[int], Any], seed: int,
     """Run one chain; return ``(result, model)``, with model None on failure.
 
     Besides "seed", "wall" and "hist", a successful result carries the
-    private fields "_cleared", "_class", "_unclear" and "_no_clear", which
-    `_finish` removes in the calling process after reporting on them once
-    for the whole run.
+    private fields "_cleared", "_class", "_unclear", "_no_clear" and
+    "_native", which `_finish` removes in the calling process after reporting
+    on them once for the whole run.
     """
     t0 = time.time()
     try:
@@ -317,7 +342,8 @@ def _run_chain(factory: Callable[[int], Any], seed: int,
                     and (hasattr(m, "get_history") or hasattr(m, "predict_at")))
         return ({"seed": seed, "wall": wall, "hist": hist,
                  "_cleared": cleared, "_class": type(m).__name__,
-                 "_unclear": unclear, "_no_clear": no_clear}, m)
+                 "_unclear": unclear, "_no_clear": no_clear,
+                 "_native": _compiled_predict(m)}, m)
     except Exception as e:  # noqa: BLE001
         return (_failed_result(seed, e, t0), None)
 
@@ -398,7 +424,7 @@ def _chain_worker_fork(seed: int, n_burn: int, n_keep: int,
 #: Sentinel default for `seeds`. Compared BY IDENTITY, so a caller who passes
 #: these very values explicitly alongside n_chains keeps their seeds -- an
 #: equality test made that depend on both the values and the container type
-#: (a tuple lost, the same values in a list won).
+#: (a tuple was replaced, the same values in a list were kept).
 _DEFAULT_SEEDS = (101, 202, 303, 404)
 
 
@@ -478,12 +504,19 @@ def _drop_workers_in_child() -> None:
     processes; at the end of the child, multiprocessing's exit function would
     send them SIGTERM (as daemonic processes) or join them (an
     AssertionError). After they are removed from the child's set, only the
-    parent process stops the worker processes."""
+    parent process stops the worker processes. The child's copies of the
+    parent's connection ends are closed as well, so that a worker process
+    reads end-of-file, and exits, once the parent process has exited, also
+    while such a child still runs."""
     try:
         children = _mp_process._children
         for pool in list(_LIVE_POOLS):
             for w in pool.workers:
                 children.discard(w.process)
+                try:
+                    w.conn.close()
+                except Exception:  # noqa: BLE001
+                    pass
     except Exception:  # noqa: BLE001
         pass
 
@@ -1040,9 +1073,9 @@ class _WorkerPool:
             try:
                 payload = _dumps(("call", chain, name, tuple(args), dict(kwargs)))
             except Exception as e:  # noqa: BLE001
-                out[k] = (False, TypeError(
+                out[k] = (False, _name_chain(TypeError(
                     f"the arguments of {name}() cannot be sent to the worker process "
-                    f"({type(e).__name__}: {e})"), None)
+                    f"({type(e).__name__}: {e})"), chain), None)
                 continue
             queues.setdefault(w, []).append((k, chain, name, payload))
         order = sorted(queues, key=lambda w: w.index)
@@ -1099,12 +1132,13 @@ def _detached_chain_model(chain, cls_name, methods, reason):
     return ChainModel(None, chain, None, cls_name, methods, detached=reason)
 
 
-def _restore_chain_model(token, owner_pid, chain, pid, cls_name, methods):
+def _restore_chain_model(token, owner_pid, chain, pid, cls_name, methods,
+                         native=False):
     """Unpickle a handle: in the process that ran the chains, while its pool
     exists, a handle on the same model; elsewhere a detached handle."""
     pool = _POOLS_BY_TOKEN.get(token)
     if pool is not None and pool.owner_pid == owner_pid == os.getpid():
-        return ChainModel(pool, chain, pid, cls_name, methods)
+        return ChainModel(pool, chain, pid, cls_name, methods, native=native)
     return _detached_chain_model(chain, cls_name, methods, _DETACHED_PICKLED)
 
 
@@ -1134,13 +1168,16 @@ class ChainModel:
     started them.
     """
 
-    def __init__(self, pool, chain, pid, cls_name, methods, detached=None):
+    def __init__(self, pool, chain, pid, cls_name, methods, detached=None,
+                 native=False):
         self._pool = pool
         self._chain = chain
         self._pid = pid
         self._cls = cls_name
         self._methods = None if methods is None else frozenset(methods)
         self._detached = detached
+        # True when the model's predict_at() is a compiled method (see predict()).
+        self._native = bool(native)
 
     def __getattr__(self, name):
         if name.startswith("_"):
@@ -1188,7 +1225,8 @@ class ChainModel:
             return (_detached_chain_model,
                     (self._chain, self._cls, methods, self._detached))
         return (_restore_chain_model, (self._pool.token, self._pool.owner_pid,
-                                       self._chain, self._pid, self._cls, methods))
+                                       self._chain, self._pid, self._cls, methods,
+                                       self._native))
 
     # A handle refers to a live model; a copy refers to the same model.
     def __copy__(self):
@@ -1371,10 +1409,10 @@ def _finish(results, models, n_burn, n_keep, *, walls=False,
     """Wrap the per-chain results in a ChainsResult.
 
     Removes the private fields of every result and reports on them once for
-    the whole run: a message when the models have no clear_history() (their
-    own histories include the warmup draws), and a warning when
-    clear_history() left warmup rows in some history entries. Prints the
-    per-chain wall times when ``walls`` and ``verbose``.
+    the whole run: a message on sys.stderr when the models have no
+    clear_history() (their own histories include the warmup draws), and a
+    warning when clear_history() left warmup rows in some history entries.
+    Prints the per-chain wall times when ``walls`` and ``verbose``.
     """
     cleared, unclear, no_clear = [], {}, []
     for r in results:
@@ -1387,16 +1425,20 @@ def _finish(results, models, n_burn, n_keep, *, walls=False,
         if r.pop("_no_clear", False) and cls not in no_clear:
             no_clear.append(cls)
         r.pop("_methods", None)
+        r.pop("_native", None)
         r.pop("_cap", None)
     if walls and verbose:
         print(f"[AI4BayesCode.run_chains] walls (s): "
               + ", ".join(f"{r['wall']:.1f}" for r in results))
     if no_clear:
+        # On sys.stderr, as R's message(), whatever `verbose` is: standard
+        # output keeps what a script prints itself, as in 1.1.2.
         print(f"run_chains: {', '.join(no_clear)} has no clear_history() method, so the "
               f"model's own get_history() and predict_at() include the n_burn = {n_burn} "
               "warmup draws (the histories in the result exclude them, and predict() "
-              "drops them). Recompiling the model with AI4BayesCode >= 1.1.3 adds "
-              "clear_history().")
+              "drops them). A compiled model has clear_history() when its class uses "
+              "kernel_control_mixin and is compiled with AI4BayesCode >= 1.1.3; a "
+              "model class written in Python can define it.", file=sys.stderr)
     if unclear:
         _warn(
             "run_chains: after clear_history(), "
@@ -1495,12 +1537,12 @@ def _make_room(n_new: int, persistent: bool) -> str:
     if causes(0, after_all):
         parts = []
         if persistent and n_new > max_w:
-            parts.append(f"this run needs {n_new} worker processes and at most {max_w} "
+            parts.append(f"this run uses {n_new} worker processes and at most {max_w} "
                          "persistent worker processes are kept (the environment "
                          "variable AI4BAYESCODE_MAX_WORKERS)")
         if after_all is not None and after_all[0] + 3 * n_new + 16 > after_all[1]:
             parts.append(f"this process has {fd[0]} open files, and {n_new} worker "
-                         f"processes need about {3 * n_new} more, above its limit of "
+                         f"processes use about {3 * n_new} more, above its limit of "
                          f"{fd[1]} open files (RLIMIT_NOFILE, ulimit -n)")
         return "; ".join(parts) + ", also after closing every earlier run"
     whats, advices = [], []
@@ -1632,11 +1674,11 @@ def _run_models(chains, fn, need_models=True):
 
 
 def _as_input(value):
-    """A value of ``newdata`` as predict_at() takes it: a numeric matrix (or
-    higher-dimensional array) is flattened column-major, the layout of an R
-    matrix that the compiled models read, and a number becomes a vector of
-    length 1. Lists and array-like objects of numbers become arrays; other
-    values are passed unchanged."""
+    """A value of ``newdata`` as a predict_at() written in Python takes it: a
+    numeric matrix (or higher-dimensional array) is flattened column-major,
+    the layout of an R matrix that the compiled models read, and a number
+    becomes a vector of length 1. Lists and array-like objects of numbers
+    become arrays; other values are passed unchanged."""
     if isinstance(value, np.ndarray):
         a = value
     elif (isinstance(value, (list, tuple, numbers.Number, np.generic))
@@ -1656,7 +1698,9 @@ def _as_input(value):
     return a
 
 
-def _prepare_newdata(newdata) -> dict:
+def _check_newdata(newdata) -> dict:
+    """``newdata`` as a dict with its values unchanged; TypeError for another
+    type than a Mapping."""
     if newdata is None:
         return {}
     if not isinstance(newdata, Mapping):
@@ -1666,7 +1710,14 @@ def _prepare_newdata(newdata) -> dict:
             "model's predict_at() to its values, for example "
             "predict(chains, {\"X\": X_new}) with X_new a matrix of n_new rows; got "
             f"{type(newdata).__name__}" + ("" if shape is None else f" of shape {shape}"))
-    return {k: _as_input(v) for k, v in newdata.items()}
+    return dict(newdata)
+
+
+def _conversion_error(exc) -> bool:
+    """True for the TypeError a compiled method raises when it cannot convert
+    its arguments (pybind11: "incompatible function arguments"); the method
+    itself did not run."""
+    return isinstance(exc, TypeError) and "incompatible function arguments" in str(exc)
 
 
 def predict(chains, newdata=None, pool=True):
@@ -1690,10 +1741,18 @@ def predict(chains, newdata=None, pool=True):
         The value of :func:`run_chains` with ``keep_models=True``. A plain
         list (a slice of the result, for example) raises TypeError.
     newdata : dict, optional
-        Maps each input name of the models' ``predict_at()`` to its values.
-        A matrix value (n_new rows, one column per covariate) is flattened
-        column-major, the layout the compiled models read; a number becomes a
-        vector of length 1. Another type than a dict raises TypeError.
+        Maps each input name of the models' ``predict_at()`` to its values,
+        for example ``{"X": X_new}`` with ``X_new`` a matrix of n_new rows and
+        one column per covariate. A compiled model receives the values as
+        given: its predict_at() reads a matrix column-major, and the shipped
+        models check its number of columns against the p they were fitted
+        with (a matrix with another number of columns raises an error that
+        names the chain). For a model whose predict_at() is written in
+        Python, a matrix is flattened column-major (the layout the compiled
+        models read) and a number becomes a vector of length 1; so is the
+        input of a compiled model built against AI4BayesCode older than
+        1.1.3, which takes vectors only. Another type than a dict raises
+        TypeError.
     pool : bool, default True
         True: ``{key: array}`` with the rows of all chains stacked along the
         first axis in chain order (``np.vstack`` for 2-D entries); an error
@@ -1703,7 +1762,10 @@ def predict(chains, newdata=None, pool=True):
         failed chain).
     """
     models, cleared = _run_models(chains, "predict")
-    newdata = _prepare_newdata(newdata)
+    given = _check_newdata(newdata)
+    flat = {k: _as_input(v) for k, v in given.items()}
+    # Whether flattening changed a value; if not, every model gets `flat`.
+    changed = any(flat[k] is not given[k] for k in given)
     n_chains = len(models)
     if not n_chains:
         raise ValueError("predict(): the run_chains() result holds no chains")
@@ -1716,6 +1778,16 @@ def predict(chains, newdata=None, pool=True):
               + ", ".join(str(i) for i in range(n_chains) if i not in use)
               + " failed in run_chains() and have no model; the prediction uses the "
                 "other chains")
+    # A compiled predict_at() converts the values itself and checks the column
+    # count of a covariate matrix, which flattening here would hide.
+    data = {i: (given if changed and _compiled_predict(models[i]) else flat) for i in use}
+
+    def retry(i, exc) -> bool:
+        # A compiled model built against older headers takes 1-D arrays only:
+        # its argument conversion rejects the values as given, so predict_at()
+        # did not run, and the flattened values are sent next.
+        return data[i] is given and _conversion_error(exc)
+
     # One request per chain to the worker processes, sent before any reply is
     # read, so that the workers compute concurrently.
     replies: dict = {}
@@ -1725,8 +1797,16 @@ def predict(chains, newdata=None, pool=True):
         if isinstance(m, ChainModel) and m._detached is None:
             groups.setdefault(id(m._pool), (m._pool, []))[1].append(i)
     for wpool, idx in groups.values():
-        got = wpool.call_many([(models[i]._chain, "predict_at", (newdata,), {})
+        got = wpool.call_many([(models[i]._chain, "predict_at", (data[i],), {})
                                for i in idx])
+        again = [k for k, (ok, value, _) in enumerate(got)
+                 if not ok and retry(idx[k], value)]
+        if again:
+            redo = wpool.call_many([(models[idx[k]]._chain, "predict_at", (flat,), {})
+                                    for k in again])
+            for k, r in zip(again, redo):
+                got[k] = r
+            redo = None
         replies.update(zip(idx, got))
         got = None
     outs = {}
@@ -1744,7 +1824,12 @@ def predict(chains, newdata=None, pool=True):
                     exc = None
         else:
             try:
-                value = models[i].predict_at(newdata)
+                try:
+                    value = models[i].predict_at(data[i])
+                except TypeError as e:
+                    if not retry(i, e):
+                        raise
+                    value = models[i].predict_at(flat)
             except Exception as e:  # noqa: BLE001
                 _name_chain(e, i)
                 raise
@@ -1794,8 +1879,9 @@ def close_models(chains) -> None:
     models are objects in this process or that was made with
     ``keep_models=False``. The worker processes are also stopped when the
     result and all of its model handles are garbage-collected, at interpreter
-    exit, and when a later run needs room for its own worker processes (see
-    :func:`run_chains`). A plain list (a slice of the result) raises TypeError.
+    exit, and when a later run closes earlier runs to start its own worker
+    processes (see :func:`run_chains`). A plain list (a slice of the result)
+    raises TypeError.
     """
     models, _ = _run_models(chains, "close_models", need_models=False)
     for p in _pools_of(models):
@@ -1896,17 +1982,18 @@ def run_chains(
     ChainsResult: a list of dicts, one per chain: `{"seed", "wall", "hist"}`
     (and "error", "error_type" for a failed chain), as in 1.1.2. Each
     ``"hist"`` is KEEP-ONLY: every history entry (1-D, 2-D, and higher-D
-    alike) holds the ``n_keep`` post-warmup draws along its first axis (each
-    chain calls clear_history() after the warmup; for a model without it the
-    first ``n_burn`` draws are stripped here), so downstream ``rhat_summary``
-    / ``diagnose`` need no ``drop_burn`` / ``n_burn`` bookkeeping. An entry
-    with a single stored draw (``keep_history=False``) is returned unchanged.
-    A model without clear_history() keeps its warmup draws in its own history
-    (a message says so); an entry that clear_history() leaves with more than
-    n_keep rows is cut in "hist" and named in a warning. Attributes
-    ``models``, ``n_burn``, ``n_keep`` and ``history_cleared``; methods
-    ``predict()`` and ``close()`` (see :func:`predict` and
-    :func:`close_models`). Its repr() is a summary of the run.
+    alike) holds the ``n_keep`` post-warmup draws along its first axis
+    (clear_history() is called after the warmup of each chain; for a model
+    without it the first ``n_burn`` draws are stripped here), so downstream
+    ``rhat_summary`` / ``diagnose`` need no ``drop_burn`` / ``n_burn``
+    bookkeeping. An entry with a single stored draw (``keep_history=False``)
+    is returned unchanged. A model without clear_history() keeps its warmup
+    draws in its own history (a message on sys.stderr says so); an entry
+    that clear_history() leaves with more than n_keep rows is cut in "hist"
+    and named in a warning. Attributes ``models``, ``n_burn``, ``n_keep``
+    and ``history_cleared``; methods ``predict()`` and ``close()`` (see
+    :func:`predict` and :func:`close_models`). Its repr() is a summary of
+    the run.
     """
     # R's ai4bayescode_run_chains takes n_chains; accept it so the same call
     # reads the same way in both frontends. Given together with seeds of
@@ -1980,7 +2067,8 @@ def run_chains(
                         got = None
                         models = [None if "error" in r else
                                   ChainModel(pool, i, pool.by_chain[i].pid,
-                                             r.get("_class"), r.get("_methods"))
+                                             r.get("_class"), r.get("_methods"),
+                                             native=r.get("_native", False))
                                   for i, r in enumerate(results)]
                         if all(m is None for m in models):
                             pool.close()

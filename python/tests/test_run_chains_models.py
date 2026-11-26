@@ -252,6 +252,38 @@ class RecordingModel(Model):
         return out
 
 
+class VectorsOnly(RecordingModel):
+    """Stands for a compiled model built against headers older than 1.1.3,
+    whose predict_at() takes 1-D arrays only: for other values the argument
+    conversion raises a TypeError, and the method body does not run."""
+
+    def predict_at(self, newdata):
+        if not all(isinstance(v, np.ndarray) and v.ndim == 1 for v in newdata.values()):
+            raise TypeError("predict_at(): incompatible function arguments. The "
+                            "following argument types are supported: ...")
+        self.calls = getattr(self, "calls", 0) + 1
+        out = super().predict_at(newdata)
+        out["calls"] = np.full(len(out["mean"]), float(self.calls))
+        return out
+
+
+def native_for_tests(m):
+    """rc._compiled_predict, with RecordingModel counted as compiled."""
+    if isinstance(m, rc.ChainModel):
+        return m._native
+    return isinstance(m, RecordingModel)
+
+
+class LateWarningModel(Model):
+    def late_warning(self):
+        # A category that pickles in the worker process and does not unpickle
+        # in the calling process, where this module has no LateWarning.
+        global LateWarning
+        LateWarning = type("LateWarning", (UserWarning,), {"__module__": __name__})
+        warnings.warn("issued with a late category", LateWarning)
+        return 1
+
+
 def make_model(seed):
     return Model(seed)
 
@@ -449,6 +481,36 @@ def test_predict_flattens_matrices_column_major(n_cores):
         chains.close()
 
 
+@pytest.mark.parametrize("n_cores", [1, pytest.param(2, marks=needs_fork)])
+def test_a_compiled_predict_at_gets_the_matrix_itself(monkeypatch, n_cores):
+    # A compiled predict_at() converts a matrix column-major itself and checks
+    # its number of columns against the model's p; flattened here, a matrix
+    # with another number of columns would pass that check whenever its size
+    # is a multiple of p. RecordingModel stands for a compiled model here.
+    monkeypatch.setattr(rc, "_compiled_predict", native_for_tests)
+    chains = run(lambda s: RecordingModel(s), n_cores=n_cores)
+    try:
+        X = np.arange(12.0).reshape(4, 3)
+        for g in AI4BayesCode.predict(chains, {"X": X, "w": 2.5}, pool=False):
+            assert g["got"]["X"] == ("ndarray", (4, 3), X.tolist())
+            assert g["got"]["w"] == ("float", (), 2.5)
+    finally:
+        chains.close()
+    # For a compiled model that takes vectors only, the values as given raise
+    # the conversion TypeError and the flattened values are sent next; the
+    # body of predict_at() runs once per chain.
+    old = run(lambda s: VectorsOnly(s), n_cores=n_cores)
+    try:
+        for g in AI4BayesCode.predict(old, {"X": X, "w": 2.5}, pool=False):
+            assert g["got"]["X"] == ("ndarray", (12,), X.ravel(order="F").tolist())
+            assert g["got"]["w"] == ("ndarray", (1,), [2.5])
+            assert set(g["calls"]) == {1.0}
+        with pytest.raises(TypeError, match="^chain 0: predict_at\\(\\): incompatible"):
+            AI4BayesCode.predict(old, {"X": "not numbers"})
+    finally:
+        old.close()
+
+
 # --------------------------------------------------------------------------
 # (3) stateful calls
 # --------------------------------------------------------------------------
@@ -498,7 +560,7 @@ def test_close_releases_every_descriptor_of_a_kept_result():
         chains = run(n_cores=2)
         assert open_fds() >= base + 6                # 3 per worker process
         chains.close()
-        kept.append(chains)                          # the closed results stay referenced
+        kept.append(chains)                          # the closed results remain referenced
     assert open_fds() == base
     assert all(c[0]["hist"]["mu"].shape == (N_KEEP, 1) for c in kept)
 
@@ -580,6 +642,50 @@ def test_workers_stop_when_the_parent_process_ends(tmp_path, how):
         assert all(gone(p, timeout=15) for p in pids)
     finally:
         kill_all(pids)
+
+
+KILLED_WITH_A_FORKED_CHILD = '''
+    import os, signal, sys, time
+    import AI4BayesCode
+
+    class M:
+        def step(self, n):
+            pass
+        def get_history(self):
+            return {}
+        def pid(self):
+            return os.getpid()
+
+    chains = AI4BayesCode.run_chains(lambda s: M(), seeds=[1, 2], n_burn=1,
+                                     n_keep=1, n_cores=2, verbose=False)
+    pids = [m.pid() for m in chains.models]
+    child = os.fork()
+    if child == 0:
+        # Outlives the parent; ended by the test. It holds no copy of the
+        # output pipes, so the test reads the parent's output to the end.
+        null = os.open(os.devnull, os.O_RDWR)
+        os.dup2(null, 1)
+        os.dup2(null, 2)
+        time.sleep(60)
+        os._exit(0)
+    with open(sys.argv[1], "w") as fh:
+        fh.write(" ".join(map(str, pids + [child])))
+    os.kill(os.getpid(), signal.SIGKILL)
+'''
+
+
+@needs_fork
+def test_workers_stop_when_the_parent_is_killed_while_a_forked_child_runs(tmp_path):
+    # The child closes its copies of the parent's connection ends at fork, so
+    # the worker processes read end-of-file when the parent process ends.
+    pid_file = tmp_path / "pids.txt"
+    run_script(tmp_path, KILLED_WITH_A_FORKED_CHILD, pid_file, timeout=60)
+    *pids, child = [int(p) for p in pid_file.read_text().split()]
+    try:
+        assert all(gone(p, timeout=15) for p in pids)
+        assert not gone(child, timeout=0.1)          # the child still runs
+    finally:
+        kill_all(pids + [child])
 
 
 EXIT_WITH_A_FINALIZER_FIRST = '''
@@ -699,9 +805,12 @@ def test_n_cores_below_one_runs_sequentially(capsys, recwarn, n_cores, keep_mode
 def test_a_model_without_clear_history_falls_back(capsys, n_cores):
     chains = run(make_old, n_cores=n_cores)
     try:
-        out = capsys.readouterr().out
-        assert out.count("has no clear_history() method") == 1 and "OldModel" in out
-        assert "n_burn = 40 warmup draws" in out and "predict() drops them" in out
+        # On stderr, as R's message(): with verbose=False the standard output
+        # holds nothing, as in 1.1.2.
+        out, err = capsys.readouterr()
+        assert out == ""
+        assert err.count("has no clear_history() method") == 1 and "OldModel" in err
+        assert "n_burn = 40 warmup draws" in err and "predict() drops them" in err
         assert chains.history_cleared == [False, False]
         for c, m in zip(chains, chains.models):
             assert c["hist"]["mu"].shape == (N_KEEP, 1)
@@ -722,7 +831,7 @@ def test_a_model_without_clear_history_falls_back(capsys, n_cores):
 def test_predict_keeps_the_warmup_bookkeeping_per_chain():
     chains = run(make_old, seeds=(101, 202, 303), n_cores=1)
     # A slice, a copy made with list() and a comprehension are plain lists
-    # without the models and the bookkeeping: predict() refuses them.
+    # without the models and the bookkeeping: predict() raises TypeError.
     for derived in (chains[:2], list(chains), chains.copy(),
                     [c for c in chains if c["seed"] != 202]):
         with pytest.raises(TypeError, match=r"takes the result of run_chains\(\)"):
@@ -737,10 +846,10 @@ def test_predict_keeps_the_warmup_bookkeeping_per_chain():
 
 def test_fallback_message_without_kept_models_and_without_warmup(capsys):
     plain = run(make_old, n_cores=1, keep_models=False)
-    assert capsys.readouterr().out.count("has no clear_history()") == 1
+    assert capsys.readouterr().err.count("has no clear_history()") == 1
     assert plain[0]["hist"]["mu"].shape == (N_KEEP, 1)
     nowarm = run(make_old, n_burn=0, n_cores=1)
-    assert "clear_history" not in capsys.readouterr().out
+    assert "clear_history" not in "".join(capsys.readouterr())
     assert nowarm.history_cleared == [False, False]
     assert nowarm.models[0].get_history()["mu"].shape == (N_KEEP, 1)
 
@@ -1331,10 +1440,10 @@ EXIT_DURING_A_CALL = '''
 @needs_fork
 @pytest.mark.parametrize("mode,repeat", [("call", 8), ("predict", 3), ("run", 3)])
 def test_exit_while_a_daemon_thread_is_in_a_call(tmp_path, mode, repeat):
-    # The interpreter exits while a daemon thread waits for a worker process.
-    # The exit stops the workers; the call must not return into the thread,
-    # whose traceback output during interpreter finalization could abort
-    # CPython. The loop stops at the first abort.
+    # The interpreter exits while a daemon thread is blocked in a call to a
+    # worker process. The exit stops the workers; the call must not return
+    # into the thread, whose traceback output during interpreter finalization
+    # could abort CPython. The loop stops at the first abort.
     for k in range(repeat):
         pid_file = tmp_path / f"pids_{k}.txt"
         t0 = time.monotonic()
@@ -1405,6 +1514,17 @@ def test_warnings_of_a_handle_call_reach_pytest_warns_and_filters():
             warnings.simplefilter("error")
             with pytest.raises(UserWarning, match="WARN hello seed=202"):
                 chains.models[1].hello()
+    finally:
+        chains.close()
+
+
+@needs_fork
+def test_a_warning_category_that_does_not_unpickle_here():
+    chains = run(lambda s: LateWarningModel(s), n_cores=2)
+    try:
+        with pytest.warns(UserWarning, match=r"\.LateWarning: issued with a late category"):
+            assert chains.models[0].late_warning() == 1
+        assert "LateWarning" not in globals()       # created in the worker only
     finally:
         chains.close()
 
@@ -1507,8 +1627,8 @@ def test_the_bound_follows_the_environment_variable(monkeypatch):
         with pytest.raises(RuntimeError, match="AI4BAYESCODE_MAX_WORKERS"):
             b.models[0].add(1)
         assert a.models[0].add(1, 1) == 2 and c.models[1].add(1, 1) == 2
-        # A run that needs more workers than the bound runs here, and closes
-        # nothing.
+        # A run with more worker processes than the bound runs here, and
+        # closes nothing.
         monkeypatch.setenv("AI4BAYESCODE_MAX_WORKERS", "1")
         with pytest.warns(UserWarning, match="also after closing every earlier run"):
             d = run(n_cores=2)
@@ -1711,5 +1831,12 @@ def test_compiled_predict_takes_a_matrix(logreg):
                 assert by_matrix[k].shape[0] == 300
                 if k not in ("y_rep",):
                     np.testing.assert_array_equal(by_matrix[k], by_vector[k])
+            # A matrix with another number of columns than p raises an error,
+            # also when its size is a multiple of p (40 x 6 = 80 x 3).
+            X6 = rng.standard_normal((40, 6))
+            with pytest.raises(RuntimeError, match=r"^chain 0: predict_at: 'X' has 6 "
+                                                   r"columns but the model was fitted "
+                                                   r"with p = 3"):
+                AI4BayesCode.predict(chains, {"X": X6})
         finally:
             chains.close()
