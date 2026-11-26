@@ -49,12 +49,44 @@
 //                       a NUTS-on-sigma freezes under the BART mean/noise
 //                       non-identifiability.
 //
+//  Prediction (predict_at)
+//  -----------------------
+//  Output key mu. new_data is empty (training data) or holds both Z (N_new x q)
+//  and X (N_new x p), flattened column-major; x_i0 = 1.
+//    * single draw (keep_history = FALSE, or last_draw_only = TRUE), 1 x N:
+//        mu_i = sum_{j=0..p} x_ij beta_j(Z_i), each beta_j evaluated from the
+//        current forest of ensemble j at Z.
+//    * keep_history = TRUE, training data, one row per stored draw d:
+//        mu_{d,i} = sum_{j=0..p} x_ij beta_{j,d}(Z_i), from the stored rows of
+//        beta_0..beta_p (get_history()).
+//    * keep_history = TRUE, new (X, Z), one row per stored draw d: beta_{j,d}
+//        is the forest of ensemble j stored at sweep d, evaluated at Z_new,
+//        plus the fmean of that sweep (bart_block::predict_history). The
+//        forests are stored only with keep_tree = TRUE; without it the call
+//        raises an error.
+//
 //  BACKEND-NEUTRAL DUAL MODULE
 //  ---------------------------
 //  Compiles under three backends from a single source:
 //    * AI4BAYESCODE_RCPP_MODULE   -> RcppArmadillo, RCPP_MODULE (R)
 //    * AI4BAYESCODE_PYBIND_MODULE -> pure armadillo, PYBIND11_MODULE (Python)
 //    * neither                    -> standalone int main() demo
+//
+//  RNG / SEEDING
+//  -------------
+//  The bart_blocks draw from the BART kernel stream, not from the
+//  std::mt19937_64 passed to step(). Under the pybind / standalone backend
+//  that stream is bart_rng::engine() (bart_pure_cpp/src/r_compat.h), a
+//  thread-local std::mt19937_64 shared by the BART-family models of the
+//  thread in one compiled binary (each pybind extension module has its
+//  own), and a non-zero rng_seed seeds it (bart_rng::set_seed) in the
+//  constructor. A model reproduces the chain of its seed, and models with
+//  different seeds give different chains, when no other BART-family model
+//  of the thread in the same binary is constructed or stepped between the
+//  model's construction and its last sweep (run_chains constructs and runs
+//  one chain at a time in each process). Under the Rcpp backend the kernel
+//  draws from R's RNG; call set.seed() before construction for a
+//  reproducible R run.
 // ============================================================================
 //
 // @example:R
@@ -68,6 +100,14 @@
 //   m  <- new(VCBart, X, matrix(Z, N, 1), y, rng_seed = 1L)  # knobs defaulted
 //   m$step(1500L); cur <- m$get_current()                 # $beta_0..$beta_2, $mu, $sigma
 //   cor(cur$beta_0, pmax(Z, 0)); cor(cur$beta_1, Z^2)      # recover the coefficient functions
+//   # ---- Posterior of mu: keep_history, plus keep_tree for new (X, Z) ----
+//   mh <- new(VCBart, X, matrix(Z, N, 1), y, rng_seed = 1L,
+//             keep_history = TRUE, keep_tree = TRUE)
+//   mh$step(1000L); mh$clear_history(); mh$step(500L)     # 500 stored draws
+//   Zn <- matrix(seq(-1, 1, length.out = 21), 21, 1); Xn <- matrix(1, 21, p)  # new (X, Z)
+//   dim(mh$predict_at(list())$mu)                         # 500 x 600: per stored draw, training data
+//   dim(mh$predict_at(list(Z = Zn, X = Xn))$mu)           # 500 x 21: per stored draw, new (X, Z)
+//   dim(mh$predict_at(list(Z = Zn, X = Xn), TRUE)$mu)     # 1 x 21: current forests (last_draw_only)
 // @example:python
 //   import numpy as np, AI4BayesCode
 //   rng = np.random.default_rng(1); N, p = 600, 2
@@ -79,6 +119,14 @@
 //   m = Mod.VCBart(X, Z.reshape(-1, 1), y, rng_seed=1)   # every tuning knob defaulted
 //   m.step(1500); cur = m.get_current()
 //   print(np.corrcoef(cur["beta_1"], Z**2)[0, 1])         # recovers beta_1(Z) = Z^2
+//   # ---- Posterior of mu: keep_history, plus keep_tree for new (X, Z) ----
+//   mh = Mod.VCBart(X, Z.reshape(-1, 1), y, rng_seed=1, keep_history=True, keep_tree=True)
+//   mh.step(1000); mh.clear_history(); mh.step(500)       # 500 stored draws
+//   Zn = np.linspace(-1, 1, 21); Xn = np.ones((21, p))    # new (X, Z)
+//   nd = {"Z": Zn, "X": Xn.flatten(order="F")}            # matrices flattened column-major
+//   print(mh.predict_at({})["mu"].shape)                  # (500, 600): per stored draw, training data
+//   print(mh.predict_at(nd)["mu"].shape)                  # (500, 21): per stored draw, new (X, Z)
+//   print(mh.predict_at(nd, last_draw_only=True)["mu"].shape)  # (1, 21): current forests
 // @example:end
 
 // [[Rcpp::depends(RcppArmadillo)]]
@@ -142,7 +190,8 @@ public:
            double nu = 3.0,
            int    numcut = 100,
            int    rng_seed = 1,
-           bool   keep_history = false)
+           bool   keep_history = false,
+           bool   keep_tree = false)
         : rng_(rng_seed == 0
                    ? std::mt19937_64{std::random_device{}()}
                    : std::mt19937_64{static_cast<std::uint64_t>(rng_seed)}),
@@ -155,11 +204,22 @@ public:
           Z_(Z),
           x_ncol_(static_cast<int>(X.n_cols)),
           z_ncol_(static_cast<int>(Z.n_cols)),
-          keep_history_(keep_history)
+          keep_history_(keep_history),
+          keep_tree_(keep_tree)
     {
         if (X.n_rows != y.n_elem || Z.n_rows != y.n_elem) {
             ai4b::stop("VCBart: X, Z and y must have matching row counts");
         }
+
+        // ---- Seed the kernel RNG so a construction seed yields an
+        //      independent chain (pybind / standalone backend only; the
+        //      Rcpp backend uses R's global RNG instead). ----------------
+#if !defined(AI4BAYESCODE_RCPP_MODULE)
+        if (rng_seed != 0) {
+            bart_rng::set_seed(static_cast<std::uint64_t>(rng_seed));
+        }
+#endif
+
         const std::size_t N = y.n_elem;
         const int J = p_ + 1;                 // number of ensembles (intercept + p)
 
@@ -284,8 +344,9 @@ public:
         // NOT declare_data_input_group: this wrapper's predict_at never
         // routes through composite_block::predict_at, because the varying
         // coefficients beta_j(Z) are BART forests that have to be RE-EVALUATED
-        // at the new Z rather than refreshed from shared_data. The co-indexing
-        // of X and Z is therefore enforced by predict_at's own check, which is
+        // at the new Z (the current forests, or the forest stored at each
+        // sweep in history mode) rather than refreshed from shared_data. The
+        // co-indexing of X and Z is therefore enforced by predict_at's own check, which is
         // also the more useful answer here: mu combines beta_j(Z_i) with X_ij,
         // so with only one of the two supplied NOTHING is predictable, and an
         // explicit message beats an empty result.
@@ -299,6 +360,10 @@ public:
         impl_->data().declare_predict_edges("mu",    {"y_rep"});
         impl_->data().declare_predict_edges("sigma", {"y_rep"});
 
+        // keep_tree (the forest of every sweep, in each bart_block's kernel;
+        // needed for predict_at at new (X, Z) in history mode) and
+        // keep_history (numeric per-sweep buffers) are independent switches.
+        if (keep_tree_)    impl_->set_keep_tree(true);
         if (keep_history_) impl_->set_keep_history(true);
     }
 
@@ -351,13 +416,35 @@ public:
         }
     }
 
-    // Predict at new data. Pass list(Z = as.vector(Z_new), X = as.vector(X_new))
-    // (flattened column-major). Returns the predicted mean mu at the new points.
+    // Predict mu at new data, or at the training data (empty map).
+    // new_data: Z (N_new x q) and X (N_new x p), each flattened column-major
+    // (Rcpp flattens an R matrix that way), or an empty map for the training
+    // Z and X. Output key mu, with x_i0 = 1:
+    //   * keep_history = FALSE, or last_draw_only = TRUE: 1 x N_new,
+    //       mu_i = sum_{j=0..p} x_ij beta_j(Z_i), each beta_j evaluated from
+    //       the current forest of ensemble j.
+    //   * keep_history = TRUE, empty map: n_draws x N; row d is computed from
+    //       row d of the stored beta_0..beta_p (get_history()).
+    //   * keep_history = TRUE, Z and X given: n_draws x N_new; row d is
+    //       computed from the forests stored at sweep d
+    //       (bart_block::predict_history: stored forest d at Z_new plus the
+    //       fmean of sweep d). Requires keep_tree = TRUE.
+    // No random numbers are drawn; the MCMC state is not changed.
     /// const and returning history_map per the core-six contract
     /// (interface.md): predict_at never mutates MCMC state, and its outputs
     /// are matrices so the stateful and history modes share one shape.
-    /// An EMPTY map predicts at the training data.
+    /// One-argument form: predict_at(new_data) is
+    /// predict_at(new_data, last_draw_only = false).
     AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data) const {
+        return predict_at(new_data, /*last_draw_only=*/false);
+    }
+
+    /// last_draw_only = true takes the SINGLE-DRAW path -- the one this
+    /// function already takes when keep_history is false -- without giving up
+    /// the retained history.
+    AI4BayesCode::history_map predict_at(const AI4BayesCode::state_map& new_data,
+                                         bool last_draw_only) const {
+        const bool use_history = keep_history_ && !last_draw_only;
         for (const auto& kv : new_data)
             if (kv.first != "Z" && kv.first != "X")
                 ai4b::stop("VCBart::predict_at: unknown key '%s'", kv.first.c_str());
@@ -366,32 +453,86 @@ public:
         if ((it_z == new_data.end()) != (it_x == new_data.end()))
             ai4b::stop("VCBart::predict_at: supply BOTH 'Z' and 'X', or neither "
                        "(neither = predict at the training data).");
+        const bool has_new = it_z != new_data.end();
+        const std::size_t J = static_cast<std::size_t>(p_) + 1;   // ensembles
 
         arma::mat Z_new, X_new;
-        if (it_z == new_data.end()) {                 // training-data predictive
+        if (!has_new) {                               // training data
             Z_new = Z_;
             X_new.set_size(Z_.n_rows, static_cast<arma::uword>(x_ncol_));
-            for (int j = 0; j < x_ncol_; ++j) X_new.col(j) = (*xcols_)[j];
+            // xcols_[0] is the intercept column; X.col(j) is xcols_[j + 1].
+            for (int j = 0; j < x_ncol_; ++j) X_new.col(j) = (*xcols_)[j + 1];
         } else {
-            const std::size_t n_in = it_z->second.n_elem / static_cast<std::size_t>(z_ncol_);
-            Z_new = arma::reshape(it_z->second, n_in, z_ncol_);
-            X_new = arma::reshape(it_x->second, n_in, x_ncol_);
+            const std::size_t q = static_cast<std::size_t>(z_ncol_);
+            const std::size_t p = static_cast<std::size_t>(x_ncol_);
+            if (it_z->second.n_elem % q != 0)
+                ai4b::stop("VCBart::predict_at: Z has %d elements, not a multiple "
+                           "of q = %d (Z is N_new x q, flattened column-major)",
+                           (int)it_z->second.n_elem, (int)q);
+            const std::size_t n_in = it_z->second.n_elem / q;
+            if (it_x->second.n_elem != n_in * p)
+                ai4b::stop("VCBart::predict_at: X has %d elements; Z gives "
+                           "N_new = %d and p = %d (X is N_new x p, flattened "
+                           "column-major)",
+                           (int)it_x->second.n_elem, (int)n_in, (int)p);
+            Z_new = arma::reshape(it_z->second, n_in, q);
+            X_new = arma::reshape(it_x->second, n_in, p);
         }
         const std::size_t n_new = Z_new.n_rows;
+        // x_ij: the multiplier of ensemble j at point i (x_i0 = 1).
+        auto x_of = [&X_new](std::size_t j, std::size_t i) {
+            return (j == 0) ? 1.0 : X_new(i, j - 1);
+        };
 
-        arma::vec mu_new(n_new, arma::fill::zeros);
-        for (int j = 0; j <= p_; ++j) {
-            auto& bj = dynamic_cast<bart_block&>(impl_->child(static_cast<std::size_t>(j)));
-            arma::vec beta_j = bj.predict(Z_new);          // beta_j(Z_new)
-            for (std::size_t i = 0; i < n_new; ++i) {
-                const double xij = (j == 0) ? 1.0 : X_new(i, j - 1);
-                mu_new[i] += xij * beta_j[i];
+        AI4BayesCode::history_map out;
+        if (!use_history) {
+            // ---- Single draw: the current forest of each ensemble --------
+            arma::mat mu(1, n_new, arma::fill::zeros);
+            for (std::size_t j = 0; j < J; ++j) {
+                auto& bj = dynamic_cast<bart_block&>(impl_->child(j));
+                const arma::vec beta_j = bj.predict(Z_new);       // beta_j(Z_new)
+                for (std::size_t i = 0; i < n_new; ++i) mu(0, i) += x_of(j, i) * beta_j[i];
+            }
+            out.emplace("mu", std::move(mu));
+            return out;
+        }
+
+        // ---- History mode: one row per stored draw ------------------------
+        // B[j] (n_draws x n_new): beta_j of each stored draw at the points.
+        std::vector<arma::mat> B(J);
+        if (!has_new) {
+            // Training data: the stored rows of beta_0..beta_p.
+            const AI4BayesCode::history_map h = impl_->get_history();
+            for (std::size_t j = 0; j < J; ++j) B[j] = h.at(beta_key(static_cast<int>(j)));
+        } else {
+            if (!keep_tree_)
+                ai4b::stop("VCBart::predict_at: prediction at new (X, Z) with "
+                           "keep_history = TRUE requires keep_tree = TRUE at "
+                           "construction (the forests of the stored draws are "
+                           "stored only then). Construct with keep_tree = TRUE, "
+                           "or pass last_draw_only = TRUE to predict from the "
+                           "current forests.");
+            for (std::size_t j = 0; j < J; ++j) {
+                auto& bj = dynamic_cast<bart_block&>(impl_->child(j));
+                B[j] = bj.predict_history(Z_new);   // forest d at Z_new + fmean of sweep d
             }
         }
-        AI4BayesCode::history_map out;
-        arma::mat mu_mat(1, n_new);
-        for (std::size_t i = 0; i < n_new; ++i) mu_mat(0, i) = mu_new[i];
-        out.emplace("mu", std::move(mu_mat));
+        const std::size_t n_draws = B[0].n_rows;
+        for (std::size_t j = 0; j < J; ++j)
+            if (B[j].n_rows != n_draws || B[j].n_cols != n_new)
+                ai4b::stop("VCBart::predict_at: beta_%d has %d x %d stored values "
+                           "and beta_0 has %d x %d",
+                           (int)j, (int)B[j].n_rows, (int)B[j].n_cols,
+                           (int)n_draws, (int)B[0].n_cols);
+        // mu_{d,i} = sum_{j=0..p} x_ij beta_{j,d}(Z_i), summed over j in the
+        // order of the "mu" refresher.
+        arma::mat mu(n_draws, n_new, arma::fill::zeros);
+        for (std::size_t j = 0; j < J; ++j)
+            for (std::size_t i = 0; i < n_new; ++i) {
+                const double xij = x_of(j, i);
+                for (std::size_t d = 0; d < n_draws; ++d) mu(d, i) += xij * B[j](d, i);
+            }
+        out.emplace("mu", std::move(mu));
         return out;
     }
 
@@ -423,6 +564,7 @@ private:
     int  x_ncol_;
     int  z_ncol_;
     bool keep_history_;
+    bool keep_tree_;
     std::shared_ptr<std::vector<arma::vec>> xcols_;
     std::vector<double> sigma_hist_;   // per-sweep sigma (recorded when keep_history_)
 };
@@ -435,7 +577,7 @@ RCPP_MODULE(VCBart_module) {
     Rcpp::class_<VCBart>("VCBart")
         .constructor<arma::mat, arma::mat, arma::vec,
                      int, double, double, double, double, int, int>(
-            "Short constructor; keep_history defaults FALSE.")
+            "Short constructor; keep_history and keep_tree default FALSE.")
         .constructor<arma::mat, arma::mat, arma::vec,
                      int, double, double, double, double, int, int, bool>(
             "Construct with: X (N x p predictors), Z (N x q effect modifiers), "
@@ -443,7 +585,12 @@ RCPP_MODULE(VCBart_module) {
             "(tree depth penalty, default 2), base (tree depth base, default "
             "0.95), nu (sigma prior df, default 3), numcut (cutpoints per var, "
             "default 100), seed (RNG seed, 0 = random), keep_history (record "
-            "per-step buffers; cheap; default FALSE).")
+            "per-step buffers; cheap; default FALSE); keep_tree defaults FALSE.")
+        .constructor<arma::mat, arma::mat, arma::vec,
+                     int, double, double, double, double, int, int, bool, bool>(
+            "As the 11-argument constructor, plus keep_tree (store the forest "
+            "of every sweep, required by predict_at at new (X, Z) with "
+            "keep_history = TRUE; EXPENSIVE; default FALSE).")
         .method("step", (void (VCBart::*)())    &VCBart::step, "Run one Gibbs backfitting sweep.")
         .method("step", (void (VCBart::*)(int)) &VCBart::step, "Run n Gibbs backfitting sweeps.")
         .method("get_current",  &VCBart::get_current,
@@ -452,9 +599,19 @@ RCPP_MODULE(VCBart_module) {
         .method("set_current",  &VCBart::set_current,
                 "Overwrite sigma and/or y (named list). y refreshes every "
                 "working response + the full mean.")
-        .method("predict_at",   &VCBart::predict_at,
-                "Predict mu at new data. Pass list(Z = as.vector(Z_new), "
-                "X = as.vector(X_new)) (flattened column-major).")
+        .method("predict_at",
+                (AI4BayesCode::history_map (VCBart::*)(const AI4BayesCode::state_map&) const)
+                    &VCBart::predict_at,
+                "Predict mu. Pass list(Z = Z_new, X = X_new) (matrices, or "
+                "their column-major vectors), or list() for the training "
+                "data. keep_history = TRUE: one row per stored draw (new "
+                "(X, Z) requires keep_tree = TRUE); else one row from the "
+                "current forests.")
+        .method("predict_at",
+                (AI4BayesCode::history_map (VCBart::*)(const AI4BayesCode::state_map&, bool) const)
+                    &VCBart::predict_at,
+                "predict_at(new_data, last_draw_only): TRUE takes the "
+                "single-draw path without discarding the history.")
         .method("get_dag",      &VCBart::get_dag,     "Predict DAG as edge list.")
         .method("get_history",  &VCBart::get_history, "History as named matrices.")
         AI4BAYESCODE_BIND_KERNEL_CONTROL(VCBart);
@@ -470,7 +627,7 @@ PYBIND11_MODULE(VCBart, m) {
     AI4BayesCode::register_ai4bayescode_types(m);
     pybind11::class_<VCBart>(m, "VCBart")
         .def(pybind11::init<arma::mat, arma::mat, arma::vec,
-                            int, double, double, double, double, int, int, bool>(),
+                            int, double, double, double, double, int, int, bool, bool>(),
              pybind11::arg("X"),
              pybind11::arg("Z"),
              pybind11::arg("y"),
@@ -481,12 +638,22 @@ PYBIND11_MODULE(VCBart, m) {
              pybind11::arg("nu")           = 3.0,
              pybind11::arg("numcut")       = 100,
              pybind11::arg("rng_seed")     = 1,
-             pybind11::arg("keep_history") = false)
+             pybind11::arg("keep_history") = false,
+             pybind11::arg("keep_tree")    = false)
         .def("step", (void (VCBart::*)())    &VCBart::step, "Run one Gibbs backfitting sweep.")
         .def("step", (void (VCBart::*)(int)) &VCBart::step, pybind11::arg("n_steps"))
         .def("get_current",  &VCBart::get_current)
         .def("set_current",  &VCBart::set_current, pybind11::arg("params"))
-        .def("predict_at",   &VCBart::predict_at, pybind11::arg("new_data"))
+        .def("predict_at",
+             (AI4BayesCode::history_map (VCBart::*)(const AI4BayesCode::state_map&, bool) const)
+                 &VCBart::predict_at,
+             pybind11::arg("new_data"),
+             pybind11::arg("last_draw_only") = false,
+             "Predict mu. new_data: {'Z': Z_new, 'X': X_new} (each flattened "
+             "column-major), or {} for the training data. keep_history=True: "
+             "one row per stored draw (new (X, Z) requires keep_tree=True); "
+             "last_draw_only=True or keep_history=False: one row from the "
+             "current forests.")
         .def("get_dag",      &VCBart::get_dag)
         .def("get_history",  &VCBart::get_history)
         AI4BAYESCODE_PYBIND_KERNEL_CONTROL(VCBart);

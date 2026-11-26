@@ -19,9 +19,9 @@
 //    4. Blocks with more than one per-draw buffer: gmrf_gaussian_joint_block
 //       (x, kappa), lda_collapsed_gibbs_block (z, theta, phi),
 //       niw_cluster_gibbs_block (mu, sigma), order_mcmc_block (order,
-//       log-score) and bart_block (fits; stored forests, sigma, split counts
-//       and split probabilities of the kernel; predictions over the stored
-//       forests).
+//       log-score) and bart_block (fits; stored forests, sigma, split counts,
+//       split probabilities and fmean of the kernel; predictions over the
+//       stored forests).
 //    5. The wrappers with per-sweep members of their own: ARDLasso (no
 //       composite_block, so a clear_history() of its own) and VCBart (sigma).
 //  genbart_block with GBartHeteroscedastic, and softbart_block, are checked in
@@ -414,6 +414,7 @@ chk::model bart_case() {
         b.mats["f: kernel var_counts_history"] =
             arma::conv_to<arma::mat>::from(h.var_counts_history);
         b.mats["f: kernel var_probs_history"] = h.var_probs_history;
+        b.mats["f: kernel fmean_history"] = arma::mat(h.fmean_history);
         b.mats["f: predict_history(X_new)"] = bb->predict_history(X_new);
     });
 }
@@ -450,8 +451,8 @@ chk::model ardlasso_case() {
     return out;
 }
 
-// VCBart's kernels draw from the thread-local engine bart_rng, seeded before
-// construction.
+// VCBart's kernels draw from the thread-local engine bart_rng, which the
+// constructor seeds with rng_seed.
 chk::model vcbart_case() {
     const std::size_t N = 60;
     std::mt19937_64 g(53);
@@ -464,7 +465,6 @@ chk::model vcbart_case() {
         Z(i, 0) = U(g);
         y[i] = Z(i, 0) + (Z(i, 0) > 0.5 ? 1.0 : -1.0) * X(i, 0) + nd(g);
     }
-    bart_rng::set_seed(59);
     auto w = std::make_shared<VCBart>(X, Z, y, 10, 2.0, 2.0, 0.95, 3.0, 20, 61, true);
     VCBart* m = w.get();
     chk::model out;

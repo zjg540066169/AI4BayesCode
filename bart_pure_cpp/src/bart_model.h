@@ -85,10 +85,13 @@ struct BartHistory {
   arma::vec                         sigma_history;
   arma::umat                        var_counts_history;
   arma::mat                         var_probs_history;
+  // Per kept iter: the fmean (mean of the working response) of the sweep that
+  // drew the stored forest; f(x) of stored draw d = forest d at x + fmean_history(d).
+  arma::vec                         fmean_history;
   std::vector<std::vector<double>>  xinfo;
   long                              ntrees = 0;
   long                              p      = 0;
-  double                            fmean  = 0.0;
+  double                            fmean  = 0.0;   // current fmean
 };
 
 class bart_model {
@@ -239,6 +242,25 @@ public:
   void clear_history() {
     tree_history_.clear(); sigma_history_.clear();
     var_counts_history_.clear(); var_probs_history_.clear();
+    fmean_history_.clear();
+  }
+  // Appends one entry to each history buffer without a sweep: a copy of the
+  // last stored entry, or, when no entry is stored, the current forest, sigma,
+  // split counts, split probabilities and fmean.  No-op while history
+  // recording is off.  Draws no random numbers.
+  void record_held_history() {
+    if (!history_recording_) return;
+    if (tree_history_.empty()) { record_history_(); return; }
+    std::string tree_last = tree_history_.back();
+    tree_history_.push_back(std::move(tree_last));
+    const double sigma_last = sigma_history_.back();
+    sigma_history_.push_back(sigma_last);
+    std::vector<int> counts_last = var_counts_history_.back();
+    var_counts_history_.push_back(std::move(counts_last));
+    std::vector<double> probs_last = var_probs_history_.back();
+    var_probs_history_.push_back(std::move(probs_last));
+    const double fmean_last = fmean_history_.back();
+    fmean_history_.push_back(fmean_last);
   }
 
   // Snapshot the current forest as a single string ("ntrees\n tree --- ...").
@@ -324,6 +346,8 @@ public:
         h.var_probs_history(i, j)  = (j < (long)var_probs_history_[i].size())
                                        ? var_probs_history_[i][j] : (double)(1.0 / p);
       }
+    h.fmean_history = arma::vec(fmean_history_.size());
+    for (std::size_t i = 0; i < fmean_history_.size(); ++i) h.fmean_history(i) = fmean_history_[i];
     const xinfo& xi = bm.getxinfo();
     h.xinfo.resize(xi.size());
     for (std::size_t j = 0; j < xi.size(); ++j) h.xinfo[j] = xi[j];
@@ -440,6 +464,9 @@ private:
     std::vector<double> pp(p);
     for (long j = 0; j < p; ++j) pp[j] = (j < (long)pv.size()) ? pv[j] : 1.0 / (double)p;
     var_probs_history_.push_back(std::move(pp));
+    // fmean of this sweep: set_Y / set_data set it before the sweep, from the
+    // working response the forest was drawn for.
+    fmean_history_.push_back(this->fmean);
   }
 
 public:
@@ -717,6 +744,7 @@ private:
   std::vector<double>               sigma_history_;
   std::vector<std::vector<int> >    var_counts_history_;
   std::vector<std::vector<double> > var_probs_history_;
+  std::vector<double>               fmean_history_;
 };
 
 // ---- one-shot batch entry (pure C++; R/Python wrappers can call this) ---

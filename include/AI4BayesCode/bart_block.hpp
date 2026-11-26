@@ -31,9 +31,9 @@
  *
  *  HISTORY RECORDING
  *  -----------------
- *  The constructor unconditionally calls `impl_->set_history(true)`, so
- *  every successful step() appends the current forest + sigma + var
- *  probs/counts to the internal bart_model history buffers. This is
+ *  With set_keep_tree(true) (off at construction), every successful step()
+ *  appends the current forest + sigma + var probs/counts + fmean to the
+ *  internal bart_model history buffers. This is
  *  required by predict_history() so that wrapper-level predict_at can
  *  walk every stored draw of the BART forest. clear_history() forwards
  *  to both the internal model buffers and the external fit buffer.
@@ -111,8 +111,11 @@
  *  bart_model::set_Y has an internal centering step (subtract fmean
  *  before feeding heterbart). bart_block ALWAYS calls it with
  *  center=true to match BART::wbart behaviour. fmean is refreshed
- *  whenever the working response or y changes; the cached fmean
- *  used by predict_at_serialized_ is updated alongside.
+ *  whenever the working response or y changes, so it can differ from
+ *  sweep to sweep (a working response that is a partial residual). The
+ *  kernel stores the fmean of each stored forest, and predict_history()
+ *  adds to forest d the fmean of the sweep that drew it, as the fit row
+ *  of that sweep does.
  *
  *  DART
  *  ----
@@ -281,9 +284,7 @@ public:
         // wall-clock on probit_BART_model when keep_history=false.
         impl_->set_history(false);
 
-        // Cache static info (xinfo, p, ntrees, fmean) once at
-        // construction; refreshed on set_Y / set_data because fmean
-        // depends on y.
+        // Cache static info (xinfo, p, ntrees) once at construction.
         cache_static_info_();
 
         // Initial fit is fmean for every row (empty stumps at
@@ -314,8 +315,6 @@ public:
                 + std::to_string(cfg_.x_train.n_rows));
         }
         impl_->set_Y(arma_y, /*center_Y=*/true);
-        // fmean may have changed inside set_Y; refresh cached value.
-        refresh_cached_fmean_();
 
         // 2. Sigma override from context (sentinel <= 0 means "use
         // internal sigma, drawn each step via Inv-Chi^2").
@@ -441,7 +440,7 @@ public:
     /// y-only update. Equivalent to pushing y into working_response_key
     /// in shared_data and letting the next set_context() pick it up.
     /// Forces center=true to match BART::wbart conventions and to
-    /// refresh fmean for predict_at_serialized_.
+    /// refresh the kernel's fmean.
     void set_Y(const arma::vec& y_new) {
         const long n_cur = static_cast<long>(cfg_.x_train.n_rows);
         if (static_cast<long>(y_new.n_elem) != n_cur) {
@@ -453,7 +452,6 @@ public:
         }
         impl_->set_Y(y_new, /*center_Y=*/true);
         cfg_.y_init = y_new;
-        refresh_cached_fmean_();
         refresh_current_fit_();
     }
 
@@ -499,7 +497,6 @@ public:
         impl_->set_data(X_new, y_new, /*center_Y=*/true);
         cfg_.x_train = X_new;
         cfg_.y_init  = y_new;
-        refresh_cached_fmean_();
         refresh_current_fit_();
     }
 
@@ -549,12 +546,12 @@ public:
     const stdbart::bart_model* underlying() const { return impl_.get(); }
 
     /// Predict f(X_new) at the CURRENT forest. Returns length-Nt vector
-    /// on the natural Y scale (cached fmean is added back).
+    /// on the natural Y scale (the kernel's current fmean is added back).
     ///
     /// Walks the LIVE forest directly (bart_model::predict_live) instead of
     /// the former serialize->parse round-trip
-    /// predict_at_serialized_(impl_->get_tree(), X_new). Bit-identical (same
-    /// live trees, same cutpoints, same summation order, same fmean) but
+    /// predict_at_serialized_(impl_->get_tree(), X_new, fmean). Bit-identical
+    /// (same live trees, same cutpoints, same summation order, same fmean) but
     /// ~50x faster: no re-serialization of the forest on every call.
     /// predict_at_serialized_ remains for predict_history() and the external-
     /// snapshot predict_at() path.
@@ -563,7 +560,10 @@ public:
     }
 
     /// Predict at X_new for ALL historical draws stored in the internal
-    /// model. Returns (n_draws x Nt) matrix on the natural Y scale.
+    /// model. Returns (n_draws x Nt) matrix on the natural Y scale: row d
+    /// is stored forest d evaluated at X_new plus fmean_history(d), the
+    /// fmean of the sweep that drew forest d (the fmean in the fit row of
+    /// that sweep).
     /// If no history has been recorded yet, returns a 1xNt matrix from
     /// the current forest.
     arma::mat predict_history(const arma::mat& X_new) {
@@ -577,9 +577,15 @@ public:
             for (arma::uword i = 0; i < v.n_elem; ++i) m(0, i) = v[i];
             return m;
         }
+        if (h.fmean_history.n_elem != n_draws) {
+            ai4b::stop("bart_block '" + cfg_.name + "': the kernel stores "
+                + std::to_string(n_draws) + " forests but "
+                + std::to_string(h.fmean_history.n_elem) + " fmean values");
+        }
         arma::mat result(n_draws, Nt, arma::fill::zeros);
         for (std::size_t d = 0; d < n_draws; ++d) {
-            arma::vec v = predict_at_serialized_(h.tree_history[d], X_new);
+            arma::vec v = predict_at_serialized_(h.tree_history[d], X_new,
+                                                 h.fmean_history[d]);
             for (arma::uword k = 0; k < Nt; ++k) result(d, k) = v[k];
         }
         return result;
@@ -593,9 +599,9 @@ public:
     }
 
     /// Accessor for the full internal BART history (tree strings, sigma,
-    /// var probs, var counts, xinfo, ntrees, p, fmean) as a backend-
-    /// neutral struct. Useful for downstream posterior predictive
-    /// analyses outside the wrapper.
+    /// var probs, var counts, per-draw fmean, xinfo, ntrees, p, current
+    /// fmean) as a backend-neutral struct. Useful for downstream posterior
+    /// predictive analyses outside the wrapper.
     stdbart::BartHistory get_full_history() const {
         return impl_->get_history();
     }
@@ -622,6 +628,17 @@ public:
     void clear_history() override {
         impl_->clear_history();
         history_fit_buf_.clear();
+    }
+
+    // Hold-in-place history append, without a sweep. A bart_block cannot be
+    // frozen, but composite_block::record_held_history() calls this on every
+    // child of a nested composite that is frozen within another composite.
+    // Appends the current fit row (keep_history) and, through the kernel
+    // (keep_tree), a copy of the last stored forest, sigma, split counts,
+    // split probabilities and fmean, or the current ones when none is stored.
+    void record_held_history() override {
+        if (keep_history_) history_fit_buf_.push_back(current_fit_);
+        impl_->record_held_history();
     }
 
     // keep_history controls ONLY the numeric per-step buffer
@@ -651,11 +668,6 @@ private:
             cached_xinfo_[j] = h.xinfo[j];
         }
         cached_ntrees_ = static_cast<int>(h.ntrees);
-        cached_fmean_  = h.fmean;
-    }
-
-    void refresh_cached_fmean_() {
-        cached_fmean_ = impl_->current_fmean();   // not get_history(), which copies every stored forest
     }
 
     // Mirrors genbart_block::refresh_current_r_ — read the kernel's
@@ -673,11 +685,12 @@ private:
         }
     }
 
-    /// Evaluate trees serialized in `s` at rows of X_new, add fmean,
+    /// Evaluate trees serialized in `s` at rows of X_new, add `fmean`,
     /// return length-Nt vector. Mirrors bart_predict_posterior's
     /// per-iter inner loop using cached_xinfo_ for cutpoints.
     arma::vec predict_at_serialized_(const std::string& s,
-                                     const arma::mat& X_new)
+                                     const arma::mat& X_new,
+                                     double fmean)
     {
         if (s.empty()) {
             ai4b::stop("bart_block: predict input is an empty serialized "
@@ -717,7 +730,7 @@ private:
                 }
                 f += node->gettheta();
             }
-            out[row] = f + cached_fmean_;
+            out[row] = f + fmean;
         }
         return out;
     }
@@ -727,10 +740,9 @@ private:
     arma::vec                            current_fit_;
     std::vector<arma::vec>               history_fit_buf_;
 
-    // Cached static info; fmean is refreshed on set_Y / set_data.
+    // Cached static info (set at construction).
     int    cached_p_      = 0;
     int    cached_ntrees_ = 0;
-    double cached_fmean_  = 0.0;
     std::vector<std::vector<double> > cached_xinfo_;
 
     // Sigma override sourced from set_context (negative = "use internal

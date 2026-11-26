@@ -515,6 +515,18 @@ public:
         history_fit_buf_.clear();
     }
 
+    // Hold-in-place history append, without a sweep. A softbart_block cannot
+    // be frozen, but composite_block::record_held_history() calls this on
+    // every child of a nested composite that is frozen within another
+    // composite. Appends the current fit row (keep_history) and, through the
+    // kernel (keep_tree), a copy of the last stored forest, sigma, sigma_mu,
+    // split probabilities and split counts, or the current ones when none is
+    // stored.
+    void record_held_history() override {
+        if (keep_history_) history_fit_buf_.push_back(current_fit_);
+        impl_->record_held_history();
+    }
+
     // keep_history -> only numeric per-step buffer (history_fit_buf_).
     void set_keep_history(bool keep) override {
         block_sampler::set_keep_history(keep);

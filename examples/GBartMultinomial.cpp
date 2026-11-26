@@ -63,6 +63,18 @@
 //  AI4BayesCode::state_map / history_map) and routes errors through
 //  ai4b::stop.
 //
+//  RNG NOTE
+//  --------
+//  The C-1 genBART kernels draw from their OWN seedable RNG stream under the
+//  pybind / standalone backend (bart_pure_cpp/src/r_compat.h,
+//  bart_rng::engine(), a thread-local std::mt19937_64); the
+//  std::mt19937_64 passed to step() drives the phi augmentation block only.
+//  A non-zero construction-time rng_seed therefore also seeds the kernel
+//  stream (bart_rng::set_seed) under that backend, so two GBartMultinomial
+//  objects built with DIFFERENT seeds produce independent chains. Under the
+//  Rcpp (R) backend the kernels use R's global RNG instead; R runs call
+//  set.seed() before construction.
+//
 //  LICENSE WARNING
 //  ---------------
 //  This file #includes "AI4BayesCode/genbart_block.hpp", which in turn
@@ -241,6 +253,15 @@ public:
         if (ntrees <= 0) {
             ai4b::stop("GBartMultinomial: ntrees must be > 0");
         }
+
+        // ---- Seed the kernel RNG so a construction seed yields an
+        //      independent chain (pybind / standalone backend only; the
+        //      Rcpp backend uses R's global RNG instead). ----------------
+#if !defined(AI4BAYESCODE_RCPP_MODULE)
+        if (rng_seed != 0) {
+            bart_rng::set_seed(static_cast<std::uint64_t>(rng_seed));
+        }
+#endif
 
         const std::size_t N = static_cast<std::size_t>(X.n_rows);
         x_ncol_ = static_cast<std::size_t>(X.n_cols);

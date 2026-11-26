@@ -44,6 +44,17 @@
 //  under pybind / standalone, so lambda can differ between them in the
 //  last bits (1 ulp in qchisq at nu = 3).
 //
+//  RNG / SEEDING
+//  -------------
+//  The BART kernel draws from its OWN seedable RNG stream under the pybind /
+//  standalone backend (bart_pure_cpp/src/r_compat.h, bart_rng::engine(), a
+//  thread-local std::mt19937_64); the std::mt19937_64 passed to step() is
+//  used by the sigma slice sampler only. A non-zero construction-time
+//  rng_seed therefore also seeds the kernel stream (bart_rng::set_seed)
+//  under that backend, so two BartNoise objects built with DIFFERENT seeds
+//  produce independent chains. Under the Rcpp backend the kernel uses R's
+//  global RNG instead; R runs call set.seed() before construction.
+//
 //  LICENSE WARNING
 //  ---------------
 //  This file #includes "AI4BayesCode/bart_block.hpp", which in turn
@@ -226,6 +237,15 @@ public:
         if (X.n_rows != y.n_elem) {
             ai4b::stop("BartNoise: X and y must have matching row counts");
         }
+
+        // ---- Seed the kernel RNG so a construction seed yields an
+        //      independent chain (pybind / standalone backend only; the
+        //      Rcpp backend uses R's global RNG instead). ----------------
+#if !defined(AI4BAYESCODE_RCPP_MODULE)
+        if (rng_seed != 0) {
+            bart_rng::set_seed(static_cast<std::uint64_t>(rng_seed));
+        }
+#endif
 
         const std::size_t N = static_cast<std::size_t>(X.n_rows);
 

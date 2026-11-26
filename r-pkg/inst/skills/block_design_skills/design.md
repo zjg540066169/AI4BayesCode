@@ -294,7 +294,9 @@ void record_held_history() override {
 ```
 
 A block with SEVERAL history buffers pushes to each of them; a block that is
-freeze-BLACKLISTED (`supports_freeze()` returns false) does not need the hook.
+freeze-BLACKLISTED (`supports_freeze()` returns false) needs the hook too:
+`composite_block::record_held_history()` calls it on every child of a nested
+composite that is frozen within another composite.
 
 **`clear_history()` is REQUIRED for any block that owns a history buffer.**
 `composite_block::clear_history()` calls it on every child, the wrapper's
@@ -340,9 +342,9 @@ on `-I` and need no per-block declaration.
 > (`freeze / unfreeze / get_frozen / clear_history` always via `AI4BAYESCODE_BIND_KERNEL_CONTROL` macro +
 > `kernel_control_mixin` CRTP; `readapt_NUTS` iff NUTS-family child; BART tree-serialization
 > carve-out iff BART-family child), with set_current-as-dispatcher and zero state-method leaks;
-> confirm the license gate for any vendored kernel. **If the block owns a history buffer and is
-> not freeze-blacklisted, confirm `record_held_history()` is overridden** -- without it, freeze
-> plus `predict_at` throws "inconsistent history sizes".
+> confirm the license gate for any vendored kernel. **If the block owns a history buffer,
+> confirm `record_held_history()` is overridden** (a freeze-blacklisted block too) -- without it,
+> freeze plus `predict_at` throws "inconsistent history sizes".
 
 ---
 

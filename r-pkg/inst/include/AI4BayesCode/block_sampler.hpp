@@ -227,8 +227,11 @@ public:
     // that iterate the JOINT history (draw d = one entry from each block)
     // require aligned lengths; a frozen block otherwise stalls its history and
     // trips "inconsistent history sizes". Default: no-op (blocks with no
-    // history, or that cannot be frozen). History-bearing freezable blocks
-    // override to append current() (single buffer) or each of their buffers.
+    // history). History-bearing blocks override to append current() (single
+    // buffer) or each of their buffers, blocks that cannot be frozen
+    // (supports_freeze() false) included: composite_block::record_held_history()
+    // calls this on every child of a nested composite that is frozen within
+    // another composite.
     virtual void record_held_history() {}
 
     // ---- Tree snapshot recording (BART-family only) ----------------------
