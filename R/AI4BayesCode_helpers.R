@@ -822,7 +822,11 @@ ai4bayescode_new_frozen <- function(module_class, ...,
 #   its first axis (vectors, matrices, and higher-dimensional arrays alike).
 #   With keep_models = TRUE (default) run$models holds the models: handles to
 #   persistent forked worker processes after a parallel run, the objects
-#   themselves after a sequential one.
+#   themselves after a sequential one. For chain i, set.seed(seeds[i]) is
+#   called immediately before model_ctor(seeds[i]) in every path; a
+#   sequential run and the parallel::mclapply call (keep_models = FALSE),
+#   which evaluates the chains in this session when as.integer(n_cores) < 2,
+#   restore the caller's .Random.seed (or its absence) afterwards.
 # ai4bayescode_predict() / predict(run): predict_at() over all chains.
 # ai4bayescode_close_models(): terminates the worker processes of a run.
 # ai4bayescode_rhat_summary(): per-key rhat + ess_bulk across chains; needs the
@@ -898,6 +902,24 @@ ai4bayescode_run_chains <- function(model_ctor,
                     "parallel = FALSE.", call. = FALSE, immediate. = TRUE)
     }
 
+    # .ai4b_rc_one_chain() calls set.seed(seeds[i]) before it constructs
+    # chain i. The caller's .Random.seed (NULL when it does not exist) is
+    # saved here, before the run, and restored on exit from run_sequential()
+    # and from run_mclapply(): parallel::mclapply() evaluates the chains in
+    # this R session, without forking, when as.integer(mc.cores) < 2, and
+    # with RNGkind "L'Ecuyer-CMRG" it creates .Random.seed when none exists
+    # (mc.reset.stream()).
+    rng_caller <- .ai4b_rc_rng_get()
+    run_sequential <- function(keep) {
+        on.exit(.ai4b_rc_rng_set(rng_caller))
+        lapply(seeds, one_chain, keep = keep)
+    }
+    run_mclapply <- function() {
+        on.exit(.ai4b_rc_rng_set(rng_caller))
+        parallel::mclapply(seeds, one_chain, mc.cores = n_cores,
+                           mc.set.seed = TRUE)
+    }
+
     models <- NULL
     if (keep_models && use_parallel && n_cores > 1 && n_chains > 1) {
         # Persistent forked workers: the model of each chain is kept in its
@@ -922,16 +944,15 @@ ai4bayescode_run_chains <- function(model_ctor,
                     "set VECLIB_MAXIMUM_THREADS=1 before starting R to keep ",
                     "parallelism, or pass parallel = FALSE.",
                     call. = FALSE, immediate. = TRUE)
-            results <- lapply(seeds, one_chain, keep = TRUE)
+            results <- run_sequential(keep = TRUE)
             models  <- lapply(results, `[[`, "model")
         }
-    } else if (!keep_models && use_parallel && n_cores > 1) {
+    } else if (!keep_models && use_parallel && n_cores > 1 && n_chains > 1) {
         if (verbose)
             message("ai4bayescode_run_chains: running ", n_chains,
                     " chains on ", n_cores, " cores (parallel)")
         warn_if_blas_unpinned()
-        results <- parallel::mclapply(seeds, one_chain, mc.cores = n_cores,
-                                      mc.set.seed = TRUE)
+        results <- run_mclapply()
         if (!all(vapply(results, chain_ok, logical(1)))) {
             # Second line of defence: a forked worker returned no history.
             # With the BLAS pinned above the fork-unsafety is gone, so this is
@@ -942,13 +963,13 @@ ai4bayescode_run_chains <- function(model_ctor,
                     "fork-specific cause. Pass parallel = FALSE to skip the ",
                     "parallel attempt entirely.",
                     call. = FALSE, immediate. = TRUE)
-            results <- lapply(seeds, one_chain)
+            results <- run_sequential(keep = FALSE)
         }
     } else {
         if (verbose)
             message("ai4bayescode_run_chains: running ", n_chains,
                     " chains sequentially")
-        results <- lapply(seeds, one_chain, keep = keep_models)
+        results <- run_sequential(keep = keep_models)
         if (keep_models) models <- lapply(results, `[[`, "model")
     }
 
@@ -1205,10 +1226,16 @@ if (!exists(".ai4b_rc_env", inherits = FALSE))
 
 .ai4b_rc_class_name <- function(m) sub("^Rcpp_", "", class(m)[1L])
 
-# One chain: construct, warm up, clear the warmup draws, sample. The history
-# returned is keep-only; `model` is the model object itself.
+# One chain: seed R's random-number generator, construct, warm up, clear the
+# warmup draws, sample. set.seed(seed_val) is called immediately before
+# model_ctor(seed_val) in every path (worker process, mclapply, this
+# session), so the random numbers that a model draws from R's generator
+# (bart_block, genbart_block and softbart_block under Rcpp) are determined by
+# seed_val and the current RNGkind(). The history returned is keep-only;
+# `model` is the model object itself.
 .ai4b_rc_one_chain <- function(model_ctor, seed_val, n_burn, n_keep) {
     t0 <- Sys.time()
+    set.seed(seed_val)
     m <- model_ctor(seed_val)
     m$step(n_burn)
     has_clear <- .ai4b_rc_has_method(m, "clear_history")
@@ -1267,18 +1294,27 @@ if (!exists(".ai4b_rc_env", inherits = FALSE))
     invisible(NULL)
 }
 
-# R random-number state of each worker, as parallel::mclapply(mc.set.seed =
-# TRUE) sets it in each forked child: with RNGkind "L'Ecuyer-CMRG", worker w
-# gets the w-th stream after the current seed; with any other kind the entry
-# is NULL and the worker removes .Random.seed, so that R seeds it afresh.
-.ai4b_rc_worker_rng <- function(n_workers) {
-    out <- vector("list", n_workers)
-    if (RNGkind()[1L] != "L'Ecuyer-CMRG") return(out)
-    if (!exists(".Random.seed", envir = globalenv(), inherits = FALSE))
-        sample.int(1L)
-    s <- get(".Random.seed", envir = globalenv(), inherits = FALSE)
-    for (w in seq_len(n_workers)) out[[w]] <- s <- parallel::nextRNGStream(s)
-    out
+# .Random.seed of the global environment, or NULL when it does not exist.
+.ai4b_rc_rng_get <- function()
+    get0(".Random.seed", envir = globalenv(), inherits = FALSE)
+
+# Restore a value of .ai4b_rc_rng_get(): assign .Random.seed, or remove it
+# when the value is NULL, then call RNGkind(), which loads .Random.seed into
+# R's generator (GetRNGstate; with no .Random.seed the generator is seeded
+# from the clock). Without the RNGkind() call the generator state after the
+# run is the state at the end of the last chain, and the Rcpp::RNGScope
+# member of the `arn` generator of bart_block and genbart_block copies that
+# state to .Random.seed (PutRNGstate) when the last model containing one is
+# garbage-collected.
+.ai4b_rc_rng_set <- function(seed) {
+    if (is.null(seed)) {
+        if (exists(".Random.seed", envir = globalenv(), inherits = FALSE))
+            rm(".Random.seed", envir = globalenv(), inherits = FALSE)
+    } else {
+        assign(".Random.seed", seed, envir = globalenv())
+    }
+    RNGkind()
+    invisible(NULL)
 }
 
 # Evaluate fun() and return its value with the printed output, messages,
@@ -1321,12 +1357,6 @@ if (!exists(".ai4b_rc_env", inherits = FALSE))
 
 # Worker side: run the chains of one worker and store their models.
 .ai4b_rc_worker_run <- function(job, n_burn, n_keep) {
-    if (is.null(job$rng)) {
-        if (exists(".Random.seed", envir = globalenv(), inherits = FALSE))
-            rm(".Random.seed", envir = globalenv(), inherits = FALSE)
-    } else {
-        assign(".Random.seed", job$rng, envir = globalenv())
-    }
     ctor <- get0("ctor", envir = .ai4b_rc_env, inherits = FALSE)
     models <- list()
     out <- list()
@@ -1499,10 +1529,9 @@ if (!exists(".ai4b_rc_env", inherits = FALSE))
                                    conditionMessage(pool), ")")))
     finished <- FALSE
     on.exit(if (!finished) .ai4b_rc_pool_close(pool, force = TRUE), add = TRUE)
-    rng  <- .ai4b_rc_worker_rng(n_workers)
     jobs <- lapply(seq_len(n_workers), function(w) {
         idx <- which(pool$node_of == w)
-        list(chains = idx, seeds = seeds[idx], rng = rng[[w]])
+        list(chains = idx, seeds = seeds[idx])
     })
     out <- tryCatch(.ai4b_rc_exchange(pool, seq_len(n_workers), jobs,
                                       .ai4b_rc_worker_run,

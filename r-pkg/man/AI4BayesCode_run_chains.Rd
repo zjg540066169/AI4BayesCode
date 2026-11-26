@@ -29,7 +29,16 @@ object exposing `step()` and `get_history()`. Must be deterministic in
 \item{n_keep}{Kept iterations per chain. Defaults to 10000.}
 
 \item{seeds}{Optional integer vector of length `n_chains`; auto-generated if
-`NULL`.}
+`NULL`. For chain `i`, `set.seed(seeds[i])` (R's random-number generator,
+current `RNGkind()`) is called immediately before `model_ctor(seeds[i])`,
+in every path (worker processes, `parallel::mclapply`, sequential). The
+draws of a model that uses R's generator (`bart_block`, `genbart_block`
+and `softbart_block` under Rcpp) are therefore determined by `seeds`, and
+chains with different seeds use different streams. The caller's
+`.Random.seed` (or its absence) is saved before the run and restored
+after a sequential run and after the `parallel::mclapply` call, which
+evaluates the chains in this session when `as.integer(n_cores) < 2`, so
+the caller's random-number stream is unchanged by the run.}
 
 \item{parallel}{Logical; run the chains in forked worker processes on
 POSIX. Defaults to `TRUE` (sequential on Windows).}
@@ -70,11 +79,11 @@ Runs `n_chains` chains from a deterministic constructor
   need no `drop_burn` / `n_burn` bookkeeping.
 
   The chains run in forked worker processes on POSIX when
-  `parallel = TRUE` and `n_cores > 1` (with `keep_models = TRUE`, also
-  `n_chains > 1`), and sequentially in this session otherwise. With
-  `keep_models = TRUE` (default) a parallel run uses persistent worker
-  processes (`parallel::makeForkCluster`): chain `i` runs in worker
-  `((i - 1) %% n_workers) + 1`, and its model is kept in that process.
+  `parallel = TRUE`, `n_cores > 1` and `n_chains > 1`, and sequentially in
+  this session otherwise. With `keep_models = TRUE` (default) a parallel
+  run uses persistent worker processes (`parallel::makeForkCluster`):
+  chain `i` runs in worker `((i - 1) %% n_workers) + 1`, and its model is
+  kept in that process.
   `run$models[[i]]` is then a handle of class `"ai4bayescode_chain_model"`:
   `run$models[[i]]$predict_at(newdata)`, or any other method call, is
   evaluated on chain `i`'s model in its worker process and returns the
@@ -84,7 +93,8 @@ Runs `n_chains` chains from a deterministic constructor
   when R exits. A handle restored with `readRDS()` in another R session
   raises an error. A sequential run returns the model objects themselves in
   `run$models`. With `keep_models = FALSE` a parallel run uses
-  `parallel::mclapply` and `run$models` is `NULL`.
+  `parallel::mclapply`, which evaluates the chains in this session when
+  `as.integer(n_cores) < 2`, and `run$models` is `NULL`.
 
   A model without `clear_history()` (compiled against AI4BayesCode older
   than 1.1.3, or a custom object) gives the same `run$histories`, with the
