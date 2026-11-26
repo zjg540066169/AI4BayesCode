@@ -29,7 +29,12 @@
   its number of dimensions; `pool = FALSE` returns one list per chain.
   `newdata = list()` (or `NULL`) gives the posterior predictive at the
   training data; a matrix or a data frame as `newdata` raises an error that
-  shows the call `predict(run, list(X = X_new))`.
+  shows the call `predict(run, list(X = X_new))`. The first `n_burn` rows of
+  an output with `n_burn + n_keep` rows are dropped (a model without
+  `clear_history()`, or one that stores per-sweep values outside the buffers
+  `clear_history()` empties, which also gives a warning); with
+  `pool = TRUE`, an output whose first dimension is neither `n_keep` nor 1
+  gives a warning, because that axis is then not one row per stored draw.
   `ai4bayescode_close_models(run)` terminates the worker processes of a run.
 * The worker processes of a kept run are also terminated when the run and
   every handle taken from it are garbage-collected, when R exits, and to make
@@ -64,7 +69,9 @@
   `AI4BayesCode.predict(chains, newdata)` (`chains.predict()`) and
   `AI4BayesCode.close_models(chains)` (`chains.close()`) correspond to the R
   functions and take the result itself, not a slice of it; `predict()`
-  flattens a 2-D array in `newdata` column-major, also for models compiled
+  passes `newdata` to compiled models as given (their `predict_at()` reads a
+  matrix column-major and checks its number of columns) and flattens a 2-D
+  array column-major for models written in Python and for models compiled
   before 1.1.3. The worker processes are not daemonic, so a model can start
   processes of its own; they are terminated by `close_models()`, when the
   result and its handles are garbage-collected, at interpreter exit, and,
@@ -108,7 +115,7 @@
     instead of N x 1 columns. `PehSharedFrailty` raises an error unless `g` is
     one integer with 0 <= g < G (it read `w[g]` out of range).
   - `OrderMCMCBN`: `sampled_DAG`, the DAG stored for each sweep (it returned
-    the current DAG only); `get_history()` gains `order_sampled_DAG`. In a held
+    the current DAG only); `get_history()` keeps its 1.1.2 keys. In a held
     sweep of the frozen block the stored DAG is the held DAG.
   - `CategoricalIsingChainVI`, `StructuredPottsVI`: `z_samples`, the stored
     per-sweep q-draws (`new_data` must be empty). The single-draw path returns
@@ -139,10 +146,11 @@
     in R.
 * BART-family models predict at new X from every stored draw only when built
   with `keep_tree = TRUE`, so `predict(run, list(X = X_new))` needs it in
-  `model_ctor`. Without it, BartNoise, SoftBartNoise, the GBart models and
-  VCBart raise an error that names `keep_tree = TRUE` and
-  `last_draw_only = TRUE` (BartNoise and SoftBartNoise stopped with
-  "inconsistent history sizes").
+  `model_ctor`. Without it, and with more than one stored draw, BartNoise,
+  SoftBartNoise and the GBart models raise an error that names
+  `keep_tree = TRUE` and `last_draw_only = TRUE` (BartNoise and SoftBartNoise
+  stopped with "inconsistent history sizes"); VCBart returns one row from
+  the current forests, as in 1.1.2, with a warning.
 * `HierarchicalLM_joint`, `HierarchicalLM_MultivariateRE`: `predict_at()`
   checks `g_idx` / `group_idx` (one integer per row, >= 0, resp. >= 1). A
   group without training rows gets its random effect drawn once per group and
@@ -177,19 +185,24 @@
   and `y_rep` left out the level of `y` (with `y + 3`, `sigma` was 3.28
   instead of 0.51). SoftBartNoise draws change; `center_Y = FALSE` draws do
   not.
-* Python: `BartNoise`, `GBartLogistic`, `GBartMultinomial`,
-  `GBartHeteroscedastic` and `VCBart` seed the BART kernel from a non-zero
-  `rng_seed`, as `SoftBartNoise` and `GBartPoisson` already did, so chains
-  with different seeds differ and parallel and sequential `run_chains()` give
-  the same chains. The kernel stream is one per thread and compiled module: a
+* Python: at its first `step()`, each `bart_block`, `genbart_block` and
+  `softbart_block` seeds the BART kernel from a copy of the chain's
+  random-number generator (the chain's own stream does not advance), and
+  `BartNoise`, `GBartLogistic`, `GBartMultinomial`, `GBartHeteroscedastic`
+  and `VCBart` also seed it from a non-zero `rng_seed` in the constructor. So
+  every BART-family sampler, including one generated before 1.1.3, gives
+  chains that differ, are reproduced from the seeds, and are the same in
+  parallel and sequential `run_chains()` (before, forked chains could share
+  the kernel stream). The kernel stream is one per thread and compiled module: a
   chain is reproduced when no other BART-family model of the same module is
   built or stepped in that thread in between, as in `run_chains()`. The
-  Python draws of these five models change; R draws do not.
-* Every model compiled by `ai4bayescode_source()`,
+  Python draws of BART-family models change; R draws do not.
+* On macOS, every model compiled by `ai4bayescode_source()`,
   `ai4bayescode_source_checkout()`, the Rcpp plugin
   (`// [[Rcpp::depends(AI4BayesCode)]]` with `Rcpp::sourceCpp()`) or
   `AI4BayesCode.source()` allocates Armadillo's heap arrays on 256-byte
-  boundaries. With macOS Accelerate, the results of BLAS and LAPACK routines
+  boundaries (other systems keep Armadillo's default allocation, as in
+  1.1.2). With macOS Accelerate, the results of BLAS and LAPACK routines
   (dot products, triangular and LU / Cholesky solves) depend on the operand
   addresses modulo 256 bytes, so one model built several times with one seed
   gave different draws (`GPRegression` in R); such builds now give
@@ -197,7 +210,7 @@
   of other models that call these routines can differ in the last bits.
   `ai4bayescode_source()` and `ai4bayescode_source_checkout()` build in a
   subfolder of the Rcpp cache folder named after a fingerprint of the
-  compiler flags and the header, and the Python build signature covers the
+  compiler flags, the header and the package version, and the Python build signature covers the
   header, so modules built by earlier versions are compiled again. A module
   built through the plugin and kept in a lasting `rcpp.cache.dir` folder is
   loaded again for an unchanged file unless `rebuild = TRUE`.
@@ -212,11 +225,13 @@
   too.
 * Python: under `warnings.simplefilter("error")`, `freeze()` and `unfreeze()`
   raise the `UserWarning` instead of `SystemError`.
-* `AI4BAYESCODE_BIND_KERNEL_CONTROL`, `AI4BAYESCODE_BIND_READAPT_NUTS` and
-  `AI4BAYESCODE_PYBIND_READAPT_NUTS` select each member with `static_cast`: a
-  wrapper that redeclares one of these members with another signature stops
-  at compile time (before, the call passed arguments the function does not
-  take).
+* The binding macros call `clear_history()` and `readapt_NUTS()` through a
+  dispatch that uses the wrapper's own member with the arguments it takes (a
+  wrapper with only the 4-argument `readapt_NUTS()` compiles as with 1.1.2,
+  and the 3-argument call passes `target_accept = -1`); the other members
+  are selected with `static_cast`, so a wrapper that redeclares one of them
+  with another signature stops at compile time (before, the call passed
+  arguments the function does not take).
 * `ai4bayescode_doc()` / `AI4BayesCode.doc()`: the Methods list has
   `clear_history()`, `freeze()`, `unfreeze()`, `get_frozen()` and
   `readapt_NUTS()` also when the binding macros register them, and
