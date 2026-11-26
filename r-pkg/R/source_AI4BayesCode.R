@@ -45,6 +45,21 @@
 #' deleted at any time. In a folder that cannot be written to, the copy goes
 #' to R's temporary folder.
 #'
+#' @section Memory alignment and the build cache:
+#' Every build force-includes `AI4BayesCode/arma_aligned_alloc.hpp`, so
+#' Armadillo takes its heap arrays from memory aligned to 64 bytes. Some BLAS
+#' and LAPACK libraries (macOS Accelerate among them) add up the terms of a
+#' dot product or a triangular solve in an order that depends on the
+#' alignment of the operands; with every heap array on a 64-byte boundary,
+#' the results of these routines, and so the draws of a model built with a
+#' given seed, do not depend on where the arrays lie in memory.
+#'
+#' Rcpp keys its build cache on the source file alone, so the build is kept
+#' in a subfolder of the cache folder (`cacheDir`, by default
+#' `getOption("rcpp.cache.dir", tempdir())`) named after a fingerprint of the
+#' compiler and linker flags and of that header: a module built with other
+#' flags is not loaded in its place.
+#'
 #' @param code Either a path to a `.cpp` file, or a length-1 character string
 #'   containing the `.cpp` source. A string that is not an existing path is
 #'   written to a temporary `.cpp` and sourced.
@@ -61,7 +76,9 @@
 #'   `ai4bayescode_source("Model.cpp"); new(Model, ...)` works at the top level.
 #' @param quiet Logical. If `FALSE` (default), print a one-line hint after
 #'   loading pointing at [ai4bayescode_doc()] for the class's usage card.
-#' @param ... Passed through to [Rcpp::sourceCpp()].
+#' @param ... Passed through to [Rcpp::sourceCpp()]. A `cacheDir` given here
+#'   is the folder that holds the fingerprint subfolder (see the section on
+#'   the build cache).
 #'
 #' @return Invisibly `NULL`. The effect is the side-effect: the Rcpp module
 #'   declared in the `.cpp` is loaded into `env`, so `new(<ClassName>, ...)`
@@ -128,6 +145,8 @@ ai4bayescode_source <- function(code,
         file.path(inc, "libgp_kernels")
     )
     missing <- roots[!dir.exists(roots)]
+    align_hdr <- file.path(inc, "AI4BayesCode", "arma_aligned_alloc.hpp")
+    if (!file.exists(align_hdr)) missing <- c(missing, align_hdr)
     if (length(missing)) {
         stop("AI4BayesCode include root(s) missing from the install:\n  ",
              paste(missing, collapse = "\n  "),
@@ -149,6 +168,15 @@ ai4bayescode_source <- function(code,
         # compile then opens with a macro-redefinition warning.
         "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_RCPP_MODULE",
+        # Armadillo takes its heap arrays from 64-byte-aligned memory, so BLAS
+        # and LAPACK results do not depend on where an array lies (see
+        # AI4BayesCode/arma_aligned_alloc.hpp). -include reads the header
+        # before the first line of the source, so before <RcppArmadillo.h>.
+        # The relative name needs no quoting: the compiler looks for it in its
+        # working directory (Rcpp's build folder), then in R's include folder,
+        # then under AI4BayesCode's include root, the first -I of
+        # PKG_CPPFLAGS, and only the last has an AI4BayesCode folder.
+        "-include AI4BayesCode/arma_aligned_alloc.hpp",
         if (!identical(build_file, cpp_file)) paste0("-I", shQuote(src_dir)),
         # Template-heavy samplers can exceed the COFF limit of 2^15 sections.
         if (.Platform$OS.type == "windows") "-Wa,-mbig-obj",
@@ -214,11 +242,25 @@ ai4bayescode_source <- function(code,
                 else do.call(Sys.setenv, stats::setNames(list(old_tmp[[v]]), v))
         }, add = TRUE)
     }
+    # Rcpp::sourceCpp keys its build cache (cache.rds under cacheDir, which
+    # persists across sessions when the option rcpp.cache.dir names a lasting
+    # folder) on the source file alone, so a module built earlier with other
+    # flags is loaded again for an unchanged file. The build therefore goes to
+    # a subfolder of cacheDir named after a fingerprint of the flags and of
+    # the force-included header. source_cpp() takes a `cacheDir` given in
+    # `...` as the folder that holds that subfolder and passes the other
+    # arguments in `...` to Rcpp::sourceCpp() unchanged. It calls
+    # Rcpp::sourceCpp() by name, so the error of a failed build reports the
+    # call `Rcpp::sourceCpp(build_file, ...)`, not the deparsed function.
+    fp_dir <- paste0("ai4b-", .ai4b_build_fingerprint(cppflags, libs, align_hdr))
+    source_cpp <- function(..., cacheDir = getOption("rcpp.cache.dir", tempdir()))
+        Rcpp::sourceCpp(build_file, rebuild = rebuild, verbose = verbose, env = env,
+                        cacheDir = file.path(cacheDir, fp_dir), ...)
     # On Windows Rcpp normalizes "<file's folder>/../inst/include" whether or not
     # it exists, which warns "The system cannot find the path specified" on
     # every call for a file outside a package source tree. That one is noise.
     withCallingHandlers(
-        Rcpp::sourceCpp(build_file, rebuild = rebuild, verbose = verbose, env = env, ...),
+        source_cpp(...),
         warning = function(w) {
             if (.Platform$OS.type == "windows" &&
                 grepl("/inst/include\"", conditionMessage(w), fixed = TRUE))
@@ -245,6 +287,22 @@ ai4bayescode_source <- function(code,
 #' @keywords internal
 #' @noRd
 .ai4b_block_fp_cache <- new.env(parent = emptyenv())
+
+# ---------------------------------------------------------------------------
+# Internal: the first 12 hex digits of an MD5 over the compiler flags, the
+# linker flags and the MD5 of the force-included header. ai4bayescode_source()
+# names the Rcpp cache subfolder of a build after it, so a change in any of
+# them gives a new folder and a fresh build.
+# ---------------------------------------------------------------------------
+#' @keywords internal
+#' @noRd
+.ai4b_build_fingerprint <- function(cppflags, libs, header) {
+    f <- tempfile("ai4b_fp_")
+    on.exit(unlink(f), add = TRUE)
+    writeLines(c(cppflags, "\x1e", libs, "\x1e", unname(tools::md5sum(header))),
+               f, useBytes = TRUE)
+    substr(unname(tools::md5sum(f)), 1L, 12L)
+}
 
 # ---------------------------------------------------------------------------
 # Internal: resolve `code` (file path OR source string) to a .cpp path.

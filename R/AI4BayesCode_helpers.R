@@ -118,6 +118,11 @@ ai4bayescode_source_checkout <- function(cpp_file,
                  "\nDid you pass the right AI4BayesCode_path?")
         }
     }
+    align_hdr <- file.path(inc_root, "AI4BayesCode", "arma_aligned_alloc.hpp")
+    if (!file.exists(align_hdr)) {
+        stop("Could not find ", align_hdr,
+             "\nDid you pass the right AI4BayesCode_path?")
+    }
 
     cppflags <- c(
         paste0("-I", shQuote(inc_root)),
@@ -133,6 +138,16 @@ ai4bayescode_source_checkout <- function(cpp_file,
         # compile then opens with a macro-redefinition warning.
         "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_RCPP_MODULE",
+        # Armadillo takes its heap arrays from 64-byte-aligned memory, so BLAS
+        # and LAPACK results do not depend on where an array lies (see
+        # include/AI4BayesCode/arma_aligned_alloc.hpp). -include reads the
+        # header before the first line of the source, so before
+        # <RcppArmadillo.h>. The relative name needs no quoting: the compiler
+        # looks for it in its working directory (Rcpp's build folder), then
+        # in R's include folder, then under the checkout's include root, the
+        # first -I of PKG_CPPFLAGS, and only the last has an AI4BayesCode
+        # folder.
+        "-include AI4BayesCode/arma_aligned_alloc.hpp",
         extra_cppflags
     )
 
@@ -141,6 +156,17 @@ ai4bayescode_source_checkout <- function(cpp_file,
     } else {
         c("$(BLAS_LIBS)", "$(LAPACK_LIBS)", extra_libs)
     }
+
+    # Rcpp::sourceCpp keys its build cache on the source file alone, so with
+    # rebuild = FALSE a module built earlier with other flags would be loaded
+    # again. The build goes to a subfolder of the cache folder named after an
+    # MD5 of the flags and of the force-included header.
+    fp_file <- tempfile("ai4b_fp_")
+    writeLines(c(cppflags, "\x1e", libs, "\x1e", unname(tools::md5sum(align_hdr))),
+               fp_file, useBytes = TRUE)
+    cache_dir <- file.path(getOption("rcpp.cache.dir", tempdir()),
+                           paste0("ai4b-", substr(unname(tools::md5sum(fp_file)), 1L, 12L)))
+    unlink(fp_file)
 
     mk_file <- tempfile(pattern = "AI4BayesCode_Makevars_", fileext = "")
     writeLines(c(
@@ -160,9 +186,10 @@ ai4bayescode_source_checkout <- function(cpp_file,
     }, add = TRUE)
 
     Rcpp::sourceCpp(cpp_file,
-                    rebuild = rebuild,
-                    verbose = verbose,
-                    env     = globalenv())
+                    rebuild  = rebuild,
+                    verbose  = verbose,
+                    env      = globalenv(),
+                    cacheDir = cache_dir)
     # Give every exposed class a name-matching constructor, so that
     # new(<Class>, y = y, rng_seed = 7L) means what it reads as and every
     # argument carrying a C++ default may simply be omitted.

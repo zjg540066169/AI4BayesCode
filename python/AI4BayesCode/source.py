@@ -13,6 +13,12 @@ location of an AI4BayesCode checkout**. The only flag that differs from the R
 build is the module macro (``-DAI4BAYESCODE_PYBIND_MODULE`` instead of
 ``-DAI4BAYESCODE_RCPP_MODULE``).
 
+Both builds force-include ``AI4BayesCode/arma_aligned_alloc.hpp``, so
+Armadillo takes its heap arrays from memory aligned to 64 bytes and the
+results of BLAS and LAPACK routines whose summation order depends on operand
+alignment (macOS Accelerate's ``ddot``, for one) do not depend on where an
+array lies in memory.
+
 Standalone Armadillo: unlike R (which gets Armadillo via RcppArmadillo), the
 Python build needs a standalone Armadillo header tree. It is discovered from
 ``ARMADILLO_INCLUDE_DIR`` or common system/brew locations; if not found, pass
@@ -362,6 +368,8 @@ def _compile_flags(include_root: Path, cxx: str | None = None) -> list[str]:
         inc / "libgp_kernels",
     ]
     missing = [str(r) for r in roots if not r.is_dir()]
+    if not (inc / "AI4BayesCode" / "arma_aligned_alloc.hpp").is_file():
+        missing.append(str(inc / "AI4BayesCode" / "arma_aligned_alloc.hpp"))
     if missing:
         raise FileNotFoundError(
             "AI4BayesCode include root(s) missing from the install:\n  "
@@ -397,6 +405,15 @@ def _compile_flags(include_root: Path, cxx: str | None = None) -> list[str]:
         # compile then opens with a macro-redefinition warning.
         "-DARMA_DONT_USE_WRAPPER=",
         "-DAI4BAYESCODE_PYBIND_MODULE",   # the only macro that differs from R
+        # Armadillo takes its heap arrays from 64-byte-aligned memory, so BLAS
+        # and LAPACK results do not depend on where an array lies (see
+        # AI4BayesCode/arma_aligned_alloc.hpp). -include reads the header
+        # before the first line of the source, so before <armadillo>. The
+        # header is passed by absolute path: the compiler runs in the caller's
+        # working directory and looks for a relative -include name there
+        # first. The flag is part of the build signature, so modules built
+        # without it are not reused.
+        "-include", str((inc / "AI4BayesCode" / "arma_aligned_alloc.hpp").absolute()),
         # MinGW's math.h hides M_PI and the other M_* constants in strict ISO
         # mode, so Windows builds use the GNU dialect, as R itself does.
         "-std=gnu++17" if _is_windows() else "-std=c++17",

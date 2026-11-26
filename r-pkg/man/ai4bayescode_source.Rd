@@ -39,7 +39,9 @@ bound. Defaults to the caller's environment, so
 \item{quiet}{Logical. If `FALSE` (default), print a one-line hint after
 loading pointing at [ai4bayescode_doc()] for the class's usage card.}
 
-\item{...}{Passed through to [Rcpp::sourceCpp()].}
+\item{...}{Passed through to [Rcpp::sourceCpp()]. A `cacheDir` given here
+is the folder that holds the fingerprint subfolder (see the section on
+the build cache).}
 }
 \value{
 Invisibly `NULL`. The effect is the side-effect: the Rcpp module
@@ -97,6 +99,23 @@ spaces replaced by underscores (`my model.cpp` gives `.ai4b_my_model.cpp`).
 The copy is kept, so that an unchanged file is not rebuilt, and can be
 deleted at any time. In a folder that cannot be written to, the copy goes
 to R's temporary folder.
+}
+
+\section{Memory alignment and the build cache}{
+
+Every build force-includes `AI4BayesCode/arma_aligned_alloc.hpp`, so
+Armadillo takes its heap arrays from memory aligned to 64 bytes. Some BLAS
+and LAPACK libraries (macOS Accelerate among them) add up the terms of a
+dot product or a triangular solve in an order that depends on the
+alignment of the operands; with every heap array on a 64-byte boundary,
+the results of these routines, and so the draws of a model built with a
+given seed, do not depend on where the arrays lie in memory.
+
+Rcpp keys its build cache on the source file alone, so the build is kept
+in a subfolder of the cache folder (`cacheDir`, by default
+`getOption("rcpp.cache.dir", tempdir())`) named after a fingerprint of the
+compiler and linker flags and of that header: a module built with other
+flags is not loaded in its place.
 }
 
 \examples{
