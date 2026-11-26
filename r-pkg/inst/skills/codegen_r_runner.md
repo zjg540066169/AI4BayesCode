@@ -872,27 +872,39 @@ header lists a field only under `current_named_outputs()` /
 that field through `get_current()` per step -- NOT pretend it lives
 in `hist`. Hallucinating non-existent history keys is the bug class
 that motivated this section (a generated `water_bif_runner.R` once
-referenced `hist$order_sampled_DAG`, which does not exist -- the
+referenced `hist$order_sampled_DAG`, which did not exist then -- the
 runner compiled but the dependent function would crash at first
 call).
 
-**Known cases (v1.2):**
+**Known cases:**
 
 | Block | Field exposed only via `get_current()` | Per-step size | Why history-omitted |
 |---|---|---|---|
-| `order_mcmc_block` | `sampled_DAG` (p x p adjacency) | p^2 ints / step | p=20, T=40000 ~= 130 MB; p=64 (block ceiling) ~= 1.3 GB. Most users only need `order_log_score` R-hat or edge marginals (computable from `get_current()` on demand). |
+| (none at present) | | | |
 
-`order_mcmc_block::get_history()` (verbatim) returns ONLY:
+`order_mcmc_block` was listed here until it stored its sampled DAGs. With
+`keep_history = TRUE`, its `get_history()` returns
 
 - `order` (T x p)
 - `order_log_score` (T x 1)
+- `order_sampled_DAG` (T x p^2): row t is the DAG stored for sweep t,
+   i.e. the DAG sampled in that sweep, or, in a held sweep of a frozen
+   block (`freeze()`, `ai4bayescode_new_frozen()`), the held DAG
+   (`sampled_DAG` at the freeze or after a later load), so the rows of
+   held sweeps are copies of one DAG, not draws from P(G | partition, D);
+   element i*p + j of the block's row (element i + j*p in the
+   `OrderMCMCBN` wrapper, as in `get_current()$sampled_DAG`) is 1 when j
+   is a parent of i
 - `y_rep` (T x N*p)   <- only when the Tier-A wrapper adds a `y_rep`
    refresher; for a bare `order_mcmc_block` it is absent.
 
-The sampled DAG is **NEVER** in history.
+and, with no stored sweep, only `order` (1 x p). The block stores p
+64-bit parent masks per sweep; `get_history()` builds the T x p^2 matrix
+of doubles on each call (p=20, T=40000 ~= 128 MB; p=64 ~= 1.3 GB).
 
-**Canonical pattern for collecting per-draw DAGs** -- used in the v1.2
-`examples/OrderMCMCBN.cpp` companion runner:
+**Pattern for collecting per-draw DAGs without `keep_history`** (or a
+subset of them) -- used in the v1.2 `examples/OrderMCMCBN.cpp` companion
+runner:
 
 ```r
 # Inside run_chain_<ClassName>() -- collect DAGs in a step-by-step

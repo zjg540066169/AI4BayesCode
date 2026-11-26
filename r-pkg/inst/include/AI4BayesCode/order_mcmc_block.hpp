@@ -91,6 +91,21 @@
  *  The shared-data keys are <name>, <name>_party (partition only),
  *  <name>_sampled_DAG and <name>_log_score, with <name> = cfg.name.
  *
+ *  History (keep_history on): each step() and each record_held_history()
+ *  appends one entry to each of three buffers, so get_history() returns one
+ *  row per stored sweep under
+ *      "<name>"             T x n    order / node sequence after the sweep
+ *      "<name>_log_score"   T x 1    its log-score
+ *      "<name>_sampled_DAG" T x n*n  sampled_dag() after the sweep, i.e. the
+ *                                    DAG that step() drew from the sweep's
+ *                                    order or partition with step()'s rng (in
+ *                                    a held row, the held DAG); layout of the
+ *                                    "sampled_DAG" output above
+ *  The DAG buffer holds n parent bitmasks per sweep
+ *  (sampled_dag_history()). With no stored sweep (keep_history off, before
+ *  the first sweep, or from clear_history() to the next sweep),
+ *  get_history() returns only "<name>", the current order, as one row.
+ *
  *  KNOWN BIAS (per spec §1.6, FK §4.1 last 3 paragraphs)
  *  ====================================================
  *  This section applies to method=order, which is now an OPT-IN choice --
@@ -545,10 +560,7 @@ public:
             partition_mcmc_step(pchain_, *cache_, rng);
             sync_from_partition_();
             sampled_dag_ = partition_sample_dag(*cache_, rng, pchain_.state);
-            if (keep_history()) {
-                history_order_.push_back(order_state_);
-                history_log_score_.push_back(current_log_score_);
-            }
+            if (keep_history()) append_history_();
             return;
         }
 
@@ -596,10 +608,7 @@ public:
         sampled_dag_ = cache_->sample_dag(rng, order_as_vec_());
 
         // History (if enabled).
-        if (keep_history()) {
-            history_order_.push_back(order_state_);
-            history_log_score_.push_back(current_log_score_);
-        }
+        if (keep_history()) append_history_();
     }
 
     const arma::vec& current() const override {
@@ -784,6 +793,17 @@ public:
         arma::mat ls(T, 1);
         for (std::size_t t = 0; t < T; ++t) ls(t, 0) = history_log_score_[t];
         out.emplace(cfg_.name + "_log_score", std::move(ls));
+        // Pack the DAG history as (T, n*n): element i*n + j of row t is 1 when
+        // bit j of parent mask i of stored sweep t is set (j is a parent of i),
+        // the layout of the "<name>_sampled_DAG" output.
+        arma::mat dags(T, n_ * n_, arma::fill::zeros);
+        for (std::size_t t = 0; t < T; ++t)
+            for (std::size_t i = 0; i < n_; ++i) {
+                const std::uint64_t pa = history_dag_[t * n_ + i];
+                for (std::size_t j = 0; j < n_; ++j)
+                    if (pa & (1ULL << j)) dags(t, i * n_ + j) = 1.0;
+            }
+        out.emplace(cfg_.name + "_sampled_DAG", std::move(dags));
         return out;
     }
 
@@ -792,12 +812,16 @@ public:
         // composite_block::history_size() takes the MIN over children, so a
         // literal 0 here drags the whole composite to 0 draws -- which is what
         // happens with keep_history off, which is the default.
+        // append_history_() appends to the order, log-score and DAG buffers
+        // together and clear_history() empties all three, so they hold the
+        // same number of sweeps: the row count of every get_history() entry.
         return history_order_.empty() ? 1 : history_order_.size();
     }
 
     void clear_history() override {
         history_order_.clear();
         history_log_score_.clear();
+        history_dag_.clear();
     }
 
     // ---- Diagnostics ----------------------------------------------------
@@ -811,19 +835,34 @@ public:
     const partition_state& partition() const noexcept { return pchain_.state; }
     const score_cache& cache() const noexcept { return *cache_; }
     const std::vector<std::uint64_t>& sampled_dag() const { return sampled_dag_; }
+    /// The stored DAGs, n parent bitmasks per stored sweep: element t*n + i is
+    /// the parent mask of node i (bit j set when j is a parent of i) in sweep
+    /// t, i.e. sampled_dag() after that sweep. Size n times the number of
+    /// stored sweeps; empty with no stored sweep. Row t of the
+    /// "<name>_sampled_DAG" history entry holds the same DAG.
+    const std::vector<std::uint64_t>& sampled_dag_history() const noexcept {
+        return history_dag_;
+    }
 
 
     // Hold-in-place history append for a frozen block: keeps this block's
     // draw count aligned with every sibling's when composite_block::step()
-    // skips its step(). See block_sampler::record_held_history.
+    // skips its step(). The held row stores the current order, log-score and
+    // sampled DAG. See block_sampler::record_held_history.
     void record_held_history() override {
-        if (keep_history_) {
-            history_order_.push_back(order_state_);
-            history_log_score_.push_back(current_log_score_);
-        }
+        if (keep_history_) append_history_();
     }
 
 private:
+    /// Appends the current order, log-score and sampled_dag_ to the three
+    /// history buffers (one stored sweep). Draws no random numbers.
+    void append_history_() {
+        history_order_.push_back(order_state_);
+        history_log_score_.push_back(current_log_score_);
+        history_dag_.insert(history_dag_.end(), sampled_dag_.begin(),
+                            sampled_dag_.end());
+    }
+
     /// Helper to view order_state_ as std::vector<std::size_t> for cache calls.
     std::vector<std::size_t> order_as_vec_() const {
         std::vector<std::size_t> out(n_);
@@ -893,9 +932,12 @@ private:
     std::vector<std::uint64_t>        sampled_dag_;
     partition_chain                   pchain_;   // used only when method=partition
 
-    // History (when keep_history true).
-    std::vector<arma::uvec> history_order_;
-    std::vector<double>     history_log_score_;
+    // History (when keep_history true): one entry per stored sweep in
+    // history_order_ and history_log_score_, n parent masks per stored sweep
+    // in history_dag_ (see sampled_dag_history()).
+    std::vector<arma::uvec>    history_order_;
+    std::vector<double>        history_log_score_;
+    std::vector<std::uint64_t> history_dag_;
 };
 
 } // namespace AI4BayesCode
