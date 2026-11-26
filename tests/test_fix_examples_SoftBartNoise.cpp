@@ -22,7 +22,16 @@
 //        histories of 6 rows each (one per sweep), the last f_softbart row
 //        is the forest's fit, and predict_at({}) returns 6 rows of y_rep;
 //    C6  set_current with an empty sigma throws and leaves get_current()
-//        unchanged.
+//        unchanged;
+//    C7  for y, y + 3 and y - 5 (keep_history, 400 sweeps, the last 200):
+//        the mean of f_softbart and of y_rep from predict_at({}) is within
+//        0.05 of mean(y) and the mean of sigma is in (0.4, 0.65) (true 0.5);
+//    C8  keep_history = TRUE, keep_tree = FALSE: predict_at at new X throws
+//        an error that names keep_tree = TRUE and last_draw_only = TRUE, and
+//        predict_at(new X, true) returns one row. keep_tree = TRUE: 5 sweeps,
+//        set_current of y + 1.5 and 5 sweeps; predict_at at the training X
+//        gives f_softbart rows equal to the 10 history rows (to 1e-12), each
+//        with the mean of the y of its own sweep, and 10 rows of y_rep.
 // ============================================================================
 #include <armadillo>
 #include <cmath>
@@ -181,6 +190,62 @@ int main() {
                 ok = ok && after.count(kv.first) && same_bits(kv.second, after.at(kv.first));
         }
         check(ok, "C6 set_current(sigma = empty) throws and leaves get_current() unchanged");
+    }
+
+    {
+        bool ok = true;
+        for (double shift : {0.0, 3.0, -5.0}) {
+            const arma::vec ys = y + shift;
+            SoftBartNoise mm(X, ys, 20, 2.0, 10.0, false, 19, 3.0, false, true);
+            mm.step(400);
+            const auto h = mm.get_history();
+            const arma::mat F = h.at("f_softbart").rows(200, 399);
+            const arma::mat S = h.at("sigma").rows(200, 399);
+            const arma::mat YR =
+                mm.predict_at(AI4BayesCode::state_map{}).at("y_rep").rows(200, 399);
+            const double my = arma::mean(ys), mf = arma::accu(F) / F.n_elem,
+                         ms = arma::accu(S) / S.n_elem, mr = arma::accu(YR) / YR.n_elem;
+            std::printf("C7 y %+g: mean(y) %.4f, mean f_softbart %.4f, sigma %.4f, "
+                        "mean y_rep %.4f\n", shift, my, mf, ms, mr);
+            ok = ok && std::fabs(mf - my) < 0.05 && std::fabs(mr - my) < 0.05 &&
+                 ms > 0.4 && ms < 0.65;
+        }
+        check(ok, "C7 f_softbart and y_rep centred at mean(y), sigma near 0.5, for y, y + 3, y - 5");
+    }
+
+    {
+        SoftBartNoise mk(X, y, 20, 2.0, 10.0, false, 23, 3.0, false, true);
+        mk.step(5);
+        AI4BayesCode::state_map at;
+        at["X"] = arma::vec(arma::vectorise(X2));
+        std::string msg;
+        try { mk.predict_at(at); } catch (const std::exception& e) { msg = e.what(); }
+        std::printf("C8 keep_tree = FALSE, predict_at(new X): %s\n", msg.c_str());
+        const arma::uword rows1 = mk.predict_at(at, true).at("f_softbart").n_rows;
+        check(msg.find("keep_tree = TRUE") != std::string::npos &&
+              msg.find("last_draw_only = TRUE") != std::string::npos && rows1 == 1,
+              "C8 keep_tree = FALSE: the error names keep_tree = TRUE and last_draw_only = TRUE; "
+              "last_draw_only gives 1 row");
+
+        SoftBartNoise mt(X, y, 20, 2.0, 10.0, false, 29, 3.0, true, true);
+        mt.step(5);
+        AI4BayesCode::state_map sy;
+        sy["y"] = arma::vec(y + 1.5);
+        mt.set_current(sy);
+        mt.step(5);
+        AI4BayesCode::state_map atr;
+        atr["X"] = arma::vec(arma::vectorise(X));
+        const auto P = mt.predict_at(atr);
+        const arma::mat& Fp = P.at("f_softbart");
+        const arma::mat Fh = mt.get_history().at("f_softbart");
+        const bool shape_ok = Fp.n_rows == 10 && Fh.n_rows == 10 && Fp.n_cols == Fh.n_cols &&
+                              P.at("y_rep").n_rows == 10;
+        const double gap = shape_ok ? arma::abs(Fp - Fh).max() : -1.0;
+        const double jump = shape_ok ? arma::mean(Fh.row(5)) - arma::mean(Fh.row(4)) : 0.0;
+        std::printf("C8 keep_tree = TRUE: max |predict_at f_softbart - history| = %.3g; "
+                    "mean of history row 6 - row 5 = %.4f (set_current of y + 1.5)\n", gap, jump);
+        check(shape_ok && gap >= 0.0 && gap < 1e-12,
+              "C8 keep_tree = TRUE: predict_at(training X) rows = history rows, each with its own m");
     }
 
     std::printf("%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail,

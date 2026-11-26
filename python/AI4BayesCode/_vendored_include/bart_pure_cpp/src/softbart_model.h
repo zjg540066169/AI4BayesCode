@@ -132,6 +132,9 @@ struct SoftbartHistory {
   arma::mat  s_history;            // n_iter x p
   arma::umat var_counts_history;   // n_iter x p
   std::size_t p = 0;
+  // Per stored forest: the center (set_center) in effect when the forest was
+  // stored.
+  arma::vec  center_history;
 };
 
 // =====================================================================
@@ -215,16 +218,24 @@ class softbart_model {
   // Changes whenever set_X or set_data replaces the training X.
   std::uint64_t x_key() const { return x_key_; }
 
+  // A constant the caller adds to the fit of the forest (softbart_block: the
+  // m of Z = (Y - m) / y_scale, on the scale of Y, set with every Y it
+  // passes). A sweep does not use it; every stored forest is stored with the
+  // center in effect (center_history), so the fit of stored forest d is
+  // center_history(d) plus that forest's fit as the caller scales it.
+  void set_center(double c) { center_ = c; }
+  double center() const { return center_; }
+
   void set_history(bool on) { history_recording_ = on; }
   bool history_recording() const { return history_recording_; }
   void clear_history() {
     tree_history_.clear(); sigma_history_.clear(); sigma_mu_history_.clear();
-    s_history_.clear(); var_counts_history_.clear();
+    s_history_.clear(); var_counts_history_.clear(); center_history_.clear();
   }
   // Appends one entry to each history buffer without a sweep: a copy of the
   // last stored entry, or, when no entry is stored, the current forest, sigma,
-  // sigma_mu, split probabilities and split counts.  No-op while history
-  // recording is off.  Draws no random numbers.
+  // sigma_mu, split probabilities, split counts and center.  No-op while
+  // history recording is off.  Draws no random numbers.
   void record_held_history() {
     if (!history_recording_) return;
     if (tree_history_.empty()) { record_history_(); return; }
@@ -238,6 +249,8 @@ class softbart_model {
     s_history_.push_back(std::move(s_last));
     std::vector<int> counts_last = var_counts_history_.back();
     var_counts_history_.push_back(std::move(counts_last));
+    const double center_last = center_history_.back();
+    center_history_.push_back(center_last);
   }
   SoftbartHistory get_history() const {
     const std::size_t n_iter = sigma_history_.size();
@@ -245,8 +258,10 @@ class softbart_model {
     h.tree_history = tree_history_;
     h.sigma_history = arma::vec(sigma_history_.size());
     h.sigma_mu_history = arma::vec(sigma_mu_history_.size());
+    h.center_history = arma::vec(center_history_.size());
     for (std::size_t i=0;i<sigma_history_.size();++i) h.sigma_history(i)=sigma_history_[i];
     for (std::size_t i=0;i<sigma_mu_history_.size();++i) h.sigma_mu_history(i)=sigma_mu_history_[i];
+    for (std::size_t i=0;i<center_history_.size();++i) h.center_history(i)=center_history_[i];
     h.s_history.set_size(n_iter, p_); h.var_counts_history.set_size(n_iter, p_);
     for (std::size_t i=0;i<n_iter;++i) for (std::size_t j=0;j<p_;++j) {
       h.s_history(i,j) = (j<s_history_[i].size())? s_history_[i][j] : 0.0;
@@ -309,6 +324,7 @@ class softbart_model {
     arma::uvec cnt = forest_->get_counts();
     std::vector<int> ci(cnt.size()); for (std::size_t j=0;j<cnt.size();++j) ci[j]=(int)cnt[j];
     var_counts_history_.push_back(std::move(ci));
+    center_history_.push_back(center_);
   }
 
   std::size_t N_, p_;
@@ -316,9 +332,10 @@ class softbart_model {
   std::unique_ptr<::Forest> forest_;
   arma::mat X_arma_; arma::vec Y_arma_; arma::vec offset_arma_;
   std::uint64_t x_key_ = 0;   // incremented on every write of X_arma_
+  double center_ = 0.0;       // see set_center
   bool history_recording_;
   std::vector<std::string> tree_history_;
-  std::vector<double> sigma_history_, sigma_mu_history_;
+  std::vector<double> sigma_history_, sigma_mu_history_, center_history_;
   std::vector<std::vector<double> > s_history_;
   std::vector<std::vector<int> > var_counts_history_;
 };

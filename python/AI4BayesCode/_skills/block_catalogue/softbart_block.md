@@ -73,7 +73,7 @@ cfg.gamma                 = 0.95;
 cfg.width                 = 0.1;   // initial branch bandwidth tau
 cfg.shape                 = 1.0;
 cfg.tau_rate              = 10.0;  // Gamma rate on tau
-cfg.center_Y              = true;  // m = mean(Y): f excludes it; false: m = midrange(y_init)
+cfg.center_Y              = true;  // m = mean(Y); false: m = midrange(y_init); f = m + y_scale f_Z
 cfg.dart                  = false; // true -> Dirichlet split prior (honoured)
 ```
 
@@ -106,7 +106,8 @@ tri-module (standalone `int main` + Rcpp + pybind11).
   `declare_dependencies` for the residual key. Omit it and the ensemble keeps
   fitting the previous sweep's residual -- it converges to the wrong surface
   with no error.
-- **`center_Y = true` is on by default** and subtracts `mean(Y)`. If a sibling
+- **`center_Y = true` is on by default** and subtracts `mean(Y)` before the
+  fit; `f` includes it again. If a sibling
   block also models an intercept, the two absorb the same location and the
   pair is only weakly identified.
 - **Bandwidth `tau` and `ntrees` trade off.** A small `width` with few trees
