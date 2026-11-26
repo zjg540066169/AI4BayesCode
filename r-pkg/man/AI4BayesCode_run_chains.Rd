@@ -83,7 +83,7 @@ Runs `n_chains` chains from a deterministic constructor
   `drop_burn` / `n_burn` bookkeeping.
 
   The chains run in forked worker processes on POSIX when
-  `parallel = TRUE`, `n_cores > 1` and `n_chains > 1`, and sequentially in
+  `parallel = TRUE`, `n_cores >= 2` and `n_chains > 1`, and sequentially in
   this session otherwise. With `keep_models = TRUE` (default) a parallel
   run starts `n_workers = min(n_cores, n_chains)` persistent worker
   processes: chain `i` runs in worker `((i - 1) \%\% n_workers) + 1`, and
@@ -99,26 +99,28 @@ Runs `n_chains` chains from a deterministic constructor
   `inits <- lapply(pilot$models, function(h) h$get_current())`, and use
   `inits[[i]]` in `model_ctor`. A sequential run returns the model objects
   themselves in `run$models`. With `keep_models = FALSE` a parallel run uses
-  `parallel::mclapply`, which evaluates the chains in this session when
-  `as.integer(n_cores) < 2`, and keeps no models.
+  `parallel::mclapply` and keeps no models.
 
   Each worker process of a kept run holds one R connection (R has 128 by
   default) and its memory until it is terminated: by
   `ai4bayescode_close_models(run)`, when the run and every handle taken
   from it are garbage-collected, when R exits, or to start the worker
-  processes of a later run. At most `max_workers` worker processes of kept
-  runs are alive at a time: `getOption("ai4bayescode.max_workers")`, else
-  the environment variable `AI4BAYESCODE_MAX_WORKERS`, else
-  `max(8, 4 * parallel::detectCores())`. Before the worker processes of a
-  run are started, those of earlier runs are terminated, least recently
-  used (created or called) first, until the new ones fit under
-  `max_workers` and `n_workers + 2` connections are free; one warning says
-  how many, and a call on a handle of such a run raises an error that names
-  the reason. When even that is not enough, the chains run in this session,
-  with a warning. A worker process that exits ends the models of its own
-  chains only: a call on one of them raises an error that names the
-  process, and calls on the chains of the other worker processes work as
-  before.
+  processes of a later run. A worker process starts with the memory pages
+  of this session, shared through `fork()`; after a garbage collection in
+  the worker process, it can hold its own copy of the session's R objects.
+  At most `max_workers` worker processes of kept runs exist at a time:
+  `getOption("ai4bayescode.max_workers")`, else the environment variable
+  `AI4BAYESCODE_MAX_WORKERS`, else `max(8, 4 * parallel::detectCores())`.
+  Before the worker processes of a run are started, those of earlier runs
+  are terminated, least recently used (created or called) first, until the
+  new ones fit under `max_workers` and `n_workers + 2` connections are
+  free; one warning says how many, and a call on a handle of such a run
+  raises an error that names the reason. When even that is not enough, the
+  chains run in this session, with a warning. A loop that keeps many runs
+  and does not need their models can pass `keep_models = FALSE`. A worker
+  process that exits ends the models of its own chains only: a call on one
+  of them raises an error that names the process, and calls on the chains
+  of the other worker processes work as before.
 
   An R error in a chain (in `model_ctor` or in a method of the model) stops
   the run with the error "chain i (seed s): <message>". When a worker
@@ -126,9 +128,11 @@ Runs `n_chains` chains from a deterministic constructor
   can make a forked chain crash), every chain is re-run sequentially in
   this session, with a warning.
 
-  A model without `clear_history()` (compiled against AI4BayesCode older
-  than 1.1.3, or a custom object) gives the same `run$histories`, with the
-  first `n_burn` draws dropped here, but its own `get_history()` and
-  `predict_at()` include the warmup draws; with `keep_models = TRUE` a
+  A compiled model has `clear_history()` when its Rcpp module binds
+  `AI4BAYESCODE_BIND_KERNEL_CONTROL()` and it is compiled against
+  AI4BayesCode >= 1.1.3. A model without `clear_history()` (another
+  compiled model, or a model written in R) gives the same `run$histories`,
+  with the first `n_burn` draws dropped here, but its own `get_history()`
+  and `predict_at()` include the warmup draws; with `keep_models = TRUE` a
   message says so, and `ai4bayescode_predict()` drops them.
 }

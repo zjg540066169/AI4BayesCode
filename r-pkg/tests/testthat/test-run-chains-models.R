@@ -248,7 +248,8 @@ test_that("a model without clear_history: stripped histories, one message", {
             })
         expect_length(msgs, 1L)
         expect_match(msgs, "FakeModel has no clear_history", fixed = TRUE)
-        expect_match(msgs, "AI4BayesCode >= 1.1.3", fixed = TRUE)
+        expect_match(msgs, "binds AI4BAYESCODE_BIND_KERNEL_CONTROL() and it is compiled against AI4BayesCode >= 1.1.3",
+                     fixed = TRUE)
         expect_identical(run$history_cleared, rep(FALSE, 3))
         expect_identical(run$histories[[2]]$theta, 202 + 10 + 1:5)
         expect_identical(dim(run$histories[[2]]$pair), c(5L, 2L))
@@ -301,6 +302,35 @@ test_that("mc.cores is an alias of n_cores", {
                                 n_burn = 1, n_keep = 2, n_cores = 2,
                                 mc.cores = 3, verbose = FALSE),
         "n_cores = 2 and mc.cores = 3 differ")
+    # Fewer than 2 cores: the chains run in this session.
+    for (keep in c(TRUE, FALSE)) {
+        expect_message(run <- ai4bayescode_run_chains(fake_ctor(clear = TRUE),
+                                                      n_chains = 2, n_burn = 1,
+                                                      n_keep = 2, n_cores = 1.5,
+                                                      keep_models = keep),
+                       "running 2 chains sequentially", fixed = TRUE)
+        expect_identical(run$histories[[2]]$theta, 202 + 1 + 1:2)
+        if (keep) expect_s3_class(run$models[[1]], "FakeModel")
+    }
+})
+
+test_that("a model given as a list of functions, without clear_history", {
+    skip_on_os("windows")
+    list_ctor <- function(seed) {
+        st <- new.env(); st$s <- seed; st$d <- numeric(0)
+        list(step = function(n = 1L) for (i in seq_len(n)) {
+                 st$s <- st$s + 1; st$d <- c(st$d, st$s) },
+             get_history = function() list(theta = st$d))
+    }
+    ref <- ai4bayescode_run_chains(list_ctor, 3, 4, 2, parallel = FALSE,
+                                   verbose = FALSE, keep_models = FALSE)
+    run <- suppressMessages(ai4bayescode_run_chains(list_ctor, 3, 4, 2,
+                                                    mc.cores = 2, verbose = FALSE))
+    expect_identical(run$histories, ref$histories)
+    expect_identical(run$histories[[3]]$theta, 303 + 4 + 1:2)
+    expect_identical(run$models[[3]]$get_history()$theta, 303 + 1:6)
+    expect_true("get_history" %in% utils::.DollarNames(run$models[[1]], ""))
+    ai4bayescode_close_models(run)
 })
 
 test_that("a handle of another session errors without using a connection", {
@@ -570,6 +600,25 @@ test_that("predict(run, ...) raises an error for an unused argument", {
     # Positional, exact and partial names are accepted.
     expect_identical(predict(run, list(), FALSE), predict(run, pool = FALSE))
     expect_identical(predict(run, newdat = list()), predict(run))
+    expect_error(predict(run, pool = "no"), "pool must be TRUE or FALSE",
+                 fixed = TRUE)
+    expect_error(predict(run, pool = NA), "pool must be TRUE or FALSE",
+                 fixed = TRUE)
+})
+
+test_that("predict(): a run whose models contain the same handle twice", {
+    skip_on_cran(); skip_on_os("windows")
+    run <- ai4bayescode_run_chains(fake_ctor(clear = TRUE), n_chains = 3,
+                                   n_burn = 1, n_keep = 2, n_cores = 2,
+                                   verbose = FALSE)
+    on.exit(ai4bayescode_close_models(run), add = TRUE)
+    mixed <- run
+    mixed$models <- run$models[c(3, 1, 3, 2)]
+    mixed$history_cleared <- run$history_cleared[c(3, 1, 3, 2)]
+    by_chain <- lapply(run$models, function(h) h$predict_at(list())$det)
+    p <- ai4bayescode_predict(mixed, pool = FALSE)
+    expect_identical(lapply(p, `[[`, "det"), by_chain[c(3, 1, 3, 2)])
+    expect_identical(predict(mixed)$det, do.call(rbind, by_chain[c(3, 1, 3, 2)]))
 })
 
 test_that("a lost worker process ends only the models of its own chains", {
