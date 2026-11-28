@@ -575,6 +575,8 @@ Format (every line is a `//` comment; `doc()` strips the `// ` prefix):
 //                          rng_seed = as.integer(seed), keep_history = TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   ai4bayescode_diagnose(run$histories[[1]])
+//   pred <- predict(run, list(<input> = <new values>), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                                           # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   # NAME every non-data argument. Only data is passed positionally; anything
 //   # left out takes its C++ default.
@@ -590,6 +592,8 @@ Format (every line is a `//` comment; `doc()` strips the `// ` prefix):
 //       lambda seed: Mod.<ClassName>(<data args>, rng_seed=int(seed), keep_history=True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000)
 //   AI4BayesCode.diagnose(chains[0]["hist"])
+//   pred = AI4BayesCode.predict(chains, {"<input>": <new values>}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                                      # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.<ClassName>(<data args>, rng_seed=7, keep_history=True)
 //   m.step(2000); print(m.get_current())
@@ -618,7 +622,16 @@ Rules:
   `2 * (x1 > 0)` slows the cross-chain mixing of the per-observation fit of a
   `genbart_block` near the jump. The rule covers the `@example` blocks, the
   `int main()` demo and the runner, which share this DGP.
-- **Keep it compact** (<= ~8 lines per backend) and **use the installed-package API
+- **Show prediction after `run_chains`**, with `pool = FALSE` written out and
+  the first chain taken from the result, exactly as in the template:
+  `pred <- predict(run, list(<input> = <new values>), pool = FALSE)` and
+  `pred_chain1 <- pred[[1]]` (Python: `pool=False` and `pred[0]`). The keys
+  are the model's declared data inputs (`get_dag()`), at new values from the
+  same DGP (e.g. a held-out slice); a model without data inputs uses
+  `predict(run, pool = FALSE)` (the training data). A model whose
+  `predict_at()` returns nothing (a prior-only model) leaves these lines out.
+- **Keep it compact** (<= ~8 lines per backend besides the DGP and the two
+  prediction lines) and **use the installed-package API
   with a RELATIVE path**: R -> `ai4bayescode_source("<ClassName>.cpp")`
   then `new(<ClassName>, ...)`; Python -> `Mod = AI4BayesCode.source("<ClassName>.cpp")`
   then `Mod.<ClassName>(...)`. The path is ALWAYS the relative

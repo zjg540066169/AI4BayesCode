@@ -205,7 +205,8 @@ The delivered `example_<ClassName>.py` MUST contain, in order:
        seeds=[101, 202, 303, 404], n_burn=4000, n_keep=4000)
    print(AI4BayesCode.rhat_summary(chains))   # convergence across chains
    tbl, plot = AI4BayesCode.diagnose(chains[0]["hist"])
-   pred = AI4BayesCode.predict(chains, {"<X>": X_test})   # pooled over the chains
+   pred = AI4BayesCode.predict(chains, {"<X>": X_test}, pool=False)   # predict for all chains
+   pred_chain1 = pred[0]                                              # prediction in the first chain
    chains.models[0].get_current()                        # chain 1's model after the run
    AI4BayesCode.close_models(chains)
    ```
@@ -265,8 +266,10 @@ print(tbl)
 if plot is not None:
     plot()
 
-# Posterior predictions at the held-out inputs, using the draws of all chains.
-pred = AI4BayesCode.predict(chains, {"<X>": X_test})
+# Posterior predictions at the held-out inputs: one dict per chain
+# (pool=True, the default, stacks the draws of all chains instead).
+pred = AI4BayesCode.predict(chains, {"<X>": X_test}, pool=False)   # predict for all chains
+pred_chain1 = pred[0]                                              # prediction in the first chain
 
 # chains.models[i] is the model of chain i after the run.
 print(chains.models[0].get_current())      # the last draw of chain 1

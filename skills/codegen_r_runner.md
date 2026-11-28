@@ -199,7 +199,8 @@ documentation a first-time user reads):
    ai4bayescode_rhat_summary(run)   # convergence check across the chains
    dg <- ai4bayescode_diagnose(run$histories[[1]])
    dg$summary; dg$plot
-   pred <- predict(run, list(<X> = <X>_test))   # pooled over the chains
+   pred <- predict(run, list(<X> = <X>_test), pool = FALSE)   # predict for all chains
+   pred_chain1 <- pred[[1]]                                   # prediction in the first chain
    run$models[[1]]$get_current()                # chain 1's model after the run
    ai4bayescode_close_models(run)
    ```
@@ -277,8 +278,10 @@ dg <- ai4bayescode_diagnose(run$histories[[1]])
 dg$summary   # per-parameter table: mean/sd/median/90% CI, R-hat, ESS
 dg$plot      # trace + autocorrelation + density (prints; needs 'bayesplot')
 
-# Posterior predictions at the held-out inputs, using the draws of all chains.
-pred <- predict(run, list(<X> = <X>_test))
+# Posterior predictions at the held-out inputs: one list per chain
+# (pool = TRUE, the default, stacks the draws of all chains instead).
+pred <- predict(run, list(<X> = <X>_test), pool = FALSE)   # predict for all chains
+pred_chain1 <- pred[[1]]                                   # prediction in the first chain
 
 # run$models[[i]] is the model of chain i after the run.
 run$models[[1]]$get_current()   # the last draw of chain 1
