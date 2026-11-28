@@ -69,12 +69,15 @@
 //   r  <- 1.0 + 0.8 * pmax(X[,1], 0) + 0.6 * X[,2]   # log-mean with a kink at x1 = 0
 //   m  <- exp(r)                                      # mean in ~[1.5, 11.0]
 //   y  <- m + sqrt(0.5 * m) * rnorm(N)               # y~N(m, phi*m), phi=0.5
+//   X_test <- matrix(runif(5 * 2L, -1, 1), 5, 2L)    # 5 held-out rows
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(GBartHeteroscedastic, X, y, rng_seed = seed, keep_history = TRUE),
+//       function(seed) new(GBartHeteroscedastic, X, y, rng_seed = seed, keep_tree = TRUE, keep_history = TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, list(X = X_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                               # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   mod <- new(GBartHeteroscedastic, X, y, rng_seed = 42L)   # ntrees 50, phi_init 1.0
 //   #          X,  y, ntrees, phi_init, seed, keep_tree
@@ -93,13 +96,16 @@
 //   r = 1.0 + 0.8 * np.maximum(X[:,0], 0) + 0.6 * X[:,1]  # log-mean with a kink at x1 = 0
 //   m = np.exp(r)                                      # mean in ~[1.5, 11.0]
 //   y = m + np.sqrt(0.5 * m) * rng.standard_normal(N) # y~N(m, phi*m), phi=0.5
+//   X_test = rng.uniform(-1, 1, size=(5, 2))  # 5 held-out rows
 //   Mod = AI4BayesCode.example("GBartHeteroscedastic")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
-//       lambda seed: Mod.GBartHeteroscedastic(X, y, rng_seed=seed, keep_history=True),
+//       lambda seed: Mod.GBartHeteroscedastic(X, y, rng_seed=seed, keep_tree=True, keep_history=True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, {"X": X_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                            # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m_ = Mod.GBartHeteroscedastic(X, y, rng_seed=42)   # ntrees 50, phi_init 1.0
 //   m_.step(2000); print(m_.get_current())            # r, mean, phi

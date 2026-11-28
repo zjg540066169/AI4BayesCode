@@ -59,12 +59,15 @@
 //   X <- cbind(1, matrix(rnorm(N * (p - 1)), N, p - 1))   # col1 intercept, rest N(0,1)
 //   prob <- 1 / (1 + exp(-(X %*% beta_true)))             # sigmoid(X beta)
 //   y <- as.numeric(runif(N) < prob)                      # Bernoulli 0/1
+//   X_test <- cbind(1, matrix(rnorm(5 * (p - 1)), 5, p - 1))  # 5 held-out rows
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(LogisticRegression, X, y, 10.0, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, list(X = X_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                               # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(LogisticRegression, X, y, 10.0, 7L, TRUE)    # X, y, prior_sd, seed, keep_history
 //   m$step(2500); str(m$get_current())
@@ -74,6 +77,7 @@
 //   X = np.column_stack([np.ones(N), rng.standard_normal((N, p - 1))])  # intercept + N(0,1)
 //   prob = 1.0 / (1.0 + np.exp(-(X @ beta_true)))                       # sigmoid(X beta)
 //   y = (rng.random(N) < prob).astype(float)                           # Bernoulli 0/1
+//   X_test = np.column_stack([np.ones(5), rng.standard_normal((5, p - 1))])  # 5 held-out rows
 //   Mod = AI4BayesCode.example("LogisticRegression")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
@@ -81,6 +85,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, {"X": X_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                            # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.LogisticRegression(X, y, 10.0, 7, True); m.step(2500); print(m.get_current())
 // @example:end

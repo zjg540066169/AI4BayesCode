@@ -151,6 +151,8 @@
 //       n_chains = 4, n_burn = 1000, n_keep = 10000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]][c("order", "order_log_score")])   # chain 1: summary + plots
+//   pred <- predict(run, pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]             # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(OrderMCMCBN, data, cards, "fk_eq2", 1.0, 3L, 20L, 4000L, 10.0, 0.5,
 //            numeric(0), 7L, TRUE)   # structure_prior,bdeu_alpha,max_parents,top_C,cache_F,prune,p_adj,init_order=empty,seed,keep_history
@@ -173,6 +175,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=10000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose({k: chains[0]["hist"][k] for k in ("order", "order_log_score")})   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                             # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.OrderMCMCBN(data, cards, "fk_eq2", 1.0, 3, 20, 4000, 10.0, 0.5,
 //                       np.zeros(0), 7, True)

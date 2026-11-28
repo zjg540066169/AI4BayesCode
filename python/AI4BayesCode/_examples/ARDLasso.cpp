@@ -40,12 +40,15 @@
 //   alpha_true <- 1.0; sigma_true <- 0.5
 //   X <- matrix(rnorm(N * p), N, p)                 # NO intercept column (alpha is built in)
 //   Y <- as.numeric(alpha_true + X %*% beta_true + sigma_true * rnorm(N))
+//   X_test <- matrix(rnorm(5 * p), 5, p)  # 5 held-out rows
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(ARDLasso, X, Y, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, list(X = X_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                               # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(ARDLasso, X, Y, 20260621L, TRUE)       # X (Nxp), Y (len N), seed, keep_history
 //   m$step(2500); str(m$get_current())
@@ -57,6 +60,7 @@
 //   alpha_true, sigma_true = 1.0, 0.5
 //   X = rng.normal(size=(N, p))                      # NO intercept column (alpha is built in)
 //   Y = alpha_true + X @ beta_true + sigma_true * rng.normal(size=N)
+//   X_test = rng.normal(size=(5, p))  # 5 held-out rows
 //   Mod = AI4BayesCode.example("ARDLasso")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
@@ -64,6 +68,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, {"X": X_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                            # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.ARDLasso(X, Y, 20260621, True)           # (X (Nxp), Y (len N), seed, keep_history)
 //   m.step(2500); print(m.get_current())

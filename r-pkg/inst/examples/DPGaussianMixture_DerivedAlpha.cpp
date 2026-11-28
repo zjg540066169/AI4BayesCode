@@ -95,6 +95,8 @@
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run, keys = c("phi", "pi", "stick_V", "mu", "lambda"), order_components = TRUE))  # label-invariant (sorted per draw)
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]             # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(DPGaussianMixture_DerivedAlpha, y, 8L, 7L)  # (y, K_trunc, seed)
 //   m$step(1500)
@@ -116,6 +118,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains, keys=["phi", "pi", "stick_V", "mu", "lambda"], order_components=True))  # label-invariant (sorted per draw)
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                             # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.DPGaussianMixture_DerivedAlpha(y, 8, 7)  # (y, K_trunc, seed)
 //   m.step(1500)

@@ -58,12 +58,15 @@
 //     T[i] <- if (k > K) edges[K+1] + (Hb - cumH[K+1]) / lambda_true[K]
 //             else       edges[k]   + (Hb - cumH[k])   / lambda_true[k] }
 //   censor <- 20; delta <- as.integer(T <= censor); t_obs <- pmin(T, censor)
+//   t_test <- c(1, 5, 10); g_test <- 0  # query times of S(t | g), group g = 0 (0-based)
 //   run <- ai4bayescode_run_chains(
 //       model_ctor = function(seed) new(PehSharedFrailty, t_obs, delta, as.numeric(z), G,
 //                                       edges, theta, 0.01, 0.01, seed, TRUE),
 //       n_chains = 4, n_burn = 3000, n_keep = 5000)
 //   print(ai4bayescode_rhat_summary(run))                     # CROSS-chain R-hat / ESS
 //   print(ai4bayescode_diagnose(run$histories[[1]])$summary)  # chain 1 summary
+//   pred <- predict(run, list(t = t_test, g = g_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                                           # prediction in the first chain
 
 // @example:python
 //   import numpy as np, AI4BayesCode as ai
@@ -81,12 +84,15 @@
 //       if k >= K: T[i] = edges[K] + (Hb - cumH[K]) / lam_true[K-1]
 //       else:      T[i] = edges[k] + (Hb - cumH[k]) / lam_true[k]
 //   censor = 20.; delta = (T <= censor).astype(float); t_obs = np.minimum(T, censor)
+//   t_test = np.array([1.0, 5.0, 10.0]); g_test = np.array([0.0])  # query times of S(t | g), group g = 0
 //   run = ai.run_chains(
 //       factory = lambda seed: Mod.PehSharedFrailty(t_obs, delta, z.astype(float), G, edges,
 //                                                   theta, 0.01, 0.01, seed, True),
 //       seeds = (101, 202, 303, 404), n_burn=3000, n_keep=5000)
 //   print(ai.rhat_summary(run))                    # CROSS-chain R-hat / ESS
 //   summary, plot_fn = ai.diagnose(run[0]["hist"]); print(summary)
+//   pred = ai.predict(run, {"t": t_test, "g": g_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                            # prediction in the first chain
 // @example:end
 
 // [[Rcpp::depends(RcppArmadillo)]]

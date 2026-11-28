@@ -58,12 +58,15 @@
 //   N <- 80; beta_true <- 1.5; sigma <- 1.0; slab_sd <- 5.0; pi_incl <- 0.5
 //   x <- rnorm(N)
 //   y <- beta_true * x + rnorm(N, 0, sigma)        # known nonzero truth -> inclusion favored
+//   x_test <- rnorm(5)                             # 5 held-out inputs
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(SpikeSlabSinhBijection, y, x, sigma, slab_sd, pi_incl, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, list(x = x_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                               # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(SpikeSlabSinhBijection,
 //            y, x,                                 # data: response y, predictor x
@@ -78,6 +81,7 @@
 //   beta_true, sigma, slab_sd, pi_incl = 1.5, 1.0, 5.0, 0.5
 //   x = rng.normal(size=N)
 //   y = beta_true * x + rng.normal(0.0, sigma, N)   # known nonzero truth -> inclusion favored
+//   x_test = rng.normal(size=5)                     # 5 held-out inputs
 //   Mod = AI4BayesCode.example("SpikeSlabSinhBijection")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
@@ -85,6 +89,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, {"x": x_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                            # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.SpikeSlabSinhBijection(y, x, sigma, slab_sd, pi_incl, 7, True)
 //   m.step(2000); print(m.get_current())            # dict: gamma (~1), beta (~1.5)

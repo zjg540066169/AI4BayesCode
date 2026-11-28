@@ -93,12 +93,15 @@
 //   beta_true <- numeric(p); beta_true[c(1,4,7)] <- c(2.5, -1.8, 1.2)  # actives {1,4,7}
 //   X <- matrix(rnorm(N * p), N, p); X <- scale(X, center = TRUE, scale = FALSE)  # center cols (no intercept)
 //   y <- as.numeric(X %*% beta_true + rnorm(N, 0, sigma_true)); y <- y - mean(y)  # center y
+//   X_test <- matrix(rnorm(5 * p), 5, p)                                          # 5 held-out rows
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(SpikeSlabRJMCMC, X, y, rng_seed = seed, keep_history = TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, list(X = X_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                               # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(SpikeSlabRJMCMC, X, y, rng_seed = 7L, keep_history = TRUE)  # Beta(1,1) on pi
 //   m$step(2500); str(m$get_current())
@@ -108,6 +111,7 @@
 //   beta_true = np.zeros(p); beta_true[[0, 3, 6]] = [2.5, -1.8, 1.2]   # actives {1,4,7}
 //   X = rng.standard_normal((N, p)); X = X - X.mean(axis=0)             # center cols (no intercept)
 //   y = X @ beta_true + rng.normal(0.0, sigma_true, N); y = y - y.mean()  # center y
+//   X_test = rng.standard_normal((5, p))                                  # 5 held-out rows
 //   Mod = AI4BayesCode.example("SpikeSlabRJMCMC")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
@@ -115,6 +119,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, {"X": X_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                            # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.SpikeSlabRJMCMC(X, y, rng_seed=7, keep_history=True)  # Beta(1,1) on pi
 //   m.step(2500); print(m.get_current())              # gamma ~ {0,3,6} active, sigma ~ 1

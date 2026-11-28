@@ -67,12 +67,15 @@
 //   X <- matrix(runif(N * p, -1.5, 1.5), N, p)           # covariates ~ U(-1.5,1.5)
 //   r <- 0.8 * pmax(X[,1], 0) + 0.6 * X[,2] - 0.4 * X[,3]  # true log-rate surface
 //   y <- rpois(N, exp(r))                                # y ~ Poisson(exp(r))
+//   X_test <- matrix(runif(5 * p, -1.5, 1.5), 5, p)      # 5 held-out rows
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(GBartPoisson, X, y, 50L, seed, FALSE, TRUE),
+//       function(seed) new(GBartPoisson, X, y, 50L, seed, TRUE, TRUE),  # keep_tree, keep_history
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, list(X = X_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                               # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GBartPoisson, X, y, 50L, 42L, FALSE, TRUE)  # X, y, ntrees, seed, keep_tree, keep_history
 //   m$step(2000); str(m$get_current())                  # $r (log rate), $rate=exp(r)
@@ -90,13 +93,16 @@
 //   X = rng.uniform(-1.5, 1.5, size=(N, p))              # covariates ~ U(-1.5,1.5)
 //   r = 0.8 * np.maximum(X[:,0], 0) + 0.6 * X[:,1] - 0.4 * X[:,2]  # true log-rate
 //   y = rng.poisson(np.exp(r)).astype(float)             # y ~ Poisson(exp(r))
+//   X_test = rng.uniform(-1.5, 1.5, size=(5, p))         # 5 held-out rows
 //   Mod = AI4BayesCode.example("GBartPoisson")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
-//       lambda seed: Mod.GBartPoisson(X, y, 50, seed, False, True),
+//       lambda seed: Mod.GBartPoisson(X, y, 50, seed, True, True),  # keep_tree, keep_history
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, {"X": X_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                            # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GBartPoisson(X, y, 50, 42, False, True); m.step(2000); print(m.get_current())
 //   # ---- Posterior at new X from every stored draw: keep_tree=True ----

@@ -93,12 +93,15 @@
 //   for (i in 2:N) f[i] <- rho * f[i-1] + innov * rnorm(1)  # OU latent path
 //   t <- (0:(N-1)) * dt
 //   y <- f + sigma_true * rnorm(N)                          # + observation noise
+//   t_test <- (N:(N + 4)) * dt                              # 5 times after the data
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(GPTimeSeries, t, y, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, list(t = t_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                               # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GPTimeSeries, t, y, 7L, TRUE)  # t, y, rng_seed, keep_history=TRUE
 //   m$step(2500); str(m$get_current())      # amp / tau / sigma / logp
@@ -113,6 +116,7 @@
 //       f[i] = rho * f[i-1] + innov * rng.standard_normal()
 //   t = np.arange(N) * dt
 //   y = f + sigma_true * rng.standard_normal(N)         # + observation noise
+//   t_test = np.arange(N, N + 5) * dt                   # 5 times after the data
 //   Mod = AI4BayesCode.example("GPTimeSeries")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
@@ -120,6 +124,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, {"t": t_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                            # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GPTimeSeries(t, y, 7, True)                 # t, y, rng_seed, keep_history
 //   m.step(2500); print(m.get_current())               # dict: amp / tau / sigma / logp

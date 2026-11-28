@@ -75,12 +75,16 @@
 //   set.seed(601); N <- 80L; M <- 25L                 # sample size, basis count
 //   x <- runif(N, -3, 3)                              # 1-D inputs on [-3, 3]
 //   y <- 1.5 * sin(2 * x) + 0.3 * x + rnorm(N, 0, 0.4) # smooth truth + N(0,0.4)
+//   x_test <- runif(5, -3, 3); L <- 1.5 * max(abs(x))                       # 5 new inputs; L of the model
+//   phi_test <- sqrt(1 / L) * sin(outer(x_test + L, (1:M) * pi / (2 * L)))  # basis at x_test (5 x M)
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(HSGPRegression, y, x, M, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, list(phi = phi_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                                   # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(HSGPRegression, y, x, M, 7L, TRUE)       # y, x, M, seed, keep_history
 //   m$step(2500); str(m$get_current())
@@ -89,6 +93,8 @@
 //   rng = np.random.default_rng(601); N = 80; M = 25       # sample size, basis count
 //   x = rng.uniform(-3, 3, N)                              # 1-D inputs on [-3, 3]
 //   y = 1.5*np.sin(2*x) + 0.3*x + rng.normal(0, 0.4, N)    # smooth truth + N(0,0.4)
+//   x_test = rng.uniform(-3, 3, 5); L = 1.5 * np.abs(x).max()  # 5 new inputs; L of the model
+//   phi_test = np.sqrt(1 / L) * np.sin(np.outer(x_test + L, np.arange(1, M + 1) * np.pi / (2 * L)))  # basis (5 x M)
 //   Mod = AI4BayesCode.example("HSGPRegression")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
@@ -96,6 +102,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, {"phi": phi_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                                # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.HSGPRegression(y, x, M, 7, True); m.step(2500); print(m.get_current())
 // @example:end

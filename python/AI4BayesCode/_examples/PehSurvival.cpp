@@ -46,6 +46,7 @@
 //       T[i] <- if (k > K) edges[K+1] + (Ht[i]-cumH[K+1])/lambda_true[K]
 //               else       edges[k]  + (Ht[i]-cumH[k])/lambda_true[k] }
 //   censor <- 8; delta <- as.integer(T <= censor); t_obs <- pmin(T, censor)
+//   t_test <- c(1, 4, 7)  # query times of S(t)
 //   # Fit with 4 parallel chains + convergence diagnosis.
 //   run <- ai4bayescode_run_chains(
 //       model_ctor = function(seed) new(PehSurvival, t_obs, delta, edges, 0.01, 0.01, seed, TRUE),
@@ -53,6 +54,8 @@
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   diag <- ai4bayescode_diagnose(run$histories[[1]])   # chain 1
 //   print(diag$summary)   # posterior mean lambda_k, R-hat, ESS
+//   pred <- predict(run, list(t = t_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                               # prediction in the first chain
 
 // @example:python
 //   import numpy as np, AI4BayesCode as ai
@@ -67,11 +70,14 @@
 //       if k >= K: T[i] = edges[K] + (Ht[i]-cumH[K])/lam_true[K-1]
 //       else:      T[i] = edges[k] + (Ht[i]-cumH[k])/lam_true[k]
 //   censor = 8.0; delta = (T <= censor).astype(float); t_obs = np.minimum(T, censor)
+//   t_test = np.array([1.0, 4.0, 7.0])  # query times of S(t)
 //   run = ai.run_chains(
 //       factory = lambda seed: Mod.PehSurvival(t_obs, delta, edges, 0.01, 0.01, seed, True),
 //       seeds = (101, 202, 303, 404), n_burn=3000, n_keep=5000)
 //   print(ai.rhat_summary(run))                    # CROSS-chain R-hat / ESS
 //   summary, plot_fn = ai.diagnose(run[0]["hist"]); print(summary)
+//   pred = ai.predict(run, {"t": t_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                               # prediction in the first chain
 // @example:end
 
 // [[Rcpp::depends(RcppArmadillo)]]

@@ -93,6 +93,8 @@
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run, keys = c("theta", "phi"), order_components = TRUE))  # label-invariant (sorted per draw)
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]             # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(LdaCollapsedGibbs, w, doc, M, V, K,     # w/doc length-N (1-indexed) tokens & doc ids
 //            rep(1, K), rep(1, V), 7L, TRUE)          # alpha (len K), beta (len V), seed, keep_history
@@ -117,6 +119,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains, keys=["theta", "phi"], order_components=True))  # label-invariant (sorted per draw)
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                             # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.LdaCollapsedGibbs(w, doc, M, V, K,        # w/doc length-N (1-indexed) tokens & doc ids
 //                             np.ones(K), np.ones(V), 7, True)  # alpha, beta, seed, keep_history

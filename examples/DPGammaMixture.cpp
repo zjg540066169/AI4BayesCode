@@ -69,6 +69,8 @@
 //       n_chains = 4, n_burn = 1000, n_keep = 15000)
 //   print(ai4bayescode_rhat_summary(run, keys = c("alpha", "pi", "stick_V", "shape", "rate"), order_components = TRUE))  # label-invariant (sorted per draw)
 //   ai4bayescode_diagnose(run$histories[[1]])
+//   pred <- predict(run, pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]             # prediction in the first chain
 // @example:python
 //   import numpy as np, AI4BayesCode
 //   rng = np.random.default_rng(7); n = 200
@@ -79,6 +81,8 @@
 //       lambda seed: Mod.DPGammaMixture(y, 12, rng_seed=int(seed), keep_history=True),
 //       seeds=[11, 22, 33, 44], n_burn=1000, n_keep=15000)
 //   AI4BayesCode.diagnose(chains[0]["hist"])
+//   pred = AI4BayesCode.predict(chains, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                             # prediction in the first chain
 // @example:end
 // ============================================================================
 

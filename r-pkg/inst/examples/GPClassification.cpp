@@ -104,12 +104,15 @@
 //   p_true <- 1 / (1 + exp(-f_true))             # Bernoulli success prob
 //   y <- as.numeric(runif(N) < p_true)           # 0/1 labels
 //   X <- matrix(x, ncol = 1)                     # N x 1 design matrix
+//   X_test <- matrix(runif(5, -3, 3), ncol = 1)  # 5 held-out rows
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(GPClassification, X, y, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, list(X = X_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                               # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GPClassification, X, y, 7L, TRUE)   # X(Nx1), y(0/1), seed=7L, keep_history=TRUE
 //   m$step(2500); str(m$get_current())           # amplitude / lengthscale / z / f
@@ -122,6 +125,7 @@
 //   p_true = 1.0 / (1.0 + np.exp(-f_true))         # Bernoulli success prob
 //   y = (rng.uniform(size=N) < p_true).astype(float)   # 0/1 labels
 //   X = x.reshape(N, 1)                            # N x 1 design matrix
+//   X_test = rng.uniform(-3.0, 3.0, (5, 1))        # 5 held-out rows
 //   Mod = AI4BayesCode.example("GPClassification")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
@@ -129,6 +133,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, {"X": X_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                            # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GPClassification(X, y, 7, True)        # X(Nx1), y(0/1), seed=7, keep_history=True
 //   m.step(2500); print(m.get_current())          # dict: amplitude, lengthscale, z, f

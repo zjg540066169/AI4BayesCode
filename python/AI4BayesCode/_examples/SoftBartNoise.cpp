@@ -66,12 +66,15 @@
 //   X <- matrix(runif(N * 3L, -1, 1), N, 3L)      # x1,x2,x3 ~ Unif(-1,1)
 //   f <- sin(3 * X[,1]) + 0.5 * X[,2]^2 - X[,3]   # smooth low-dim mean
 //   y <- f + rnorm(N, 0, 0.5)                      # sigma_true = 0.5
+//   X_test <- matrix(runif(5 * 3L, -1, 1), 5, 3L)  # 5 held-out rows
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(SoftBartNoise, X, y, rng_seed = seed, keep_history = TRUE),
+//       function(seed) new(SoftBartNoise, X, y, rng_seed = seed, keep_tree = TRUE, keep_history = TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, list(X = X_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                               # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(SoftBartNoise, X, y, rng_seed = 42L)   # every tuning knob defaulted
 //   #          X,  y, ntrees, k, tau_rate, dart, seed
@@ -82,13 +85,16 @@
 //   X = rng.uniform(-1, 1, size=(N, 3))             # x1,x2,x3 ~ Unif(-1,1)
 //   f = np.sin(3 * X[:,0]) + 0.5 * X[:,1]**2 - X[:,2]   # smooth low-dim mean
 //   y = f + rng.normal(0, 0.5, size=N)              # sigma_true = 0.5
+//   X_test = rng.uniform(-1, 1, size=(5, 3))        # 5 held-out rows
 //   Mod = AI4BayesCode.example("SoftBartNoise")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
-//       lambda seed: Mod.SoftBartNoise(X, y, rng_seed=seed, keep_history=True),
+//       lambda seed: Mod.SoftBartNoise(X, y, rng_seed=seed, keep_tree=True, keep_history=True),
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, {"X": X_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                            # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.SoftBartNoise(X, y, rng_seed=42)   # every tuning knob defaulted
 //   m.step(2000); print(m.get_current())            # f_softbart, sigma

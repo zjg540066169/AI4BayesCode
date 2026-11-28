@@ -131,12 +131,16 @@
 //   u <- diag(tau_true) %*% u; u <- u - rowMeans(u)      # scale + center RE (identifiability)
 //   mu <- as.numeric(X %*% beta_true) + u[1, group] + X[, 2] * u[2, group]
 //   y  <- mu + sigma_true * rnorm(N)
+//   X_test <- cbind(1, matrix(rnorm(5 * (p - 1)), 5, p - 1))  # 5 held-out rows
+//   group_idx_test <- sample.int(J, 5, TRUE)                  # 1-indexed group of each row
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(HierarchicalLM_MultivariateRE, y, X, group, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, list(X = X_test, group_idx = group_idx_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                                                           # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(HierarchicalLM_MultivariateRE, y, X, group, 7L, TRUE)  # y, X, group(1-idx), seed, keep_history
 //   m$step(2500); str(m$get_current())
@@ -155,6 +159,8 @@
 //   gidx = group.astype(int) - 1
 //   mu = X @ beta_true + u[0, gidx] + X[:, 1] * u[1, gidx]
 //   y  = mu + sigma_true * rng.normal(size=N)
+//   X_test = np.column_stack([np.ones(5), rng.normal(size=(5, p - 1))])  # 5 held-out rows
+//   group_idx_test = rng.integers(1, J + 1, 5).astype(float)             # 1-indexed group of each row
 //   Mod = AI4BayesCode.example("HierarchicalLM_MultivariateRE")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
@@ -162,6 +168,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, {"X": X_test, "group_idx": group_idx_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                                                         # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.HierarchicalLM_MultivariateRE(y, X, group, 7, True)  # (y, X, group(1-idx float), seed, keep_history)
 //   m.step(2500); print(m.get_current())

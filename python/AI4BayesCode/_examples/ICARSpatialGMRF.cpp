@@ -72,6 +72,8 @@
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]             # prediction in the first chain
 //   yrep <- predict(run)$y_rep    # posterior predictive y_rep_t ~ N(Intercept + phi[node_t], sigma^2):
 //                                 # 8000 x 125, one row per kept draw of the 4 chains
 //   mean(apply(yrep, 1, var) >= var(y))            # posterior predictive p-value of var(y)
@@ -98,6 +100,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                             # prediction in the first chain
 //   yrep = AI4BayesCode.predict(chains)["y_rep"]   # posterior predictive y_rep:
 //                                                  # (8000, 125), one row per kept draw
 //   print((yrep.var(axis=1, ddof=1) >= y.var(ddof=1)).mean())   # predictive p-value of var(y)

@@ -91,12 +91,15 @@
 //     k3<-sir(y+h/2*k2,c(beta_t,gamma_t)); k4<-sir(y+h*k3,c(beta_t,gamma_t))
 //     y <- y + h/6*(k1+2*k2+2*k3+k4); I_true[k] <- y[2] }
 //   I_obs <- I_true * exp(sigma_t * rnorm(15))              # LogNormal noise
+//   t_obs_test <- 15:21; y0_test <- c(980, 20, 0)           # held-out days 15-21; new (S0, I0, R0)
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(ODE_SIR, S0, I0, R0, t_obs, I_obs, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, list(t_obs = t_obs_test, y0 = y0_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                                                     # prediction in the first chain
 //   fc <- predict(run, list(t_obs = 0:28))         # I_traj, y_rep at t = 0..28: 8000 x 29
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(ODE_SIR, S0, I0, R0, t_obs, I_obs, 7L, TRUE)   # S0,I0,R0,t_obs,I_obs,seed,keep_history
@@ -116,6 +119,7 @@
 //       k3=sir(y+0.5*k2,[beta_t,gamma_t]); k4=sir(y+k3,[beta_t,gamma_t])
 //       y = y + (k1+2*k2+2*k3+k4)/6.0; I_true[k] = y[1]
 //   rng = np.random.default_rng(1); I_obs = I_true * np.exp(sigma_t * rng.standard_normal(15))
+//   t_obs_test = np.arange(15.0, 22.0); y0_test = np.array([980.0, 20.0, 0.0])  # held-out days 15-21; new (S0, I0, R0)
 //   Mod = AI4BayesCode.example("ODE_SIR")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
@@ -123,6 +127,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, {"t_obs": t_obs_test, "y0": y0_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                                                   # prediction in the first chain
 //   fc = chains.predict({"t_obs": np.arange(29.0)})  # I_traj, y_rep at t = 0..28: 8000 x 29
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.ODE_SIR(S0, I0, R0, t_obs, I_obs, 7, True); m.step(2500); print(m.get_current())

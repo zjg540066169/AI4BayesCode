@@ -97,12 +97,15 @@
 //   f_true <- sin(3 * x) + 0.5 * x                 # known smooth latent function
 //   y <- f_true + rnorm(N, 0, 0.30)               # Gaussian noise, sigma_true = 0.30
 //   X <- matrix(x, ncol = 1)                       # X is N x 1
+//   X_test <- matrix(runif(5, -3, 3), ncol = 1)    # 5 held-out rows
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(GPRegression, X, y, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, list(X = X_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                               # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GPRegression, X, y, 11L, TRUE)        # X, y, seed=11, keep_history=TRUE
 //   m$step(2500); str(m$get_current())             # amplitude / lengthscale / sigma
@@ -116,6 +119,7 @@
 //   f_true = np.sin(3.0 * x) + 0.5 * x             # known smooth latent function
 //   y = f_true + rng.normal(0.0, 0.30, N)          # Gaussian noise, sigma_true = 0.30
 //   X = x.reshape(N, 1)                            # X is N x 1
+//   X_test = rng.uniform(-3.0, 3.0, (5, 1))        # 5 held-out rows
 //   Mod = AI4BayesCode.example("GPRegression")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
@@ -123,6 +127,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, {"X": X_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                            # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GPRegression(X, y, 11, True)           # X, y, seed=11, keep_history=True
 //   m.step(2500); print(m.get_current())           # dict: amplitude, lengthscale, sigma

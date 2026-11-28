@@ -35,12 +35,15 @@
 //   alpha <- 1.5; beta <- c(2.0, -1.0, 0.5); sigma <- 0.8
 //   X <- matrix(rnorm(N * p), N, p)                     # iid N(0,1) design
 //   y <- as.numeric(alpha + X %*% beta + rnorm(N, 0, sigma))
+//   X_test <- matrix(rnorm(5 * p), 5, p)  # 5 held-out rows
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
 //       function(seed) new(LinearRegJointMixed, y, X, seed, TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, list(X = X_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                               # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(LinearRegJointMixed, y, X, 7L, TRUE)       # ctor: y, X, seed, keep_history
 //   m$step(2500); str(m$get_current())                 # -> alpha, beta(p), sigma
@@ -51,6 +54,7 @@
 //   alpha, beta, sigma = 1.5, np.array([2.0, -1.0, 0.5]), 0.8
 //   X = rng.standard_normal((N, p))                     # iid N(0,1) design
 //   y = alpha + X @ beta + rng.standard_normal(N) * sigma
+//   X_test = rng.standard_normal((5, p))  # 5 held-out rows
 //   Mod = AI4BayesCode.example("LinearRegJointMixed")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
@@ -58,6 +62,8 @@
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, {"X": X_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                            # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.LinearRegJointMixed(y, X, 7, True)          # ctor: y, X, seed, keep_history
 //   m.step(2500); print(m.get_current())

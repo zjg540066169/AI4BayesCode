@@ -66,12 +66,15 @@
 //   X <- matrix(runif(N * p, -1.5, 1.5), N, p)  # X ~ Uniform(-1.5, 1.5)
 //   eta <- 1.5 * X[, 1] - 1.0 * X[, 2] + 0.8 * X[, 3]   # smooth linear predictor
 //   y <- as.numeric(runif(N) < 1 / (1 + exp(-eta)))     # y ~ Bernoulli(sigmoid(eta))
+//   X_test <- matrix(runif(5 * p, -1.5, 1.5), 5, p)     # 5 held-out rows
 //   # ---- Parallel chains + convergence diagnosis (default) ----
 //   run <- ai4bayescode_run_chains(
-//       function(seed) new(GBartLogistic, X, y, rng_seed = seed, keep_history = TRUE),
+//       function(seed) new(GBartLogistic, X, y, rng_seed = seed, keep_tree = TRUE, keep_history = TRUE),
 //       n_chains = 4, n_burn = 1000, n_keep = 2000)
 //   print(ai4bayescode_rhat_summary(run))          # CROSS-chain R-hat / ESS
 //   ai4bayescode_diagnose(run$histories[[1]])      # chain 1: summary + plots
+//   pred <- predict(run, list(X = X_test), pool = FALSE)   # predict for all chains
+//   pred_chain1 <- pred[[1]]                               # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m <- new(GBartLogistic, X, y, rng_seed = 42L)   # ntrees 50 -- single chain
 //   m$step(2000L); str(m$get_current())         # $r linear predictor, $p fitted prob
@@ -88,13 +91,16 @@
 //   X = rng.uniform(-1.5, 1.5, size=(N, p))                 # X ~ Uniform(-1.5, 1.5)
 //   eta = 1.5 * X[:, 0] - 1.0 * X[:, 1] + 0.8 * X[:, 2]     # smooth linear predictor
 //   y = (rng.uniform(size=N) < 1 / (1 + np.exp(-eta))).astype(float)  # Bernoulli(sigmoid)
+//   X_test = rng.uniform(-1.5, 1.5, size=(5, p))                      # 5 held-out rows
 //   Mod = AI4BayesCode.example("GBartLogistic")
 //   # ---- Parallel chains + diagnosis (default) ----
 //   chains = AI4BayesCode.run_chains(
-//       lambda seed: Mod.GBartLogistic(X, y, 50, seed, False, True),
+//       lambda seed: Mod.GBartLogistic(X, y, 50, seed, True, True),  # keep_tree, keep_history
 //       seeds=[101, 202, 303, 404], n_burn=1000, n_keep=2000, n_cores=1)
 //   print(AI4BayesCode.rhat_summary(chains))   # CROSS-chain R-hat / ESS
 //   AI4BayesCode.diagnose(chains[0]["hist"])   # chain 1: summary + plots
+//   pred = AI4BayesCode.predict(chains, {"X": X_test}, pool=False)   # predict for all chains
+//   pred_chain1 = pred[0]                                            # prediction in the first chain
 //   # ---- Advanced: stateful single-chain control ----
 //   m = Mod.GBartLogistic(X, y, rng_seed=42)                # X, y, seed (ntrees 50)
 //   m.step(2000); print(m.get_current())                   # 'r' linear predictor, 'p' fitted prob
